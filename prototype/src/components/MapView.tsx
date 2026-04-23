@@ -169,12 +169,14 @@ export default function MapView({
     if (!map || !overlay) return;
 
     // Fit the camera to the dataset ONLY on first load of a given document
-    // (not on every selection or edit). Clicking a building must not reset
-    // the user's zoom/pitch.
+    // (not on every selection or edit).
     //
-    // Three fallback sources, in order. MapLibre's fitBounds + flyTo are both
-    // fine to call before the style finishes loading — they queue the movement.
+    // IMPORTANT: MapLibre can drop the camera move if we call fitBounds before
+    // its style has loaded — the initial center/zoom from the Map constructor
+    // settles AFTER our effect runs. We detect that and defer the move until
+    // the `load` event fires.
     if (flownForDocRef.current !== cityjson) {
+      flownForDocRef.current = cityjson;
       const footprintBbox = computeFootprintBounds(footprints);
       const metaBbox = computeMetadataBounds(cityjson);
       const centre = computeTranslateCentre(cityjson);
@@ -184,35 +186,41 @@ export default function MapView({
         footprintBbox,
         metaBbox,
         centre,
+        styleLoaded: map.isStyleLoaded(),
       });
 
       const bbox = footprintBbox ?? metaBbox;
-      if (bbox && isFiniteBbox(bbox)) {
-        flownForDocRef.current = cityjson;
-        map.fitBounds(bbox, {
-          padding: 60,
-          maxZoom: 18,
-          pitch: 55,
-          bearing: map.getBearing(),
-          duration: 700,
-        });
-      } else if (centre && Number.isFinite(centre[0]) && Number.isFinite(centre[1])) {
-        flownForDocRef.current = cityjson;
-        map.flyTo({
-          center: centre,
-          zoom: 16,
-          pitch: 55,
-          bearing: map.getBearing(),
-          duration: 700,
-        });
+      const doFit = () => {
+        if (bbox && isFiniteBbox(bbox)) {
+          map.fitBounds(bbox, {
+            padding: 60,
+            maxZoom: 18,
+            pitch: 55,
+            bearing: map.getBearing(),
+            duration: 700,
+          });
+        } else if (centre && Number.isFinite(centre[0]) && Number.isFinite(centre[1])) {
+          map.flyTo({
+            center: centre,
+            zoom: 16,
+            pitch: 55,
+            bearing: map.getBearing(),
+            duration: 700,
+          });
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[MapView auto-fit] No focus location found (no footprints, no extent, unsupported CRS).'
+          );
+        }
+      };
+
+      if (map.isStyleLoaded()) {
+        doFit();
       } else {
-        // All three failed — log once per cityjson so we don't spam.
-        // eslint-disable-next-line no-console
-        console.warn(
-          '[MapView auto-fit] Could not determine a focus location for this document. ' +
-            'No extractable footprints, no metadata.geographicalExtent, unsupported CRS.'
-        );
-        flownForDocRef.current = cityjson;
+        // Defer until the map is ready, else the initial center/zoom from the
+        // Map constructor wins. Use `once` so we don't leak a listener.
+        map.once('load', doFit);
       }
     }
 
