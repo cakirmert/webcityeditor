@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>CityJSON 2.0 Three.js Spike</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+  #canvas-container { position: absolute; inset: 0; }
+  #left-panel {
+    position: absolute; top: 0; left: 0; width: 360px; height: 100%;
+    background: #fafafa; border-right: 1px solid #ddd; padding: 14px;
+    overflow-y: auto; z-index: 2;
+  }
+  #right-panel {
+    position: absolute; top: 0; right: 0; width: 320px; height: 100%;
+    background: #fafafa; border-left: 1px solid #ddd; padding: 14px;
+    overflow-y: auto; z-index: 2; display: none;
+  }
+  h2 { margin: 0 0 8px; font-size: 14px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; text-transform: uppercase; color: #555; }
+  button { padding: 6px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px; margin: 2px; }
+  button:hover { background: #f0f0f0; }
+  button.primary { background: #2E4057; color: #fff; border-color: #2E4057; }
+  button.primary:hover { background: #3e5270; }
+  input[type="text"], input[type="number"] { width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px; margin-top: 2px; }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 4px; }
+  .kv .k { color: #666; }
+  .kv .v { word-break: break-all; }
+  .status { padding: 8px; border-radius: 3px; margin: 8px 0; font-size: 12px; }
+  .status.ok { background: #d4edda; color: #155724; }
+  .status.err { background: #f8d7da; color: #721c24; }
+  .status.info { background: #d1ecf1; color: #0c5460; }
+  .test-result { padding: 6px 8px; margin: 3px 0; border-radius: 3px; font-size: 11px; background: #f0f0f0; }
+  .test-result.pass { background: #d4edda; color: #155724; }
+  .test-result.fail { background: #f8d7da; color: #721c24; }
+  .test-result.pending { background: #e2e3e5; color: #383d41; }
+  #legend { position: absolute; bottom: 14px; left: 374px; background: rgba(255,255,255,0.95); padding: 8px; border-radius: 3px; z-index: 1; font-size: 11px; border: 1px solid #ddd; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+  .legend-swatch { width: 14px; height: 14px; border: 1px solid #999; }
+  .attr-row { display: flex; gap: 4px; margin: 3px 0; align-items: center; }
+  .attr-row label { flex: 0 0 40%; font-size: 11px; color: #555; }
+  .attr-row input { flex: 1; }
+  #file-input { display: block; margin: 4px 0; }
+  textarea { width: 100%; height: 120px; font-family: monospace; font-size: 10px; border: 1px solid #ccc; padding: 4px; }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="left-panel">
+  <h2>CityJSON 2.0 Spike</h2>
+  <div id="status" class="status info">Ready. Load a file to start.</div>
+
+  <h3>1. Load Data</h3>
+  <button class="primary" id="btn-3dbag">Try 3DBAG (remote)</button>
+  <button id="btn-sample">Use tiny built-in sample</button>
+  <br>
+  <input type="file" id="file-input" accept=".json,.city.json" />
+  <div style="font-size: 11px; color: #666; margin-top: 4px;">Or paste raw JSON and press Enter:</div>
+  <input type="text" id="url-input" placeholder="https://... .city.json" />
+  <button id="btn-load-url" style="margin-top: 4px;">Load from URL</button>
+
+  <h3>2. Test Results</h3>
+  <div id="test-1" class="test-result pending">Test 1: Fetch & parse — not run</div>
+  <div id="test-2" class="test-result pending">Test 2: Render in Three.js — not run</div>
+  <div id="test-3" class="test-result pending">Test 3: Click-pick building — not run</div>
+  <div id="test-4" class="test-result pending">Test 4: Edit & re-serialize — not run</div>
+
+  <h3>3. Scene Info</h3>
+  <div id="scene-info" class="kv">
+    <span class="k">Version</span><span class="v" id="info-version">—</span>
+    <span class="k">Buildings</span><span class="v" id="info-count">—</span>
+    <span class="k">Vertices</span><span class="v" id="info-vertices">—</span>
+    <span class="k">CRS</span><span class="v" id="info-crs">—</span>
+  </div>
+
+  <h3>4. Controls</h3>
+  <div style="font-size: 11px; color: #555;">
+    Left-drag: orbit · Right-drag: pan · Wheel: zoom · <b>Click building: select</b>
+  </div>
+  <button id="btn-reset-view">Reset view</button>
+  <button id="btn-isolate" disabled>Isolate selected</button>
+  <button id="btn-showall" disabled>Show all</button>
+</div>
+
+<div id="right-panel">
+  <h2>Selected Building</h2>
+  <div class="kv">
+    <span class="k">ID</span><span class="v" id="sel-id">—</span>
+    <span class="k">Type</span><span class="v" id="sel-type">—</span>
+    <span class="k">Children</span><span class="v" id="sel-children">—</span>
+    <span class="k">Surfaces</span><span class="v" id="sel-surfaces">—</span>
+  </div>
+
+  <h3>Attributes</h3>
+  <div id="attr-editor"></div>
+
+  <h3>Test 4: Export</h3>
+  <button id="btn-export" class="primary">Export modified CityJSON</button>
+  <div style="font-size: 11px; color: #666; margin-top: 4px;">Export re-serializes all edits. Validate with <code>cjio validate</code>.</div>
+  <textarea id="export-output" readonly placeholder="Export JSON will appear here..."></textarea>
+</div>
+
+<div id="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:#b8860b"></div>RoofSurface</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#c0c0c0"></div>WallSurface</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#8b4513"></div>GroundSurface</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#9acd32"></div>OuterCeilingSurface</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#888888"></div>Unclassified</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#ff6b00; border-color:#ff6b00"></div>Selected</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ===== State =====
+const state = {
+  cityjson: null,            // Full parsed CityJSON doc
+  originalJson: null,        // Preserved copy of original for round-trip
+  worldCenter: new THREE.Vector3(), // For centering the scene
+  buildings: new Map(),       // id → { mesh, attributes, originalAttributes, surfaces }
+  selectedId: null,
+  isolated: false,
+};
+
+const SURFACE_COLORS = {
+  RoofSurface: 0xb8860b,
+  WallSurface: 0xc0c0c0,
+  GroundSurface: 0x8b4513,
+  OuterCeilingSurface: 0x9acd32,
+  ClosureSurface: 0xffe4b5,
+  default: 0x888888,
+};
+
+const SELECT_COLOR = 0xff6b00;
+
+// ===== Three.js setup =====
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf0f0f5);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 50000);
+camera.position.set(100, 100, 100);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+
+const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(200, 400, 300);
+scene.add(sun);
+const hemisphere = new THREE.HemisphereLight(0xaaccff, 0x886644, 0.3);
+scene.add(hemisphere);
+
+const gridHelper = new THREE.GridHelper(500, 20, 0xaaaaaa, 0xcccccc);
+scene.add(gridHelper);
+const axes = new THREE.AxesHelper(30);
+scene.add(axes);
+
+function resize() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ===== CityJSON Parser (minimal, spec-faithful) =====
+
+function applyTransform(intVertex, transform) {
+  if (!transform) return intVertex;
+  const s = transform.scale || [1, 1, 1];
+  const t = transform.translate || [0, 0, 0];
+  return [intVertex[0] * s[0] + t[0], intVertex[1] * s[1] + t[1], intVertex[2] * s[2] + t[2]];
+}
+
+// Resolve all child hierarchy for a building: returns flat list of CityObjects whose geometry we should include
+function collectBuildingWithChildren(cityjson, rootId) {
+  const result = [];
+  const visit = (id) => {
+    const obj = cityjson.CityObjects[id];
+    if (!obj) return;
+    result.push({ id, obj });
+    if (obj.children) {
+      for (const childId of obj.children) visit(childId);
+    }
+  };
+  visit(rootId);
+  return result;
+}
+
+// Fan-triangulate a polygon (assumes convex or near-convex faces — typical for LoD2)
+// Each boundary is a list of vertex indices forming a ring (outer + optional holes)
+function fanTriangulateRing(ring) {
+  const triangles = [];
+  for (let i = 1; i < ring.length - 1; i++) {
+    triangles.push([ring[0], ring[i], ring[i + 1]]);
+  }
+  return triangles;
+}
+
+// Given a CityJSON geometry object, yield triangles: [vIdx,vIdx,vIdx] with semantic type
+function* walkGeometryTriangles(geom) {
+  const type = geom.type;
+  const boundaries = geom.boundaries;
+  const semanticsArr = geom.semantics?.surfaces || [];
+  const semanticsValues = geom.semantics?.values;
+
+  // Helper to resolve semantic type for a face by its path indices into values[]
+  function getSurfaceType(...pathIdx) {
+    if (!semanticsValues) return null;
+    let cur = semanticsValues;
+    for (const idx of pathIdx) {
+      if (cur == null) return null;
+      cur = cur[idx];
+    }
+    if (cur == null) return null;
+    const surface = semanticsArr[cur];
+    return surface?.type || null;
+  }
+
+  // MultiSurface: boundaries = [face, face, ...] where face = [outerRing, hole1, ...]
+  // Solid: boundaries = [shell] where shell = [face, face, ...]
+  // CompositeSolid: boundaries = [solid, solid, ...] each solid = [shell]
+  // MultiSolid: same as CompositeSolid structurally
+  if (type === 'MultiSurface' || type === 'CompositeSurface') {
+    for (let fi = 0; fi < boundaries.length; fi++) {
+      const face = boundaries[fi];
+      const outerRing = face[0];
+      const tris = fanTriangulateRing(outerRing);
+      const surfaceType = getSurfaceType(fi);
+      for (const tri of tris) yield { tri, surfaceType };
+    }
+  } else if (type === 'Solid') {
+    const shell = boundaries[0]; // outer shell (v2.0: first shell is outer)
+    for (let fi = 0; fi < shell.length; fi++) {
+      const face = shell[fi];
+      const outerRing = face[0];
+      const tris = fanTriangulateRing(outerRing);
+      const surfaceType = getSurfaceType(0, fi);
+      for (const tri of tris) yield { tri, surfaceType };
+    }
+  } else if (type === 'MultiSolid' || type === 'CompositeSolid') {
+    for (let si = 0; si < boundaries.length; si++) {
+      const solid = boundaries[si];
+      const shell = solid[0];
+      for (let fi = 0; fi < shell.length; fi++) {
+        const face = shell[fi];
+        const outerRing = face[0];
+        const tris = fanTriangulateRing(outerRing);
+        const surfaceType = getSurfaceType(si, 0, fi);
+        for (const tri of tris) yield { tri, surfaceType };
+      }
+    }
+  }
+}
+
+function buildBuildingMesh(cityjson, rootId) {
+  const transform = cityjson.transform;
+  const vertices = cityjson.vertices;
+  const objects = collectBuildingWithChildren(cityjson, rootId);
+
+  const positions = [];
+  const colors = [];
+  const surfaceCounts = {};
+
+  for (const { obj } of objects) {
+    if (!obj.geometry) continue;
+    // Pick highest LoD available; for v2.0 LoD is a string like "2.2"
+    let chosenGeom = obj.geometry.find(g => String(g.lod).startsWith('2'))
+                  || obj.geometry.find(g => String(g.lod).startsWith('3'))
+                  || obj.geometry.find(g => String(g.lod).startsWith('1'))
+                  || obj.geometry[0];
+    if (!chosenGeom) continue;
+
+    for (const { tri, surfaceType } of walkGeometryTriangles(chosenGeom)) {
+      surfaceCounts[surfaceType || 'null'] = (surfaceCounts[surfaceType || 'null'] || 0) + 1;
+      const colorHex = SURFACE_COLORS[surfaceType] ?? SURFACE_COLORS.default;
+      const color = new THREE.Color(colorHex);
+      for (const vIdx of tri) {
+        if (vIdx >= vertices.length) continue;
+        const [x, y, z] = applyTransform(vertices[vIdx], transform);
+        positions.push(x, y, z);
+        colors.push(color.r, color.g, color.b);
+      }
+    }
+  }
+
+  if (positions.length === 0) return null;
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    flatShading: true,
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.buildingId = rootId;
+  mesh.userData.surfaceCounts = surfaceCounts;
+  return mesh;
+}
+
+// ===== Main load pipeline =====
+
+function setStatus(msg, kind = 'info') {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status ' + kind;
+}
+
+function markTest(n, pass, msg) {
+  const el = document.getElementById('test-' + n);
+  el.className = 'test-result ' + (pass ? 'pass' : 'fail');
+  el.textContent = `Test ${n}: ${msg}`;
+}
+
+function clearScene() {
+  for (const { mesh } of state.buildings.values()) {
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+  state.buildings.clear();
+  state.selectedId = null;
+  state.isolated = false;
+  document.getElementById('right-panel').style.display = 'none';
+  document.getElementById('btn-isolate').disabled = true;
+  document.getElementById('btn-showall').disabled = true;
+}
+
+async function loadCityJSON(text, sourceLabel) {
+  clearScene();
+  setStatus(`Parsing ${sourceLabel}...`, 'info');
+
+  // TEST 1: Fetch & parse
+  let data;
+  try {
+    data = JSON.parse(text);
+    if (!data.version) throw new Error('No version field');
+    if (!data.CityObjects) throw new Error('No CityObjects');
+    if (!data.vertices) throw new Error('No vertices');
+    markTest(1, true, `parsed, version ${data.version}, ${Object.keys(data.CityObjects).length} objects, ${data.vertices.length} vertices`);
+  } catch (e) {
+    markTest(1, false, `parse failed: ${e.message}`);
+    setStatus(`Parse error: ${e.message}`, 'err');
+    return;
+  }
+
+  state.cityjson = data;
+  state.originalJson = JSON.parse(text); // untouched reference copy
+
+  // Populate info panel
+  document.getElementById('info-version').textContent = data.version;
+  const buildingIds = Object.keys(data.CityObjects).filter(id => {
+    const o = data.CityObjects[id];
+    return (o.type === 'Building' || o.type === 'Bridge' || o.type === 'CityObjectGroup') && !o.parents;
+  });
+  document.getElementById('info-count').textContent = buildingIds.length;
+  document.getElementById('info-vertices').textContent = data.vertices.length.toLocaleString();
+  document.getElementById('info-crs').textContent = data.metadata?.referenceSystem || '—';
+
+  // TEST 2: Build meshes
+  try {
+    let meshCount = 0;
+    const bboxCenter = { x: 0, y: 0, z: 0 };
+    let firstMeshBbox = null;
+
+    for (const rootId of buildingIds) {
+      const mesh = buildBuildingMesh(data, rootId);
+      if (!mesh) continue;
+      state.buildings.set(rootId, { mesh, attributes: { ...(data.CityObjects[rootId].attributes || {}) }, originalAttributes: { ...(data.CityObjects[rootId].attributes || {}) } });
+      scene.add(mesh);
+      meshCount++;
+      if (!firstMeshBbox) {
+        mesh.geometry.computeBoundingBox();
+        firstMeshBbox = mesh.geometry.boundingBox.clone();
+      }
+    }
+
+    if (meshCount === 0) throw new Error('No buildings produced a mesh');
+
+    // Center the scene on first building's bbox (simple recentering for display)
+    if (firstMeshBbox) {
+      const center = firstMeshBbox.getCenter(new THREE.Vector3());
+      state.worldCenter.copy(center);
+      for (const { mesh } of state.buildings.values()) {
+        mesh.position.sub(center);
+      }
+      const size = firstMeshBbox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      camera.position.set(maxDim * 2, maxDim * 2, maxDim * 2);
+      camera.lookAt(0, 0, 0);
+      controls.target.set(0, 0, 0);
+    }
+
+    markTest(2, true, `rendered ${meshCount} building(s)`);
+    setStatus(`Loaded ${meshCount} buildings from ${sourceLabel}. Click a building to select.`, 'ok');
+  } catch (e) {
+    markTest(2, false, `render failed: ${e.message}`);
+    setStatus(`Render error: ${e.message}`, 'err');
+  }
+}
+
+// ===== Picking =====
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+renderer.domElement.addEventListener('click', (ev) => {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  const meshes = [...state.buildings.values()].map(b => b.mesh).filter(m => m.visible);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length === 0) {
+    // click on empty — could deselect
+    return;
+  }
+  const picked = hits[0].object;
+  selectBuilding(picked.userData.buildingId);
+});
+
+function selectBuilding(id) {
+  // Reset previous selection color
+  if (state.selectedId) {
+    const prev = state.buildings.get(state.selectedId);
+    if (prev) prev.mesh.material.emissive = new THREE.Color(0x000000);
+  }
+  state.selectedId = id;
+  const b = state.buildings.get(id);
+  if (!b) return;
+  // Highlight
+  b.mesh.material.emissive = new THREE.Color(SELECT_COLOR);
+  b.mesh.material.emissiveIntensity = 0.3;
+
+  markTest(3, true, `picked building ${id.slice(0, 20)}${id.length > 20 ? '…' : ''}`);
+
+  // Populate right panel
+  const panel = document.getElementById('right-panel');
+  panel.style.display = 'block';
+  const obj = state.cityjson.CityObjects[id];
+  document.getElementById('sel-id').textContent = id.length > 36 ? id.slice(0, 33) + '…' : id;
+  document.getElementById('sel-type').textContent = obj.type || '—';
+  document.getElementById('sel-children').textContent = obj.children ? obj.children.length : 0;
+  const sc = b.mesh.userData.surfaceCounts || {};
+  const scStr = Object.entries(sc).map(([k, v]) => `${k}:${v}`).join(', ');
+  document.getElementById('sel-surfaces').textContent = scStr || '—';
+
+  renderAttributeEditor(id);
+
+  document.getElementById('btn-isolate').disabled = false;
+  document.getElementById('btn-showall').disabled = !state.isolated;
+}
+
+function renderAttributeEditor(id) {
+  const editor = document.getElementById('attr-editor');
+  editor.innerHTML = '';
+  const b = state.buildings.get(id);
+  if (!b) return;
+  const entries = Object.entries(b.attributes);
+  if (entries.length === 0) {
+    editor.innerHTML = '<div style="color:#888;font-size:11px;">No attributes on this building.</div>';
+    return;
+  }
+  for (const [key, val] of entries) {
+    const row = document.createElement('div');
+    row.className = 'attr-row';
+    const label = document.createElement('label');
+    label.textContent = key;
+    label.title = key;
+    const input = document.createElement('input');
+    input.type = (typeof val === 'number') ? 'number' : 'text';
+    input.step = 'any';
+    input.value = val === null || val === undefined ? '' : String(val);
+    input.addEventListener('input', () => {
+      const raw = input.value;
+      let parsed = raw;
+      if (typeof val === 'number') parsed = raw === '' ? null : Number(raw);
+      else if (typeof val === 'boolean') parsed = raw === 'true';
+      b.attributes[key] = parsed;
+    });
+    row.appendChild(label);
+    row.appendChild(input);
+    editor.appendChild(row);
+  }
+}
+
+// ===== Test 4: Export with edits applied =====
+function exportModifiedCityJSON() {
+  // Start from untouched original, re-apply current attributes
+  const exported = JSON.parse(JSON.stringify(state.originalJson));
+  let changed = 0;
+  for (const [id, b] of state.buildings) {
+    const obj = exported.CityObjects[id];
+    if (!obj) continue;
+    // Compare current attrs with original
+    const origAttrs = b.originalAttributes || {};
+    const curAttrs = b.attributes || {};
+    const allKeys = new Set([...Object.keys(origAttrs), ...Object.keys(curAttrs)]);
+    for (const k of allKeys) {
+      if (origAttrs[k] !== curAttrs[k]) changed++;
+    }
+    obj.attributes = { ...curAttrs };
+  }
+  // Structural checks
+  let ok = true;
+  const problems = [];
+  if (!exported.version) { ok = false; problems.push('version missing'); }
+  if (!exported.CityObjects) { ok = false; problems.push('CityObjects missing'); }
+  if (!Array.isArray(exported.vertices)) { ok = false; problems.push('vertices missing/bad'); }
+  if (exported.vertices.length !== state.originalJson.vertices.length) {
+    ok = false; problems.push('vertex count drift');
+  }
+
+  const text = JSON.stringify(exported, null, 2);
+  document.getElementById('export-output').value = text;
+
+  if (ok) {
+    markTest(4, true, `re-serialized ok, ${changed} attribute change(s), structure preserved`);
+    setStatus(`Exported ${text.length.toLocaleString()} chars. ${changed} attribute change(s).`, 'ok');
+  } else {
+    markTest(4, false, `problems: ${problems.join('; ')}`);
+  }
+
+  // Also offer download
+  const blob = new Blob([text], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'modified.city.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ===== UI wiring =====
+
+document.getElementById('btn-3dbag').addEventListener('click', async () => {
+  const url = 'https://3d.bk.tudelft.nl/opendata/cityjson/3dcities/v2.0/9-284-556.city.json';
+  setStatus('Fetching from 3DBAG (~several MB)...', 'info');
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    await loadCityJSON(text, '3DBAG tile 9-284-556');
+  } catch (e) {
+    markTest(1, false, `fetch error: ${e.message}`);
+    setStatus(`Fetch failed: ${e.message}. Try downloading manually and using file input.`, 'err');
+  }
+});
+
+document.getElementById('btn-load-url').addEventListener('click', async () => {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+  setStatus(`Fetching ${url}...`, 'info');
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    await loadCityJSON(text, url);
+  } catch (e) {
+    markTest(1, false, `fetch error: ${e.message}`);
+    setStatus(`Fetch failed: ${e.message}`, 'err');
+  }
+});
+
+document.getElementById('file-input').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  await loadCityJSON(text, file.name);
+});
+
+document.getElementById('btn-sample').addEventListener('click', async () => {
+  // Tiny inline CityJSON 2.0 sample: 1 building (cube) with semantic surfaces
+  const sample = {
+    type: 'CityJSON',
+    version: '2.0',
+    transform: { scale: [0.001, 0.001, 0.001], translate: [0, 0, 0] },
+    metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/4978' },
+    CityObjects: {
+      'Building_A': {
+        type: 'Building',
+        attributes: {
+          measuredHeight: 10.0,
+          yearOfConstruction: 1965,
+          storeysAboveGround: 3,
+          function: 'residential'
+        },
+        geometry: [{
+          type: 'Solid',
+          lod: '2.2',
+          boundaries: [[
+            [[0,3,2,1]],  // ground
+            [[4,5,6,7]],  // roof
+            [[0,1,5,4]],  // wall south
+            [[1,2,6,5]],  // wall east
+            [[2,3,7,6]],  // wall north
+            [[3,0,4,7]]   // wall west
+          ]],
+          semantics: {
+            surfaces: [
+              { type: 'GroundSurface' },
+              { type: 'RoofSurface' },
+              { type: 'WallSurface' }
+            ],
+            values: [[0, 1, 2, 2, 2, 2]]
+          }
+        }]
+      }
+    },
+    vertices: [
+      [0, 0, 0], [10000, 0, 0], [10000, 8000, 0], [0, 8000, 0],
+      [0, 0, 10000], [10000, 0, 10000], [10000, 8000, 10000], [0, 8000, 10000]
+    ]
+  };
+  await loadCityJSON(JSON.stringify(sample), 'built-in sample (1 cube building)');
+});
+
+document.getElementById('btn-reset-view').addEventListener('click', () => {
+  controls.reset();
+});
+
+document.getElementById('btn-isolate').addEventListener('click', () => {
+  if (!state.selectedId) return;
+  for (const [id, b] of state.buildings) {
+    b.mesh.visible = (id === state.selectedId);
+  }
+  state.isolated = true;
+  document.getElementById('btn-showall').disabled = false;
+});
+
+document.getElementById('btn-showall').addEventListener('click', () => {
+  for (const { mesh } of state.buildings.values()) mesh.visible = true;
+  state.isolated = false;
+  document.getElementById('btn-showall').disabled = true;
+});
+
+document.getElementById('btn-export').addEventListener('click', exportModifiedCityJSON);
+</script>
+
+</body>
+</html>

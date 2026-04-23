@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+/node_modules/
+prototype/node_modules/
+spike/cityjson-threejs-loader/node_modules/
+
+# The cityjson-threejs-loader is a third-party clone — don't commit their source
+# as ours. Users run the setup step in README.md to clone it themselves.
+spike/cityjson-threejs-loader/
+
+# Build output
+prototype/dist/
+prototype/.vite/
+spike/cityjson-threejs-loader/dist/
+spike/unpacked/
+unpacked_v*/
+
+# Test + coverage
+prototype/coverage/
+*.test.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor + IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.idea/
+*.swp
+*.swo
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary / generated
+*.log
+*.tmp
+~$*.docx
+~$*.xlsx
