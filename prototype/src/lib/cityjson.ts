@@ -1,4 +1,4 @@
-import type { AttributeValue, CityJsonDocument } from '../types';
+import type { AttributeValue, CityJsonDocument, CityObject } from '../types';
 
 export type ValidationResult =
   | { ok: true; doc: CityJsonDocument }
@@ -44,6 +44,140 @@ export function parseCityJson(text: string): ValidationResult {
     };
   }
   return validateCityJson(parsed);
+}
+
+/**
+ * Auto-detect between monolithic CityJSON and CityJSONSeq (one JSON per line,
+ * first line = header, subsequent lines = CityJSONFeature) and parse
+ * accordingly, assembling into a single in-memory CityJsonDocument.
+ *
+ * Use this from the FileLoader; it replaces the plain `parseCityJson` call and
+ * handles both formats transparently.
+ */
+export function parseCityJsonAuto(text: string, limitFeatures?: number): ValidationResult {
+  // Heuristic: if the first newline-trimmed line parses as a CityJSON header
+  // AND there's a second non-empty line, treat as CityJSONSeq.
+  const firstNewline = text.indexOf('\n');
+  if (firstNewline < 0) return parseCityJson(text);
+
+  const firstLine = text.slice(0, firstNewline).trim();
+  const rest = text.slice(firstNewline + 1);
+  const restHasLine = rest.trim().length > 0;
+  if (!restHasLine) return parseCityJson(text);
+
+  let header: unknown;
+  try {
+    header = JSON.parse(firstLine);
+  } catch {
+    // Not valid JSON on line 1 — fall back to treating whole file as monolithic
+    return parseCityJson(text);
+  }
+  if (
+    typeof header !== 'object' ||
+    header === null ||
+    (header as { type?: unknown }).type !== 'CityJSON'
+  ) {
+    return parseCityJson(text);
+  }
+
+  return parseCityJsonSeq(text, limitFeatures);
+}
+
+/**
+ * Parse a CityJSONSeq file (newline-delimited: header + N CityJSONFeatures)
+ * into a single merged CityJsonDocument.
+ *
+ * Each CityJSONFeature has its own local `vertices` array; we rewrite its
+ * geometry boundaries to reference a combined global vertices array. For
+ * feature counts into the thousands this is fine in memory; above that,
+ * pass `limitFeatures` to load only the first N.
+ */
+export function parseCityJsonSeq(text: string, limitFeatures?: number): ValidationResult {
+  const lines = text.split(/\r?\n/);
+  if (lines.length === 0) {
+    return { ok: false, error: 'Empty file' };
+  }
+
+  let header: CityJsonDocument;
+  try {
+    const parsed = JSON.parse(lines[0]) as unknown;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      (parsed as { type?: unknown }).type !== 'CityJSON'
+    ) {
+      return { ok: false, error: 'First line is not a CityJSON header' };
+    }
+    header = parsed as CityJsonDocument;
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Header parse error: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+
+  const doc: CityJsonDocument = {
+    type: 'CityJSON',
+    version: header.version,
+    metadata: header.metadata,
+    transform: header.transform,
+    CityObjects: { ...(header.CityObjects ?? {}) },
+    vertices: [...(header.vertices ?? [])],
+  };
+
+  let featureCount = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (limitFeatures !== undefined && featureCount >= limitFeatures) break;
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    let feature: {
+      type?: string;
+      CityObjects?: Record<string, CityObject>;
+      vertices?: [number, number, number][];
+    };
+    try {
+      feature = JSON.parse(raw);
+    } catch {
+      continue; // Skip malformed lines rather than failing the whole load
+    }
+    if (feature.type !== 'CityJSONFeature' || !feature.CityObjects) continue;
+
+    const offset = doc.vertices.length;
+    if (feature.vertices && feature.vertices.length > 0) {
+      for (const v of feature.vertices) doc.vertices.push(v);
+    }
+
+    for (const [id, obj] of Object.entries(feature.CityObjects)) {
+      if (offset > 0 && obj.geometry) {
+        obj.geometry = (obj.geometry as unknown[]).map((g) =>
+          shiftGeometryIndices(g, offset)
+        );
+      }
+      doc.CityObjects[id] = obj;
+    }
+    featureCount++;
+  }
+
+  return { ok: true, doc };
+}
+
+/**
+ * Walk a CityJSON geometry's boundaries (arrays of arrays of numbers) and add
+ * `offset` to every leaf number. Used when merging CityJSONSeq features into a
+ * single vertex array.
+ */
+function shiftGeometryIndices(geom: unknown, offset: number): unknown {
+  if (geom == null || typeof geom !== 'object') return geom;
+  const g = geom as { boundaries?: unknown; [k: string]: unknown };
+  if (g.boundaries !== undefined) {
+    return { ...g, boundaries: shiftBoundary(g.boundaries, offset) };
+  }
+  return geom;
+}
+
+function shiftBoundary(node: unknown, offset: number): unknown {
+  if (!Array.isArray(node)) return node;
+  return node.map((item) => (typeof item === 'number' ? item + offset : shiftBoundary(item, offset)));
 }
 
 /**

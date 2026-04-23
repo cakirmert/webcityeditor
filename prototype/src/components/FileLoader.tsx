@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CityJsonDocument } from '../types';
 import { deleteDocument, listDocuments, loadDocument } from '../lib/storage';
+import { parseCityJsonAuto } from '../lib/cityjson';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
@@ -55,27 +56,23 @@ export default function FileLoader({ onLoaded }: Props) {
 
   const parseAndEmit = useCallback(
     (text: string, name: string) => {
-      try {
-        const data = JSON.parse(text);
-        if (data.type !== 'CityJSON') {
-          throw new Error('File is not a CityJSON document (missing type:"CityJSON")');
-        }
-        if (!data.CityObjects || !data.vertices) {
-          throw new Error('Missing required CityJSON fields (CityObjects/vertices)');
-        }
-        setStatus({
-          kind: 'ok',
-          msg: `Loaded v${data.version}, ${
-            Object.keys(data.CityObjects).length
-          } objects, ${data.vertices.length.toLocaleString()} vertices`,
-        });
-        onLoaded(data as CityJsonDocument, name);
-      } catch (e) {
-        setStatus({
-          kind: 'err',
-          msg: `Parse error: ${e instanceof Error ? e.message : String(e)}`,
-        });
+      // parseCityJsonAuto handles both monolithic CityJSON and CityJSONSeq
+      // (one JSON per line: header + CityJSONFeature per feature). It also
+      // merges vertex indices correctly across features.
+      const result = parseCityJsonAuto(text);
+      if (!result.ok) {
+        setStatus({ kind: 'err', msg: `Parse error: ${result.error}` });
+        return;
       }
+      const data = result.doc;
+      const isSeq = /\.(city\.)?jsonl$/i.test(name);
+      setStatus({
+        kind: 'ok',
+        msg: `Loaded v${data.version}${isSeq ? ' (CityJSONSeq)' : ''}, ${
+          Object.keys(data.CityObjects).length
+        } objects, ${data.vertices.length.toLocaleString()} vertices`,
+      });
+      onLoaded(data, name);
     },
     [onLoaded]
   );
@@ -230,7 +227,7 @@ export default function FileLoader({ onLoaded }: Props) {
           <input
             ref={inputRef}
             type="file"
-            accept=".json,.city.json,application/json"
+            accept=".json,.city.json,.jsonl,.city.jsonl,application/json"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
