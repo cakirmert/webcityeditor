@@ -172,16 +172,23 @@ export default function MapView({
     // (not on every selection or edit). Clicking a building must not reset
     // the user's zoom/pitch.
     //
-    // Three fallback sources, in order:
-    //   1. Bounding box of every extracted footprint (most accurate)
-    //   2. metadata.geographicalExtent from the CityJSON header (always in CRS coords; we
-    //      unproject to WGS84 here)
-    //   3. transform.translate as a centre hint (last resort; pick a default zoom)
+    // Three fallback sources, in order. MapLibre's fitBounds + flyTo are both
+    // fine to call before the style finishes loading — they queue the movement.
     if (flownForDocRef.current !== cityjson) {
-      flownForDocRef.current = cityjson;
-      const bbox =
-        computeFootprintBounds(footprints) ?? computeMetadataBounds(cityjson);
-      if (bbox) {
+      const footprintBbox = computeFootprintBounds(footprints);
+      const metaBbox = computeMetadataBounds(cityjson);
+      const centre = computeTranslateCentre(cityjson);
+      // eslint-disable-next-line no-console
+      console.log('[MapView auto-fit]', {
+        footprints: footprints.length,
+        footprintBbox,
+        metaBbox,
+        centre,
+      });
+
+      const bbox = footprintBbox ?? metaBbox;
+      if (bbox && isFiniteBbox(bbox)) {
+        flownForDocRef.current = cityjson;
         map.fitBounds(bbox, {
           padding: 60,
           maxZoom: 18,
@@ -189,17 +196,23 @@ export default function MapView({
           bearing: map.getBearing(),
           duration: 700,
         });
+      } else if (centre && Number.isFinite(centre[0]) && Number.isFinite(centre[1])) {
+        flownForDocRef.current = cityjson;
+        map.flyTo({
+          center: centre,
+          zoom: 16,
+          pitch: 55,
+          bearing: map.getBearing(),
+          duration: 700,
+        });
       } else {
-        const centre = computeTranslateCentre(cityjson);
-        if (centre) {
-          map.flyTo({
-            center: centre,
-            zoom: 16,
-            pitch: 55,
-            bearing: map.getBearing(),
-            duration: 700,
-          });
-        }
+        // All three failed — log once per cityjson so we don't spam.
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[MapView auto-fit] Could not determine a focus location for this document. ' +
+            'No extractable footprints, no metadata.geographicalExtent, unsupported CRS.'
+        );
+        flownForDocRef.current = cityjson;
       }
     }
 
@@ -466,6 +479,17 @@ function averageCenter(footprints: Footprint[]): [number, number] | null {
     }
   }
   return n === 0 ? null : [sx / n, sy / n];
+}
+
+function isFiniteBbox(bbox: maplibregl.LngLatBoundsLike): boolean {
+  if (!Array.isArray(bbox) || bbox.length !== 2) return false;
+  const [a, b] = bbox as [[number, number], [number, number]];
+  return (
+    Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+    b.every((v) => typeof v === 'number' && Number.isFinite(v))
+  );
 }
 
 function computeFootprintBounds(
