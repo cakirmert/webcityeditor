@@ -7,6 +7,7 @@ import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
 import { TerraDraw, TerraDrawPolygonMode } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
+import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
 import { detectCrs } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
@@ -167,14 +168,19 @@ export default function MapView({
     const overlay = overlayRef.current;
     if (!map || !overlay) return;
 
-    // Fit the camera to the dataset's bounding box ONLY on first load of a
-    // given document (not on every selection or edit). Clicking a building
-    // must not reset the user's zoom/pitch. fitBounds auto-picks a zoom that
-    // frames everything, so this works for a small sample cube and a full
-    // city tile alike — no hardcoded zoom or centre.
-    if (footprints.length > 0 && flownForDocRef.current !== cityjson) {
+    // Fit the camera to the dataset ONLY on first load of a given document
+    // (not on every selection or edit). Clicking a building must not reset
+    // the user's zoom/pitch.
+    //
+    // Three fallback sources, in order:
+    //   1. Bounding box of every extracted footprint (most accurate)
+    //   2. metadata.geographicalExtent from the CityJSON header (always in CRS coords; we
+    //      unproject to WGS84 here)
+    //   3. transform.translate as a centre hint (last resort; pick a default zoom)
+    if (flownForDocRef.current !== cityjson) {
       flownForDocRef.current = cityjson;
-      const bbox = computeFootprintBounds(footprints);
+      const bbox =
+        computeFootprintBounds(footprints) ?? computeMetadataBounds(cityjson);
       if (bbox) {
         map.fitBounds(bbox, {
           padding: 60,
@@ -183,6 +189,17 @@ export default function MapView({
           bearing: map.getBearing(),
           duration: 700,
         });
+      } else {
+        const centre = computeTranslateCentre(cityjson);
+        if (centre) {
+          map.flyTo({
+            center: centre,
+            zoom: 16,
+            pitch: 55,
+            bearing: map.getBearing(),
+            duration: 700,
+          });
+        }
       }
     }
 
@@ -474,4 +491,43 @@ function computeFootprintBounds(
     [minLng, minLat],
     [maxLng, maxLat],
   ];
+}
+
+/**
+ * Fallback #2: read `metadata.geographicalExtent` (a 6-element bbox in the
+ * dataset's own CRS: [minX, minY, minZ, maxX, maxY, maxZ]) and reproject the
+ * 2D corners to WGS84. Works for files where extractFootprints returned
+ * nothing (for instance, because CityObjects lack GroundSurfaces we can
+ * detect).
+ */
+function computeMetadataBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLike | null {
+  const ext = doc.metadata?.geographicalExtent;
+  if (!Array.isArray(ext) || ext.length < 4) return null;
+  const [minX, minY, , maxX, maxY] = ext as number[];
+  const crs = detectCrs(doc);
+  if (!crs.supported) return null;
+  try {
+    const a = proj4(crs.code, 'EPSG:4326', [minX, minY]) as [number, number];
+    const b = proj4(crs.code, 'EPSG:4326', [maxX, maxY]) as [number, number];
+    return [a, b];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fallback #3: project `transform.translate` — the document's local origin —
+ * to WGS84 and use it as a centre. Gives a useful view even when no bbox and
+ * no footprints can be determined.
+ */
+function computeTranslateCentre(doc: CityJsonDocument): [number, number] | null {
+  const t = doc.transform?.translate;
+  if (!t || !Number.isFinite(t[0]) || !Number.isFinite(t[1])) return null;
+  const crs = detectCrs(doc);
+  if (!crs.supported) return null;
+  try {
+    return proj4(crs.code, 'EPSG:4326', [t[0], t[1]]) as [number, number];
+  } catch {
+    return null;
+  }
 }
