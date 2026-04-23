@@ -49,4 +49,9 @@ data/
 *.gml
 *.GML
 *.city.json
+*.city.jsonl
+*.jsonl
 # keep the built-in sample cube in source tests unaffected — none on disk
+
+# Third-party CLI tools downloaded during setup (citygml-tools, citydb-tool, …)
+tools/
