@@ -155,6 +155,40 @@ export function parseCityJsonSeq(text: string, limitFeatures?: number): Validati
       }
       doc.CityObjects[id] = obj;
     }
+
+    // Non-conformant CityJSONSeq fix (observed on Hamburg LoD2 export from
+    // citygml-tools): the feature's declared `id` points to an implicit
+    // Building that's referenced by the BuildingParts' `parents` field but
+    // isn't itself an entry in `CityObjects`. Per CityJSONSeq spec the parent
+    // MUST be present. We synthesize it so extractFootprints, filterToBuilding,
+    // and picking all work — without it the map has no Buildings to frame.
+    const featureId = (feature as { id?: string }).id;
+    if (
+      typeof featureId === 'string' &&
+      !doc.CityObjects[featureId] &&
+      Object.keys(feature.CityObjects).length > 0
+    ) {
+      const childIds: string[] = [];
+      const inheritAttrs: Record<string, unknown> = {};
+      for (const [id, obj] of Object.entries(feature.CityObjects)) {
+        if ((obj.parents ?? []).includes(featureId)) {
+          childIds.push(id);
+          // Hoist common attributes (measuredHeight, storeys, roofType, …) to
+          // the synthesized parent so clicking the Building shows something
+          // useful rather than an empty attribute list.
+          for (const [k, v] of Object.entries(obj.attributes ?? {})) {
+            if (!(k in inheritAttrs)) inheritAttrs[k] = v;
+          }
+        }
+      }
+      if (childIds.length > 0) {
+        doc.CityObjects[featureId] = {
+          type: 'Building',
+          children: childIds,
+          attributes: inheritAttrs as CityObject['attributes'],
+        };
+      }
+    }
     featureCount++;
   }
 
