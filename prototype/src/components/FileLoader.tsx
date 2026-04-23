@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CityJsonDocument } from '../types';
 import { deleteDocument, listDocuments, loadDocument } from '../lib/storage';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
 
 interface Props {
   onLoaded: (doc: CityJsonDocument, fileName: string) => void;
@@ -15,7 +17,6 @@ interface QuickSample {
   label: string;
   description: string;
   url: string;
-  /** If true, clicking shows a help message instead of fetching (no direct URL available). */
   guideOnly?: boolean;
 }
 
@@ -46,37 +47,10 @@ export default function FileLoader({ onLoaded }: Props) {
   const [recent, setRecent] = useState<{ name: string; savedAt: number }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch the list of locally-saved documents once on mount
   useEffect(() => {
     listDocuments()
       .then(setRecent)
       .catch((e) => console.warn('Could not list local saves:', e));
-  }, []);
-
-  const handleLoadLocal = useCallback(
-    async (name: string) => {
-      setStatus({ kind: 'info', msg: `Loading local save "${name}"…` });
-      try {
-        const stored = await loadDocument(name);
-        if (!stored) throw new Error('Not found');
-        onLoaded(stored.doc, stored.name);
-      } catch (e) {
-        setStatus({
-          kind: 'err',
-          msg: `Local load failed: ${e instanceof Error ? e.message : String(e)}`,
-        });
-      }
-    },
-    [onLoaded]
-  );
-
-  const handleDeleteLocal = useCallback(async (name: string) => {
-    try {
-      await deleteDocument(name);
-      setRecent((prev) => prev.filter((r) => r.name !== name));
-    } catch (e) {
-      console.warn('Delete failed:', e);
-    }
   }, []);
 
   const parseAndEmit = useCallback(
@@ -143,8 +117,8 @@ export default function FileLoader({ onLoaded }: Props) {
     const sample: CityJsonDocument = {
       type: 'CityJSON',
       version: '2.0',
-      transform: { scale: [0.001, 0.001, 0.001], translate: [0, 0, 0] },
-      metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/4978' },
+      transform: { scale: [0.001, 0.001, 0.001], translate: [85000, 447000, 0] },
+      metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/28992' },
       CityObjects: {
         Building_A: {
           type: 'Building',
@@ -194,6 +168,32 @@ export default function FileLoader({ onLoaded }: Props) {
     parseAndEmit(JSON.stringify(sample), 'sample-cube.city.json');
   }, [parseAndEmit]);
 
+  const handleLoadLocal = useCallback(
+    async (name: string) => {
+      setStatus({ kind: 'info', msg: `Loading local save "${name}"…` });
+      try {
+        const stored = await loadDocument(name);
+        if (!stored) throw new Error('Not found');
+        onLoaded(stored.doc, stored.name);
+      } catch (e) {
+        setStatus({
+          kind: 'err',
+          msg: `Local load failed: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    },
+    [onLoaded]
+  );
+
+  const handleDeleteLocal = useCallback(async (name: string) => {
+    try {
+      await deleteDocument(name);
+      setRecent((prev) => prev.filter((r) => r.name !== name));
+    } catch (e) {
+      console.warn('Delete failed:', e);
+    }
+  }, []);
+
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setDragActive(true);
@@ -207,16 +207,20 @@ export default function FileLoader({ onLoaded }: Props) {
   };
 
   return (
-    <div className="loader-overlay">
-      <div className="loader-card">
-        <h2>Load CityJSON</h2>
-        <p>
-          Drop a <code>.city.json</code> file, paste a URL, or try the built-in sample cube.
-          Works with CityJSON 2.0 files from 3DBAG, Berlin Senat, or any compliant source.
+    <div className="absolute inset-0 z-[5] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="w-[460px] max-w-[92%] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
+        <h2 className="mb-1 text-[15px] font-semibold">Load CityJSON</h2>
+        <p className="mb-4 text-xs text-[var(--text-dim)]">
+          Drop a <code className="rounded bg-[var(--bg)] px-1">.city.json</code> file, paste a
+          URL, or pick a quick sample. CityJSON 2.0 is the primary format.
         </p>
 
         <div
-          className={`drop-zone ${dragActive ? 'active' : ''}`}
+          className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-4 text-center text-xs transition-colors ${
+            dragActive
+              ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]'
+              : 'border-[var(--border)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--text)]'
+          }`}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={onDrop}
@@ -227,7 +231,7 @@ export default function FileLoader({ onLoaded }: Props) {
             ref={inputRef}
             type="file"
             accept=".json,.city.json,application/json"
-            style={{ display: 'none' }}
+            className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) handleFile(f);
@@ -235,153 +239,121 @@ export default function FileLoader({ onLoaded }: Props) {
           />
         </div>
 
-        <div className="loader-actions">
-          <div className="row">
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://... .city.json"
-            />
-            <button onClick={handleUrl}>Fetch URL</button>
-          </div>
-          <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button onClick={handleSample}>Use built-in sample cube</button>
-          </div>
+        <div className="mb-2 flex gap-2">
+          <Input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://... .city.json"
+            className="flex-1"
+          />
+          <Button onClick={handleUrl}>Fetch URL</Button>
         </div>
-
-        <div style={{ marginTop: 18 }}>
-          <div
-            style={{
-              fontSize: 10,
-              textTransform: 'uppercase',
-              letterSpacing: 0.6,
-              color: 'var(--text-dim)',
-              marginBottom: 6,
-            }}
-          >
-            Quick samples (remote)
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {QUICK_SAMPLES.map((s) => (
-              <button
-                key={s.url}
-                onClick={() => {
-                  if (s.guideOnly) {
-                    setStatus({
-                      kind: 'info',
-                      msg: `${s.description} — download portal opens in a new tab.`,
-                    });
-                    window.open(s.url, '_blank', 'noopener,noreferrer');
-                    return;
-                  }
-                  setUrl(s.url);
-                  void (async () => {
-                    setStatus({ kind: 'info', msg: `Fetching ${s.label}…` });
-                    try {
-                      const resp = await fetch(s.url);
-                      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                      const text = await resp.text();
-                      const name = s.url.split('/').pop() ?? s.label;
-                      parseAndEmit(text, name);
-                    } catch (e) {
-                      setStatus({
-                        kind: 'err',
-                        msg: `Fetch failed: ${
-                          e instanceof Error ? e.message : String(e)
-                        }`,
-                      });
-                    }
-                  })();
-                }}
-                style={{
-                  textAlign: 'left',
-                  padding: '6px 8px',
-                  background: 'var(--bg)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 3,
-                  fontSize: 11,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>
-                  {s.label}
-                  {s.guideOnly && (
-                    <span
-                      style={{
-                        marginLeft: 6,
-                        fontSize: 9,
-                        padding: '1px 5px',
-                        borderRadius: 2,
-                        background: 'var(--warn)',
-                        color: '#000',
-                      }}
-                    >
-                      GUIDE
-                    </span>
-                  )}
-                </div>
-                <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>
-                  {s.description}
-                </div>
-              </button>
-            ))}
-          </div>
+        <div className="flex justify-end">
+          <Button onClick={handleSample} variant="outline">
+            Use built-in sample cube
+          </Button>
         </div>
 
         {status.kind !== 'idle' && (
-          <div className={`status-message ${status.kind}`}>{status.msg}</div>
-        )}
-
-        {recent.length > 0 && (
-          <div style={{ marginTop: 18 }}>
-            <div
-              style={{
-                fontSize: 10,
-                textTransform: 'uppercase',
-                letterSpacing: 0.6,
-                color: 'var(--text-dim)',
-                marginBottom: 6,
-              }}
-            >
-              Local saves (browser IndexedDB)
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {recent.slice(0, 6).map((r) => (
-                <div
-                  key={r.name}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 8px',
-                    background: 'var(--bg)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 3,
-                    fontSize: 11,
-                  }}
-                >
-                  <button
-                    onClick={() => handleLoadLocal(r.name)}
-                    style={{ flex: 1, textAlign: 'left' }}
-                  >
-                    {r.name}{' '}
-                    <span style={{ color: 'var(--text-faint)', marginLeft: 4 }}>
-                      {formatRelative(r.savedAt)}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => handleDeleteLocal(r.name)}
-                    title="Delete local save"
-                    style={{ padding: '2px 6px' }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
+          <div
+            className={`mt-3 rounded-md px-3 py-2 text-xs ${
+              status.kind === 'ok'
+                ? 'border border-[var(--success)] bg-[var(--success)]/10 text-[var(--success)]'
+                : status.kind === 'err'
+                ? 'border border-[var(--error)] bg-[var(--error)]/10 text-[var(--error)]'
+                : 'border border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)]'
+            }`}
+          >
+            {status.msg}
           </div>
         )}
+
+        <Section label="Quick samples (remote)">
+          {QUICK_SAMPLES.map((s) => (
+            <button
+              key={s.url}
+              onClick={() => {
+                if (s.guideOnly) {
+                  setStatus({
+                    kind: 'info',
+                    msg: `${s.description} — download portal opens in a new tab.`,
+                  });
+                  window.open(s.url, '_blank', 'noopener,noreferrer');
+                  return;
+                }
+                setUrl(s.url);
+                void (async () => {
+                  setStatus({ kind: 'info', msg: `Fetching ${s.label}…` });
+                  try {
+                    const resp = await fetch(s.url);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const text = await resp.text();
+                    const name = s.url.split('/').pop() ?? s.label;
+                    parseAndEmit(text, name);
+                  } catch (e) {
+                    setStatus({
+                      kind: 'err',
+                      msg: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+                    });
+                  }
+                })();
+              }}
+              className="flex w-full flex-col items-start gap-0.5 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-2 text-left text-[11px] hover:border-[var(--accent)]"
+            >
+              <div className="flex items-center gap-2 font-semibold text-[var(--text)]">
+                {s.label}
+                {s.guideOnly && (
+                  <span className="rounded bg-[var(--warn)] px-1.5 py-0 text-[9px] font-semibold text-black">
+                    GUIDE
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-[var(--text-faint)]">{s.description}</div>
+            </button>
+          ))}
+        </Section>
+
+        {recent.length > 0 && (
+          <Section label="Local saves (IndexedDB)">
+            {recent.slice(0, 6).map((r) => (
+              <div
+                key={r.name}
+                className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[11px]"
+              >
+                <button
+                  onClick={() => handleLoadLocal(r.name)}
+                  className="flex-1 truncate text-left hover:text-[var(--accent)]"
+                >
+                  {r.name}{' '}
+                  <span className="ml-1 text-[var(--text-faint)]">
+                    {formatRelative(r.savedAt)}
+                  </span>
+                </button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleDeleteLocal(r.name)}
+                  title="Delete local save"
+                >
+                  ×
+                </Button>
+              </div>
+            ))}
+          </Section>
+        )}
       </div>
+    </div>
+  );
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-4">
+      <div className="mb-1.5 text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+        {label}
+      </div>
+      <div className="flex flex-col gap-1">{children}</div>
     </div>
   );
 }

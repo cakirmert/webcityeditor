@@ -3,7 +3,8 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { PolygonLayer, SolidPolygonLayer } from '@deck.gl/layers';
-import type { PickingInfo } from '@deck.gl/core';
+import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
+import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
 import { TerraDraw, TerraDrawPolygonMode } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import type { CityJsonDocument, SelectionInfo } from '../types';
@@ -33,10 +34,22 @@ interface Props {
   onFootprintDrawn: (ringWgs84: [number, number][]) => void;
   /** Called if the user cancels drawing (e.g. ESC). */
   onDrawCanceled?: () => void;
-  /** Live preview for the new-building dialog; shows a ghost extrusion of the pending building. */
+  /**
+   * Live preview for the new-building dialog or a pending transform.
+   * - `polygon` + `height` renders a ghost extrusion (SolidPolygonLayer).
+   * - `mesh` renders an actual triangulated building (SimpleMeshLayer),
+   *   which faithfully shows the selected roof type while the user edits the dialog.
+   *   If `mesh` is set, it takes priority over the polygon variant.
+   */
   preview?: {
-    polygon: [number, number][];
-    height: number;
+    polygon?: [number, number][];
+    height?: number;
+    mesh?: {
+      positions: Float32Array;
+      indices: Uint32Array;
+      colors: Uint8Array;
+      anchorLngLat: [number, number];
+    };
   } | null;
 }
 
@@ -173,10 +186,14 @@ export default function MapView({
       }
     }
 
+    // deck.gl's Layer base type is the lowest common denominator; listing the
+    // specific parameterised Layer subclasses here is fine and keeps the
+    // type-check honest about which layer classes we feed to MapboxOverlay.
     const layers: Array<
       | SolidPolygonLayer<Footprint>
       | PolygonLayer<Footprint>
       | SolidPolygonLayer<{ polygon: [number, number][]; height: number }>
+      | SimpleMeshLayer<{ position: [number, number] }>
     > = [];
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
@@ -238,13 +255,34 @@ export default function MapView({
       );
     }
 
-    // Preview layer for the in-progress new building (visible while the
-    // NewBuildingDialog is open and the user adjusts height).
-    if (preview && preview.polygon.length >= 3) {
+    // Preview for the in-progress new building (mesh) OR a pending transform (polygon).
+    if (preview?.mesh && preview.mesh.positions.length > 0) {
+      layers.push(
+        new SimpleMeshLayer<{ position: [number, number] }>({
+          id: 'new-building-preview-mesh',
+          data: [{ position: preview.mesh.anchorLngLat }],
+          getPosition: (d) => d.position,
+          // A per-vertex mesh.colors buffer is honoured when _useMeshColors is
+          // true; but that option isn't typed in deck.gl's public types.
+          // getColor is a single tint applied per instance; we pick a warm
+          // orange so the preview reads as "pending / unsaved".
+          getColor: [255, 180, 80, 230],
+          mesh: {
+            positions: { value: preview.mesh.positions, size: 3 },
+            indices: { value: preview.mesh.indices, size: 1 },
+          } as unknown as never,
+          _instanced: false,
+          sizeScale: 1,
+          coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+          coordinateOrigin: [preview.mesh.anchorLngLat[0], preview.mesh.anchorLngLat[1], 0],
+          pickable: false,
+        })
+      );
+    } else if (preview?.polygon && preview.polygon.length >= 3) {
       layers.push(
         new SolidPolygonLayer<{ polygon: [number, number][]; height: number }>({
-          id: 'new-building-preview',
-          data: [preview],
+          id: 'new-building-preview-poly',
+          data: [{ polygon: preview.polygon, height: preview.height ?? 10 }],
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
           getFillColor: [255, 180, 80, 200],

@@ -27,6 +27,14 @@ export interface NewBuildingForm {
   roofHeight: number;
   function: string;
   yearOfConstruction: number | null;
+  /**
+   * Split the newly-created building immediately after insertion. `none` leaves
+   * it whole; `floors` produces one BuildingPart per storey (requires `storeys`
+   * ≥ 2); `sides` produces N side-by-side BuildingParts along the longer axis
+   * (requires a rectangular footprint).
+   */
+  splitMode: 'none' | 'floors' | 'sides';
+  splitCount: number;
 }
 
 interface Props {
@@ -52,6 +60,8 @@ export default function NewBuildingDialog({
   const [year, setYear] = useState<number | null>(new Date().getFullYear());
   const [storeys, setStoreys] = useState(3);
   const [storeysAutoSync, setStoreysAutoSync] = useState(true);
+  const [splitMode, setSplitMode] = useState<'none' | 'floors' | 'sides'>('none');
+  const [splitCount, setSplitCount] = useState(2);
 
   useEffect(() => {
     if (storeysAutoSync) {
@@ -75,8 +85,10 @@ export default function NewBuildingDialog({
       roofHeight: effectiveRoofHeight,
       function: func,
       yearOfConstruction: year,
+      splitMode,
+      splitCount,
     }),
-    [totalHeight, storeys, roofType, effectiveRoofHeight, func, year]
+    [totalHeight, storeys, roofType, effectiveRoofHeight, func, year, splitMode, splitCount]
   );
 
   useEffect(() => {
@@ -207,6 +219,41 @@ export default function NewBuildingDialog({
               }}
             />
           </Row>
+
+          <div className="my-2 h-px bg-[var(--border)]" />
+
+          <Row label="Subdivide on create">
+            <Select
+              value={splitMode}
+              onValueChange={(v) => setSplitMode(v as 'none' | 'floors' | 'sides')}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">no split (one whole building)</SelectItem>
+                <SelectItem value="floors">split per floor (stacked)</SelectItem>
+                <SelectItem value="sides">split along long axis (rect only)</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+          {splitMode !== 'none' && (
+            <Row label={splitMode === 'floors' ? 'Number of floors' : 'Number of parts'}>
+              <Input
+                type="number"
+                min={2}
+                max={splitMode === 'floors' ? 20 : 8}
+                value={splitCount}
+                onChange={(e) => setSplitCount(Math.max(2, Number(e.target.value) || 2))}
+              />
+            </Row>
+          )}
+          {splitMode !== 'none' && (
+            <div className="text-[10px] text-[var(--text-faint)]">
+              Each part becomes its own BuildingPart with its own attributes — pick a
+              part after creation to set its function, etc.
+            </div>
+          )}
         </div>
 
         <DialogFooter>

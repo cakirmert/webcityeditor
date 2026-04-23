@@ -42,3 +42,11 @@ desktop.ini
 *.tmp
 ~$*.docx
 ~$*.xlsx
+
+# Local test data (CityGML / CityJSON / large fixtures) — users bring their own
+Data/
+data/
+*.gml
+*.GML
+*.city.json
+# keep the built-in sample cube in source tests unaffected — none on disk

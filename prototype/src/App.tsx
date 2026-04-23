@@ -16,6 +16,7 @@ import {
   computeTransformedFootprint,
   type PendingTransform,
 } from './lib/transform-preview';
+import { buildPreviewMesh } from './lib/preview-mesh';
 import type { AttributeValue, CityJsonDocument, SelectionInfo } from './types';
 
 export default function App() {
@@ -217,9 +218,34 @@ export default function App() {
           },
         });
         const id = insertBuilding(cityjson, result);
+        const newIds = new Set([id]);
+        // Apply the optional split-on-create immediately.
+        if (form.splitMode === 'floors') {
+          try {
+            const { partIds } = splitBuildingByFloor(cityjson, id, form.splitCount);
+            for (const p of partIds) newIds.add(p);
+          } catch (e) {
+            alert(
+              `Building created but split-by-floor failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`
+            );
+          }
+        } else if (form.splitMode === 'sides') {
+          try {
+            const { partIds } = splitBuildingBySide(cityjson, id, form.splitCount);
+            for (const p of partIds) newIds.add(p);
+          } catch (e) {
+            alert(
+              `Building created but split-by-side failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`
+            );
+          }
+        }
         setDirtyIds((prev) => {
           const next = new Set(prev);
-          next.add(id);
+          for (const nid of newIds) next.add(nid);
           return next;
         });
         setReloadToken((t) => t + 1);
@@ -327,9 +353,29 @@ export default function App() {
               onDrawCanceled={handleCancelDraw}
               preview={
                 pendingFootprint && pendingForm
-                  ? { polygon: pendingFootprint, height: pendingForm.totalHeight }
+                  ? {
+                      // Mesh-based preview gives the user the actual roof shape
+                      // in real time; falls back to polygon extrusion if the
+                      // target CRS isn't recognised by proj4.
+                      mesh:
+                        buildPreviewMesh({
+                          footprintWgs84: pendingFootprint,
+                          targetCrs: detectCrs(cityjson).code,
+                          eaveHeight:
+                            pendingForm.roofType === 'flat'
+                              ? pendingForm.totalHeight
+                              : pendingForm.totalHeight - pendingForm.roofHeight,
+                          ridgeHeight: pendingForm.totalHeight,
+                          roofType: pendingForm.roofType,
+                        }) ?? undefined,
+                      polygon: pendingFootprint,
+                      height: pendingForm.totalHeight,
+                    }
                   : pendingTransform
-                  ? computeTransformedFootprint(cityjson, pendingTransform)
+                  ? (() => {
+                      const t = computeTransformedFootprint(cityjson, pendingTransform);
+                      return t ? { polygon: t.polygon, height: t.height } : null;
+                    })()
                   : null
               }
             />

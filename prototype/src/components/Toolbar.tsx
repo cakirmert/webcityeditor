@@ -1,3 +1,5 @@
+import { Button } from './ui/button';
+
 interface Stats {
   version: string;
   totalObjects: number;
@@ -19,8 +21,6 @@ interface Props {
   drawMode?: 'none' | 'polygon';
   onStartDraw?: () => void;
   onCancelDraw?: () => void;
-  sidePanelFullscreen?: boolean;
-  onToggleFullscreen?: () => void;
 }
 
 export default function Toolbar({
@@ -38,61 +38,67 @@ export default function Toolbar({
   onCancelDraw,
 }: Props) {
   return (
-    <div className="toolbar">
-      <span className="title">City Editor</span>
+    <header className="flex h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
+      <span className="font-semibold text-[13px]">City Editor</span>
+
       {fileName && (
-        <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-          {dirtyCount > 0 && <span className="dirty-dot" />}
-          {fileName}
+        <div className="flex items-center gap-2 text-[var(--text-dim)]">
           {dirtyCount > 0 && (
-            <span style={{ marginLeft: 6, color: 'var(--warn)' }}>
-              · {dirtyCount} unsaved
-            </span>
+            <span className="inline-block h-2 w-2 rounded-full bg-[var(--warn)]" />
           )}
-        </span>
+          <span className="max-w-[240px] truncate" title={fileName}>
+            {fileName}
+          </span>
+          {dirtyCount > 0 && (
+            <span className="text-[var(--warn)]">· {dirtyCount} unsaved</span>
+          )}
+        </div>
       )}
-      <div className="spacer" />
+
+      <div className="flex-1" />
+
       {stats && (
-        <span className="stats">
-          CityJSON <b>{stats.version}</b> · <b>{stats.rootBuildings}</b> buildings ·{' '}
-          <b>{stats.vertices.toLocaleString()}</b> vertices
+        <span className="text-[11px] text-[var(--text-dim)] tabular-nums">
+          CityJSON <b className="text-[var(--text)]">{stats.version}</b>{' '}
+          · <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
+          · <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
+          vertices
           {stats.crs && (
             <>
-              {' '}
-              · CRS <b style={{ fontFamily: 'monospace' }}>{shortCrs(stats.crs)}</b>
+              {' '}· CRS{' '}
+              <b className="font-mono text-[var(--text)]">{shortCrs(stats.crs)}</b>
             </>
           )}
         </span>
       )}
+
       {hasData && (
         <>
           {drawMode === 'polygon' ? (
-            <button
-              onClick={onCancelDraw}
-              style={{ background: 'var(--warn)', color: '#000', borderColor: 'var(--warn)' }}
-              title="Cancel drawing (Esc)"
-            >
+            <Button variant="warn" onClick={onCancelDraw} title="Cancel drawing (Esc)">
               ✕ Cancel drawing
-            </button>
+            </Button>
           ) : (
             onStartDraw && (
-              <button
+              <Button
+                variant="primary"
                 onClick={onStartDraw}
-                className="primary"
                 title="Draw a 2D footprint to create a new LoD2 building"
               >
                 ＋ New Building
-              </button>
+              </Button>
             )
           )}
-          <button onClick={onReloadView} title="Re-parse modified data and refresh map + 3D view">
+
+          <Button onClick={onReloadView} title="Re-parse modified data and refresh map + 3D view">
             ↻ Reload view
-          </button>
+          </Button>
+
           {onSaveLocal && (
-            <button
+            <Button
               onClick={onSaveLocal}
               disabled={saveStatus === 'saving'}
-              title="Persist current in-memory doc to browser IndexedDB (local)"
+              title="Persist current in-memory doc to browser IndexedDB"
             >
               {saveStatus === 'saving'
                 ? 'Saving…'
@@ -101,22 +107,23 @@ export default function Toolbar({
                 : saveStatus === 'error'
                 ? '⚠ Save failed'
                 : '💾 Save local'}
-            </button>
+            </Button>
           )}
-          <button className="primary" onClick={onExport} disabled={!hasData}>
+
+          <Button variant="primary" onClick={onExport} disabled={!hasData}>
             ⬇ Export CityJSON
-          </button>
-          <button onClick={onNewFile} title="Load a different file">
+          </Button>
+
+          <Button onClick={onNewFile} variant="ghost" title="Load a different file">
             Load another…
-          </button>
+          </Button>
         </>
       )}
-    </div>
+    </header>
   );
 }
 
 function shortCrs(crs: string): string {
-  // Strip long OGC URL, keep EPSG code when possible
   const m = crs.match(/EPSG\/\d+\/(\d+)/);
   if (m) return `EPSG:${m[1]}`;
   return crs.length > 30 ? crs.slice(-20) : crs;
