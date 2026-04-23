@@ -217,7 +217,7 @@ The round-trip tests in `generator.test.ts` are the concrete evidence that there
 
 ## 10. Should you use LoD 2 or LoD 3 for Hamburg?
 
-Short version: **keep the LoD 2 file.** LoD 3 is nicer to look at but costs you on three fronts:
+Short version: **keep the LoD 2 file.** LoD 3 is nicer to look at but costs you on three fronts, AND most of the simulator ecosystem that consumes our output is built around LoD 2 (see §10a below).
 
 | Dimension | LoD 2 | LoD 3 |
 |---|---|---|
@@ -235,6 +235,29 @@ Short version: **keep the LoD 2 file.** LoD 3 is nicer to look at but costs you 
 - For **proposing new buildings** we emit LoD 2 directly. With the proposed "procedural windows + entrance" work item (roadmap §12-2), new buildings become LoD 3-ish via an overlay MultiSurface sidecar.
 
 **Conclusion**: load the LoD 2 file, don't hunt for LoD 3 for Hamburg. If you later need higher visual fidelity for a specific demo shot, you can always load the LoD 3 into a separate session as a display-only dataset.
+
+### 10a. Which LoD does a simulator actually want?
+
+The prototype's output CityJSON is intended to feed a downstream simulator. The right LoD depends on the simulator family. For almost all urban-scale simulators, **LoD 2 is the target**, not LoD 3.
+
+| Simulator family | Example tools | Needs LoD | Why |
+|---|---|---|---|
+| Urban energy demand | SimStadt, CitySim, UMEP, Simstadt+EnergyADE | **LoD 2** | Wants wall/roof orientations + areas + storey count + use type. LoD 3 windows aren't modelled geometrically; they're a per-wall **window-to-wall ratio attribute**. Feed LoD 3 and the simulator strips it down anyway. |
+| Urban microclimate / CFD | ENVI-met, Palm-4U, OpenFOAM pipelines | **LoD 2** | Meshes on building envelopes. LoD 3 detail breaks the mesher or adds hours of preprocessing for no accuracy gain. |
+| Solar / PV potential | r.sun, UMEP SEBE, SolarCalc | **LoD 2** | Needs roof planes with correct pitch + azimuth. Windows are irrelevant; walls are secondary. |
+| Noise propagation | NoiseModelling, CNOSSOS pipelines | **LoD 1 or 2** | Treats buildings as sound barriers; facade detail is ignored. |
+| Flood / stormwater | TUFLOW, HEC-RAS 2D | **LoD 1** | Just needs footprints + heights as obstacles. |
+| Daylighting / indoor comfort | RADIANCE, DAYSIM | **LoD 3+** | Genuinely cares about window geometry and room layout. For this tier, IFC is usually a better source than CityJSON. |
+| Structural / seismic | OpenSees, SAP2000 pipelines | **IFC / LoD 4** | Needs internal structural elements. Not CityJSON territory. |
+
+**Rule of thumb**: pick the lowest LoD that still carries the information the simulator reads. Higher LoD = more file / memory / preprocessing cost with no analytical payoff unless the simulator specifically consumes the extra detail.
+
+**Our pipeline's position**:
+- ✅ **Loading / displaying** any LoD (0 through 3) is fine — the loader handles them, and move/rotate/attribute edits don't care about LoD depth.
+- ⚠ **Regenerating geometry** (split by floor, change roof type) outputs LoD 2. If the input was LoD 3, its windows and doors are silently dropped. That's fine for the simulator families in the top five rows above; it's a problem for the last two.
+- 🟡 For **procedural openings** on newly generated buildings, the roadmap's "procedural doors + windows" item emits a sidecar LoD 3 MultiSurface so new buildings get LoD 3-tagged geometry without re-plumbing the whole editor.
+
+**Which simulator are you targeting?** If it's any of the first five rows, ship LoD 2 and don't worry about the rest. If it's a daylighting or structural tool, we should talk separately — the right answer there is probably IFC, not CityJSON.
 
 ---
 
