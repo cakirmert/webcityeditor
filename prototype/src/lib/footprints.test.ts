@@ -32,6 +32,8 @@ describe('extractFootprints', () => {
   it('returns empty array for unsupported CRS', () => {
     const doc = buildSampleCube();
     doc.metadata = { referenceSystem: 'urn:unknown' };
+    // also nuke the transform's translate so the coord-magnitude fallback can't rescue it
+    doc.transform = { scale: [1, 1, 1], translate: [1e9, 1e9, 0] };
     const fps = extractFootprints(doc);
     expect(fps).toEqual([]);
   });

@@ -65,17 +65,45 @@ export interface CrsInfo {
   code: string;
   /** true if proj4 has a registered definition for this code */
   supported: boolean;
+  /** true if the CRS was guessed from coordinate magnitudes rather than declared */
+  inferred?: boolean;
 }
 
-/** Detect the projected CRS declared in a CityJSON document. */
+/**
+ * Detect the projected CRS declared in a CityJSON document. If the metadata
+ * doesn't declare one (some citygml-tools output, some hand-authored files),
+ * fall back to inferring from the magnitude of transform.translate — works
+ * for the most common European CRS we see in practice.
+ */
 export function detectCrs(doc: CityJsonDocument): CrsInfo {
   const raw = doc.metadata?.referenceSystem;
-  if (typeof raw !== 'string') return { code: 'UNKNOWN', supported: false };
-  const match = raw.match(/EPSG\/\d+\/(\d+)|EPSG:(\d+)/);
-  if (!match) return { code: 'UNKNOWN', supported: false };
-  const code = `EPSG:${match[1] ?? match[2]}`;
-  const supported = proj4.defs(code) !== undefined;
-  return { code, supported };
+  if (typeof raw === 'string') {
+    const match = raw.match(/EPSG\/\d+\/(\d+)|EPSG:(\d+)/);
+    if (match) {
+      const code = `EPSG:${match[1] ?? match[2]}`;
+      return { code, supported: proj4.defs(code) !== undefined };
+    }
+  }
+  // Heuristic fallback based on transform.translate (the common "origin" of
+  // the dataset). These ranges are deliberately loose; if you hit a false
+  // positive, set metadata.referenceSystem explicitly in your source file.
+  const t = doc.transform?.translate;
+  if (t && Number.isFinite(t[0]) && Number.isFinite(t[1])) {
+    const [x, y] = t;
+    // UTM 32N (most of Germany, Austria, northern Italy)
+    if (x > 300_000 && x < 900_000 && y > 5_000_000 && y < 6_400_000) {
+      return { code: 'EPSG:25832', supported: true, inferred: true };
+    }
+    // UTM 33N (eastern Germany, Poland)
+    if (x > 200_000 && x < 900_000 && y > 5_800_000 && y < 7_300_000) {
+      return { code: 'EPSG:25833', supported: true, inferred: true };
+    }
+    // Dutch RD New
+    if (x > -7_000 && x < 300_000 && y > 300_000 && y < 620_000) {
+      return { code: 'EPSG:28992', supported: true, inferred: true };
+    }
+  }
+  return { code: 'UNKNOWN', supported: false };
 }
 
 export interface CityCoord {

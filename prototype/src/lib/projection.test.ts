@@ -27,12 +27,25 @@ describe('detectCrs', () => {
     expect(crs.supported).toBe(true);
   });
 
-  it('returns unsupported for unknown CRS', () => {
+  it('returns unsupported for unknown CRS when coord fallback also fails', () => {
     const crs = detectCrs({
       ...buildSampleCube(),
       metadata: { referenceSystem: 'urn:something-bogus' },
+      // transform coords in nowhere-land — outside every fallback range
+      transform: { scale: [1, 1, 1], translate: [1e9, 1e9, 0] },
     });
     expect(crs.supported).toBe(false);
+  });
+
+  it('falls back to EPSG:25832 from coord magnitudes if CRS is unset (Hamburg tile case)', () => {
+    const crs = detectCrs({
+      ...buildSampleCube(),
+      metadata: {},
+      transform: { scale: [0.001, 0.001, 0.001], translate: [565794, 5936653, 18] },
+    });
+    expect(crs.code).toBe('EPSG:25832');
+    expect(crs.supported).toBe(true);
+    expect(crs.inferred).toBe(true);
   });
 });
 
