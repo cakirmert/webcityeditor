@@ -396,7 +396,9 @@ export default function App() {
           <aside className={`side-panel ${sidePanelFullscreen ? 'fullscreen' : ''}`}>
             <div className="panel-header">
               <h3>
-                {dirtyIds.has(selection.objectId) && <span className="dirty-dot" />}
+                {dirtyIds.has(selection.objectId) && (
+                  <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[var(--warn)]" />
+                )}
                 {cityjson.CityObjects[selection.objectId]?.type ?? 'Unknown'}
               </h3>
               <div style={{ display: 'flex', gap: 4 }}>
