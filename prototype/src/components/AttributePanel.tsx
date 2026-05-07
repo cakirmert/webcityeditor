@@ -14,6 +14,9 @@ interface Props {
   onRevert: (id: string) => void;
   onClose: () => void;
   onSplitByFloor?: (id: string, floorCount: number) => void;
+  /** New: split using a custom per-floor height array (in metres). The
+   *  topmost entry keeps the parent's roof type. */
+  onSplitByFloorHeights?: (id: string, heights: number[]) => void;
   onSplitBySide?: (id: string, partCount: number) => void;
   pendingTransform?: PendingTransform | null;
   onStartTransform?: (id: string) => void;
@@ -31,6 +34,7 @@ export default function AttributePanel({
   onRevert,
   onClose,
   onSplitByFloor,
+  onSplitByFloorHeights,
   onSplitBySide,
   pendingTransform,
   onStartTransform,
@@ -41,6 +45,10 @@ export default function AttributePanel({
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
   const [sideCount, setSideCount] = useState(2);
+  /** Custom per-floor wall heights in metres (only used when "Custom heights"
+   *  mode is active). Length must match floorCount, sum must match the
+   *  building's eave height. */
+  const [customHeights, setCustomHeights] = useState<number[] | null>(null);
   const inTransformMode = !!pendingTransform;
 
   const splitGate = useMemo(
@@ -252,28 +260,22 @@ export default function AttributePanel({
           {splitGate.ok ? (
             <>
               {onSplitByFloor && (
-                <div className="flex items-center gap-2">
-                  <Label className="w-14">Floors</Label>
-                  <Input
-                    type="number"
-                    min={2}
-                    max={20}
-                    value={floorCount}
-                    onChange={(e) =>
-                      setFloorCount(Math.max(2, Number(e.target.value) || 2))
-                    }
-                    className="w-16"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => onSplitByFloor(buildingId, floorCount)}
-                  >
-                    Split by floor
-                  </Button>
-                </div>
+                <FloorSplitEditor
+                  eaveHeight={splitGate.params!.eaveHeight}
+                  floorCount={floorCount}
+                  setFloorCount={setFloorCount}
+                  customHeights={customHeights}
+                  setCustomHeights={setCustomHeights}
+                  onApplyUniform={() => onSplitByFloor(buildingId, floorCount)}
+                  onApplyCustom={
+                    onSplitByFloorHeights
+                      ? (h) => onSplitByFloorHeights(buildingId, h)
+                      : undefined
+                  }
+                />
               )}
               {onSplitBySide && (
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2">
                   <Label className="w-14">Sides</Label>
                   <Input
                     type="number"
@@ -343,6 +345,145 @@ interface RowProps {
   attrKey: string;
   value: AttributeValue;
   onChange: (v: AttributeValue) => void;
+}
+
+interface FloorSplitEditorProps {
+  eaveHeight: number;
+  floorCount: number;
+  setFloorCount: (n: number) => void;
+  customHeights: number[] | null;
+  setCustomHeights: (h: number[] | null) => void;
+  onApplyUniform: () => void;
+  onApplyCustom?: (heights: number[]) => void;
+}
+
+/**
+ * Two-mode split editor: "uniform" picks a floor count and divides equally;
+ * "custom" lets the user dial each floor's wall height in metres. The custom
+ * mode auto-distributes a sensible starting point (3.5 m ground + equal upper
+ * floors), validates that heights sum to the eave height, and shows live
+ * warnings when any floor falls below the storey-height minimum or the sum
+ * drifts.
+ */
+function FloorSplitEditor({
+  eaveHeight,
+  floorCount,
+  setFloorCount,
+  customHeights,
+  setCustomHeights,
+  onApplyUniform,
+  onApplyCustom,
+}: FloorSplitEditorProps) {
+  const customMode = customHeights !== null;
+
+  // When entering custom mode (or when floorCount changes while in custom
+  // mode), seed sensible defaults: a tall ground floor + equal upper floors.
+  const seedCustom = (n: number): number[] => {
+    if (n < 2) return [eaveHeight];
+    const ground = Math.min(3.5, eaveHeight / n + 0.5);
+    const remaining = eaveHeight - ground;
+    const upper = remaining / (n - 1);
+    return [ground, ...new Array(n - 1).fill(upper)];
+  };
+
+  const enterCustom = () => setCustomHeights(seedCustom(floorCount));
+  const leaveCustom = () => setCustomHeights(null);
+
+  const updateOne = (idx: number, val: number) => {
+    if (!customHeights) return;
+    const next = customHeights.slice();
+    next[idx] = val;
+    setCustomHeights(next);
+  };
+
+  const onChangeFloorCount = (n: number) => {
+    setFloorCount(n);
+    if (customHeights) setCustomHeights(seedCustom(n));
+  };
+
+  const sum = customHeights?.reduce((a, b) => a + b, 0) ?? 0;
+  const sumDelta = customMode ? sum - eaveHeight : 0;
+  const sumOk = Math.abs(sumDelta) < 0.01;
+  const anyTooShort =
+    customMode && customHeights!.some((h) => h < MIN_STOREY_HEIGHT);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Label className="w-14">Floors</Label>
+        <Input
+          type="number"
+          min={2}
+          max={20}
+          value={floorCount}
+          onChange={(e) => onChangeFloorCount(Math.max(2, Number(e.target.value) || 2))}
+          className="w-16"
+        />
+        {!customMode && (
+          <Button size="sm" onClick={onApplyUniform}>
+            Split equally
+          </Button>
+        )}
+        {onApplyCustom && (
+          <Button size="sm" variant="ghost" onClick={customMode ? leaveCustom : enterCustom}>
+            {customMode ? '✕ Equal' : 'Custom heights…'}
+          </Button>
+        )}
+      </div>
+
+      {customMode && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-2">
+          <div className="mb-1.5 flex items-baseline justify-between text-[10px] text-[var(--text-faint)]">
+            <span>Per-floor wall height (m)</span>
+            <span className={sumOk ? '' : 'text-[var(--warn)]'}>
+              Σ {sum.toFixed(2)} / {eaveHeight.toFixed(2)} m
+              {!sumOk && ` (${sumDelta > 0 ? '+' : ''}${sumDelta.toFixed(2)})`}
+            </span>
+          </div>
+          <div className="space-y-1">
+            {customHeights!.map((h, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="w-12 text-[11px] tabular-nums text-[var(--text-faint)]">
+                  Floor {i + 1}
+                </span>
+                <Input
+                  type="number"
+                  min={MIN_STOREY_HEIGHT}
+                  step="0.1"
+                  value={h.toFixed(2)}
+                  onChange={(e) =>
+                    updateOne(i, Math.max(0, Number(e.target.value) || 0))
+                  }
+                  className="w-20"
+                />
+                <span className="text-[10px] text-[var(--text-faint)]">m</span>
+                {h < MIN_STOREY_HEIGHT && (
+                  <span className="text-[10px] text-[var(--warn)]">⚠ &lt; {MIN_STOREY_HEIGHT} m</span>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!sumOk || anyTooShort}
+              onClick={() => onApplyCustom?.(customHeights!)}
+            >
+              Split with custom heights
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setCustomHeights(seedCustom(floorCount))}
+            >
+              Auto-distribute
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AttributeRow({ attrKey, value, onChange }: RowProps) {

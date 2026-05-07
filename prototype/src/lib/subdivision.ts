@@ -95,6 +95,8 @@ export function canSplitBuilding(doc: CityJsonDocument, id: string): {
 /**
  * Split a building into N BuildingParts stacked vertically, one per storey.
  * Lower parts become flat boxes; the topmost keeps the original roof type.
+ * Heights are uniform — for custom per-floor heights use
+ * `splitBuildingByFloorHeights`.
  *
  * Preconditions: canSplitBuilding returns ok. Minimum storey height enforced.
  */
@@ -103,24 +105,60 @@ export function splitBuildingByFloor(
   buildingId: string,
   floorCount: number
 ): SplitResult {
+  if (floorCount < 2) throw new Error('Floor count must be at least 2');
+  const gate = canSplitBuilding(doc, buildingId);
+  if (!gate.ok || !gate.params) throw new Error(gate.reason ?? 'Cannot split');
+  const perFloorWallH = gate.params.eaveHeight / floorCount;
+  const heights = new Array(floorCount).fill(perFloorWallH) as number[];
+  return splitBuildingByFloorHeights(doc, buildingId, heights);
+}
+
+/**
+ * Split a building into BuildingParts using a custom per-floor wall-height
+ * array (in metres). The number of parts is `heights.length`. The topmost
+ * part keeps the original roof type; lower parts are flat boxes.
+ *
+ * The sum of `heights` must equal the source building's eaveHeight (within
+ * 1 cm tolerance). Each individual height must be ≥ MIN_STOREY_HEIGHT.
+ *
+ * This is the workhorse the visual division editor uses. The legacy
+ * `splitBuildingByFloor(doc, id, n)` delegates here with a uniform array.
+ */
+export function splitBuildingByFloorHeights(
+  doc: CityJsonDocument,
+  buildingId: string,
+  heights: number[]
+): SplitResult {
   const gate = canSplitBuilding(doc, buildingId);
   if (!gate.ok || !gate.params) throw new Error(gate.reason ?? 'Cannot split');
   const p = gate.params;
 
-  if (floorCount < 2) throw new Error('Floor count must be at least 2');
-  const perFloorWallH = p.eaveHeight / floorCount;
-  if (perFloorWallH < MIN_STOREY_HEIGHT) {
+  if (heights.length < 2) throw new Error('Need at least 2 floor heights');
+  for (const h of heights) {
+    if (!Number.isFinite(h) || h <= 0) {
+      throw new Error('Each floor height must be a positive number');
+    }
+    if (h < MIN_STOREY_HEIGHT) {
+      throw new Error(
+        `Floor height ${h.toFixed(2)} m is below the ${MIN_STOREY_HEIGHT} m minimum.`
+      );
+    }
+  }
+  const sum = heights.reduce((a, b) => a + b, 0);
+  if (Math.abs(sum - p.eaveHeight) > 0.01) {
     throw new Error(
-      `Per-floor wall height ${perFloorWallH.toFixed(2)} m is below the ${MIN_STOREY_HEIGHT} m minimum. ` +
-        `Reduce floor count or increase total height.`
+      `Floor heights sum to ${sum.toFixed(2)} m but the building's eave height is ${p.eaveHeight.toFixed(2)} m. ` +
+        `Each split must conserve total height.`
     );
   }
 
   const partIds: string[] = [];
-  for (let i = 0; i < floorCount; i++) {
-    const isTop = i === floorCount - 1;
-    const floorBase = p.baseElevation + i * perFloorWallH;
-    const thisEave = floorBase + perFloorWallH;
+  let cumulative = 0;
+  for (let i = 0; i < heights.length; i++) {
+    const isTop = i === heights.length - 1;
+    const wallH = heights[i];
+    const floorBase = p.baseElevation + cumulative;
+    const thisEave = floorBase + wallH;
     const thisRidge = isTop ? p.baseElevation + p.totalHeight : thisEave;
     const thisRoofType: RoofType = isTop ? p.roofType : 'flat';
 
@@ -139,14 +177,13 @@ export function splitBuildingByFloor(
       },
     };
     const result = generateBuilding(doc, partParams);
-    // Promote to BuildingPart
     result.cityObject.type = 'BuildingPart';
     result.cityObject.parents = [buildingId];
     const id = insertBuilding(doc, result);
     partIds.push(id);
+    cumulative += wallH;
   }
 
-  // Clear parent geometry and link children
   const parent = doc.CityObjects[buildingId];
   parent.geometry = [];
   parent.children = [...(parent.children ?? []), ...partIds];

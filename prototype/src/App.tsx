@@ -10,7 +10,11 @@ import { filterToBuilding } from './lib/footprints';
 import { saveDocument } from './lib/storage';
 import { generateBuilding, insertBuilding } from './lib/generator';
 import { detectCrs } from './lib/projection';
-import { splitBuildingByFloor, splitBuildingBySide } from './lib/subdivision';
+import {
+  splitBuildingByFloor,
+  splitBuildingByFloorHeights,
+  splitBuildingBySide,
+} from './lib/subdivision';
 import { moveBuilding, rotateBuilding } from './lib/transform';
 import {
   computeTransformedFootprint,
@@ -101,6 +105,25 @@ export default function App() {
       if (!cityjson) return;
       try {
         const { partIds } = splitBuildingByFloor(cityjson, id, floorCount);
+        setDirtyIds((prev) => {
+          const next = new Set(prev);
+          next.add(id);
+          for (const p of partIds) next.add(p);
+          return next;
+        });
+        setReloadToken((t) => t + 1);
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [cityjson]
+  );
+
+  const handleSplitByFloorHeights = useCallback(
+    (id: string, heights: number[]) => {
+      if (!cityjson) return;
+      try {
+        const { partIds } = splitBuildingByFloorHeights(cityjson, id, heights);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -443,6 +466,7 @@ export default function App() {
               onAttributeChange={handleAttributeChange}
               onRevert={handleRevert}
               onSplitByFloor={handleSplitByFloor}
+              onSplitByFloorHeights={handleSplitByFloorHeights}
               onSplitBySide={handleSplitBySide}
               pendingTransform={
                 pendingTransform?.id === selection.objectId ? pendingTransform : null
@@ -467,6 +491,7 @@ function AttributePanelInline(props: {
   onAttributeChange: (id: string, key: string, value: AttributeValue) => void;
   onRevert: (id: string) => void;
   onSplitByFloor: (id: string, floorCount: number) => void;
+  onSplitByFloorHeights: (id: string, heights: number[]) => void;
   onSplitBySide: (id: string, partCount: number) => void;
   pendingTransform: PendingTransform | null;
   onStartTransform: (id: string) => void;
@@ -483,6 +508,7 @@ function AttributePanelInline(props: {
       onRevert={props.onRevert}
       onClose={() => {}}
       onSplitByFloor={props.onSplitByFloor}
+      onSplitByFloorHeights={props.onSplitByFloorHeights}
       onSplitBySide={props.onSplitBySide}
       pendingTransform={props.pendingTransform}
       onStartTransform={props.onStartTransform}

@@ -4,6 +4,7 @@ import { generateBuilding, insertBuilding, type NewBuildingParams } from './gene
 import {
   canSplitBuilding,
   splitBuildingByFloor,
+  splitBuildingByFloorHeights,
   splitBuildingBySide,
   MIN_STOREY_HEIGHT,
   MIN_SIDE_WIDTH,
@@ -144,5 +145,73 @@ describe('splitBuildingBySide', () => {
     const { doc, id } = makeBuilding();
     const { partIds } = splitBuildingBySide(doc, id, 2);
     expect(doc.CityObjects[id].children).toEqual(partIds);
+  });
+});
+
+describe('splitBuildingByFloorHeights (custom per-floor heights)', () => {
+  it('produces parts at the requested heights (German tall-ground-floor pattern)', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    // 3.5 m ground + 2.83 m × 3 upper floors = 12 m exactly (within tolerance).
+    const heights = [3.5, 2.833, 2.833, 2.834];
+    const { partIds } = splitBuildingByFloorHeights(doc, id, heights);
+    expect(partIds).toHaveLength(4);
+
+    // Each part's measuredHeight reflects its local wall height
+    const parts = partIds.map((pid) => doc.CityObjects[pid]);
+    expect(parts[0].attributes?.measuredHeight).toBeCloseTo(3.5, 2);
+    expect(parts[1].attributes?.measuredHeight).toBeCloseTo(2.833, 2);
+    expect(parts[3].attributes?.measuredHeight).toBeCloseTo(2.834, 2);
+
+    // Each part is correctly tagged with floor index
+    for (let i = 0; i < parts.length; i++) {
+      expect(parts[i].attributes?._floorIndex).toBe(i);
+      expect(parts[i].attributes?._splitOrigin).toBe(id);
+    }
+
+    // Parent still references children
+    expect(doc.CityObjects[id].children).toEqual(partIds);
+    expect(doc.CityObjects[id].geometry).toEqual([]);
+  });
+
+  it('rejects when heights do not sum to the building eave height', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    expect(() => splitBuildingByFloorHeights(doc, id, [3, 3, 3])).toThrow(
+      /conserve total height/
+    );
+  });
+
+  it('rejects any individual floor below the storey-height minimum', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    expect(() => splitBuildingByFloorHeights(doc, id, [2.0, 5.0, 5.0])).toThrow(
+      /below the .* minimum/
+    );
+  });
+
+  it('rejects fewer than 2 heights', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    expect(() => splitBuildingByFloorHeights(doc, id, [12])).toThrow(/at least 2/);
+  });
+
+  it('topmost part keeps the original roof type, lower parts are flat', () => {
+    const { doc, id } = makeBuilding({
+      eaveHeight: 9,
+      ridgeHeight: 12,
+      roofType: 'pyramid',
+    });
+    const { partIds } = splitBuildingByFloorHeights(doc, id, [3, 3, 3]);
+    const parts = partIds.map((pid) => doc.CityObjects[pid]);
+    expect(parts[0].attributes?.roofType).toBe('flat');
+    expect(parts[1].attributes?.roofType).toBe('flat');
+    expect(parts[2].attributes?.roofType).toBe('pyramid');
+  });
+
+  it('legacy splitBuildingByFloor still works (delegates to splitBuildingByFloorHeights)', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    const { partIds } = splitBuildingByFloor(doc, id, 4);
+    expect(partIds).toHaveLength(4);
+    // All parts equal height
+    for (const pid of partIds) {
+      expect(doc.CityObjects[pid].attributes?.measuredHeight).toBeCloseTo(3, 2);
+    }
   });
 });

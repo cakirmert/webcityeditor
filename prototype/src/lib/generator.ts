@@ -135,7 +135,7 @@ export function generateBuilding(
           'Use pyramid for N-sided polygons.'
       );
     }
-    out = buildHip(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal);
+    out = buildHip(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal, eaveOverhang);
   } else {
     throw new Error(`Unknown roof type: ${params.roofType}`);
   }
@@ -151,9 +151,12 @@ export function generateBuilding(
   // LoD 2.2 eave overhang adds OuterCeilingSurface (soffit) faces. The
   // builder marks them with semantics index 3 when it emits them; the surface
   // entry must match that index, so push it BEFORE the openings pass which
-  // assigns its own indices on top. Currently flat + pyramid honour overhang;
-  // gable + hip ignore it (rake overhang complicates gable roofs).
-  const overhangSupported = params.roofType === 'flat' || params.roofType === 'pyramid';
+  // assigns its own indices on top. Flat / pyramid / hip honour overhang;
+  // gable still ignores it (rake-vs-eave overhang complicates the gable end).
+  const overhangSupported =
+    params.roofType === 'flat' ||
+    params.roofType === 'pyramid' ||
+    params.roofType === 'hip';
   const hasSoffits = overhangSupported && eaveOverhang > 0;
   if (hasSoffits) {
     surfaces.push({ type: 'OuterCeilingSurface' });
@@ -631,7 +634,8 @@ function buildHip(
   eaveZ: number,
   ridgeZ: number,
   toInt: (x: number, y: number, z: number) => [number, number, number],
-  toGlobal: (local: number) => number
+  toGlobal: (local: number) => number,
+  eaveOverhang: number = 0
 ): BuildOut {
   // Same corner layout as gable: v0-v3 with long axis along e0/e2 or e1/e3.
   // Unlike gable, the hip roof has no gable-end walls (all walls rectangular)
@@ -673,68 +677,105 @@ function buildHip(
   const rA: [number, number] = [cx - rdx * (ridgeLen / 2), cy - rdy * (ridgeLen / 2)];
   const rB: [number, number] = [cx + rdx * (ridgeLen / 2), cy + rdy * (ridgeLen / 2)];
 
+  const hasOverhang = eaveOverhang > 0;
   const newVertices: [number, number, number][] = [];
+  // Layout (local indices):
+  //   0..3   ground
+  //   4..7   wall-top (eave Z, footprint corners — walls anchor here)
+  //   8, 9   ridge endpoints rA, rB
+  //   10..13 roof-edge (eave Z, offset outward) — only when hasOverhang
   for (let i = 0; i < 4; i++) newVertices.push(toInt(projected[i][0], projected[i][1], baseZ));
   for (let i = 0; i < 4; i++) newVertices.push(toInt(projected[i][0], projected[i][1], eaveZ));
   newVertices.push(toInt(rA[0], rA[1], ridgeZ));
   newVertices.push(toInt(rB[0], rB[1], ridgeZ));
+  if (hasOverhang) {
+    for (let i = 0; i < 4; i++) {
+      const out = vertexOutwardDir(projected, i);
+      const ox = projected[i][0] + out[0] * eaveOverhang;
+      const oy = projected[i][1] + out[1] * eaveOverhang;
+      newVertices.push(toInt(ox, oy, eaveZ));
+    }
+  }
 
   const G = (local: number) => toGlobal(local);
   const g0 = G(0),
     g1 = G(1),
     g2 = G(2),
     g3 = G(3);
-  const e0v = G(4),
-    e1v = G(5),
-    e2v = G(6),
-    e3v = G(7);
+  // Wall-top vertices (where walls meet the eave). When no overhang,
+  // these are also the roof-edge — re-bind below.
+  const wt0 = G(4),
+    wt1 = G(5),
+    wt2 = G(6),
+    wt3 = G(7);
   const ra = G(8),
     rb = G(9);
+  // Roof-edge: offset outward when hasOverhang, else collapsed onto wall-top.
+  const re0 = hasOverhang ? G(10) : wt0;
+  const re1 = hasOverhang ? G(11) : wt1;
+  const re2 = hasOverhang ? G(12) : wt2;
+  const re3 = hasOverhang ? G(13) : wt3;
 
   // Ground (reversed)
   const groundRing = [g3, g2, g1, g0];
 
-  // 4 rectangular walls (no gable-ends; hip has all rectangular walls)
+  // 4 rectangular walls go from ground to wall-top (independent of overhang).
   const wallRings = [
-    [g0, g1, e1v, e0v],
-    [g1, g2, e2v, e1v],
-    [g2, g3, e3v, e2v],
-    [g3, g0, e0v, e3v],
+    [g0, g1, wt1, wt0],
+    [g1, g2, wt2, wt1],
+    [g2, g3, wt3, wt2],
+    [g3, g0, wt0, wt3],
   ];
 
-  // 4 roof faces. rA is the ridge endpoint nearer the (v0, v3) short edge;
-  // rB is nearer (v1, v2) when ridgeOnE0 is true, and correspondingly when false.
+  // 4 roof faces use roof-edge vertices (offset outward when overhang).
   let roofRings: number[][];
   if (ridgeOnE0) {
-    // Ridge runs between midpoints above e3 (v3-v0) and e1 (v1-v2).
-    // rA ≈ over mid(v3,v0), rB ≈ over mid(v1,v2).
     roofRings = [
-      // long slope on e0 side: eave v0, eave v1, rB, rA
-      [e0v, e1v, rb, ra],
-      // long slope on e2 side: eave v2, eave v3, rA, rB
-      [e2v, e3v, ra, rb],
-      // hip triangle on e1 side: eave v1, eave v2, rB
-      [e1v, e2v, rb],
-      // hip triangle on e3 side: eave v3, eave v0, rA
-      [e3v, e0v, ra],
+      [re0, re1, rb, ra],
+      [re2, re3, ra, rb],
+      [re1, re2, rb],
+      [re3, re0, ra],
     ];
   } else {
-    // Ridge runs between midpoints above e0 (v0-v1) and e2 (v2-v3).
     roofRings = [
-      [e1v, e2v, rb, ra],
-      [e3v, e0v, ra, rb],
-      [e0v, e1v, ra],
-      [e2v, e3v, rb],
+      [re1, re2, rb, ra],
+      [re3, re0, ra, rb],
+      [re0, re1, ra],
+      [re2, re3, rb],
     ];
+  }
+
+  // 4 soffits — only when hasOverhang. Each connects wall-top edge to
+  // roof-edge edge with normal pointing -Z (visible from below).
+  const soffitRings: number[][] = [];
+  if (hasOverhang) {
+    soffitRings.push(
+      [wt0, re0, re1, wt1],
+      [wt1, re1, re2, wt2],
+      [wt2, re2, re3, wt3],
+      [wt3, re3, re0, wt0]
+    );
   }
 
   const shell: number[][][] = [
     [groundRing],
     ...roofRings.map((r) => [r]),
     ...wallRings.map((w) => [w]),
+    ...soffitRings.map((s) => [s]),
   ];
-  // 1 ground + 4 roof (2 trapezoids + 2 triangles) + 4 walls
-  const semanticsValues: number[] = [0, 1, 1, 1, 1, 2, 2, 2, 2];
+  // 1 ground + 4 roof (2 trapezoids + 2 triangles) + 4 walls + 0|4 soffits
+  const semanticsValues: number[] = [
+    0,
+    1,
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    ...new Array(soffitRings.length).fill(3),
+  ];
 
   // All 4 hip walls are rectangular. They live at shellIndex 5..8 (after
   // ground + 4 roof faces). Wall order matches edge order: e0, e1, e2, e3.

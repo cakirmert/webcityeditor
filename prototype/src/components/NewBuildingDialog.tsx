@@ -276,7 +276,7 @@ export default function NewBuildingDialog({
             </div>
           </Row>
 
-          {(roofType === 'flat' || roofType === 'pyramid') && (
+          {(roofType === 'flat' || roofType === 'pyramid' || roofType === 'hip') && (
             <Row label="Eave overhang (m)">
               <div className="flex items-center gap-2">
                 <Input
