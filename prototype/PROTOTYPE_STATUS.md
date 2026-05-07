@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-05-07. **Test suite**: 164 passing across 17 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
+**Last updated**: 2026-05-07 (afternoon). **Test suite**: 229 passing across 22 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
 
 ---
 
@@ -39,6 +39,7 @@ Browser-only React app. Everything client-side; no backend yet.
 - Attribute editor with priority-sorted rows, type coercion (number/string/boolean)
 - Dirty tracking, per-building revert, toolbar dirty-count
 - **Transform mode**: "Start editing position" enters a live-preview mode with dX/dY/angle inputs + quick-step buttons; map renders a ghost of the transformed footprint; Save commits, Cancel discards. Works on ANY building (generated or imported).
+- **Edit footprint mode** (editor-created buildings only): "Edit footprint corners" loads the building's outline as a TerraDrawSelectMode polygon with draggable vertex handles + midpoint dots that split edges into new corners. Save calls `regenerateBuilding` which re-runs the parametric generator with the new shape and the building's stashed parametric attributes (`_eaveHeight`, `_addWindows`, `_eaveOverhang`, …) intact. Imported buildings show a friendly disabled-state explanation.
 - **Subdivide — visual division editor**: split-by-floor with two modes:
   - **"Split equally"**: the original uniform N-floor split.
   - **"Custom heights…"**: per-floor wall-height input (auto-seeded with 3.5 m ground + equal upper floors — German residential pattern), live Σ display turning red when heights drift, ⚠ badge when any floor falls below MIN_STOREY_HEIGHT, sum-conservation enforced before Apply unlocks.
@@ -48,7 +49,16 @@ Browser-only React app. Everything client-side; no backend yet.
 - **Map tinting by roofType**: outline + extruded layers colour each footprint by its `roofType` attribute (flat=cool grey, gable=terracotta, hip=deeper terra, pyramid=walnut, +shed/mansard/barrel). Recognises CityGML/3DBAG integer codes (1000, 2100, 3100, 3200, 3300, 3400, 5100) AND human-readable strings, including 3DBAG's `roofType: 1000` / `roofType: "flat"` mixed convention.
 - **3D viewer color-mode toggle**: top-right of the side-panel viewer flips between "By surface" (semantic — distinct tints for Wall / Roof / Window / Door / OuterCeiling) and "By object" (CityObject type — Building / Bridge / Plant / Road). No re-load; flips a uniform on the parser's mesh material.
 - Export → downloads a modified CityJSON
+- **Export glTF (`.glb`)**: binary glTF 2.0 with semantic-coloured per-vertex tinting, per-triangle flat shading, and `extras.cityjson` carrying the centroid and source CRS. Loads in Blender / Sketchfab / three.js / Cesium / Babylon.js without any CityJSON-aware tooling on the receiver.
 - Save local → persists to browser IndexedDB
+
+### Filter / search the city
+- **Filter bar** below the toolbar: text search (matches id + every string/number attribute, case-insensitive), roof-type chips drawn from the dataset, year-of-construction range, height range. Multi-criteria AND.
+- Match count shown live (e.g. "47 of 918 match"). Non-matching buildings dim to ~25 % opacity on the map so the match pattern is visible at a glance; the selected building always wins.
+
+### Trust + housekeeping
+- **Integrity-check pill**: red/amber pill in the toolbar surfaces vertex-index out-of-bounds, dangling parent/child links, asymmetric parent links, semantics shell/face mismatches, missing transforms, NaN vertices, and orphaned-vertex info. Click for a summary alert with the first 12 issues.
+- **Vertex compaction**: a "Compact (N)" toolbar button appears when there are 50+ orphaned vertices (typical after a few footprint-edit regenerations). Click reclaims them in place and reports how many were freed.
 
 ### UI
 - Full shadcn/ui — Button, Input, Label, Dialog, Select — across Toolbar, FileLoader, AttributePanel, NewBuildingDialog
@@ -188,6 +198,11 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - ✅ **Map tinting by roofType** — Hamburg / 3DBAG datasets now visually informative (CityGML integer codes + human strings both supported).
 - ✅ **3DBAG smoke-test fixture** — synthetic dataset captures EPSG:7415 + multi-LoD geometry + `b3_*` attribute conventions, runs in CI without a download.
 - ✅ **Live preview mesh with windows + doors** — the dialog's deck.gl preview now matches what the generator emits.
+- ✅ **Footprint editing** (drag-and-drop building corners on the map) — TerraDrawSelectMode with `regenerateBuilding` re-running the parametric generator on the new shape; private `_*` attributes preserve every generator input across regenerations.
+- ✅ **Binary glTF export** — `.glb` export with earcut hole-aware triangulation, semantic per-vertex colouring, centroid-relative Float32 positions, `extras.cityjson` metadata.
+- ✅ **Integrity check** — full structural validator with severity tiers (error / warning / info), wired to a toolbar pill.
+- ✅ **Vertex compaction** — `compactVertices` pass reclaims orphaned indices left behind by `regenerateBuilding`; toolbar surfaces a "Compact (N)" button when ≥ 50 orphans accumulate.
+- ✅ **Filter bar** — text + roof-type + year-range + height-range filtering with map dimming for non-matches.
 
 **Remaining roadmap (priority order):**
 
@@ -195,11 +210,10 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 2. **Batch Hamburg tile conversion** — a little script to convert all 788 tiles at once, plus a quick-picker in the FileLoader listing all converted tiles. ~2 h.
 3. **Viewport-filtered streaming** — in CityJSONSeq mode, skip features outside the current map viewport. Unlocks much larger files. ~½ day.
 4. **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build. ~3-7 days.
-5. **Edit footprints of existing buildings** — Terra Draw edit mode, drag vertices. ~1 day.
-6. **Visual division editor — drag-on-3D handles** — let the user drag the split rings up/down in the 3D viewer instead of typing numbers. The numeric editor is already wired; this is a UX layer on top. ~1 day.
-7. **Gable rake overhang** — extend the ridge past the gable wall + rebuild gable triangles. ~½ day (the long-side eave overhang already in place).
-8. **Hamburg pipeline end-to-end with 3DCityDB** — spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-9. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+5. **Visual division editor — drag-on-3D handles** — let the user drag the split rings up/down in the 3D viewer instead of typing numbers. The numeric editor is already wired; this is a UX layer on top. ~1 day.
+6. **Gable rake overhang** — extend the ridge past the gable wall + rebuild gable triangles. ~½ day (the long-side eave overhang already in place).
+7. **Hamburg pipeline end-to-end with 3DCityDB** — spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
+8. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 ---
 
@@ -238,10 +252,15 @@ webcityeditor/
         │   ├── projection.ts            proj4 CRS registry + coord-magnitude CRS inference
         │   ├── footprints.ts            Extract polygons for deck.gl; filter to single building
         │   ├── footprint-tint.ts        Map roofType (string OR CityGML integer) → RGBA fill colour
+        │   ├── filter.ts                Building filter — text + roof + year + height; matchingIds() helper
         │   ├── generator.ts             Flat/pyramid/gable/hip LoD 2(.2) Solid generators
         │   ├── generator-internal.ts    BuildOut / RectangularWall types shared with openings.ts
         │   ├── openings.ts              applyOpenings — windows + door (LoD 2.2)
         │   ├── preview-mesh.ts          Live roof mesh + window/door overlays for SimpleMeshLayer
+        │   ├── regenerate.ts            Re-run the parametric generator on a new footprint, in place
+        │   ├── compact.ts               compactVertices — reclaim orphaned indices after edits
+        │   ├── integrity.ts             Structural integrity check — vertex bounds, parent links, …
+        │   ├── gltf-export.ts           CityJSON → binary glTF (.glb) export
         │   ├── subdivision.ts           splitBuildingByFloor + splitBuildingByFloorHeights + splitBuildingBySide
         │   ├── transform.ts             moveBuilding / rotateBuilding (vertex-append-based)
         │   ├── transform-preview.ts     Live-preview footprint under pending transform
@@ -253,7 +272,7 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (164 tests across 17 files)
+## 10. Test suite (229 tests across 22 files)
 
 | File | Tests | Coverage |
 |---|---|---|
@@ -264,11 +283,16 @@ webcityeditor/
 | `lib/roundtrip.test.ts` | 6 | edit → stringify → re-parse preserves every edit; geometry untouched |
 | `lib/footprints.test.ts` | 7 | Extraction returns closed polygons in the right region; filterToBuilding scopes correctly |
 | `lib/footprint-tint.test.ts` | 7 | roofType mapping: human strings ↔ CityGML/3DBAG integer codes; alpha pass-through; fallback for unknown |
+| `lib/filter.test.ts` | 22 | Building filter: text/roof/year/height matching, AND combinations, range helpers, isFilterEmpty, matchingIds |
 | `lib/generator.test.ts` | 18 | Flat/pyramid/gable/hip generation, input validation, insertBuilding, round-trip for every roof type, storey-height validator |
 | `lib/openings.test.ts` | 11 | LoD 2.2 procedural windows + door; ring orientation; gable-end skip; round-trip survival; narrow-wall / lintel-clearance skip |
 | `lib/eave-overhang.test.ts` | 12 | LoD 2.2 eave overhang for all 4 roof types; soffit topology; rake-corner caps for gable; combine-with-openings without index collision |
 | `lib/preview-mesh.test.ts` | 8 | Live preview mesh: window/door overlay vertex counts, gable-end skip, narrow-wall skip, additive (never replaces) |
 | `lib/3dbag-smoke.test.ts` | 8 | Synthetic 3DBAG fixture: EPSG:7415, multi-LoD geometry, `b3_*` attributes, vertex-index rewriting, roofType int↔str |
+| `lib/regenerate.test.ts` | 9 | regenerateBuilding: footprint swap, attr preservation, openings + overhang preservation, imported-building rejection, non-rectangular gable rejection, JSON round-trip |
+| `lib/compact.test.ts` | 8 | compactVertices: no-op on clean docs, reclaims orphans from regenerate, footprint shape preserved, idempotent |
+| `lib/integrity.test.ts` | 13 | Vertex-index bounds, dangling parent/child, asymmetric links, orphaned vertices, semantics shell/face mismatch, NaN vertices |
+| `lib/gltf-export.test.ts` | 13 | glb header validity, accessor counts/types, bufferView alignment, extras.cityjson metadata, refuses empty geometry |
 | `lib/subdivision.test.ts` | 18 | canSplit, splitByFloor, splitByFloorHeights (German tall-ground-floor pattern, sum conservation), splitBySide, min-size enforcement |
 | `lib/transform.test.ts` | 7 | move preserves originals; rotate changes bbox; 360° returns to origin |
 | `components/Toolbar.test.tsx` | 6 | Title, stats, dirty counter, wiring |
