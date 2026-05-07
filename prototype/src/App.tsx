@@ -18,6 +18,7 @@ import {
 import { moveBuilding, rotateBuilding } from './lib/transform';
 import { regenerateBuilding } from './lib/regenerate';
 import { extractFootprints } from './lib/footprints';
+import { exportToGltf } from './lib/gltf-export';
 import {
   computeTransformedFootprint,
   type PendingTransform,
@@ -375,6 +376,27 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [cityjson, fileName]);
 
+  const handleExportGltf = useCallback(() => {
+    if (!cityjson) return;
+    try {
+      const glb = exportToGltf(cityjson);
+      // Pass the underlying ArrayBuffer to Blob — Uint8Array's buffer type
+      // can be ArrayBufferLike (incl. SharedArrayBuffer), which TS strict
+      // mode rejects as a BlobPart. Slicing forces a fresh ArrayBuffer.
+      const blob = new Blob([glb.slice().buffer], { type: 'model/gltf-binary' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const base =
+        fileName.replace(/\.city\.json$|\.json$|\.jsonl$|\.city\.jsonl$/i, '') || 'export';
+      a.download = `${base}.glb`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  }, [cityjson, fileName]);
+
   const handleReset = useCallback(() => {
     setCityjson(null);
     setFileName('');
@@ -419,6 +441,7 @@ export default function App() {
         dirtyCount={dirtyIds.size}
         hasData={!!cityjson}
         onExport={handleExport}
+        onExportGltf={handleExportGltf}
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}

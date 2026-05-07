@@ -14,6 +14,9 @@ interface Props {
   dirtyCount: number;
   hasData: boolean;
   onExport: () => void;
+  /** Optional secondary export — emit a binary glTF (.glb) so the user can
+   *  open the city in Blender / Sketchfab / any glTF viewer. */
+  onExportGltf?: () => void;
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -29,6 +32,7 @@ export default function Toolbar({
   dirtyCount,
   hasData,
   onExport,
+  onExportGltf,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -113,6 +117,15 @@ export default function Toolbar({
           <Button variant="primary" onClick={onExport} disabled={!hasData}>
             ⬇ Export CityJSON
           </Button>
+
+          {onExportGltf && (
+            <Button
+              onClick={onExportGltf}
+              title="Export to binary glTF (.glb) — opens in Blender / Sketchfab / any 3D viewer"
+            >
+              ⬇ glTF
+            </Button>
+          )}
 
           <Button onClick={onNewFile} variant="ghost" title="Load a different file">
             Load another…
