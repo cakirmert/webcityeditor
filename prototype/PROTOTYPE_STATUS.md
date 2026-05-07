@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-05-07 (afternoon). **Test suite**: 229 passing across 22 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
+**Last updated**: 2026-05-07 (evening). **Test suite**: 240 passing across 23 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
 
 ---
 
@@ -59,6 +59,10 @@ Browser-only React app. Everything client-side; no backend yet.
 ### Trust + housekeeping
 - **Integrity-check pill**: red/amber pill in the toolbar surfaces vertex-index out-of-bounds, dangling parent/child links, asymmetric parent links, semantics shell/face mismatches, missing transforms, NaN vertices, and orphaned-vertex info. Click for a summary alert with the first 12 issues.
 - **Vertex compaction**: a "Compact (N)" toolbar button appears when there are 50+ orphaned vertices (typical after a few footprint-edit regenerations). Click reclaims them in place and reports how many were freed.
+- **Undo / Redo**: snapshot-based history covering every mutation (create, attribute change, transform, split, footprint edit, compact). Toolbar buttons + Ctrl+Z / Ctrl+Shift+Z (Cmd+Z / Cmd+Shift+Z). 30-snapshot cap; tooltips show the next action's label ("Undo: Move building").
+
+### Browse
+- **Building list sidebar** (toolbar "☰ List" toggle): 300px-wide left rail with one row per building, sortable by id / year / height / function, capped at 300 visible rows. Filter narrows it; clicking a row selects on the map and opens its AttributePanel.
 
 ### UI
 - Full shadcn/ui — Button, Input, Label, Dialog, Select — across Toolbar, FileLoader, AttributePanel, NewBuildingDialog
@@ -203,6 +207,8 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - ✅ **Integrity check** — full structural validator with severity tiers (error / warning / info), wired to a toolbar pill.
 - ✅ **Vertex compaction** — `compactVertices` pass reclaims orphaned indices left behind by `regenerateBuilding`; toolbar surfaces a "Compact (N)" button when ≥ 50 orphans accumulate.
 - ✅ **Filter bar** — text + roof-type + year-range + height-range filtering with map dimming for non-matches.
+- ✅ **Undo / Redo** — snapshot-based history with keyboard shortcuts; covers every mutation handler.
+- ✅ **Building list sidebar** — sortable list view of (filtered) buildings with click-to-select.
 
 **Remaining roadmap (priority order):**
 
@@ -261,6 +267,7 @@ webcityeditor/
         │   ├── compact.ts               compactVertices — reclaim orphaned indices after edits
         │   ├── integrity.ts             Structural integrity check — vertex bounds, parent links, …
         │   ├── gltf-export.ts           CityJSON → binary glTF (.glb) export
+        │   ├── undo.ts                  UndoStore — snapshot-based history (push/undo/redo)
         │   ├── subdivision.ts           splitBuildingByFloor + splitBuildingByFloorHeights + splitBuildingBySide
         │   ├── transform.ts             moveBuilding / rotateBuilding (vertex-append-based)
         │   ├── transform-preview.ts     Live-preview footprint under pending transform
@@ -272,7 +279,7 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (229 tests across 22 files)
+## 10. Test suite (240 tests across 23 files)
 
 | File | Tests | Coverage |
 |---|---|---|
@@ -293,6 +300,7 @@ webcityeditor/
 | `lib/compact.test.ts` | 8 | compactVertices: no-op on clean docs, reclaims orphans from regenerate, footprint shape preserved, idempotent |
 | `lib/integrity.test.ts` | 13 | Vertex-index bounds, dangling parent/child, asymmetric links, orphaned vertices, semantics shell/face mismatch, NaN vertices |
 | `lib/gltf-export.test.ts` | 13 | glb header validity, accessor counts/types, bufferView alignment, extras.cityjson metadata, refuses empty geometry |
+| `lib/undo.test.ts` | 11 | UndoStore: push, undo, redo, redo-invalidation on new push, maxDepth cap, peek labels, deep-clone integrity, selection + dirty restoration |
 | `lib/subdivision.test.ts` | 18 | canSplit, splitByFloor, splitByFloorHeights (German tall-ground-floor pattern, sum conservation), splitBySide, min-size enforcement |
 | `lib/transform.test.ts` | 7 | move preserves originals; rotate changes bbox; 360° returns to origin |
 | `components/Toolbar.test.tsx` | 6 | Title, stats, dirty counter, wiring |
