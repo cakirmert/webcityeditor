@@ -1,8 +1,39 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CityJSONLoader, CityJSONParser } from 'cityjson-threejs-loader';
 import type { CityJsonDocument, SelectionInfo } from '../types';
+
+/**
+ * Warm architectural surface palette. Replaces the loader's default Window=
+ * pure-blue / RoofSurface=pure-red defaults with something less playground.
+ * Hex values are 0xRRGGBB, the format the loader expects.
+ */
+const SURFACE_COLORS_ARCH = {
+  GroundSurface: 0x6e6358, // sandy mid-gray, slightly warm
+  WallSurface: 0xd9cfbf, // cream
+  RoofSurface: 0x8e3a2c, // terracotta
+  TrafficArea: 0x5a5a5a,
+  AuxiliaryTrafficArea: 0x4a7a3a,
+  Window: 0x3d6f8f, // muted teal-blue
+  Door: 0x4a2f1f, // walnut
+};
+
+/** Distinct CityObject palette — used in "by type" mode. */
+const OBJECT_COLORS_DISTINCT = {
+  Building: 0x7497df,
+  BuildingPart: 0x9bb4e0,
+  BuildingInstallation: 0x6a87c2,
+  Bridge: 0x999999,
+  CityObjectGroup: 0xffe9a3,
+  PlantCover: 0x5fa85f,
+  SolitaryVegetationObject: 0x5fa85f,
+  TINRelief: 0xd4b58a,
+  Road: 0x7a7a7a,
+  WaterBody: 0x4a8fbf,
+};
+
+type ColorMode = 'surface' | 'object';
 
 interface Props {
   cityjson: CityJsonDocument;
@@ -12,6 +43,7 @@ interface Props {
 
 export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [colorMode, setColorMode] = useState<ColorMode>('surface');
   const sceneRef = useRef<{
     scene: THREE.Scene;
     renderer: THREE.WebGLRenderer;
@@ -66,6 +98,10 @@ export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
 
     const raycaster = new THREE.Raycaster();
     const parser = new CityJSONParser();
+    // Use the warm-architectural palette by default. resetMaterial() will
+    // re-read these in the load effect below. The loader's .d.ts is
+    // incomplete; cast through unknown so we can set the runtime fields.
+    setParserPalette(parser);
 
     const state = {
       scene,
@@ -136,7 +172,12 @@ export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
         else if (mat) mat.dispose();
       });
     }
+    // Re-apply custom palette & color mode each load — resetMaterial() builds
+    // fresh material instances and they default to objectColors-by-type unless
+    // we explicitly pin showSemantics.
+    setParserPalette(state.parser);
     state.parser.resetMaterial();
+    applyColorMode(state.parser, colorMode);
 
     const loader = new CityJSONLoader(state.parser);
     state.loader = loader;
@@ -157,7 +198,16 @@ export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
     } catch (e) {
       console.warn('Could not fit camera:', e);
     }
-  }, [cityjson, reloadToken]);
+  }, [cityjson, reloadToken, colorMode]);
+
+  // 2b. Toggle showSemantics live without re-loading the whole model.
+  // resetMaterial() → loader.load() rebuilds vertex buffers, which is wasteful
+  // when only the per-pixel color path needs to flip.
+  useEffect(() => {
+    const state = sceneRef.current;
+    if (!state) return;
+    applyColorMode(state.parser, colorMode);
+  }, [colorMode]);
 
   // 3. Double-click picking
   useEffect(() => {
@@ -208,7 +258,85 @@ export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
     return () => el.removeEventListener('dblclick', onDblClick);
   }, [onSelect, cityjson]);
 
-  return <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />;
+  return (
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />
+      <div
+        style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          display: 'flex',
+          gap: 0,
+          background: 'rgba(20, 20, 24, 0.7)',
+          backdropFilter: 'blur(4px)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 6,
+          overflow: 'hidden',
+          fontSize: 11,
+          userSelect: 'none',
+        }}
+        title="Switch between coloring by CityObject type (Building/Bridge/…) and by semantic surface (Wall/Roof/Window/Door)"
+      >
+        <ColorModeButton
+          active={colorMode === 'surface'}
+          onClick={() => setColorMode('surface')}
+          label="By surface"
+        />
+        <ColorModeButton
+          active={colorMode === 'object'}
+          onClick={() => setColorMode('object')}
+          label="By object"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ColorModeButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: active ? 'rgba(255,255,255,0.18)' : 'transparent',
+        color: active ? '#fff' : '#cbd0d8',
+        border: 'none',
+        padding: '4px 10px',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        fontSize: 'inherit',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Toggle the parser's mesh material between per-surface and per-object color
+ *  paths. Kept tiny because it's called from two places. */
+function applyColorMode(parser: CityJSONParser, mode: ColorMode) {
+  const mat = (parser as unknown as { meshMaterial?: { showSemantics?: boolean } }).meshMaterial;
+  if (mat) mat.showSemantics = mode === 'surface';
+}
+
+/** Pin our two custom palettes onto the parser. The loader's .d.ts doesn't
+ *  expose these runtime fields, so we cast through unknown — see
+ *  cityjson-threejs-loader/src/parsers/CityJSONParser.js. */
+function setParserPalette(parser: CityJSONParser) {
+  const p = parser as unknown as {
+    surfaceColors: Record<string, number>;
+    objectColors: Record<string, number>;
+  };
+  p.surfaceColors = SURFACE_COLORS_ARCH;
+  p.objectColors = OBJECT_COLORS_DISTINCT;
 }
 
 function fitCameraToBox(
