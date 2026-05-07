@@ -24,6 +24,11 @@ interface Props {
     warningCount: number;
     onShow: () => void;
   };
+  /** Optional vertex-compaction action. Shows a small "Compact" button in
+   *  the toolbar when the doc has orphaned vertices (typical after
+   *  footprint-edit regenerations). */
+  orphanedVertexCount?: number;
+  onCompactVertices?: () => void;
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -41,6 +46,8 @@ export default function Toolbar({
   onExport,
   onExportGltf,
   integrity,
+  orphanedVertexCount = 0,
+  onCompactVertices,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -121,6 +128,16 @@ export default function Toolbar({
           <Button onClick={onReloadView} title="Re-parse modified data and refresh map + 3D view">
             ↻ Reload view
           </Button>
+
+          {onCompactVertices && orphanedVertexCount > 50 && (
+            <Button
+              onClick={onCompactVertices}
+              variant="ghost"
+              title={`Reclaim ${orphanedVertexCount} orphaned vertices left over from footprint regenerations`}
+            >
+              ◇ Compact ({orphanedVertexCount.toLocaleString()})
+            </Button>
+          )}
 
           {onSaveLocal && (
             <Button

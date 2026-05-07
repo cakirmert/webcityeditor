@@ -20,6 +20,7 @@ import { regenerateBuilding } from './lib/regenerate';
 import { extractFootprints } from './lib/footprints';
 import { exportToGltf } from './lib/gltf-export';
 import { checkIntegrity } from './lib/integrity';
+import { compactVertices } from './lib/compact';
 import {
   computeTransformedFootprint,
   type PendingTransform,
@@ -415,6 +416,24 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cityjson, reloadToken]);
 
+  const handleCompactVertices = useCallback(() => {
+    if (!cityjson) return;
+    const r = compactVertices(cityjson);
+    if (r.changed) {
+      setReloadToken((t) => t + 1);
+      // Mark every dirty building as still dirty (compact preserves their
+      // semantic state, but the doc is structurally different and we want
+      // the user to feel that an action took place).
+      setSaveStatus('idle');
+    }
+    alert(
+      r.changed
+        ? `Reclaimed ${r.reclaimed.toLocaleString()} orphaned vertices. ` +
+            `Doc now has ${r.after.toLocaleString()} vertices (was ${r.before.toLocaleString()}).`
+        : 'No orphaned vertices to reclaim.'
+    );
+  }, [cityjson]);
+
   const handleShowIntegrity = useCallback(() => {
     if (!integrity) return;
     if (integrity.issues.length === 0) {
@@ -488,6 +507,8 @@ export default function App() {
               }
             : undefined
         }
+        orphanedVertexCount={integrity?.summary.orphanedVertices ?? 0}
+        onCompactVertices={handleCompactVertices}
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}
