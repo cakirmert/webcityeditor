@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-04-23. **Test suite**: 108 passing. **TypeScript**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
+**Last updated**: 2026-05-07. **Test suite**: 164 passing across 17 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
 
 ---
 
@@ -29,15 +29,24 @@ Browser-only React app. Everything client-side; no backend yet.
 - **＋ New Building** toolbar action activates Terra Draw polygon mode
 - **Snap-to-existing-footprints** within 20 px while drawing
 - Dialog prompts for total height / storeys / roof type (**flat, pyramid, gable, hip**) with DIN-inspired storey-height validation
-- **Live roof mesh preview** on the map via deck.gl `SimpleMeshLayer` — roof shape updates as you type
+- **Live roof mesh preview** on the map via deck.gl `SimpleMeshLayer` — roof shape, **windows, and door** all update as you type
+- **Procedural openings (LoD 2.2)** — Windows / Door checkboxes in the dialog. When enabled, the generator emits per-storey window holes (1.4 × 1.5 m, 0.9 m sill, ~3 m spacing) on every rectangular wall and a single 1.0 × 2.1 m door on the first wall. Each opening is both an inner-ring hole on the parent wall AND a separate co-planar `Window`/`Door` semantic surface. Bumps the geometry's LoD label from `2.0` to `2.2`.
+- **LoD 2.2 eave overhang** — `Eave overhang (m)` input. Adds extending wall-top + roof-edge vertex rings, `OuterCeilingSurface` soffits, and (for gable) rake-corner-cap triangles. **Supports all 4 roof types**: flat, pyramid, hip, gable.
 - **Subdivide-on-create**: choose "none / floors / sides" with a count; split applies immediately after insertion
-- The parametric generator produces a proper LoD 2 `Solid` with `GroundSurface` / `RoofSurface` / `WallSurface` semantics. Round-trip through JSON.stringify tested for every roof type.
+- The parametric generator produces a proper LoD 2 `Solid` with `GroundSurface` / `RoofSurface` / `WallSurface` (+ optional `OuterCeilingSurface` / `Window` / `Door`) semantics. Round-trip through JSON.stringify tested for every roof type and every opening combination.
 
 ### Edit existing buildings
 - Attribute editor with priority-sorted rows, type coercion (number/string/boolean)
 - Dirty tracking, per-building revert, toolbar dirty-count
 - **Transform mode**: "Start editing position" enters a live-preview mode with dX/dY/angle inputs + quick-step buttons; map renders a ghost of the transformed footprint; Save commits, Cancel discards. Works on ANY building (generated or imported).
-- **Subdivide** split-by-floor / split-by-side with MIN_STOREY_HEIGHT=2.4m, MIN_SIDE_WIDTH=3m enforced. Works on any Building (relaxed from "only editor-created" — imported buildings are supported).
+- **Subdivide — visual division editor**: split-by-floor with two modes:
+  - **"Split equally"**: the original uniform N-floor split.
+  - **"Custom heights…"**: per-floor wall-height input (auto-seeded with 3.5 m ground + equal upper floors — German residential pattern), live Σ display turning red when heights drift, ⚠ badge when any floor falls below MIN_STOREY_HEIGHT, sum-conservation enforced before Apply unlocks.
+  - **Live 3D split-line preview**: the side-panel Three.js viewer draws horizontal accent rings around the building outline at each cumulative split height as you edit — no more "edit numbers blind".
+- **Subdivide — split-by-side** with MIN_SIDE_WIDTH=3m enforced.
+- Both split modes work on any Building (imported buildings supported, not just editor-created).
+- **Map tinting by roofType**: outline + extruded layers colour each footprint by its `roofType` attribute (flat=cool grey, gable=terracotta, hip=deeper terra, pyramid=walnut, +shed/mansard/barrel). Recognises CityGML/3DBAG integer codes (1000, 2100, 3100, 3200, 3300, 3400, 5100) AND human-readable strings, including 3DBAG's `roofType: 1000` / `roofType: "flat"` mixed convention.
+- **3D viewer color-mode toggle**: top-right of the side-panel viewer flips between "By surface" (semantic — distinct tints for Wall / Roof / Window / Door / OuterCeiling) and "By object" (CityObject type — Building / Bridge / Plant / Road). No re-load; flips a uniform on the parser's mesh material.
 - Export → downloads a modified CityJSON
 - Save local → persists to browser IndexedDB
 
@@ -119,7 +128,7 @@ Full step-by-step: [`HAMBURG_PIPELINE.md`](HAMBURG_PIPELINE.md).
 
 ---
 
-## 5. Roofs — what we handle, what a WASM straight-skeleton would add
+## 5. Roofs — what we handle
 
 | Footprint shape | Flat | Pyramid | Gable | Hip | Notes |
 |---|---|---|---|---|---|
@@ -128,6 +137,16 @@ Full step-by-step: [`HAMBURG_PIPELINE.md`](HAMBURG_PIPELINE.md).
 | Convex N-gon | ✅ | ✅ | ❌ | ❌ | Apex-over-centroid |
 | **L / U / T / concave** | ✅ | ⚠ | ❌ | ❌ | Flat always works; pyramid may put apex outside; gable/hip refuse |
 | Polygon with holes | ✅ | ⚠ | ❌ | ❌ | Hole ignored by our face walker |
+
+**LoD 2.2 features per roof type:**
+
+| Feature | Flat | Pyramid | Gable | Hip |
+|---|---|---|---|---|
+| Eave overhang | ✅ | ✅ | ✅ (long sides only) | ✅ |
+| Procedural windows | ✅ all walls | ✅ all walls | ✅ long walls only | ✅ all walls |
+| Procedural door | ✅ first wall | ✅ first wall | ✅ first long wall | ✅ first wall |
+
+Gable's eave overhang covers the long-side eaves and emits 4 rake-corner-cap triangles to close the geometric gap at each gable corner. Full rake overhang (extending the ridge past the gable wall) is **not** implemented — it changes the ridge length and roof slope angles, and would need a separate roadmap item if a demo demands it.
 
 **Why not WASM straight-skeleton?** No ready npm package; CGAL+Emscripten build is 3–7 days. Our pure-JS generators cover the common cases at zero dependency cost. Straight-skeleton remains the "right answer" for concave and multi-ridge roofs — roadmap item for later.
 
@@ -161,17 +180,26 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 
 ## 8. What's left — roadmap (priority order)
 
-1. **Visual division editor** — draggable division lines on a 2D footprint preview, per-part attribute assignment, polygon-clipping for non-rectangles. ~2.5 days. Biggest remaining UX gap.
-2. **IFC → CityJSON import** — route #1 is doc-only (`ifc-to-cityjson` CLI); route #2 is `web-ifc` WASM in-browser (~1 week).
-3. **LoD 2.2 eave overhang** — single parameter + one line per roof builder. ~1-2 h.
-4. **Procedural doors + windows** — LoD 3 MultiSurface sidecar on new buildings. ~1 day.
-5. **Per-object colouring mode** in the Three.js side-panel viewer — each BuildingPart gets a distinct tint for easy "residential vs commercial" reading. ~½ day.
-6. **Batch Hamburg tile conversion** — a little script to convert all 788 tiles at once, plus a quick-picker in the FileLoader listing all converted tiles. ~2 h.
-7. **Viewport-filtered streaming** — in CityJSONSeq mode, skip features outside the current map viewport. Unlocks much larger files. ~½ day.
-8. **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build. ~3-7 days.
-9. **Edit footprints of existing buildings** — Terra Draw edit mode, drag vertices. ~1 day.
-10. **Hamburg pipeline end-to-end with 3DCityDB** — spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-11. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+**Done since the last status update (2026-04-23 → 2026-05-07):**
+- ✅ **LoD 2.2 eave overhang** — all 4 roof types, with `OuterCeilingSurface` soffits and (for gable) rake-corner-cap triangles.
+- ✅ **Procedural doors + windows** — full LoD 2.2 with per-storey window placement, hole-cut walls + standalone semantic Window/Door faces, narrow-wall + lintel-clearance skip logic.
+- ✅ **Per-object / per-surface colouring mode** in the side-panel viewer — top-right toggle, warm architectural palette.
+- ✅ **Visual division editor MVP** — custom per-floor heights with auto-distribute + sum-conservation validation + live 3D split-line preview rings.
+- ✅ **Map tinting by roofType** — Hamburg / 3DBAG datasets now visually informative (CityGML integer codes + human strings both supported).
+- ✅ **3DBAG smoke-test fixture** — synthetic dataset captures EPSG:7415 + multi-LoD geometry + `b3_*` attribute conventions, runs in CI without a download.
+- ✅ **Live preview mesh with windows + doors** — the dialog's deck.gl preview now matches what the generator emits.
+
+**Remaining roadmap (priority order):**
+
+1. **IFC → CityJSON import** — route #1 is doc-only (`ifc-to-cityjson` CLI); route #2 is `web-ifc` WASM in-browser (~1 week).
+2. **Batch Hamburg tile conversion** — a little script to convert all 788 tiles at once, plus a quick-picker in the FileLoader listing all converted tiles. ~2 h.
+3. **Viewport-filtered streaming** — in CityJSONSeq mode, skip features outside the current map viewport. Unlocks much larger files. ~½ day.
+4. **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build. ~3-7 days.
+5. **Edit footprints of existing buildings** — Terra Draw edit mode, drag vertices. ~1 day.
+6. **Visual division editor — drag-on-3D handles** — let the user drag the split rings up/down in the 3D viewer instead of typing numbers. The numeric editor is already wired; this is a UX layer on top. ~1 day.
+7. **Gable rake overhang** — extend the ridge past the gable wall + rebuild gable triangles. ~½ day (the long-side eave overhang already in place).
+8. **Hamburg pipeline end-to-end with 3DCityDB** — spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
+9. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 ---
 
@@ -209,28 +237,39 @@ webcityeditor/
         │   ├── cityjson.ts              Validate, parse (mono + seq), sample, diff
         │   ├── projection.ts            proj4 CRS registry + coord-magnitude CRS inference
         │   ├── footprints.ts            Extract polygons for deck.gl; filter to single building
-        │   ├── generator.ts             Flat/pyramid/gable/hip LoD 2 Solid generators
-        │   ├── preview-mesh.ts          Live roof mesh for deck.gl SimpleMeshLayer preview
-        │   ├── subdivision.ts           splitBuildingByFloor / splitBuildingBySide, validation
+        │   ├── footprint-tint.ts        Map roofType (string OR CityGML integer) → RGBA fill colour
+        │   ├── generator.ts             Flat/pyramid/gable/hip LoD 2(.2) Solid generators
+        │   ├── generator-internal.ts    BuildOut / RectangularWall types shared with openings.ts
+        │   ├── openings.ts              applyOpenings — windows + door (LoD 2.2)
+        │   ├── preview-mesh.ts          Live roof mesh + window/door overlays for SimpleMeshLayer
+        │   ├── subdivision.ts           splitBuildingByFloor + splitBuildingByFloorHeights + splitBuildingBySide
         │   ├── transform.ts             moveBuilding / rotateBuilding (vertex-append-based)
         │   ├── transform-preview.ts     Live-preview footprint under pending transform
-        │   └── storage.ts               IndexedDB save/load/list
+        │   ├── storage.ts               IndexedDB save/load/list
+        │   └── __fixtures__/
+        │       └── 3dbag-sample.ts      Synthetic 3DBAG-flavoured CityJSONSeq for offline smoke tests
         └── test/setup.ts
 ```
 
 ---
 
-## 10. Test suite (108 tests across 11 files)
+## 10. Test suite (164 tests across 17 files)
 
 | File | Tests | Coverage |
 |---|---|---|
 | `lib/cityjson.test.ts` | 23 | Validation, parsing, root buildings, setAttribute, diff |
 | `lib/cityjsonseq.test.ts` | 7 | CityJSONSeq parse, index-shift merge, limit, malformed-line tolerance, auto-detect |
+| `lib/synthetic-parent.test.ts` | 4 | Hamburg LoD2 non-conformant `parents` recovery (synthesises a missing root Building) |
 | `lib/projection.test.ts` | 8 | CRS detection + coord-magnitude fallback; 2D+3D reprojection for EPSG:28992/7415/4978/25832 |
 | `lib/roundtrip.test.ts` | 6 | edit → stringify → re-parse preserves every edit; geometry untouched |
 | `lib/footprints.test.ts` | 7 | Extraction returns closed polygons in the right region; filterToBuilding scopes correctly |
-| `lib/generator.test.ts` | 17 | Flat/pyramid/gable/hip generation, input validation, insertBuilding, round-trip for every roof type, storey-height validator |
-| `lib/subdivision.test.ts` | 12 | canSplit (accepts imported + inferred storeys), splitByFloor, splitBySide, min-size enforcement, JSON round-trip |
+| `lib/footprint-tint.test.ts` | 7 | roofType mapping: human strings ↔ CityGML/3DBAG integer codes; alpha pass-through; fallback for unknown |
+| `lib/generator.test.ts` | 18 | Flat/pyramid/gable/hip generation, input validation, insertBuilding, round-trip for every roof type, storey-height validator |
+| `lib/openings.test.ts` | 11 | LoD 2.2 procedural windows + door; ring orientation; gable-end skip; round-trip survival; narrow-wall / lintel-clearance skip |
+| `lib/eave-overhang.test.ts` | 12 | LoD 2.2 eave overhang for all 4 roof types; soffit topology; rake-corner caps for gable; combine-with-openings without index collision |
+| `lib/preview-mesh.test.ts` | 8 | Live preview mesh: window/door overlay vertex counts, gable-end skip, narrow-wall skip, additive (never replaces) |
+| `lib/3dbag-smoke.test.ts` | 8 | Synthetic 3DBAG fixture: EPSG:7415, multi-LoD geometry, `b3_*` attributes, vertex-index rewriting, roofType int↔str |
+| `lib/subdivision.test.ts` | 18 | canSplit, splitByFloor, splitByFloorHeights (German tall-ground-floor pattern, sum conservation), splitBySide, min-size enforcement |
 | `lib/transform.test.ts` | 7 | move preserves originals; rotate changes bbox; 360° returns to origin |
 | `components/Toolbar.test.tsx` | 6 | Title, stats, dirty counter, wiring |
 | `components/FileLoader.test.tsx` | 4 | Sample button, fetch errors, non-CityJSON rejection |
