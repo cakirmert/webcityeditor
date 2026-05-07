@@ -11,6 +11,7 @@ import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
 import { detectCrs } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
+import { tintByRoofType } from '../lib/footprint-tint';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -242,7 +243,7 @@ export default function MapView({
         data: footprints,
         getPolygon: (d) => d.polygon,
         getFillColor: (d) =>
-          d.id === selectedId ? [255, 150, 40, 140] : [160, 170, 185, 120],
+          d.id === selectedId ? [255, 150, 40, 140] : tintByRoofType(d, 120),
         getLineColor: (d) =>
           d.id === selectedId ? [255, 120, 10, 255] : [60, 70, 85, 220],
         getLineWidth: 1,
@@ -272,7 +273,7 @@ export default function MapView({
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
           getFillColor: (d) =>
-            d.id === selectedId ? [255, 150, 40, 240] : [200, 200, 210, 230],
+            d.id === selectedId ? [255, 150, 40, 240] : tintByRoofType(d, 230),
           extruded: true,
           wireframe: false,
           pickable: true,
@@ -563,3 +564,4 @@ function computeTranslateCentre(doc: CityJsonDocument): [number, number] | null 
     return null;
   }
 }
+
