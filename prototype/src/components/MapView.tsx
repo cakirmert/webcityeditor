@@ -65,6 +65,13 @@ interface Props {
     footprintWgs84: [number, number][];
   } | null;
   onFootprintChange?: (newRingWgs84: [number, number][]) => void;
+  /**
+   * When non-null, only buildings whose CityObject id is in this Set are
+   * rendered at full opacity — the rest dim to ~25% so the user can pick
+   * them out at a glance. `null` = no filter active, every building at
+   * full opacity (the default before FilterBar landed).
+   */
+  filteredIds?: Set<string> | null;
 }
 
 /**
@@ -95,6 +102,7 @@ export default function MapView({
   preview,
   footprintEdit,
   onFootprintChange,
+  filteredIds = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -256,10 +264,18 @@ export default function MapView({
         id: 'building-outlines',
         data: footprints,
         getPolygon: (d) => d.polygon,
-        getFillColor: (d) =>
-          d.id === selectedId ? [255, 150, 40, 140] : tintByRoofType(d, 120),
-        getLineColor: (d) =>
-          d.id === selectedId ? [255, 120, 10, 255] : [60, 70, 85, 220],
+        getFillColor: (d) => {
+          if (d.id === selectedId) return [255, 150, 40, 140];
+          const matched = !filteredIds || filteredIds.has(d.id);
+          if (!matched) return [120, 120, 130, 35]; // dimmed
+          return tintByRoofType(d, 120);
+        },
+        getLineColor: (d) => {
+          if (d.id === selectedId) return [255, 120, 10, 255];
+          const matched = !filteredIds || filteredIds.has(d.id);
+          if (!matched) return [80, 80, 90, 60]; // dimmed
+          return [60, 70, 85, 220];
+        },
         getLineWidth: 1,
         lineWidthMinPixels: 1,
         stroked: true,
@@ -267,8 +283,8 @@ export default function MapView({
         extruded: false,
         pickable: true,
         updateTriggers: {
-          getFillColor: [selectedId],
-          getLineColor: [selectedId],
+          getFillColor: [selectedId, filteredIds],
+          getLineColor: [selectedId, filteredIds],
         },
         onClick: (info: PickingInfo<Footprint>) => {
           if (info.object) onSelect({ objectId: info.object.id });
@@ -286,8 +302,12 @@ export default function MapView({
           data: footprints,
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
-          getFillColor: (d) =>
-            d.id === selectedId ? [255, 150, 40, 240] : tintByRoofType(d, 230),
+          getFillColor: (d) => {
+            if (d.id === selectedId) return [255, 150, 40, 240];
+            const matched = !filteredIds || filteredIds.has(d.id);
+            if (!matched) return [120, 120, 130, 60]; // dimmed
+            return tintByRoofType(d, 230);
+          },
           extruded: true,
           wireframe: false,
           pickable: true,
@@ -298,7 +318,7 @@ export default function MapView({
             specularColor: [60, 64, 70],
           },
           updateTriggers: {
-            getFillColor: [selectedId],
+            getFillColor: [selectedId, filteredIds],
           },
           onClick: (info: PickingInfo<Footprint>) => {
             if (info.object) onSelect({ objectId: info.object.id });

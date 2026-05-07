@@ -21,6 +21,8 @@ import { extractFootprints } from './lib/footprints';
 import { exportToGltf } from './lib/gltf-export';
 import { checkIntegrity } from './lib/integrity';
 import { compactVertices } from './lib/compact';
+import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
+import FilterBar from './components/FilterBar';
 import {
   computeTransformedFootprint,
   type PendingTransform,
@@ -55,6 +57,9 @@ export default function App() {
     initialFootprint: [number, number][];
     pendingRing: [number, number][] | null;
   } | null>(null);
+  /** Building filter — text + roof type + year/height ranges. Pure UI state;
+   *  doesn't mutate the doc, just dims non-matching footprints on the map. */
+  const [filter, setFilter] = useState<BuildingFilter>({});
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -65,6 +70,7 @@ export default function App() {
       setFileName(name);
       setSelection(null);
       setDirtyIds(new Set());
+      setFilter({}); // reset filters when loading a new doc
       originals.clear();
     },
     [originals]
@@ -461,6 +467,21 @@ export default function App() {
     alert(lines.join('\n'));
   }, [integrity]);
 
+  // Extract footprints once (memoized on doc identity + reload token) so
+  // FilterBar and the dimmed-set computation share the same derived data.
+  const footprintsForFilter = useMemo(() => {
+    if (!cityjson) return [];
+    return extractFootprints(cityjson);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityjson, reloadToken]);
+
+  const filteredIds = useMemo(
+    () => matchingIds(footprintsForFilter, filter),
+    [footprintsForFilter, filter]
+  );
+
+  const filterIsEmpty = isFilterEmpty(filter);
+
   const stats = useMemo(() => {
     if (!cityjson) return null;
     const ids = Object.keys(cityjson.CityObjects);
@@ -517,6 +538,14 @@ export default function App() {
         onStartDraw={handleStartDraw}
         onCancelDraw={handleCancelDraw}
       />
+      {cityjson && footprintsForFilter.length > 0 && (
+        <FilterBar
+          footprints={footprintsForFilter}
+          filter={filter}
+          onChange={setFilter}
+          matchCount={filteredIds.size}
+        />
+      )}
       <div className="main">
         <div className="viewer-host">
           {cityjson ? (
@@ -528,6 +557,7 @@ export default function App() {
               drawMode={drawMode}
               onFootprintDrawn={handleFootprintDrawn}
               onDrawCanceled={handleCancelDraw}
+              filteredIds={filterIsEmpty ? null : filteredIds}
               footprintEdit={
                 footprintEdit
                   ? {
