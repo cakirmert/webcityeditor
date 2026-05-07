@@ -29,6 +29,16 @@ interface Props {
    *  footprint-edit regenerations). */
   orphanedVertexCount?: number;
   onCompactVertices?: () => void;
+  /** Optional undo/redo. Buttons render disabled when stacks are empty.
+   *  Tooltips include the next action's label ("Undo: Move building"). */
+  undoState?: {
+    canUndo: boolean;
+    canRedo: boolean;
+    undoLabel?: string;
+    redoLabel?: string;
+    onUndo: () => void;
+    onRedo: () => void;
+  };
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -48,6 +58,7 @@ export default function Toolbar({
   integrity,
   orphanedVertexCount = 0,
   onCompactVertices,
+  undoState,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -123,6 +134,37 @@ export default function Toolbar({
                 ＋ New Building
               </Button>
             )
+          )}
+
+          {undoState && (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!undoState.canUndo}
+                onClick={undoState.onUndo}
+                title={
+                  undoState.undoLabel
+                    ? `Undo: ${undoState.undoLabel} (Ctrl+Z)`
+                    : 'Nothing to undo'
+                }
+              >
+                ↶ Undo
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!undoState.canRedo}
+                onClick={undoState.onRedo}
+                title={
+                  undoState.redoLabel
+                    ? `Redo: ${undoState.redoLabel} (Ctrl+Shift+Z)`
+                    : 'Nothing to redo'
+                }
+              >
+                ↷ Redo
+              </Button>
+            </>
           )}
 
           <Button onClick={onReloadView} title="Re-parse modified data and refresh map + 3D view">

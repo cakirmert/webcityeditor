@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import FileLoader from './components/FileLoader';
 import MapView from './components/MapView';
@@ -23,6 +23,7 @@ import { checkIntegrity } from './lib/integrity';
 import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
 import FilterBar from './components/FilterBar';
+import { UndoStore } from './lib/undo';
 import {
   computeTransformedFootprint,
   type PendingTransform,
@@ -60,6 +61,11 @@ export default function App() {
   /** Building filter — text + roof type + year/height ranges. Pure UI state;
    *  doesn't mutate the doc, just dims non-matching footprints on the map. */
   const [filter, setFilter] = useState<BuildingFilter>({});
+  /** Persistent undo/redo store. Lives in a ref so it survives re-renders
+   *  without triggering them; we mirror canUndo/canRedo into state for the
+   *  toolbar buttons. */
+  const undoRef = useRef<UndoStore>(new UndoStore());
+  const [undoVersion, setUndoVersion] = useState(0); // bumped to re-render toolbar
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -71,10 +77,85 @@ export default function App() {
       setSelection(null);
       setDirtyIds(new Set());
       setFilter({}); // reset filters when loading a new doc
+      undoRef.current.clear();
+      setUndoVersion((v) => v + 1);
       originals.clear();
     },
     [originals]
   );
+
+  /**
+   * Capture an undo snapshot of the current doc + selection + dirty state.
+   * Call this BEFORE applying a mutation so undo restores the pre-mutation
+   * state. Bumps undoVersion to refresh the toolbar's enabled/disabled UI.
+   */
+  const pushUndo = useCallback(
+    (label: string) => {
+      if (!cityjson) return;
+      undoRef.current.push({
+        doc: cityjson,
+        label,
+        dirtyIds: new Set(dirtyIds),
+        selectionId: selection?.objectId ?? null,
+      });
+      setUndoVersion((v) => v + 1);
+    },
+    [cityjson, dirtyIds, selection]
+  );
+
+  const handleUndo = useCallback(() => {
+    if (!cityjson) return;
+    const popped = undoRef.current.undo({
+      doc: cityjson,
+      dirtyIds: new Set(dirtyIds),
+      selectionId: selection?.objectId ?? null,
+    });
+    if (!popped) return;
+    setCityjson(popped.doc);
+    setDirtyIds(new Set(popped.dirtyIds ?? []));
+    setSelection(popped.selectionId ? { objectId: popped.selectionId } : null);
+    setReloadToken((t) => t + 1);
+    setUndoVersion((v) => v + 1);
+  }, [cityjson, dirtyIds, selection]);
+
+  const handleRedo = useCallback(() => {
+    if (!cityjson) return;
+    const popped = undoRef.current.redo({
+      doc: cityjson,
+      dirtyIds: new Set(dirtyIds),
+      selectionId: selection?.objectId ?? null,
+    });
+    if (!popped) return;
+    setCityjson(popped.doc);
+    setDirtyIds(new Set(popped.dirtyIds ?? []));
+    setSelection(popped.selectionId ? { objectId: popped.selectionId } : null);
+    setReloadToken((t) => t + 1);
+    setUndoVersion((v) => v + 1);
+  }, [cityjson, dirtyIds, selection]);
+
+  // Keyboard shortcuts: Ctrl+Z / Cmd+Z for undo, Ctrl+Shift+Z / Cmd+Shift+Z
+  // for redo. Skip when focus is in an input/textarea so editing fields
+  // can still use their native undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta) return;
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+      } else if (e.key === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleUndo, handleRedo]);
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
@@ -92,6 +173,11 @@ export default function App() {
       if (!cityjson) return;
       const obj = cityjson.CityObjects[id];
       if (!obj) return;
+      // Only push undo when the value actually changes; otherwise typing in
+      // an input that hasn't moved would burn snapshots.
+      const prev = obj.attributes?.[key];
+      if (prev === value) return;
+      pushUndo(`Edit ${id}.${key}`);
       if (!obj.attributes) obj.attributes = {};
       obj.attributes[key] = value;
       setDirtyIds((prev) => {
@@ -100,7 +186,7 @@ export default function App() {
         return next;
       });
     },
-    [cityjson]
+    [cityjson, pushUndo]
   );
 
   const handleRevert = useCallback(
@@ -127,6 +213,7 @@ export default function App() {
     (id: string, floorCount: number) => {
       if (!cityjson) return;
       try {
+        pushUndo(`Split ${id} into ${floorCount} floors`);
         const { partIds } = splitBuildingByFloor(cityjson, id, floorCount);
         setDirtyIds((prev) => {
           const next = new Set(prev);
@@ -139,13 +226,14 @@ export default function App() {
         alert(e instanceof Error ? e.message : String(e));
       }
     },
-    [cityjson]
+    [cityjson, pushUndo]
   );
 
   const handleSplitByFloorHeights = useCallback(
     (id: string, heights: number[]) => {
       if (!cityjson) return;
       try {
+        pushUndo(`Split ${id} with custom heights`);
         const { partIds } = splitBuildingByFloorHeights(cityjson, id, heights);
         setDirtyIds((prev) => {
           const next = new Set(prev);
@@ -158,13 +246,14 @@ export default function App() {
         alert(e instanceof Error ? e.message : String(e));
       }
     },
-    [cityjson]
+    [cityjson, pushUndo]
   );
 
   const handleSplitBySide = useCallback(
     (id: string, partCount: number) => {
       if (!cityjson) return;
       try {
+        pushUndo(`Split ${id} into ${partCount} side parts`);
         const { partIds } = splitBuildingBySide(cityjson, id, partCount);
         setDirtyIds((prev) => {
           const next = new Set(prev);
@@ -177,7 +266,7 @@ export default function App() {
         alert(e instanceof Error ? e.message : String(e));
       }
     },
-    [cityjson]
+    [cityjson, pushUndo]
   );
 
   // Enter "edit position" mode for a building. While active, dX/dY/angle are
@@ -202,6 +291,11 @@ export default function App() {
     if (!cityjson || !pendingTransform) return;
     const { id, dx, dy, angle } = pendingTransform;
     try {
+      // Snapshot only when there's actually a change to commit — pure
+      // close/cancel shouldn't pollute the undo stack.
+      if (angle !== 0 || dx !== 0 || dy !== 0) {
+        pushUndo(`Move ${id}`);
+      }
       // Order: rotate first (around centroid), then translate. Matches what the
       // live preview does in computeTransformedFootprint.
       if (angle !== 0) rotateBuilding(cityjson, id, angle);
@@ -219,7 +313,7 @@ export default function App() {
     } finally {
       setPendingTransform(null);
     }
-  }, [cityjson, pendingTransform]);
+  }, [cityjson, pendingTransform, pushUndo]);
 
   // ── Footprint editing (drag building polygon corners) ─────────────────────
   const handleStartFootprintEdit = useCallback(
@@ -252,8 +346,17 @@ export default function App() {
   const handleSaveFootprintEdit = useCallback(() => {
     if (!cityjson || !footprintEdit) return;
     const ring = footprintEdit.pendingRing ?? footprintEdit.initialFootprint;
+    pushUndo(`Edit footprint of ${footprintEdit.buildingId}`);
     const res = regenerateBuilding(cityjson, footprintEdit.buildingId, ring);
     if (!res.ok) {
+      // Roll back the snapshot we just pushed so the user doesn't have to
+      // burn it.
+      undoRef.current.undo({
+        doc: cityjson,
+        dirtyIds: new Set(dirtyIds),
+        selectionId: selection?.objectId ?? null,
+      });
+      setUndoVersion((v) => v + 1);
       alert(res.reason ?? 'Could not regenerate building');
       return;
     }
@@ -264,7 +367,7 @@ export default function App() {
     });
     setReloadToken((t) => t + 1);
     setFootprintEdit(null);
-  }, [cityjson, footprintEdit]);
+  }, [cityjson, footprintEdit, pushUndo, dirtyIds, selection]);
 
   const handleStartDraw = useCallback(() => {
     setSelection(null);
@@ -293,6 +396,7 @@ export default function App() {
         return;
       }
       try {
+        pushUndo('Create new building');
         const ridgeHeight = form.totalHeight;
         const eaveHeight =
           form.roofType === 'flat' ? form.totalHeight : form.totalHeight - form.roofHeight;
@@ -354,7 +458,7 @@ export default function App() {
         setPendingForm(null);
       }
     },
-    [cityjson, pendingFootprint]
+    [cityjson, pendingFootprint, pushUndo]
   );
 
   const handleSaveLocal = useCallback(async () => {
@@ -424,6 +528,7 @@ export default function App() {
 
   const handleCompactVertices = useCallback(() => {
     if (!cityjson) return;
+    pushUndo('Compact orphaned vertices');
     const r = compactVertices(cityjson);
     if (r.changed) {
       setReloadToken((t) => t + 1);
@@ -431,6 +536,14 @@ export default function App() {
       // semantic state, but the doc is structurally different and we want
       // the user to feel that an action took place).
       setSaveStatus('idle');
+    } else {
+      // Roll back the snapshot we just pushed — nothing actually changed.
+      undoRef.current.undo({
+        doc: cityjson,
+        dirtyIds: new Set(dirtyIds),
+        selectionId: selection?.objectId ?? null,
+      });
+      setUndoVersion((v) => v + 1);
     }
     alert(
       r.changed
@@ -438,7 +551,7 @@ export default function App() {
             `Doc now has ${r.after.toLocaleString()} vertices (was ${r.before.toLocaleString()}).`
         : 'No orphaned vertices to reclaim.'
     );
-  }, [cityjson]);
+  }, [cityjson, pushUndo, dirtyIds, selection]);
 
   const handleShowIntegrity = useCallback(() => {
     if (!integrity) return;
@@ -481,6 +594,21 @@ export default function App() {
   );
 
   const filterIsEmpty = isFilterEmpty(filter);
+
+  // Re-derived after every undo/redo/push so the toolbar buttons reflect
+  // the current stack state. `undoVersion` is the dep that drives this.
+  const undoState = useMemo(() => {
+    if (!cityjson) return undefined;
+    return {
+      canUndo: undoRef.current.canUndo(),
+      canRedo: undoRef.current.canRedo(),
+      undoLabel: undoRef.current.peekUndoLabel(),
+      redoLabel: undoRef.current.peekRedoLabel(),
+      onUndo: handleUndo,
+      onRedo: handleRedo,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityjson, undoVersion, handleUndo, handleRedo]);
 
   const stats = useMemo(() => {
     if (!cityjson) return null;
@@ -530,6 +658,7 @@ export default function App() {
         }
         orphanedVertexCount={integrity?.summary.orphanedVertices ?? 0}
         onCompactVertices={handleCompactVertices}
+        undoState={undoState}
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}
