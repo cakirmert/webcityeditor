@@ -17,6 +17,13 @@ interface Props {
   /** Optional secondary export — emit a binary glTF (.glb) so the user can
    *  open the city in Blender / Sketchfab / any glTF viewer. */
   onExportGltf?: () => void;
+  /** Optional integrity-check action. Shows a small pill in the toolbar
+   *  when there are warnings/errors and opens a details modal on click. */
+  integrity?: {
+    errorCount: number;
+    warningCount: number;
+    onShow: () => void;
+  };
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -33,6 +40,7 @@ export default function Toolbar({
   hasData,
   onExport,
   onExportGltf,
+  integrity,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -74,6 +82,22 @@ export default function Toolbar({
             </>
           )}
         </span>
+      )}
+
+      {integrity && (integrity.errorCount > 0 || integrity.warningCount > 0) && (
+        <button
+          onClick={integrity.onShow}
+          title="Click to see details — vertex-index bounds, parent/child links, orphaned vertices, etc."
+          className={
+            integrity.errorCount > 0
+              ? 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer'
+              : 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer'
+          }
+        >
+          {integrity.errorCount > 0
+            ? `⚠ ${integrity.errorCount} error${integrity.errorCount === 1 ? '' : 's'}`
+            : `⚠ ${integrity.warningCount} warning${integrity.warningCount === 1 ? '' : 's'}`}
+        </button>
       )}
 
       {hasData && (

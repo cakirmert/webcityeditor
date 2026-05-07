@@ -19,6 +19,7 @@ import { moveBuilding, rotateBuilding } from './lib/transform';
 import { regenerateBuilding } from './lib/regenerate';
 import { extractFootprints } from './lib/footprints';
 import { exportToGltf } from './lib/gltf-export';
+import { checkIntegrity } from './lib/integrity';
 import {
   computeTransformedFootprint,
   type PendingTransform,
@@ -405,6 +406,42 @@ export default function App() {
     originals.clear();
   }, [originals]);
 
+  // Cheap integrity check — re-runs only when the doc identity / reload-token
+  // changes, NOT on every render. The walk is O(vertices+faces), <100 ms even
+  // on a Hamburg tile (918 buildings, ~30k vertices).
+  const integrity = useMemo(() => {
+    if (!cityjson) return null;
+    return checkIntegrity(cityjson);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityjson, reloadToken]);
+
+  const handleShowIntegrity = useCallback(() => {
+    if (!integrity) return;
+    if (integrity.issues.length === 0) {
+      alert('No integrity issues found.');
+      return;
+    }
+    // Group + cap so the alert isn't a wall of text on huge files. First 12
+    // entries cover the typical case; "+ N more" hints at the rest.
+    const lines: string[] = [];
+    lines.push(
+      `Integrity: ${integrity.counts.error} error(s), ${integrity.counts.warning} warning(s), ${integrity.counts.info} info`
+    );
+    lines.push(
+      `Scanned ${integrity.summary.cityObjects} CityObjects, ${integrity.summary.vertices} vertices (${integrity.summary.referencedVertices} referenced).`
+    );
+    lines.push('');
+    const max = 12;
+    for (const issue of integrity.issues.slice(0, max)) {
+      const tag = issue.severity === 'error' ? '✗' : issue.severity === 'warning' ? '⚠' : 'ℹ';
+      lines.push(`${tag} [${issue.code}] ${issue.message}`);
+    }
+    if (integrity.issues.length > max) {
+      lines.push(`… + ${integrity.issues.length - max} more`);
+    }
+    alert(lines.join('\n'));
+  }, [integrity]);
+
   const stats = useMemo(() => {
     if (!cityjson) return null;
     const ids = Object.keys(cityjson.CityObjects);
@@ -442,6 +479,15 @@ export default function App() {
         hasData={!!cityjson}
         onExport={handleExport}
         onExportGltf={handleExportGltf}
+        integrity={
+          integrity
+            ? {
+                errorCount: integrity.counts.error,
+                warningCount: integrity.counts.warning,
+                onShow: handleShowIntegrity,
+              }
+            : undefined
+        }
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}
