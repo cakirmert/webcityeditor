@@ -399,6 +399,14 @@ export default function App() {
                               : pendingForm.totalHeight - pendingForm.roofHeight,
                           ridgeHeight: pendingForm.totalHeight,
                           roofType: pendingForm.roofType,
+                          storeys: pendingForm.storeys,
+                          openings:
+                            pendingForm.addWindows || pendingForm.addDoor
+                              ? {
+                                  windows: pendingForm.addWindows,
+                                  door: pendingForm.addDoor,
+                                }
+                              : undefined,
                         }) ?? undefined,
                       polygon: pendingFootprint,
                       height: pendingForm.totalHeight,

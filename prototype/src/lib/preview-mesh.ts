@@ -12,6 +12,18 @@ export interface PreviewMeshParams {
   ridgeHeight: number;
   /** Roof shape. Same family as `generator.ts` — flat, pyramid, gable, hip. */
   roofType: RoofType;
+  /** Number of storeys above ground. Used to space window rows when openings
+   *  are requested. Defaults to 1 if omitted. */
+  storeys?: number;
+  /** Optional procedural openings preview. When present, the mesh emits
+   *  small overlay quads (offset 5 cm out from each wall, hard-coloured blue
+   *  for windows / brown for doors) so the user can see where openings will
+   *  land before clicking Create. The actual generator output uses semantic
+   *  hole-cut surfaces; the preview is z-fight-safe and earcut-free. */
+  openings?: {
+    windows: boolean;
+    door: boolean;
+  };
 }
 
 export interface PreviewMesh {
@@ -21,9 +33,19 @@ export interface PreviewMesh {
   indices: Uint32Array;
   /** Anchor point in WGS84 [lng, lat], matching the CRS centroid of the footprint. */
   anchorLngLat: [number, number];
-  /** RGB 0-255 per vertex, matched to positions. GroundSurface=brown, RoofSurface=amber, WallSurface=grey. */
+  /** RGB 0-255 per vertex, matched to positions. GroundSurface=brown, RoofSurface=amber, WallSurface=grey, Window=blue, Door=brown. */
   colors: Uint8Array;
 }
+
+// Window / door geometry constants — must match openings.ts exactly so the
+// preview matches what the generator produces on Create.
+const WINDOW_W = 1.4;
+const WINDOW_H = 1.5;
+const WINDOW_SILL = 0.9;
+const WINDOW_MIN_MARGIN = 0.4;
+const WINDOW_TARGET_SPACING = 3.0;
+const DOOR_W = 1.0;
+const DOOR_H = 2.1;
 
 /**
  * Build a triangle mesh that matches one of the four roof types in generator.ts,
@@ -78,6 +100,11 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
   const GROUND: [number, number, number] = [139, 69, 19];
   const ROOF: [number, number, number] = [184, 134, 11];
   const WALL: [number, number, number] = [200, 200, 210];
+  // Distinct hi-vis colours for the openings preview. The actual viewer uses
+  // a softer teal-blue / walnut palette; the preview goes a bit louder so the
+  // openings remain unambiguously visible at the dialog's small map zoom.
+  const WINDOW_COL: [number, number, number] = [56, 132, 200];
+  const DOOR_COL: [number, number, number] = [82, 50, 30];
 
   const positions: number[] = [];
   const indices: number[] = [];
@@ -325,6 +352,119 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
           ],
           ROOF
         );
+      }
+    }
+  }
+
+  // Procedural openings overlay (windows + door). Emitted as small co-planar
+  // quads offset 5 cm outward from the parent wall to avoid Z-fighting. We
+  // do NOT cut holes here — the preview is for shape feedback, the generator
+  // produces the real LoD 2.2 semantic surfaces on Create.
+  if (params.openings && (params.openings.windows || params.openings.door)) {
+    const storeys = Math.max(1, params.storeys ?? 1);
+    const storeyHeight = params.eaveHeight / storeys;
+
+    // Identify gable-end walls (pentagonal in the actual generator) so we
+    // don't decorate them with windows. Same logic as buildGable.
+    const gableEndWalls = new Set<number>();
+    if (params.roofType === 'gable' && n === 4) {
+      const [v0, v1, v2, v3] = local;
+      const lenSq = (a: [number, number], b: [number, number]) =>
+        (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+      const e0 = lenSq(v0, v1);
+      const e1 = lenSq(v1, v2);
+      const e2 = lenSq(v2, v3);
+      const e3 = lenSq(v3, v0);
+      const ridgeOnE0 = e0 + e2 > e1 + e3;
+      // Gable-end walls are perpendicular to the ridge: e1, e3 when ridgeOnE0,
+      // else e0, e2.
+      if (ridgeOnE0) {
+        gableEndWalls.add(1);
+        gableEndWalls.add(3);
+      } else {
+        gableEndWalls.add(0);
+        gableEndWalls.add(2);
+      }
+    }
+
+    let doorPlaced = false;
+    for (let i = 0; i < n; i++) {
+      if (gableEndWalls.has(i)) continue;
+      const j = (i + 1) % n;
+      const a: [number, number] = [local[i][0], local[i][1]];
+      const b: [number, number] = [local[j][0], local[j][1]];
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const wallLen = Math.hypot(dx, dy);
+      if (wallLen < WINDOW_W + 2 * WINDOW_MIN_MARGIN) continue;
+      const ux = dx / wallLen;
+      const uy = dy / wallLen;
+      // Outward normal of edge i→j on a CCW polygon = rotate (ux, uy) by -90°
+      // → (uy, -ux). 5 cm offset to keep the quad in front of the wall mesh.
+      const ox = uy * 0.05;
+      const oy = -ux * 0.05;
+
+      const skipGroundStorey = params.openings.door && !doorPlaced && i === 0;
+
+      if (params.openings.windows) {
+        const usableLen = wallLen - 2 * WINDOW_MIN_MARGIN;
+        const maxByFit = Math.floor(
+          (usableLen + (WINDOW_TARGET_SPACING - WINDOW_W)) / WINDOW_TARGET_SPACING
+        );
+        const targetCount = Math.max(
+          1,
+          Math.min(maxByFit, Math.round(wallLen / WINDOW_TARGET_SPACING))
+        );
+        for (let storey = 0; storey < storeys; storey++) {
+          if (storey === 0 && skipGroundStorey) continue;
+          const floorZ = storey * storeyHeight;
+          const sillZ = floorZ + WINDOW_SILL;
+          const topZ = sillZ + WINDOW_H;
+          if (topZ > params.eaveHeight - 0.3) continue;
+          for (let w = 0; w < targetCount; w++) {
+            const centreU = ((w + 0.5) / targetCount) * wallLen;
+            const leftU = centreU - WINDOW_W / 2;
+            const rightU = centreU + WINDOW_W / 2;
+            const blX = a[0] + ux * leftU + ox;
+            const blY = a[1] + uy * leftU + oy;
+            const brX = a[0] + ux * rightU + ox;
+            const brY = a[1] + uy * rightU + oy;
+            faceFan(
+              [
+                [blX, blY, sillZ],
+                [brX, brY, sillZ],
+                [brX, brY, topZ],
+                [blX, blY, topZ],
+              ],
+              WINDOW_COL
+            );
+          }
+        }
+      }
+
+      if (params.openings.door && !doorPlaced && wallLen >= DOOR_W + 0.6) {
+        const doorTopZ = Math.min(DOOR_H, params.eaveHeight - 0.3);
+        if (doorTopZ >= 1.8) {
+          const centreU = wallLen / 2;
+          const leftU = centreU - DOOR_W / 2;
+          const rightU = centreU + DOOR_W / 2;
+          const blX = a[0] + ux * leftU + ox;
+          const blY = a[1] + uy * leftU + oy;
+          const brX = a[0] + ux * rightU + ox;
+          const brY = a[1] + uy * rightU + oy;
+          // Lift the door 1 mm off the ground so it doesn't z-fight the
+          // ground polygon when the camera is at zero zenith.
+          faceFan(
+            [
+              [blX, blY, 0.001],
+              [brX, brY, 0.001],
+              [brX, brY, doorTopZ],
+              [blX, blY, doorTopZ],
+            ],
+            DOOR_COL
+          );
+          doorPlaced = true;
+        }
       }
     }
   }
