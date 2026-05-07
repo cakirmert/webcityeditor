@@ -163,9 +163,7 @@ describe('LoD 2.2 eave overhang (flat roofs)', () => {
     expect(g.semantics.values[0].length).toBe(g.boundaries[0].length);
   });
 
-  it('overhang ignored on pitched roofs (pyramid) — generator falls back to LoD 2.0', () => {
-    // Pyramid + overhang is not yet implemented; verify it doesn't crash and
-    // doesn't produce soffits or OuterCeilingSurface entries.
+  it('pyramid overhang adds n soffits + OuterCeilingSurface, bumps LoD to 2.2', () => {
     const doc = buildSampleCube();
     const r = generateBuilding(
       doc,
@@ -173,13 +171,71 @@ describe('LoD 2.2 eave overhang (flat roofs)', () => {
         roofType: 'pyramid',
         eaveHeight: 6,
         ridgeHeight: 9,
-        eaveOverhang: 0.3,
+        eaveOverhang: 0.5,
       })
     );
     const g = geomOf(r);
-    // LoD stays at 2.0 because no overhang faces were emitted (pyramid case
-    // falls through). If openings are also off, no semantic bump happens.
-    expect(g.lod).toBe('2.0');
-    expect(g.semantics.surfaces.map((s) => s.type)).not.toContain('OuterCeilingSurface');
+    expect(g.lod).toBe('2.2');
+    expect(g.semantics.surfaces.map((s) => s.type)).toEqual([
+      'GroundSurface',
+      'RoofSurface',
+      'WallSurface',
+      'OuterCeilingSurface',
+    ]);
+    // 1 ground + 4 roof tris + 4 walls + 4 soffits = 13 faces (4-sided footprint)
+    expect(g.boundaries[0]).toHaveLength(13);
+    // Last 4 semantic indices = OuterCeilingSurface (3)
+    const sem = g.semantics.values[0];
+    expect(sem.slice(9)).toEqual([3, 3, 3, 3]);
+    // 4 ground + 4 wall-top + 1 apex + 4 roof-edge = 13 vertices
+    expect(r.newVertices).toHaveLength(13);
+  });
+
+  it('pyramid roof faces use roof-edge vertices when overhang > 0 (overhang visible)', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        roofType: 'pyramid',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0.5,
+      })
+    );
+    const g = geomOf(r);
+    // Roof faces are at boundaries[0][1..4]. Their vertex indices should NOT
+    // overlap with the wall-top ring (which would mean no overhang). Wall-top
+    // vertices live at vertexOffset+4..vertexOffset+7; roof-edge at +9..+12.
+    const wallTopIdx = new Set([
+      r.vertexOffset + 4,
+      r.vertexOffset + 5,
+      r.vertexOffset + 6,
+      r.vertexOffset + 7,
+    ]);
+    let roofUsesWallTop = 0;
+    for (let f = 1; f <= 4; f++) {
+      for (const v of g.boundaries[0][f][0]) {
+        if (wallTopIdx.has(v)) roofUsesWallTop++;
+      }
+    }
+    expect(roofUsesWallTop).toBe(0);
+  });
+
+  it('overhang ignored on gable / hip — falls back to LoD 2.0 (rake overhang not yet implemented)', () => {
+    for (const roofType of ['gable', 'hip'] as const) {
+      const doc = buildSampleCube();
+      const r = generateBuilding(
+        doc,
+        baseParams({
+          roofType,
+          eaveHeight: 6,
+          ridgeHeight: 9,
+          eaveOverhang: 0.3,
+        })
+      );
+      const g = geomOf(r);
+      expect(g.lod, `${roofType} should stay at LoD 2.0 without overhang`).toBe('2.0');
+      expect(g.semantics.surfaces.map((s) => s.type)).not.toContain('OuterCeilingSurface');
+    }
   });
 });

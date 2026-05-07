@@ -119,7 +119,7 @@ export function generateBuilding(
   if (params.roofType === 'flat') {
     out = buildFlat(projected, baseZ, eaveZAbs, toInt, toGlobal, eaveOverhang);
   } else if (params.roofType === 'pyramid') {
-    out = buildPyramid(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal);
+    out = buildPyramid(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal, eaveOverhang);
   } else if (params.roofType === 'gable') {
     if (projected.length !== 4) {
       throw new Error(
@@ -148,11 +148,13 @@ export function generateBuilding(
   ];
   let lodLabel = '2.0';
 
-  // LoD 2.2 eave overhang adds OuterCeilingSurface (soffit) faces. buildFlat
-  // marks them with semantics index 3 when it emits them; the surface entry
-  // must match that index, so push it BEFORE the openings pass which assigns
-  // its own indices on top.
-  const hasSoffits = params.roofType === 'flat' && eaveOverhang > 0;
+  // LoD 2.2 eave overhang adds OuterCeilingSurface (soffit) faces. The
+  // builder marks them with semantics index 3 when it emits them; the surface
+  // entry must match that index, so push it BEFORE the openings pass which
+  // assigns its own indices on top. Currently flat + pyramid honour overhang;
+  // gable + hip ignore it (rake overhang complicates gable roofs).
+  const overhangSupported = params.roofType === 'flat' || params.roofType === 'pyramid';
+  const hasSoffits = overhangSupported && eaveOverhang > 0;
   if (hasSoffits) {
     surfaces.push({ type: 'OuterCeilingSurface' });
     lodLabel = '2.2';
@@ -356,14 +358,17 @@ function buildPyramid(
   eaveZ: number,
   ridgeZ: number,
   toInt: (x: number, y: number, z: number) => [number, number, number],
-  toGlobal: (local: number) => number
+  toGlobal: (local: number) => number,
+  eaveOverhang: number = 0
 ): BuildOut {
   const n = projected.length;
   const newVertices: [number, number, number][] = [];
+  const hasOverhang = eaveOverhang > 0;
 
   // Ground (z=baseZ)
   for (let i = 0; i < n; i++) newVertices.push(toInt(projected[i][0], projected[i][1], baseZ));
-  // Eave (z=eaveZ)
+  // Wall-top / eave (z=eaveZ) — at the original footprint corners. Walls
+  // anchor here regardless of overhang.
   for (let i = 0; i < n; i++) newVertices.push(toInt(projected[i][0], projected[i][1], eaveZ));
   // Apex at centroid, z=ridgeZ
   let cx = 0,
@@ -377,40 +382,78 @@ function buildPyramid(
   newVertices.push(toInt(cx, cy, ridgeZ));
 
   const groundStart = 0;
-  const eaveStart = n;
+  const wallTopStart = n;
   const apexLocal = 2 * n;
+
+  // Roof-edge ring (only when hasOverhang). Roof triangles connect roof-edge
+  // segments to the apex; wall-top stays inside, soffits fill the gap.
+  let roofEdgeStart = wallTopStart;
+  if (hasOverhang) {
+    roofEdgeStart = 2 * n + 1; // skip past apex local index
+    for (let i = 0; i < n; i++) {
+      const out = vertexOutwardDir(projected, i);
+      const ox = projected[i][0] + out[0] * eaveOverhang;
+      const oy = projected[i][1] + out[1] * eaveOverhang;
+      newVertices.push(toInt(ox, oy, eaveZ));
+    }
+  }
 
   const groundRing: number[] = [];
   for (let i = 0; i < n; i++) groundRing.push(toGlobal(groundStart + i));
   groundRing.reverse();
 
-  // Walls — rectangular ground→eave
+  // Walls — rectangular ground→wall-top (no slope)
   const wallRings: number[][] = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     wallRings.push([
       toGlobal(groundStart + i),
       toGlobal(groundStart + j),
-      toGlobal(eaveStart + j),
-      toGlobal(eaveStart + i),
+      toGlobal(wallTopStart + j),
+      toGlobal(wallTopStart + i),
     ]);
   }
 
-  // Roof — n triangles sharing the apex
+  // Roof — n triangles sharing the apex, anchored to roof-edge (or wall-top
+  // when no overhang — they're the same vertices in that case).
   const roofRings: number[][] = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    roofRings.push([toGlobal(eaveStart + i), toGlobal(eaveStart + j), toGlobal(apexLocal)]);
+    roofRings.push([
+      toGlobal(roofEdgeStart + i),
+      toGlobal(roofEdgeStart + j),
+      toGlobal(apexLocal),
+    ]);
+  }
+
+  // Soffits — only when hasOverhang. n quads filling the underside.
+  const soffitRings: number[][] = [];
+  if (hasOverhang) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      soffitRings.push([
+        toGlobal(wallTopStart + i),
+        toGlobal(roofEdgeStart + i),
+        toGlobal(roofEdgeStart + j),
+        toGlobal(wallTopStart + j),
+      ]);
+    }
   }
 
   const shell: number[][][] = [
     [groundRing],
     ...roofRings.map((r) => [r]),
     ...wallRings.map((w) => [w]),
+    ...soffitRings.map((s) => [s]),
   ];
-  const semanticsValues: number[] = [0, ...new Array(n).fill(1), ...new Array(n).fill(2)];
+  const semanticsValues: number[] = [
+    0,
+    ...new Array(n).fill(1),
+    ...new Array(n).fill(2),
+    ...new Array(soffitRings.length).fill(3),
+  ];
 
-  // Pyramid walls are rectangular (ground→eave) for every footprint edge.
+  // Pyramid walls are rectangular (ground→wall-top) for every footprint edge.
   // They live at shellIndex 1+n .. 1+n+n-1 (after ground + n roof triangles).
   const walls: RectangularWall[] = [];
   for (let i = 0; i < n; i++) {
@@ -420,8 +463,8 @@ function buildPyramid(
       globalCorners: [
         toGlobal(groundStart + i),
         toGlobal(groundStart + j),
-        toGlobal(eaveStart + j),
-        toGlobal(eaveStart + i),
+        toGlobal(wallTopStart + j),
+        toGlobal(wallTopStart + i),
       ],
       corners3D: [
         [projected[i][0], projected[i][1], baseZ],
