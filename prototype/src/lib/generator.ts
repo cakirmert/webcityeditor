@@ -32,6 +32,11 @@ export interface NewBuildingParams {
   /** Optional procedural openings (windows + door). Bumps the geometry's LoD
    *  label from `2.0` to `2.2` when any opening is requested. */
   openings?: OpeningOptions;
+  /** LoD 2.2 eave overhang in metres (default 0 = no overhang). When > 0, flat
+   *  roofs extend outward by this distance and the underside is emitted as
+   *  `OuterCeilingSurface` (soffit) faces. Only flat roofs support overhang
+   *  in this version; pitched roofs ignore the value. */
+  eaveOverhang?: number;
 }
 
 export interface GenerateResult {
@@ -110,8 +115,9 @@ export function generateBuilding(
   const toGlobal = (local: number) => vertexOffset + local;
 
   let out: BuildOut;
+  const eaveOverhang = Math.max(0, params.eaveOverhang ?? 0);
   if (params.roofType === 'flat') {
-    out = buildFlat(projected, baseZ, eaveZAbs, toInt, toGlobal);
+    out = buildFlat(projected, baseZ, eaveZAbs, toInt, toGlobal, eaveOverhang);
   } else if (params.roofType === 'pyramid') {
     out = buildPyramid(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal);
   } else if (params.roofType === 'gable') {
@@ -142,6 +148,16 @@ export function generateBuilding(
   ];
   let lodLabel = '2.0';
 
+  // LoD 2.2 eave overhang adds OuterCeilingSurface (soffit) faces. buildFlat
+  // marks them with semantics index 3 when it emits them; the surface entry
+  // must match that index, so push it BEFORE the openings pass which assigns
+  // its own indices on top.
+  const hasSoffits = params.roofType === 'flat' && eaveOverhang > 0;
+  if (hasSoffits) {
+    surfaces.push({ type: 'OuterCeilingSurface' });
+    lodLabel = '2.2';
+  }
+
   // Procedural openings pass — adds Window/Door semantics + extra faces, and
   // bumps LoD to 2.2 because openings are an LoD ≥ 2.2 concept.
   if (params.openings && (params.openings.windows || params.openings.door)) {
@@ -153,6 +169,7 @@ export function generateBuilding(
         storeys: params.storeys,
         baseZ,
         eaveZ: eaveZAbs,
+        baseSurfaceCount: surfaces.length,
       },
       out.newVertices,
       toInt,
@@ -199,36 +216,90 @@ function buildFlat(
   baseZ: number,
   roofZ: number,
   toInt: (x: number, y: number, z: number) => [number, number, number],
-  toGlobal: (local: number) => number
+  toGlobal: (local: number) => number,
+  eaveOverhang: number
 ): BuildOut {
   const n = projected.length;
+  const hasOverhang = eaveOverhang > 0;
+
+  // Layout:
+  //   0 .. n-1     ground vertices       (proj[i], baseZ)
+  //   n .. 2n-1    wall-top vertices     (proj[i], roofZ) — walls anchor here
+  //   2n .. 3n-1   roof-edge vertices    (proj[i] + outward * overhang, roofZ)
+  //                — only when hasOverhang. The roof and soffit faces use
+  //                these; walls + openings stay on wall-top.
   const newVertices: [number, number, number][] = [];
   for (let i = 0; i < n; i++) newVertices.push(toInt(projected[i][0], projected[i][1], baseZ));
   for (let i = 0; i < n; i++) newVertices.push(toInt(projected[i][0], projected[i][1], roofZ));
 
   const groundStart = 0;
-  const roofStart = n;
+  const wallTopStart = n;
+  let roofEdgeStart = wallTopStart; // collapses onto wall-top when no overhang
+
+  if (hasOverhang) {
+    roofEdgeStart = 2 * n;
+    for (let i = 0; i < n; i++) {
+      const out = vertexOutwardDir(projected, i);
+      const ox = projected[i][0] + out[0] * eaveOverhang;
+      const oy = projected[i][1] + out[1] * eaveOverhang;
+      newVertices.push(toInt(ox, oy, roofZ));
+    }
+  }
 
   const groundRing: number[] = [];
   for (let i = 0; i < n; i++) groundRing.push(toGlobal(groundStart + i));
-  groundRing.reverse();
+  groundRing.reverse(); // CW from below = CCW from outside (ground viewed from below)
 
+  // Roof ring uses roof-edge verts when overhang, wall-top otherwise.
   const roofRing: number[] = [];
-  for (let i = 0; i < n; i++) roofRing.push(toGlobal(roofStart + i));
+  for (let i = 0; i < n; i++) roofRing.push(toGlobal(roofEdgeStart + i));
 
+  // Walls: ground → wall-top, vertical (independent of overhang).
   const wallRings: number[][] = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     wallRings.push([
       toGlobal(groundStart + i),
       toGlobal(groundStart + j),
-      toGlobal(roofStart + j),
-      toGlobal(roofStart + i),
+      toGlobal(wallTopStart + j),
+      toGlobal(wallTopStart + i),
     ]);
   }
 
-  const shell: number[][][] = [[groundRing], [roofRing], ...wallRings.map((w) => [w])];
-  const semanticsValues: number[] = [0, 1, ...new Array(n).fill(2)];
+  // Soffits: wall-top → roof-edge, horizontal at roofZ. Order
+  // [wallTopI, roofEdgeI, roofEdgeJ, wallTopJ] gives a normal pointing -Z,
+  // which is what we want — the underside is what the user sees from below.
+  const soffitRings: number[][] = [];
+  if (hasOverhang) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      soffitRings.push([
+        toGlobal(wallTopStart + i),
+        toGlobal(roofEdgeStart + i),
+        toGlobal(roofEdgeStart + j),
+        toGlobal(wallTopStart + j),
+      ]);
+    }
+  }
+
+  // Shell + semantics, in this order so face indices line up with WallInfo's
+  // shellIndex below:
+  //   [0]        ground          → semantics 0
+  //   [1]        roof            → semantics 1
+  //   [2..1+n]   walls           → semantics 2
+  //   [2+n..]    soffits (opt)   → semantics 3 (OuterCeilingSurface)
+  const shell: number[][][] = [
+    [groundRing],
+    [roofRing],
+    ...wallRings.map((w) => [w]),
+    ...soffitRings.map((s) => [s]),
+  ];
+  const semanticsValues: number[] = [
+    0,
+    1,
+    ...new Array(n).fill(2),
+    ...new Array(soffitRings.length).fill(3),
+  ];
 
   // Wall metadata for the openings pass. Walls live at shellIndex 2..n+1.
   const walls: RectangularWall[] = [];
@@ -239,8 +310,8 @@ function buildFlat(
       globalCorners: [
         toGlobal(groundStart + i),
         toGlobal(groundStart + j),
-        toGlobal(roofStart + j),
-        toGlobal(roofStart + i),
+        toGlobal(wallTopStart + j),
+        toGlobal(wallTopStart + i),
       ],
       corners3D: [
         [projected[i][0], projected[i][1], baseZ],
@@ -251,6 +322,32 @@ function buildFlat(
     });
   }
   return { newVertices, shell, semanticsValues, walls };
+}
+
+/**
+ * Outward normal at footprint vertex i. Averages the outward normals of the
+ * two adjacent edges (i-1, i) and (i, i+1). For a CCW polygon (standard math
+ * orientation) the outward normal of edge (a→b) is (b.y-a.y, -(b.x-a.x))
+ * normalised. For convex polygons this gives the correct bisector direction;
+ * for concave vertices it can produce a degenerate direction at near-180°
+ * angles, but for typical building footprints this is fine.
+ */
+function vertexOutwardDir(
+  projected: [number, number][],
+  i: number
+): [number, number] {
+  const n = projected.length;
+  const prev = projected[(i - 1 + n) % n];
+  const curr = projected[i];
+  const next = projected[(i + 1) % n];
+  const n1: [number, number] = [curr[1] - prev[1], -(curr[0] - prev[0])];
+  const n2: [number, number] = [next[1] - curr[1], -(next[0] - curr[0])];
+  const len1 = Math.hypot(n1[0], n1[1]) || 1;
+  const len2 = Math.hypot(n2[0], n2[1]) || 1;
+  const ax = n1[0] / len1 + n2[0] / len2;
+  const ay = n1[1] / len1 + n2[1] / len2;
+  const al = Math.hypot(ax, ay) || 1;
+  return [ax / al, ay / al];
 }
 
 function buildPyramid(

@@ -220,6 +220,7 @@ export default function App() {
             form.addWindows || form.addDoor
               ? { windows: form.addWindows, door: form.addDoor }
               : undefined,
+          eaveOverhang: form.eaveOverhang,
         });
         const id = insertBuilding(cityjson, result);
         const newIds = new Set([id]);

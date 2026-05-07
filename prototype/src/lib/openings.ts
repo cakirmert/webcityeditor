@@ -29,6 +29,10 @@ export interface OpeningsConfig {
   baseZ: number;
   /** Wall-top Z = baseZ + eaveHeight (the height the wall meets the roof). */
   eaveZ: number;
+  /** Index in the geometry's `surfaces` array right after the standard
+   *  ground/roof/wall (and optional OuterCeilingSurface) entries. New Window
+   *  and Door surfaces append starting at this index. Default 3. */
+  baseSurfaceCount?: number;
 }
 
 export interface OpeningsResult {
@@ -71,7 +75,10 @@ export function applyOpenings(
     return { extraSurfaces: [], windowSurfaceIdx: -1, doorSurfaceIdx: -1, openingFacesAdded: 0 };
   }
 
-  const baseSurfaceCount = 3; // ground=0, roof=1, wall=2 (existing layout)
+  // Default: ground=0, roof=1, wall=2 (the 3 standard semantics). With LoD 2.2
+  // eave overhang the soffit `OuterCeilingSurface` lives at index 3 and the
+  // caller bumps baseSurfaceCount to 4 so Window/Door append cleanly.
+  const baseSurfaceCount = cfg.baseSurfaceCount ?? 3;
   const extraSurfaces: Array<{ type: string }> = [];
   let windowSurfaceIdx = -1;
   let doorSurfaceIdx = -1;

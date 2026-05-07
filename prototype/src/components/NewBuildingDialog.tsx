@@ -40,6 +40,9 @@ export interface NewBuildingForm {
   addWindows: boolean;
   /** Add a single ground-floor door on the first rectangular wall. */
   addDoor: boolean;
+  /** LoD 2.2 eave overhang in metres. 0 = no overhang. Currently honored only
+   *  by flat roofs; pitched roofs ignore it. */
+  eaveOverhang: number;
 }
 
 interface Props {
@@ -69,6 +72,7 @@ export default function NewBuildingDialog({
   const [splitCount, setSplitCount] = useState(2);
   const [addWindows, setAddWindows] = useState(true);
   const [addDoor, setAddDoor] = useState(true);
+  const [eaveOverhang, setEaveOverhang] = useState(0); // metres
 
   useEffect(() => {
     if (storeysAutoSync) {
@@ -96,6 +100,7 @@ export default function NewBuildingDialog({
       splitCount,
       addWindows,
       addDoor,
+      eaveOverhang,
     }),
     [
       totalHeight,
@@ -108,6 +113,7 @@ export default function NewBuildingDialog({
       splitCount,
       addWindows,
       addDoor,
+      eaveOverhang,
     ]
   );
 
@@ -269,6 +275,24 @@ export default function NewBuildingDialog({
               )}
             </div>
           </Row>
+
+          {roofType === 'flat' && (
+            <Row label="Eave overhang (m)">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step="0.1"
+                  value={eaveOverhang}
+                  onChange={(e) => setEaveOverhang(Math.max(0, Number(e.target.value) || 0))}
+                />
+                {eaveOverhang > 0 && (
+                  <span className="text-[10px] text-[var(--text-faint)]">→ LoD 2.2 soffit</span>
+                )}
+              </div>
+            </Row>
+          )}
 
           <div className="my-2 h-px bg-[var(--border)]" />
 
