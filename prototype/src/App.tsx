@@ -16,6 +16,8 @@ import {
   splitBuildingBySide,
 } from './lib/subdivision';
 import { moveBuilding, rotateBuilding } from './lib/transform';
+import { regenerateBuilding } from './lib/regenerate';
+import { extractFootprints } from './lib/footprints';
 import {
   computeTransformedFootprint,
   type PendingTransform,
@@ -42,6 +44,14 @@ export default function App() {
    *  in custom-heights mode for the selected building. The 3D viewer reads
    *  this to draw horizontal split-line rings at each cumulative height. */
   const [splitPreviewHeights, setSplitPreviewHeights] = useState<number[] | null>(null);
+  /** Live-edit state for footprint editing. The map shows the building's
+   *  outline as draggable Terra Draw polygon; pending updates flow through
+   *  `pendingRing` until the user clicks Save (regenerate) or Cancel. */
+  const [footprintEdit, setFootprintEdit] = useState<{
+    buildingId: string;
+    initialFootprint: [number, number][];
+    pendingRing: [number, number][] | null;
+  } | null>(null);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -201,6 +211,51 @@ export default function App() {
       setPendingTransform(null);
     }
   }, [cityjson, pendingTransform]);
+
+  // ── Footprint editing (drag building polygon corners) ─────────────────────
+  const handleStartFootprintEdit = useCallback(
+    (id: string) => {
+      if (!cityjson) return;
+      const fps = extractFootprints(cityjson);
+      const fp = fps.find((f) => f.id === id);
+      if (!fp) {
+        alert(`Could not extract footprint for building ${id}`);
+        return;
+      }
+      // The footprint polygon comes back closed (first === last); strip the
+      // closing vertex so MapView can re-close it for Terra Draw.
+      const open = fp.polygon.slice();
+      const [first, last] = [open[0], open[open.length - 1]];
+      if (first[0] === last[0] && first[1] === last[1]) open.pop();
+      setFootprintEdit({ buildingId: id, initialFootprint: open, pendingRing: null });
+    },
+    [cityjson]
+  );
+
+  const handleFootprintChange = useCallback((newRing: [number, number][]) => {
+    setFootprintEdit((prev) => (prev ? { ...prev, pendingRing: newRing } : prev));
+  }, []);
+
+  const handleCancelFootprintEdit = useCallback(() => {
+    setFootprintEdit(null);
+  }, []);
+
+  const handleSaveFootprintEdit = useCallback(() => {
+    if (!cityjson || !footprintEdit) return;
+    const ring = footprintEdit.pendingRing ?? footprintEdit.initialFootprint;
+    const res = regenerateBuilding(cityjson, footprintEdit.buildingId, ring);
+    if (!res.ok) {
+      alert(res.reason ?? 'Could not regenerate building');
+      return;
+    }
+    setDirtyIds((prev) => {
+      const next = new Set(prev);
+      next.add(footprintEdit.buildingId);
+      return next;
+    });
+    setReloadToken((t) => t + 1);
+    setFootprintEdit(null);
+  }, [cityjson, footprintEdit]);
 
   const handleStartDraw = useCallback(() => {
     setSelection(null);
@@ -383,6 +438,15 @@ export default function App() {
               drawMode={drawMode}
               onFootprintDrawn={handleFootprintDrawn}
               onDrawCanceled={handleCancelDraw}
+              footprintEdit={
+                footprintEdit
+                  ? {
+                      buildingId: footprintEdit.buildingId,
+                      footprintWgs84: footprintEdit.initialFootprint,
+                    }
+                  : null
+              }
+              onFootprintChange={handleFootprintChange}
               preview={
                 pendingFootprint && pendingForm
                   ? {
@@ -493,6 +557,12 @@ export default function App() {
               onUpdateTransform={handleUpdateTransform}
               onCancelTransform={handleCancelTransform}
               onSaveTransform={handleSaveTransform}
+              inFootprintEdit={
+                footprintEdit?.buildingId === selection.objectId
+              }
+              onStartFootprintEdit={handleStartFootprintEdit}
+              onSaveFootprintEdit={handleSaveFootprintEdit}
+              onCancelFootprintEdit={handleCancelFootprintEdit}
             />
           </aside>
         )}
@@ -517,6 +587,10 @@ function AttributePanelInline(props: {
   onUpdateTransform: (patch: Partial<Omit<PendingTransform, 'id'>>) => void;
   onCancelTransform: () => void;
   onSaveTransform: () => void;
+  inFootprintEdit: boolean;
+  onStartFootprintEdit: (id: string) => void;
+  onSaveFootprintEdit: () => void;
+  onCancelFootprintEdit: () => void;
 }) {
   return (
     <AttributePanel
@@ -535,6 +609,10 @@ function AttributePanelInline(props: {
       onUpdateTransform={props.onUpdateTransform}
       onCancelTransform={props.onCancelTransform}
       onSaveTransform={props.onSaveTransform}
+      inFootprintEdit={props.inFootprintEdit}
+      onStartFootprintEdit={props.onStartFootprintEdit}
+      onSaveFootprintEdit={props.onSaveFootprintEdit}
+      onCancelFootprintEdit={props.onCancelFootprintEdit}
       hideHeader
     />
   );

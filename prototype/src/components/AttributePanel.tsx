@@ -27,6 +27,12 @@ interface Props {
   onUpdateTransform?: (patch: Partial<Omit<PendingTransform, 'id'>>) => void;
   onCancelTransform?: () => void;
   onSaveTransform?: () => void;
+  /** True while the building's footprint is being edited on the map.
+   *  When set, the panel shows Save/Cancel and hides editing affordances. */
+  inFootprintEdit?: boolean;
+  onStartFootprintEdit?: (id: string) => void;
+  onSaveFootprintEdit?: () => void;
+  onCancelFootprintEdit?: () => void;
   hideHeader?: boolean;
 }
 
@@ -46,6 +52,10 @@ export default function AttributePanel({
   onUpdateTransform,
   onCancelTransform,
   onSaveTransform,
+  inFootprintEdit = false,
+  onStartFootprintEdit,
+  onSaveFootprintEdit,
+  onCancelFootprintEdit,
   hideHeader = false,
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
@@ -264,6 +274,55 @@ export default function AttributePanel({
                   ✓ Save
                 </Button>
                 <Button onClick={onCancelTransform} className="flex-1">
+                  ✕ Cancel
+                </Button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {/* Footprint editing — only available for buildings the editor created
+          (we know their full parametric inputs and can re-run the generator
+          on a new shape). Imported buildings get a hint instead of the
+          button. */}
+      {(onStartFootprintEdit || inFootprintEdit) && (
+        <section
+          className={
+            inFootprintEdit
+              ? 'rounded-md border border-[var(--select)] bg-[rgba(255,150,40,0.08)] p-3'
+              : ''
+          }
+        >
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+            Edit footprint
+          </div>
+          {!inFootprintEdit ? (
+            attrs._createdBy === 'city-editor-prototype' ? (
+              <Button
+                variant="primary"
+                onClick={() => onStartFootprintEdit?.(buildingId)}
+                className="w-full"
+              >
+                ✦ Edit footprint corners
+              </Button>
+            ) : (
+              <div className="text-[11px] text-[var(--text-faint)] italic">
+                Available only for buildings created in the editor — imported
+                buildings keep their original geometry.
+              </div>
+            )
+          ) : (
+            <>
+              <div className="text-[10px] text-[var(--text-dim)]">
+                Drag the corner handles or midpoint dots on the map. Save
+                regenerates the building with the new shape.
+              </div>
+              <div className="mt-3 flex gap-2 border-t border-[var(--border)] pt-3">
+                <Button variant="primary" onClick={onSaveFootprintEdit} className="flex-1">
+                  ✓ Save shape
+                </Button>
+                <Button onClick={onCancelFootprintEdit} className="flex-1">
                   ✕ Cancel
                 </Button>
               </div>

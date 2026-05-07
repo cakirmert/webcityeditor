@@ -5,7 +5,7 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { PolygonLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
-import { TerraDraw, TerraDrawPolygonMode } from 'terra-draw';
+import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
@@ -53,6 +53,18 @@ interface Props {
       anchorLngLat: [number, number];
     };
   } | null;
+  /**
+   * When set, the map enters footprint-edit mode for the named building.
+   * The building's outer footprint loads as a single editable Terra Draw
+   * polygon with draggable vertices and midpoints. Each drag fires
+   * `onFootprintChange` with the latest ring; the parent decides when to
+   * commit the change (typically via Save/Cancel buttons in the side panel).
+   */
+  footprintEdit?: {
+    buildingId: string;
+    footprintWgs84: [number, number][];
+  } | null;
+  onFootprintChange?: (newRingWgs84: [number, number][]) => void;
 }
 
 /**
@@ -81,6 +93,8 @@ export default function MapView({
   onFootprintDrawn,
   onDrawCanceled,
   preview,
+  footprintEdit,
+  onFootprintChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -425,6 +439,92 @@ export default function MapView({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [drawMode, onFootprintDrawn, onDrawCanceled, footprints]);
+
+  // ── Footprint-edit mode (TerraDrawSelectMode) ─────────────────────────────
+  // When `footprintEdit` is set, load the building's polygon as a single
+  // editable feature and fire `onFootprintChange` whenever the user drags a
+  // vertex or midpoint. The parent commits the change via Save/Cancel buttons
+  // in the side panel; this effect just streams the live ring upward.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    // Only one TerraDraw can be alive at a time on the map. If the polygon-
+    // draw effect already started one, bail (drawMode === 'polygon' takes
+    // precedence — the parent should ensure these aren't both set, but we
+    // fail-soft if they are).
+    if (drawMode === 'polygon') return;
+
+    if (footprintEdit && !drawRef.current) {
+      const start = () => {
+        const draw = new TerraDraw({
+          adapter: new TerraDrawMapLibreGLAdapter({ map }),
+          modes: [
+            new TerraDrawSelectMode({
+              flags: {
+                polygon: {
+                  feature: {
+                    draggable: true, // whole-shape drag (rare; vertex drag is the main UX)
+                    coordinates: {
+                      draggable: true, // <-- the actual feature we want
+                      midpoints: true, // edge midpoints add a vertex on drag
+                      deletable: false, // don't let the user delete a corner — the
+                      // generator wouldn't know what to do with < 3 corners
+                    },
+                  },
+                },
+              },
+            }),
+          ],
+        });
+        draw.start();
+
+        // Strip closing vertex if present — Terra Draw expects open rings
+        // internally, then closes for export.
+        const open = footprintEdit.footprintWgs84.slice();
+        const [first, last] = [open[0], open[open.length - 1]];
+        if (first && last && first[0] === last[0] && first[1] === last[1]) open.pop();
+
+        const featureId = 'building-footprint-edit';
+        draw.addFeatures([
+          {
+            id: featureId,
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              // GeoJSON convention: outer ring closed (first === last)
+              coordinates: [[...open, open[0]]],
+            },
+            properties: { mode: 'select' },
+          },
+        ]);
+        draw.setMode('select');
+        // Pre-select the feature so the user sees vertex handles immediately.
+        draw.selectFeature(featureId);
+
+        draw.on('change', () => {
+          const snapshot = draw.getSnapshot();
+          const f = snapshot.find((ff) => String(ff.id) === featureId);
+          if (
+            f &&
+            f.geometry.type === 'Polygon' &&
+            Array.isArray(f.geometry.coordinates?.[0])
+          ) {
+            const ring = f.geometry.coordinates[0] as [number, number][];
+            onFootprintChange?.(ring);
+          }
+        });
+
+        drawRef.current = draw;
+      };
+
+      if (map.isStyleLoaded()) start();
+      else map.once('load', start);
+    } else if (!footprintEdit && drawRef.current) {
+      drawRef.current.clear();
+      drawRef.current.stop();
+      drawRef.current = null;
+    }
+  }, [footprintEdit, drawMode, onFootprintChange]);
 
   return (
     <>
