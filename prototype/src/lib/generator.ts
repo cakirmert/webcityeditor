@@ -194,6 +194,16 @@ export function generateBuilding(
       function: 'residential',
       _createdBy: 'city-editor-prototype',
       _createdAt: new Date().toISOString(),
+      // Stash the parametric inputs as private attributes so a future
+      // `regenerateBuilding` (footprint-edit, etc.) can re-run the same
+      // generator with the same shape choices. Keys are `_`-prefixed so the
+      // editor's "official" attribute view can hide them by convention.
+      _eaveHeight: params.eaveHeight,
+      _ridgeHeight: params.ridgeHeight,
+      _baseElevation: params.baseElevation ?? 0,
+      _eaveOverhang: params.eaveOverhang ?? 0,
+      _addWindows: params.openings?.windows ?? false,
+      _addDoor: params.openings?.door ?? false,
       ...(params.attributes ?? {}),
     },
     geometry: [
