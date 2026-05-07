@@ -35,14 +35,25 @@ const OBJECT_COLORS_DISTINCT = {
 
 type ColorMode = 'surface' | 'object';
 
+/** Live-preview info from the visual division editor. When set, the viewer
+ *  draws horizontal accent rings at each cumulative split height around the
+ *  selected building's footprint. */
+export interface SplitPreviewInfo {
+  buildingId: string;
+  /** Per-floor wall heights in metres (in floor order, ground up). */
+  heights: number[];
+}
+
 interface Props {
   cityjson: CityJsonDocument;
   reloadToken: number;
   onSelect: (info: SelectionInfo | null) => void;
+  splitPreview?: SplitPreviewInfo | null;
 }
 
-export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
+export default function Viewer({ cityjson, reloadToken, onSelect, splitPreview }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const splitOverlayRef = useRef<THREE.Group | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('surface');
   const sceneRef = useRef<{
     scene: THREE.Scene;
@@ -209,6 +220,28 @@ export default function Viewer({ cityjson, reloadToken, onSelect }: Props) {
     applyColorMode(state.parser, colorMode);
   }, [colorMode]);
 
+  // 2c. Split-line preview overlay. When the user is in custom-heights mode
+  // for the selected building, draw N-1 horizontal rings around the building
+  // outline at each cumulative split height. Rebuilds whenever the heights
+  // change so the user sees live feedback as they edit.
+  useEffect(() => {
+    const state = sceneRef.current;
+    if (!state) return;
+
+    // Drop the previous overlay if any.
+    if (splitOverlayRef.current) {
+      state.modelGroup.remove(splitOverlayRef.current);
+      disposeGroup(splitOverlayRef.current);
+      splitOverlayRef.current = null;
+    }
+
+    if (!splitPreview || !cityjson) return;
+    const overlay = buildSplitOverlay(cityjson, splitPreview, state.loader);
+    if (!overlay) return;
+    splitOverlayRef.current = overlay;
+    state.modelGroup.add(overlay);
+  }, [cityjson, splitPreview, reloadToken]);
+
   // 3. Double-click picking
   useEffect(() => {
     const state = sceneRef.current;
@@ -337,6 +370,112 @@ function setParserPalette(parser: CityJSONParser) {
   };
   p.surfaceColors = SURFACE_COLORS_ARCH;
   p.objectColors = OBJECT_COLORS_DISTINCT;
+}
+
+/**
+ * Build a Three.js group containing N-1 horizontal Line rings, one per
+ * cumulative split height, traced around the selected building's ground-
+ * footprint outline. Returns null if the building has no decodable ground
+ * ring (BuildingPart children, missing semantics, etc.).
+ *
+ * The overlay is registered as a child of `modelGroup`, which already has the
+ * loader's centring matrix applied — so we apply the same matrix to the
+ * overlay before adding so the lines line up with the rendered building.
+ */
+function buildSplitOverlay(
+  doc: CityJsonDocument,
+  preview: SplitPreviewInfo,
+  loader: CityJSONLoader | null
+): THREE.Group | null {
+  if (!loader || !doc.transform) return null;
+  const ring = readGroundRingMetric(doc, preview.buildingId);
+  if (!ring || ring.length < 3) return null;
+
+  const group = new THREE.Group();
+  const lineMat = new THREE.LineBasicMaterial({
+    color: 0xffd84a, // accent yellow
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const baseZ = ring.reduce((m, [, , z]) => Math.min(m, z), Infinity);
+  let cumH = 0;
+  // Draw a ring at every floor boundary EXCEPT the very top (which is the
+  // eave — already where the wall ends, no split there).
+  for (let i = 0; i < preview.heights.length - 1; i++) {
+    cumH += preview.heights[i];
+    const z = baseZ + cumH;
+    const pts: THREE.Vector3[] = ring.map(([x, y]) => new THREE.Vector3(x, y, z));
+    pts.push(pts[0].clone()); // close
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(geom, lineMat);
+    line.renderOrder = 999; // draw after the building so depthTest: false sticks
+    group.add(line);
+  }
+  group.applyMatrix4(loader.matrix);
+  return group;
+}
+
+/**
+ * Decode a building's outer GroundSurface ring to projected-CRS metric coords.
+ * Walks geometries, finds the face whose semantic surface type is
+ * `GroundSurface`, and returns its outer ring with each integer-encoded vertex
+ * decoded through doc.transform. Returns null if no GroundSurface is found
+ * (e.g. on imported data without semantics).
+ */
+function readGroundRingMetric(
+  doc: CityJsonDocument,
+  buildingId: string
+): [number, number, number][] | null {
+  const obj = doc.CityObjects[buildingId];
+  if (!obj?.geometry || !doc.transform) return null;
+  const t = doc.transform;
+  const decode = (idx: number): [number, number, number] => {
+    const v = doc.vertices[idx];
+    return [
+      v[0] * t.scale[0] + t.translate[0],
+      v[1] * t.scale[1] + t.translate[1],
+      v[2] * t.scale[2] + t.translate[2],
+    ];
+  };
+  for (const geomRaw of obj.geometry) {
+    const g = geomRaw as {
+      type?: string;
+      boundaries?: number[][][][] | number[][][];
+      semantics?: { surfaces?: Array<{ type?: string }>; values?: number[][] };
+    };
+    if (!g.boundaries || !g.semantics?.surfaces) continue;
+    const groundIdx = g.semantics.surfaces.findIndex((s) => s?.type === 'GroundSurface');
+    if (groundIdx < 0) continue;
+    // For Solid: boundaries is shells[shell[face[ring]]] (4 levels deep).
+    const shells = g.boundaries as number[][][][];
+    if (!Array.isArray(shells[0]?.[0]?.[0])) continue; // not a Solid layout
+    for (let s = 0; s < shells.length; s++) {
+      const faceSem = g.semantics.values?.[s];
+      if (!faceSem) continue;
+      const shell = shells[s];
+      for (let f = 0; f < shell.length; f++) {
+        if (faceSem[f] === groundIdx) {
+          const outer = shell[f][0];
+          return outer.map(decode);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Recursive Three.js group disposal helper for the split-line overlay. */
+function disposeGroup(group: THREE.Group) {
+  group.traverse((obj) => {
+    const m = obj as THREE.Mesh & THREE.Line;
+    if (m.geometry) m.geometry.dispose();
+    const mat = m.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose());
+    else if (mat) mat.dispose();
+  });
 }
 
 function fitCameraToBox(

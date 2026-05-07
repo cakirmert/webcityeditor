@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AttributeValue, CityJsonDocument } from '../types';
 import { canSplitBuilding, MIN_STOREY_HEIGHT, MIN_SIDE_WIDTH } from '../lib/subdivision';
 import type { PendingTransform } from '../lib/transform-preview';
@@ -17,6 +17,10 @@ interface Props {
   /** New: split using a custom per-floor height array (in metres). The
    *  topmost entry keeps the parent's roof type. */
   onSplitByFloorHeights?: (id: string, heights: number[]) => void;
+  /** Optional notifier — fires whenever the user is in custom-heights mode
+   *  and the heights array changes. Lets the parent draw a live 3D preview
+   *  of the split lines. `null` means "leave custom mode". */
+  onCustomHeightsPreview?: (heights: number[] | null) => void;
   onSplitBySide?: (id: string, partCount: number) => void;
   pendingTransform?: PendingTransform | null;
   onStartTransform?: (id: string) => void;
@@ -35,6 +39,7 @@ export default function AttributePanel({
   onClose,
   onSplitByFloor,
   onSplitByFloorHeights,
+  onCustomHeightsPreview,
   onSplitBySide,
   pendingTransform,
   onStartTransform,
@@ -48,7 +53,19 @@ export default function AttributePanel({
   /** Custom per-floor wall heights in metres (only used when "Custom heights"
    *  mode is active). Length must match floorCount, sum must match the
    *  building's eave height. */
-  const [customHeights, setCustomHeights] = useState<number[] | null>(null);
+  const [customHeights, setCustomHeightsRaw] = useState<number[] | null>(null);
+  // Keep the parent's preview in sync with our custom-heights state.
+  const setCustomHeights = (h: number[] | null) => {
+    setCustomHeightsRaw(h);
+    onCustomHeightsPreview?.(h);
+  };
+  // When the building selection changes, drop any in-progress custom heights
+  // (and inform the parent so the preview clears).
+  useEffect(() => {
+    setCustomHeightsRaw(null);
+    onCustomHeightsPreview?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingId]);
   const inTransformMode = !!pendingTransform;
 
   const splitGate = useMemo(

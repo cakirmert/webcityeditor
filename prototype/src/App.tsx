@@ -38,6 +38,10 @@ export default function App() {
   const [sidePanelFullscreen, setSidePanelFullscreen] = useState(false);
   /** Live-preview state for translating/rotating a building before committing. */
   const [pendingTransform, setPendingTransform] = useState<PendingTransform | null>(null);
+  /** Live-preview state for the visual division editor — set when the user is
+   *  in custom-heights mode for the selected building. The 3D viewer reads
+   *  this to draw horizontal split-line rings at each cumulative height. */
+  const [splitPreviewHeights, setSplitPreviewHeights] = useState<number[] | null>(null);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -456,6 +460,11 @@ export default function App() {
                 cityjson={filteredForSelected}
                 reloadToken={reloadToken}
                 onSelect={() => {}}
+                splitPreview={
+                  splitPreviewHeights
+                    ? { buildingId: selection.objectId, heights: splitPreviewHeights }
+                    : null
+                }
               />
             </div>
 
@@ -467,6 +476,7 @@ export default function App() {
               onRevert={handleRevert}
               onSplitByFloor={handleSplitByFloor}
               onSplitByFloorHeights={handleSplitByFloorHeights}
+              onCustomHeightsPreview={setSplitPreviewHeights}
               onSplitBySide={handleSplitBySide}
               pendingTransform={
                 pendingTransform?.id === selection.objectId ? pendingTransform : null
@@ -492,6 +502,7 @@ function AttributePanelInline(props: {
   onRevert: (id: string) => void;
   onSplitByFloor: (id: string, floorCount: number) => void;
   onSplitByFloorHeights: (id: string, heights: number[]) => void;
+  onCustomHeightsPreview: (heights: number[] | null) => void;
   onSplitBySide: (id: string, partCount: number) => void;
   pendingTransform: PendingTransform | null;
   onStartTransform: (id: string) => void;
@@ -509,6 +520,7 @@ function AttributePanelInline(props: {
       onClose={() => {}}
       onSplitByFloor={props.onSplitByFloor}
       onSplitByFloorHeights={props.onSplitByFloorHeights}
+      onCustomHeightsPreview={props.onCustomHeightsPreview}
       onSplitBySide={props.onSplitBySide}
       pendingTransform={props.pendingTransform}
       onStartTransform={props.onStartTransform}
