@@ -23,6 +23,8 @@ import { checkIntegrity } from './lib/integrity';
 import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
 import FilterBar from './components/FilterBar';
+import BuildingListPanel from './components/BuildingListPanel';
+import { applyFilter } from './lib/filter';
 import { UndoStore } from './lib/undo';
 import {
   computeTransformedFootprint,
@@ -66,6 +68,9 @@ export default function App() {
    *  toolbar buttons. */
   const undoRef = useRef<UndoStore>(new UndoStore());
   const [undoVersion, setUndoVersion] = useState(0); // bumped to re-render toolbar
+  /** Building list sidebar visibility. Off by default to keep first-time
+   *  load minimal; toggled via the Toolbar's "☰ List" button. */
+  const [showList, setShowList] = useState(false);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -593,6 +598,14 @@ export default function App() {
     [footprintsForFilter, filter]
   );
 
+  // Pre-applied filter result for the BuildingListPanel — same input as
+  // matchingIds but we keep the Footprint objects (not just ids) so the
+  // list can show function/year/height per row.
+  const filteredFootprints = useMemo(
+    () => applyFilter(footprintsForFilter, filter),
+    [footprintsForFilter, filter]
+  );
+
   const filterIsEmpty = isFilterEmpty(filter);
 
   // Re-derived after every undo/redo/push so the toolbar buttons reflect
@@ -659,6 +672,8 @@ export default function App() {
         orphanedVertexCount={integrity?.summary.orphanedVertices ?? 0}
         onCompactVertices={handleCompactVertices}
         undoState={undoState}
+        showList={showList}
+        onToggleList={() => setShowList((v) => !v)}
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}
@@ -676,6 +691,15 @@ export default function App() {
         />
       )}
       <div className="main">
+        {showList && cityjson && footprintsForFilter.length > 0 && (
+          <BuildingListPanel
+            filteredFootprints={filteredFootprints}
+            totalCount={footprintsForFilter.length}
+            selectedId={selection?.objectId ?? null}
+            onSelect={(id) => setSelection({ objectId: id })}
+            onClose={() => setShowList(false)}
+          />
+        )}
         <div className="viewer-host">
           {cityjson ? (
             <MapView

@@ -39,6 +39,9 @@ interface Props {
     onUndo: () => void;
     onRedo: () => void;
   };
+  /** Toggle for the building list sidebar. */
+  showList?: boolean;
+  onToggleList?: () => void;
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -59,6 +62,8 @@ export default function Toolbar({
   orphanedVertexCount = 0,
   onCompactVertices,
   undoState,
+  showList = false,
+  onToggleList,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -134,6 +139,17 @@ export default function Toolbar({
                 ＋ New Building
               </Button>
             )
+          )}
+
+          {onToggleList && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onToggleList}
+              title={showList ? 'Hide building list' : 'Show building list'}
+            >
+              {showList ? '▣ List' : '☰ List'}
+            </Button>
           )}
 
           {undoState && (
