@@ -22,6 +22,8 @@ import { exportToGltf } from './lib/gltf-export';
 import { checkIntegrity } from './lib/integrity';
 import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
+import { mergeCityJson } from './lib/merge';
+import { parseCityJsonAuto } from './lib/cityjson';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
 import { applyFilter } from './lib/filter';
@@ -531,6 +533,57 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cityjson, reloadToken]);
 
+  const handleMergeFile = useCallback(() => {
+    if (!cityjson) return;
+    // Hidden file input — appended, clicked, removed.
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.city.json,.jsonl,.city.jsonl';
+    input.style.display = 'none';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = parseCityJsonAuto(text);
+        if (!parsed.ok) {
+          alert(`Could not parse "${file.name}": ${parsed.error}`);
+          return;
+        }
+        // Snapshot before mutation so the user can undo a bad merge.
+        pushUndo(`Merge ${file.name}`);
+        const r = mergeCityJson(cityjson, parsed.doc);
+        if (!r.ok) {
+          // Roll back — merge refused, no doc change.
+          undoRef.current.undo({
+            doc: cityjson,
+            dirtyIds: new Set(dirtyIds),
+            selectionId: selection?.objectId ?? null,
+          });
+          setUndoVersion((v) => v + 1);
+          alert(`Merge failed: ${r.reason}`);
+          return;
+        }
+        setReloadToken((t) => t + 1);
+        const lines = [
+          `Merged "${file.name}" successfully.`,
+          `Added ${r.added} CityObject${r.added === 1 ? '' : 's'}.`,
+        ];
+        if (r.renamed && r.renamed > 0) {
+          lines.push(
+            `${r.renamed} id conflict${r.renamed === 1 ? '' : 's'} resolved with __mergeN suffix.`
+          );
+        }
+        alert(lines.join('\n'));
+      } catch (e) {
+        alert(`Could not read file: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+    document.body.appendChild(input);
+    input.click();
+  }, [cityjson, pushUndo, dirtyIds, selection]);
+
   const handleCompactVertices = useCallback(() => {
     if (!cityjson) return;
     pushUndo('Compact orphaned vertices');
@@ -674,6 +727,7 @@ export default function App() {
         undoState={undoState}
         showList={showList}
         onToggleList={() => setShowList((v) => !v)}
+        onMergeFile={handleMergeFile}
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}

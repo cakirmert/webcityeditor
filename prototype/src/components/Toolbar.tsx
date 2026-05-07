@@ -42,6 +42,10 @@ interface Props {
   /** Toggle for the building list sidebar. */
   showList?: boolean;
   onToggleList?: () => void;
+  /** Optional merge action — opens a file picker, parses the picked file,
+   *  and merges its CityObjects into the current doc. Useful for stitching
+   *  adjacent Hamburg tiles together. */
+  onMergeFile?: () => void;
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -64,6 +68,7 @@ export default function Toolbar({
   undoState,
   showList = false,
   onToggleList,
+  onMergeFile,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -223,6 +228,16 @@ export default function Toolbar({
               title="Export to binary glTF (.glb) — opens in Blender / Sketchfab / any 3D viewer"
             >
               ⬇ glTF
+            </Button>
+          )}
+
+          {onMergeFile && (
+            <Button
+              variant="ghost"
+              onClick={onMergeFile}
+              title="Merge another CityJSON file into the current doc — useful for stitching adjacent tiles"
+            >
+              ＋ Merge file…
             </Button>
           )}
 
