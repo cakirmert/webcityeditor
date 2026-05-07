@@ -278,19 +278,105 @@ describe('LoD 2.2 eave overhang (flat roofs)', () => {
     expect(roofUsesWallTop).toBe(0);
   });
 
-  it('overhang ignored on gable — falls back to LoD 2.0 (rake-vs-eave handling deferred)', () => {
+  it('gable overhang adds 2 long-side soffits + 4 rake-corner caps (= 6 OuterCeilingSurface faces)', () => {
+    // 14 m × 8 m rectangle in Delft. With ridge running along e0/e2 (longer
+    // axis), only the long edges should overhang.
     const doc = buildSampleCube();
     const r = generateBuilding(
       doc,
       baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116], // ~14 m east
+          [4.357302, 52.011672], // + 8 m north
+          [4.3571, 52.011672],
+        ],
         roofType: 'gable',
         eaveHeight: 6,
         ridgeHeight: 9,
-        eaveOverhang: 0.3,
+        eaveOverhang: 0.4,
+      })
+    );
+    const g = geomOf(r);
+    expect(g.lod).toBe('2.2');
+    expect(g.semantics.surfaces.map((s) => s.type)).toEqual([
+      'GroundSurface',
+      'RoofSurface',
+      'WallSurface',
+      'OuterCeilingSurface',
+    ]);
+    // 1 ground + 2 roof slopes + 4 walls + 2 long-side soffits + 4 rake-corner
+    // caps = 13 faces total.
+    expect(g.boundaries[0]).toHaveLength(13);
+    // Last 6 entries are OuterCeilingSurface (semantics index 3).
+    const sem = g.semantics.values[0];
+    expect(sem.slice(7)).toEqual([3, 3, 3, 3, 3, 3]);
+    // 4 ground + 4 wall-top + 2 ridge + 4 long-edge roof-edge = 14 vertices.
+    expect(r.newVertices).toHaveLength(14);
+  });
+
+  it('gable: roof slopes use roof-edge vertices (not wall-top) when overhang > 0', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0.4,
+      })
+    );
+    const g = geomOf(r);
+    // Wall-top vertices live at vertexOffset+4..vertexOffset+7. Roof faces
+    // (boundaries[0][1..2]) must not contain wall-top indices on the long
+    // edges — they should use the new roof-edge ring (offsets +10..+13) plus
+    // the ridge endpoints (+8, +9).
+    const wallTopIdx = new Set([
+      r.vertexOffset + 4,
+      r.vertexOffset + 5,
+      r.vertexOffset + 6,
+      r.vertexOffset + 7,
+    ]);
+    let roofUsesWallTop = 0;
+    for (let f = 1; f <= 2; f++) {
+      for (const v of g.boundaries[0][f][0]) {
+        if (wallTopIdx.has(v)) roofUsesWallTop++;
+      }
+    }
+    expect(roofUsesWallTop).toBe(0);
+  });
+
+  it('gable: zero overhang preserves the original 7-face / 10-vertex topology', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0,
       })
     );
     const g = geomOf(r);
     expect(g.lod).toBe('2.0');
-    expect(g.semantics.surfaces.map((s) => s.type)).not.toContain('OuterCeilingSurface');
+    expect(g.boundaries[0]).toHaveLength(7); // unchanged
+    expect(r.newVertices).toHaveLength(10);
+    expect(g.semantics.surfaces.map((s) => s.type)).toEqual([
+      'GroundSurface',
+      'RoofSurface',
+      'WallSurface',
+    ]);
   });
 });

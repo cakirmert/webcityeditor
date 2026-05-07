@@ -276,7 +276,12 @@ export default function NewBuildingDialog({
             </div>
           </Row>
 
-          {(roofType === 'flat' || roofType === 'pyramid' || roofType === 'hip') && (
+          {/* All four roof types now honour eaveOverhang. Gable's variant only
+              overhangs on the long sides (no rake overhang). */}
+          {(roofType === 'flat' ||
+            roofType === 'pyramid' ||
+            roofType === 'hip' ||
+            roofType === 'gable') && (
             <Row label="Eave overhang (m)">
               <div className="flex items-center gap-2">
                 <Input
