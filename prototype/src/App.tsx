@@ -216,6 +216,10 @@ export default function App() {
             function: form.function,
             yearOfConstruction: form.yearOfConstruction,
           },
+          openings:
+            form.addWindows || form.addDoor
+              ? { windows: form.addWindows, door: form.addDoor }
+              : undefined,
         });
         const id = insertBuilding(cityjson, result);
         const newIds = new Set([id]);

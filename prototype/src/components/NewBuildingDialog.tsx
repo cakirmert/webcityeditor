@@ -35,6 +35,11 @@ export interface NewBuildingForm {
    */
   splitMode: 'none' | 'floors' | 'sides';
   splitCount: number;
+  /** Add procedurally placed windows on every rectangular wall, per storey.
+   *  Bumps the geometry's LoD from 2.0 to 2.2 in the exported CityJSON. */
+  addWindows: boolean;
+  /** Add a single ground-floor door on the first rectangular wall. */
+  addDoor: boolean;
 }
 
 interface Props {
@@ -62,6 +67,8 @@ export default function NewBuildingDialog({
   const [storeysAutoSync, setStoreysAutoSync] = useState(true);
   const [splitMode, setSplitMode] = useState<'none' | 'floors' | 'sides'>('none');
   const [splitCount, setSplitCount] = useState(2);
+  const [addWindows, setAddWindows] = useState(true);
+  const [addDoor, setAddDoor] = useState(true);
 
   useEffect(() => {
     if (storeysAutoSync) {
@@ -87,8 +94,21 @@ export default function NewBuildingDialog({
       yearOfConstruction: year,
       splitMode,
       splitCount,
+      addWindows,
+      addDoor,
     }),
-    [totalHeight, storeys, roofType, effectiveRoofHeight, func, year, splitMode, splitCount]
+    [
+      totalHeight,
+      storeys,
+      roofType,
+      effectiveRoofHeight,
+      func,
+      year,
+      splitMode,
+      splitCount,
+      addWindows,
+      addDoor,
+    ]
   );
 
   useEffect(() => {
@@ -218,6 +238,36 @@ export default function NewBuildingDialog({
                 setYear(v === '' ? null : Number(v));
               }}
             />
+          </Row>
+
+          <div className="my-2 h-px bg-[var(--border)]" />
+
+          <Row label="Procedural openings">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addWindows}
+                  onChange={(e) => setAddWindows(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                <span>Windows</span>
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addDoor}
+                  onChange={(e) => setAddDoor(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                <span>Door</span>
+              </label>
+              {(addWindows || addDoor) && (
+                <span className="text-[10px] text-[var(--text-faint)]">
+                  → exports as LoD 2.2
+                </span>
+              )}
+            </div>
           </Row>
 
           <div className="my-2 h-px bg-[var(--border)]" />

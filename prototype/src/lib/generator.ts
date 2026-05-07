@@ -1,7 +1,16 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument, CityObject } from '../types';
+import type { BuildOut, RectangularWall } from './generator-internal';
+import { applyOpenings } from './openings';
 
 export type RoofType = 'flat' | 'pyramid' | 'gable' | 'hip';
+
+export interface OpeningOptions {
+  /** Add procedurally placed windows on every rectangular wall, per storey. */
+  windows: boolean;
+  /** Add a single ground-floor door on the first rectangular wall. */
+  door: boolean;
+}
 
 export interface NewBuildingParams {
   /** Target CRS for the new building (must match existing doc's CRS). */
@@ -20,6 +29,9 @@ export interface NewBuildingParams {
   baseElevation?: number;
   /** Optional attributes to attach to the generated CityObject. */
   attributes?: Record<string, string | number | boolean | null>;
+  /** Optional procedural openings (windows + door). Bumps the geometry's LoD
+   *  label from `2.0` to `2.2` when any opening is requested. */
+  openings?: OpeningOptions;
 }
 
 export interface GenerateResult {
@@ -94,30 +106,14 @@ export function generateBuilding(
 
   // Dispatch to the roof-specific builder. Each fills in newVertices and builds
   // the solid boundaries with correctly-ordered rings.
-  let newVertices: [number, number, number][];
-  let shell: number[][][]; // [face][ring][vertexIdxIntoFinalDocVertices]
-  let semanticsValues: number[];
-
   const vertexOffset = doc.vertices.length;
   const toGlobal = (local: number) => vertexOffset + local;
 
+  let out: BuildOut;
   if (params.roofType === 'flat') {
-    ({ newVertices, shell, semanticsValues } = buildFlat(
-      projected,
-      baseZ,
-      eaveZAbs,
-      toInt,
-      toGlobal
-    ));
+    out = buildFlat(projected, baseZ, eaveZAbs, toInt, toGlobal);
   } else if (params.roofType === 'pyramid') {
-    ({ newVertices, shell, semanticsValues } = buildPyramid(
-      projected,
-      baseZ,
-      eaveZAbs,
-      ridgeZAbs,
-      toInt,
-      toGlobal
-    ));
+    out = buildPyramid(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal);
   } else if (params.roofType === 'gable') {
     if (projected.length !== 4) {
       throw new Error(
@@ -125,14 +121,7 @@ export function generateBuilding(
           'Use pyramid for N-sided polygons, or flat.'
       );
     }
-    ({ newVertices, shell, semanticsValues } = buildGable(
-      projected,
-      baseZ,
-      eaveZAbs,
-      ridgeZAbs,
-      toInt,
-      toGlobal
-    ));
+    out = buildGable(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal);
   } else if (params.roofType === 'hip') {
     if (projected.length !== 4) {
       throw new Error(
@@ -140,24 +129,40 @@ export function generateBuilding(
           'Use pyramid for N-sided polygons.'
       );
     }
-    ({ newVertices, shell, semanticsValues } = buildHip(
-      projected,
-      baseZ,
-      eaveZAbs,
-      ridgeZAbs,
-      toInt,
-      toGlobal
-    ));
+    out = buildHip(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal);
   } else {
     throw new Error(`Unknown roof type: ${params.roofType}`);
   }
 
   // Assemble Solid geometry
-  const surfaces = [
+  const surfaces: Array<{ type: string }> = [
     { type: 'GroundSurface' },
     { type: 'RoofSurface' },
     { type: 'WallSurface' },
   ];
+  let lodLabel = '2.0';
+
+  // Procedural openings pass — adds Window/Door semantics + extra faces, and
+  // bumps LoD to 2.2 because openings are an LoD ≥ 2.2 concept.
+  if (params.openings && (params.openings.windows || params.openings.door)) {
+    const openingsRes = applyOpenings(
+      out,
+      {
+        windows: params.openings.windows,
+        door: params.openings.door,
+        storeys: params.storeys,
+        baseZ,
+        eaveZ: eaveZAbs,
+      },
+      out.newVertices,
+      toInt,
+      toGlobal
+    );
+    if (openingsRes.openingFacesAdded > 0) {
+      surfaces.push(...openingsRes.extraSurfaces);
+      lodLabel = '2.2';
+    }
+  }
 
   const id = `bld-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const cityObject: CityObject = {
@@ -174,28 +179,20 @@ export function generateBuilding(
     geometry: [
       {
         type: 'Solid',
-        lod: '2.0',
-        boundaries: [shell],
+        lod: lodLabel,
+        boundaries: [out.shell],
         semantics: {
           surfaces,
-          values: [semanticsValues],
+          values: [out.semanticsValues],
         },
       } as unknown,
     ] as unknown[],
   };
 
-  return { id, cityObject, newVertices, vertexOffset };
+  return { id, cityObject, newVertices: out.newVertices, vertexOffset };
 }
 
 // ---------- roof builders ----------
-
-interface BuildOut {
-  newVertices: [number, number, number][];
-  /** One "face" per entry; each face is [outerRing, hole1, hole2, …]. */
-  shell: number[][][];
-  /** Semantic surface index for each face. 0=ground, 1=roof, 2=wall. */
-  semanticsValues: number[];
-}
 
 function buildFlat(
   projected: [number, number][],
@@ -232,7 +229,28 @@ function buildFlat(
 
   const shell: number[][][] = [[groundRing], [roofRing], ...wallRings.map((w) => [w])];
   const semanticsValues: number[] = [0, 1, ...new Array(n).fill(2)];
-  return { newVertices, shell, semanticsValues };
+
+  // Wall metadata for the openings pass. Walls live at shellIndex 2..n+1.
+  const walls: RectangularWall[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    walls.push({
+      shellIndex: 2 + i,
+      globalCorners: [
+        toGlobal(groundStart + i),
+        toGlobal(groundStart + j),
+        toGlobal(roofStart + j),
+        toGlobal(roofStart + i),
+      ],
+      corners3D: [
+        [projected[i][0], projected[i][1], baseZ],
+        [projected[j][0], projected[j][1], baseZ],
+        [projected[j][0], projected[j][1], roofZ],
+        [projected[i][0], projected[i][1], roofZ],
+      ],
+    });
+  }
+  return { newVertices, shell, semanticsValues, walls };
 }
 
 function buildPyramid(
@@ -294,7 +312,29 @@ function buildPyramid(
     ...wallRings.map((w) => [w]),
   ];
   const semanticsValues: number[] = [0, ...new Array(n).fill(1), ...new Array(n).fill(2)];
-  return { newVertices, shell, semanticsValues };
+
+  // Pyramid walls are rectangular (ground→eave) for every footprint edge.
+  // They live at shellIndex 1+n .. 1+n+n-1 (after ground + n roof triangles).
+  const walls: RectangularWall[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    walls.push({
+      shellIndex: 1 + n + i,
+      globalCorners: [
+        toGlobal(groundStart + i),
+        toGlobal(groundStart + j),
+        toGlobal(eaveStart + j),
+        toGlobal(eaveStart + i),
+      ],
+      corners3D: [
+        [projected[i][0], projected[i][1], baseZ],
+        [projected[j][0], projected[j][1], baseZ],
+        [projected[j][0], projected[j][1], eaveZ],
+        [projected[i][0], projected[i][1], eaveZ],
+      ],
+    });
+  }
+  return { newVertices, shell, semanticsValues, walls };
 }
 
 function buildGable(
@@ -412,7 +452,37 @@ function buildGable(
   ];
   // Order: 1 ground, 2 roof, 4 walls
   const semanticsValues: number[] = [0, 1, 1, 2, 2, 2, 2];
-  return { newVertices, shell, semanticsValues };
+
+  // Gable has two long rectangular walls and two pentagonal gable-end walls.
+  // Only the long walls are eligible for openings. Walls live at shellIndex
+  // 3..6 (after ground + 2 roof slopes). The wall order in `wallRings` is:
+  //   ridgeOnE0:  [long e0, gable e1, long e2, gable e3]
+  //   else:       [gable e0, long e1, gable e2, long e3]
+  const walls: RectangularWall[] = [];
+  const wallEdges: Array<{ shellIndex: number; edgeStart: 0 | 1 | 2 | 3 }> = ridgeOnE0
+    ? [
+        { shellIndex: 3, edgeStart: 0 }, // long wall under e0 (v0→v1)
+        { shellIndex: 5, edgeStart: 2 }, // long wall under e2 (v2→v3)
+      ]
+    : [
+        { shellIndex: 4, edgeStart: 1 }, // long wall under e1 (v1→v2)
+        { shellIndex: 6, edgeStart: 3 }, // long wall under e3 (v3→v0)
+      ];
+  for (const w of wallEdges) {
+    const i = w.edgeStart;
+    const j = (i + 1) % 4;
+    walls.push({
+      shellIndex: w.shellIndex,
+      globalCorners: [G(i), G(j), G(4 + j), G(4 + i)],
+      corners3D: [
+        [projected[i][0], projected[i][1], baseZ],
+        [projected[j][0], projected[j][1], baseZ],
+        [projected[j][0], projected[j][1], eaveZ],
+        [projected[i][0], projected[i][1], eaveZ],
+      ],
+    });
+  }
+  return { newVertices, shell, semanticsValues, walls };
 }
 
 function buildHip(
@@ -525,7 +595,24 @@ function buildHip(
   ];
   // 1 ground + 4 roof (2 trapezoids + 2 triangles) + 4 walls
   const semanticsValues: number[] = [0, 1, 1, 1, 1, 2, 2, 2, 2];
-  return { newVertices, shell, semanticsValues };
+
+  // All 4 hip walls are rectangular. They live at shellIndex 5..8 (after
+  // ground + 4 roof faces). Wall order matches edge order: e0, e1, e2, e3.
+  const walls: RectangularWall[] = [];
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    walls.push({
+      shellIndex: 5 + i,
+      globalCorners: [G(i), G(j), G(4 + j), G(4 + i)],
+      corners3D: [
+        [projected[i][0], projected[i][1], baseZ],
+        [projected[j][0], projected[j][1], baseZ],
+        [projected[j][0], projected[j][1], eaveZ],
+        [projected[i][0], projected[i][1], eaveZ],
+      ],
+    });
+  }
+  return { newVertices, shell, semanticsValues, walls };
 }
 
 /**
