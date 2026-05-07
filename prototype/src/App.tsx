@@ -24,6 +24,7 @@ import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
 import { mergeCityJson } from './lib/merge';
 import { parseCityJsonAuto } from './lib/cityjson';
+import type { IfcImportMetadata } from './lib/ifc-import';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
 import { applyFilter } from './lib/filter';
@@ -73,6 +74,16 @@ export default function App() {
   /** Building list sidebar visibility. Off by default to keep first-time
    *  load minimal; toggled via the Toolbar's "☰ List" button. */
   const [showList, setShowList] = useState(false);
+  /** IFC-import "awaiting placement click" state. When set, the map shows a
+   *  banner + crosshair cursor; the next click drops the IFC-derived
+   *  building at that lng/lat. */
+  const [ifcPending, setIfcPending] = useState<{
+    metadata: IfcImportMetadata;
+    fileName: string;
+  } | null>(null);
+  /** True while the WASM is loading and parsing — disables the toolbar
+   *  button so a slow IFC parse doesn't get re-triggered. */
+  const [ifcParsing, setIfcParsing] = useState(false);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -533,6 +544,117 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cityjson, reloadToken]);
 
+  // ── IFC import ────────────────────────────────────────────────────────────
+
+  /** Step 1: open file picker, parse the picked IFC via web-ifc (WASM),
+   *  surface a summary, and arm the map for placement. The web-ifc module
+   *  + 1.3 MB WASM is dynamically imported here so the initial bundle
+   *  doesn't pay the cost for users who never touch IFC. */
+  const handleImportIfc = useCallback(() => {
+    if (!cityjson) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.ifc';
+    input.style.display = 'none';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (!file) return;
+      setIfcParsing(true);
+      try {
+        const { parseIfcMetadata } = await import('./lib/ifc-import');
+        const metadata = await parseIfcMetadata(file);
+        setIfcPending({ metadata, fileName: file.name });
+      } catch (e) {
+        alert(`IFC parse failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setIfcParsing(false);
+      }
+    };
+    document.body.appendChild(input);
+    input.click();
+  }, [cityjson]);
+
+  /** Step 2: user clicked the map — convert IFC bbox into a footprint at
+   *  that location and use the existing parametric generator to drop a
+   *  Building. The IFC's GlobalId, source filename, and dimensions are
+   *  recorded as private `_ifc*` attributes for traceability. */
+  const handleIfcPlacement = useCallback(
+    async (lngLat: [number, number]) => {
+      if (!cityjson || !ifcPending) return;
+      const crs = detectCrs(cityjson);
+      if (!crs.supported) {
+        alert(`Cannot place — host doc CRS ${crs.code} not supported`);
+        setIfcPending(null);
+        return;
+      }
+      const m = ifcPending.metadata;
+      try {
+        pushUndo(`Import IFC: ${ifcPending.fileName}`);
+        // Dynamic import keeps `buildFootprintFromIfc` (and its web-ifc
+        // dep graph) out of the initial bundle even though we use it here.
+        // The dynamic chunk is already in cache from step 1.
+        const { buildFootprintFromIfc } = await import('./lib/ifc-import');
+        const footprint = buildFootprintFromIfc(m, lngLat);
+        // Pick a sensible storey count — clamp to 1+ so DIN validation is happy.
+        const storeys = Math.max(1, m.storeyCount);
+        const result = generateBuilding(cityjson, {
+          targetCrs: crs.code,
+          footprintWgs84: footprint,
+          storeys,
+          eaveHeight: m.height,
+          ridgeHeight: m.height,
+          roofType: 'flat',
+          attributes: {
+            function: 'mixed',
+            _ifcSource: ifcPending.fileName,
+            _ifcGlobalId: m.globalId,
+            _ifcName: m.name,
+            _ifcWidth: m.width,
+            _ifcDepth: m.depth,
+            _ifcHeight: m.height,
+            _ifcStoreyCount: m.storeyCount,
+            ...(m.refLat !== null
+              ? { _ifcRefLatitude: m.refLat, _ifcRefLongitude: m.refLon }
+              : {}),
+          },
+        });
+        const id = insertBuilding(cityjson, result);
+        setDirtyIds((prev) => {
+          const next = new Set(prev);
+          next.add(id);
+          return next;
+        });
+        setSelection({ objectId: id });
+        setReloadToken((t) => t + 1);
+      } catch (e) {
+        alert(
+          `Could not create building from IFC: ${e instanceof Error ? e.message : String(e)}`
+        );
+      } finally {
+        setIfcPending(null);
+      }
+    },
+    [cityjson, ifcPending, pushUndo]
+  );
+
+  const handleCancelIfcPlacement = useCallback(() => {
+    setIfcPending(null);
+  }, []);
+
+  // Esc key cancels IFC placement (parallel to the polygon-draw cancel).
+  useEffect(() => {
+    if (!ifcPending) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIfcPending(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ifcPending]);
+
   const handleMergeFile = useCallback(() => {
     if (!cityjson) return;
     // Hidden file input — appended, clicked, removed.
@@ -728,6 +850,8 @@ export default function App() {
         showList={showList}
         onToggleList={() => setShowList((v) => !v)}
         onMergeFile={handleMergeFile}
+        onImportIfc={handleImportIfc}
+        ifcParsing={ifcParsing}
         onReloadView={handleReloadView}
         onNewFile={handleReset}
         onSaveLocal={handleSaveLocal}
@@ -754,7 +878,14 @@ export default function App() {
             onClose={() => setShowList(false)}
           />
         )}
-        <div className="viewer-host">
+        <div className="viewer-host" style={{ position: 'relative' }}>
+          {ifcPending && (
+            <IfcPlacementBanner
+              metadata={ifcPending.metadata}
+              fileName={ifcPending.fileName}
+              onCancel={handleCancelIfcPlacement}
+            />
+          )}
           {cityjson ? (
             <MapView
               cityjson={cityjson}
@@ -765,6 +896,7 @@ export default function App() {
               onFootprintDrawn={handleFootprintDrawn}
               onDrawCanceled={handleCancelDraw}
               filteredIds={filterIsEmpty ? null : filteredIds}
+              onPlacementClick={ifcPending ? handleIfcPlacement : undefined}
               footprintEdit={
                 footprintEdit
                   ? {
@@ -942,5 +1074,77 @@ function AttributePanelInline(props: {
       onCancelFootprintEdit={props.onCancelFootprintEdit}
       hideHeader
     />
+  );
+}
+
+/**
+ * Floating banner shown over the map while the user is in IFC-placement
+ * mode. Surfaces the parsed IFC's headline numbers + a Cancel button (Esc
+ * also works). Click anywhere on the map to drop the building.
+ */
+function IfcPlacementBanner({
+  metadata,
+  fileName,
+  onCancel,
+}: {
+  metadata: IfcImportMetadata;
+  fileName: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 12,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 12,
+        background: 'rgba(46,64,87,0.96)',
+        color: '#fff',
+        padding: '10px 16px',
+        borderRadius: 6,
+        fontSize: 12,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+        maxWidth: 520,
+        backdropFilter: 'blur(4px)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>
+            ⌂ Click on the map to place &ldquo;{metadata.name ?? fileName}&rdquo;
+          </div>
+          <div style={{ marginTop: 2, color: 'rgba(255,255,255,0.78)' }}>
+            {metadata.width.toFixed(1)} × {metadata.depth.toFixed(1)} ×{' '}
+            {metadata.height.toFixed(1)} m · {metadata.storeyCount} storey
+            {metadata.storeyCount === 1 ? '' : 's'}
+            {metadata.refLat !== null && metadata.refLon !== null && (
+              <>
+                {' '}· IFC site geo-ref {metadata.refLat.toFixed(4)}°N,{' '}
+                {metadata.refLon.toFixed(4)}°E
+              </>
+            )}
+          </div>
+          <div style={{ marginTop: 2, fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>
+            ESC to cancel · parsed in {metadata.parseMs} ms
+          </div>
+        </div>
+        <button
+          onClick={onCancel}
+          style={{
+            background: 'rgba(255,255,255,0.12)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.22)',
+            borderRadius: 4,
+            padding: '4px 10px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+          }}
+        >
+          ✕ Cancel
+        </button>
+      </div>
+    </div>
   );
 }

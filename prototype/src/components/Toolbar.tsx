@@ -46,6 +46,11 @@ interface Props {
    *  and merges its CityObjects into the current doc. Useful for stitching
    *  adjacent Hamburg tiles together. */
   onMergeFile?: () => void;
+  /** Optional IFC import. Click to open a file picker; subsequent flow
+   *  (placement, etc.) is owned by the parent. */
+  onImportIfc?: () => void;
+  /** Disabled the IFC button while a parse is in flight. */
+  ifcParsing?: boolean;
   onReloadView: () => void;
   onNewFile: () => void;
   onSaveLocal?: () => void;
@@ -69,6 +74,8 @@ export default function Toolbar({
   showList = false,
   onToggleList,
   onMergeFile,
+  onImportIfc,
+  ifcParsing = false,
   onReloadView,
   onNewFile,
   onSaveLocal,
@@ -228,6 +235,17 @@ export default function Toolbar({
               title="Export to binary glTF (.glb) — opens in Blender / Sketchfab / any 3D viewer"
             >
               ⬇ glTF
+            </Button>
+          )}
+
+          {onImportIfc && (
+            <Button
+              variant="ghost"
+              onClick={onImportIfc}
+              disabled={ifcParsing}
+              title="Import an IFC building model — parses with web-ifc and drops a placeable LoD2 box"
+            >
+              {ifcParsing ? 'Parsing IFC…' : '⌂ Import IFC…'}
             </Button>
           )}
 

@@ -72,6 +72,12 @@ interface Props {
    * full opacity (the default before FilterBar landed).
    */
   filteredIds?: Set<string> | null;
+  /**
+   * When set, the next map click reports its lng/lat via this callback and
+   * is "consumed" — it doesn't trigger building selection. Used by IFC
+   * import to let the user drop the imported building wherever they like.
+   */
+  onPlacementClick?: (lngLat: [number, number]) => void;
 }
 
 /**
@@ -103,6 +109,7 @@ export default function MapView({
   footprintEdit,
   onFootprintChange,
   filteredIds = null,
+  onPlacementClick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -459,6 +466,34 @@ export default function MapView({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [drawMode, onFootprintDrawn, onDrawCanceled, footprints]);
+
+  // ── One-click placement mode (used by IFC import) ────────────────────────
+  // When `onPlacementClick` is set, we attach a one-shot map click listener
+  // that fires the callback with the clicked lng/lat. The change in cursor
+  // gives the user a visual cue. Selection clicks are blocked because
+  // deck.gl's `onClick` on the building layers fires after MapLibre's, but
+  // we set the picking layer to non-pickable while placement is awaiting,
+  // so map clicks can land cleanly on the basemap.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!onPlacementClick) return;
+
+    const prevCursor = map.getCanvas().style.cursor;
+    map.getCanvas().style.cursor = 'crosshair';
+
+    const handler = (e: maplibregl.MapMouseEvent) => {
+      // Stop deck.gl's onClick from also firing — we don't want the click
+      // to also select a building underneath the placement cursor.
+      e.preventDefault();
+      onPlacementClick([e.lngLat.lng, e.lngLat.lat]);
+    };
+    map.on('click', handler);
+    return () => {
+      map.off('click', handler);
+      map.getCanvas().style.cursor = prevCursor;
+    };
+  }, [onPlacementClick]);
 
   // ── Footprint-edit mode (TerraDrawSelectMode) ─────────────────────────────
   // When `footprintEdit` is set, load the building's polygon as a single
