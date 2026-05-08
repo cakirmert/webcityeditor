@@ -95,8 +95,9 @@ export function convertIfcToCityJsonBuilding(
 
   // Triangulated faces — one face per triangle, single ring of 3 verts.
   // Each face is tagged with a CityJSON 2.0 semantic surface type derived
-  // from BOTH the IFC source class AND (for slabs) the triangle's Z position
-  // relative to the IFC's storey elevations.
+  // from BOTH the IFC source class AND the triangle's Z position relative
+  // to the mesh's own Z extrema (used for IfcSlab that lacks a useful
+  // PredefinedType).
   const triCount = ifc.indices.length / 3;
   const meshFaces: number[][] = [];
   const meshFaceSemantics: number[] = [];
@@ -115,14 +116,12 @@ export function convertIfcToCityJsonBuilding(
     Door: 4,
   };
 
-  // Storey-elevation extrema with the same z-shift the converter applies to
-  // vertices (so triangle Z and storey Z compare in the same frame).
-  const topStoreyZ =
-    ifc.storeyElevations.length > 0
-      ? ifc.storeyElevations[ifc.storeyElevations.length - 1] + zShift
-      : null;
-  const bottomStoreyZ =
-    ifc.storeyElevations.length > 0 ? ifc.storeyElevations[0] + zShift : null;
+  // Mesh-frame Z extrema (post-zShift): floor sits at z=0 by construction,
+  // ridge / parapet at z = ifc.height. Pass these to the classifier so a
+  // generic IfcSlab whose PredefinedType we couldn't recover still ends up
+  // tagged correctly when it sits at one of the building's vertical limits.
+  const meshBottomZ = 0;
+  const meshTopZ = ifc.height;
 
   for (let t2 = 0; t2 < triCount; t2++) {
     const i0 = ifc.indices[t2 * 3];
@@ -138,7 +137,7 @@ export function convertIfcToCityJsonBuilding(
         3 +
       zShift;
     const cls = ifc.triangleSourceClass[t2];
-    const sem = classifyTriangleSurface(cls, nz, centerZ, topStoreyZ, bottomStoreyZ);
+    const sem = classifyTriangleSurface(cls, nz, centerZ, meshTopZ, meshBottomZ);
     meshFaceSemantics.push(idxFor[sem]);
   }
 

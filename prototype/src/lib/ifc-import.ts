@@ -95,6 +95,14 @@ const BUILDING_ELEMENT_TYPES = [
  * / OuterCeilingSurface / OuterFloorSurface, so finer-grained IFC classes
  * (IfcStair, IfcColumn, IfcBeam) collapse into 'wall' which renders as
  * generic envelope.
+ *
+ * IfcSlab is special: the IFC standard puts roofs, foundations, and
+ * intermediate floors all under IfcSlab, distinguished only by the
+ * `PredefinedType` attribute (`.ROOF.`, `.BASESLAB.`, `.FLOOR.`, etc.).
+ * The KIT FZK-Haus reference fixture, e.g., has no IfcRoof at all — the
+ * gable roof is two `IfcSlab` instances tagged `.ROOF.`. So when we see
+ * an IfcSlab we read PredefinedType in `parseIfc` and refine 'slab' to
+ * 'roof' / 'ground' / 'slab' before stashing it on the triangle.
  */
 function classFromIfcType(typeId: number): IfcSourceClass {
   switch (typeId) {
@@ -120,7 +128,32 @@ function classFromIfcType(typeId: number): IfcSourceClass {
   }
 }
 
-export type IfcSourceClass = 'wall' | 'slab' | 'roof' | 'window' | 'door' | 'other';
+/**
+ * Refine an IfcSlab into its CityJSON-friendly subtype using its
+ * PredefinedType. Returns the IfcSourceClass to assign per-triangle.
+ *   .ROOF.                → 'roof'    (gable / flat roof slab)
+ *   .BASESLAB. / .LANDING.→ 'ground'  (foundation, sits on the ground)
+ *   .FLOOR. / others      → 'slab'    (intermediate floor — not visible
+ *                                       from outside; tagged as wall by
+ *                                       the surface classifier so it
+ *                                       blends into the envelope colour)
+ */
+function refineSlabClass(predefinedType: string | null): IfcSourceClass {
+  if (!predefinedType) return 'slab';
+  const t = predefinedType.toUpperCase();
+  if (t === 'ROOF') return 'roof';
+  if (t === 'BASESLAB' || t === 'LANDING') return 'ground';
+  return 'slab';
+}
+
+export type IfcSourceClass =
+  | 'wall'
+  | 'slab'
+  | 'roof'
+  | 'ground'
+  | 'window'
+  | 'door'
+  | 'other';
 
 export interface IfcImportResult {
   /** IFC IfcBuilding GlobalId (UUID-like). */
@@ -238,19 +271,14 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
 
     // ── Coordination matrix ──────────────────────────────────────────
     // web-ifc derives a 4×4 coordination matrix from IfcSite +
-    // IfcGeometricRepresentationContext that puts the model close to
-    // origin in a standard orientation. For files where authoring tools
+    // IfcGeometricRepresentationContext. For files where authoring tools
     // exported the building far from origin (Revit's "shared coords",
-    // or geo-referenced models that put a building millions of metres
-    // out in some projected CRS), this matrix is the only thing that
-    // makes the resulting mesh sane to handle. Skipping it leaves
-    // vertices in their raw coords and our XY-centring at the end
-    // produces tight bboxes anyway, but rotations/scales we miss show
-    // up as obviously-wrong orientations. Apply it before placement
-    // transforms so the rest of the pipeline operates in the
-    // coordinated frame.
+    // geo-referenced models that put a building millions of metres out
+    // in some projected CRS), this matrix is the only thing that makes
+    // the mesh sane to handle. We apply it after the per-mesh placement
+    // matrix. For most well-formed IFC4 files (FZK-Haus, IFC reference
+    // fixtures) it's identity and the multiply is skipped.
     const coordRaw = api.GetCoordinationMatrix(modelID);
-    // Some web-ifc builds return a typed array, others a JS array.
     const C = Array.from(coordRaw as ArrayLike<number>);
     const hasCoordMat = C.length === 16 && !isIdentityMatrix(C);
 
@@ -271,7 +299,18 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
 
     api.StreamAllMeshesWithTypes(modelID, BUILDING_ELEMENT_TYPES, (flatMesh) => {
       const ifcType = api.GetLineType(modelID, flatMesh.expressID);
-      const sourceClass = classFromIfcType(ifcType);
+      let sourceClass = classFromIfcType(ifcType);
+      // IfcSlab covers roofs, foundations, and intermediate floors —
+      // refine via PredefinedType so a `.ROOF.` slab tags as `roof`,
+      // `.BASESLAB.` as `ground`. Skip the GetLine call for non-slabs;
+      // it's the slowest call in this loop.
+      if (sourceClass === 'slab') {
+        const slabLine = api.GetLine(modelID, flatMesh.expressID, false) as {
+          PredefinedType?: { value?: string } | string | null;
+        };
+        const pt = readIfcStringValue(slabLine.PredefinedType);
+        sourceClass = refineSlabClass(pt);
+      }
       const placedGeoms = flatMesh.geometries;
       const n = placedGeoms.size();
       for (let i = 0; i < n; i++) {
@@ -323,6 +362,13 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
           'IfcCovering, IfcChimney, IfcBuildingElementProxy.)'
       );
     }
+
+    // The IFC standard pins Z as up, web-ifc preserves that, and our
+    // matrix multiply respects it — so we trust the mesh's own min/max
+    // Z as ground / roof rather than reading IfcBuildingStorey.Elevation
+    // (which is in IFC's logical Z frame, NOT the mesh frame after
+    // placement-chain transforms — the two only agree when every
+    // placement is identity, which we cannot rely on).
 
     // Centre the mesh on the XY bbox-centre — leave Z alone so floor stays
     // at minZ. Caller adds a horizontal offset for placement and we know the
@@ -416,50 +462,66 @@ export type CitySurfaceType =
 
 /**
  * Tag a triangle with its CityJSON 2.0 semantic surface using BOTH the IFC's
- * source class (IfcWall, IfcWindow, IfcDoor, IfcRoof, IfcSlab, …) AND the
- * triangle's vertical normal component / Z position relative to the
- * building's storey elevations. Falls back to normal-only when the IFC
- * class is `other`.
+ * source class (IfcWall, IfcWindow, IfcDoor, IfcSlab.PredefinedType, …) AND
+ * the triangle's vertical normal component / Z position relative to the
+ * mesh's overall Z extrema.
  *
  * Mapping rules:
- *   IfcWindow                 → Window
- *   IfcDoor                   → Door
- *   IfcRoof                   → RoofSurface
- *   IfcWall                   → WallSurface (almost always vertical anyway)
- *   IfcSlab → top-most storey → RoofSurface
- *           → ground-level    → GroundSurface
- *           → mid-storey      → WallSurface (it's an inter-floor partition,
- *                                            not visible exterior; classifying
- *                                            it as wall keeps the cream tint
- *                                            for floor edges that show through
- *                                            staircase voids)
- *   other  → fall back to normal-only classification
+ *   IfcWindow                                          → Window
+ *   IfcDoor                                            → Door
+ *   IfcRoof / IfcSlab(.ROOF.)                          → RoofSurface
+ *   IfcWall                                            → WallSurface
+ *   IfcSlab(.BASESLAB. / .LANDING.) ('ground' class):
+ *       face normal points down → GroundSurface
+ *       face normal points up   → WallSurface (slab top edge — not the
+ *                                              ground exterior)
+ *   IfcSlab(.FLOOR. / generic) ('slab' class):
+ *       at the top of the mesh   → RoofSurface (flat-roof case where
+ *                                                the ridge slab is .FLOOR.
+ *                                                in some authoring tools)
+ *       at the bottom            → GroundSurface (foundation w/o .BASESLAB.)
+ *       in between               → WallSurface (intermediate floor)
+ *   IfcStair / IfcColumn / IfcBeam / proxies ('other'):
+ *       always                   → WallSurface (interior surfaces; tagging
+ *                                                them by normal mis-classifies
+ *                                                stair undersides as ground
+ *                                                across all heights)
  *
  * `nz` is the Z component of the triangle's outward normal.
- * `triCenterZ` is its centroid Z (used to decide top/bottom slab).
- * `topStoreyZ` / `bottomStoreyZ` come from the IFC's IfcBuildingStorey
- * elevations (callers pass null when the IFC has no storeys declared).
+ * `triCenterZ` is its centroid Z in the mesh frame.
+ * `meshTopZ` / `meshBottomZ` are the building's overall Z extrema in the
+ *   same frame — the converter passes them after applying its own zShift,
+ *   so a "near top" check is just `triCenterZ >= meshTopZ - eps`.
  */
 export function classifyTriangleSurface(
   cls: IfcSourceClass,
   nz: number,
   triCenterZ: number,
-  topStoreyZ: number | null,
-  bottomStoreyZ: number | null
+  meshTopZ: number,
+  meshBottomZ: number
 ): CitySurfaceType {
   if (cls === 'window') return 'Window';
   if (cls === 'door') return 'Door';
   if (cls === 'roof') return 'RoofSurface';
   if (cls === 'wall') return 'WallSurface';
+  // Foundation / landing slab: only the down-facing face is the actual
+  // ground; the top of the slab is just a floor edge — keep it as wall
+  // so it doesn't render in ground-grey on top.
+  if (cls === 'ground') return nz < -0.5 ? 'GroundSurface' : 'WallSurface';
+  // Generic slab: position-based, with a tolerance band so floor slabs
+  // that happen to sit at the building extremes still get tagged.
   if (cls === 'slab') {
-    if (topStoreyZ !== null && triCenterZ >= topStoreyZ - 0.5) return 'RoofSurface';
-    if (bottomStoreyZ !== null && triCenterZ <= bottomStoreyZ + 0.5) {
-      return nz < 0 ? 'GroundSurface' : 'WallSurface';
-    }
+    const eps = 0.5;
+    if (triCenterZ >= meshTopZ - eps) return 'RoofSurface';
+    if (triCenterZ <= meshBottomZ + eps) return nz < 0 ? 'GroundSurface' : 'WallSurface';
     return 'WallSurface';
   }
-  // 'other' — fall back to normal-only.
-  return classifySurfaceFromNormal(nz);
+  // 'other' — IfcStair, IfcColumn, IfcBeam, IfcBuildingElementProxy etc.
+  // These are usually internal and not part of the visible envelope.
+  // Tagging them WallSurface keeps the cream colour for the building
+  // mass; trying to be clever with the normal mis-classifies stair
+  // undersides as GroundSurface at upper-floor heights.
+  return 'WallSurface';
 }
 
 /** Original simple normal-only classifier, kept for backward compat with
