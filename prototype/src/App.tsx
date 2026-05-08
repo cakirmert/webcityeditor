@@ -24,7 +24,7 @@ import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
 import { mergeCityJson } from './lib/merge';
 import { parseCityJsonAuto } from './lib/cityjson';
-import type { IfcImportMetadata } from './lib/ifc-import';
+import type { IfcImportResult } from './lib/ifc-import';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
 import { applyFilter } from './lib/filter';
@@ -75,10 +75,10 @@ export default function App() {
    *  load minimal; toggled via the Toolbar's "☰ List" button. */
   const [showList, setShowList] = useState(false);
   /** IFC-import "awaiting placement click" state. When set, the map shows a
-   *  banner + crosshair cursor; the next click drops the IFC-derived
-   *  building at that lng/lat. */
+   *  banner + crosshair cursor; the next click drops the IFC's full
+   *  triangulated mesh at that lng/lat as an LoD 3 MultiSurface. */
   const [ifcPending, setIfcPending] = useState<{
-    metadata: IfcImportMetadata;
+    parsed: IfcImportResult;
     fileName: string;
   } | null>(null);
   /** True while the WASM is loading and parsing — disables the toolbar
@@ -562,9 +562,9 @@ export default function App() {
       if (!file) return;
       setIfcParsing(true);
       try {
-        const { parseIfcMetadata } = await import('./lib/ifc-import');
-        const metadata = await parseIfcMetadata(file);
-        setIfcPending({ metadata, fileName: file.name });
+        const { parseIfc } = await import('./lib/ifc-import');
+        const parsed = await parseIfc(file);
+        setIfcPending({ parsed, fileName: file.name });
       } catch (e) {
         alert(`IFC parse failed: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
@@ -575,57 +575,39 @@ export default function App() {
     input.click();
   }, [cityjson]);
 
-  /** Step 2: user clicked the map — convert IFC bbox into a footprint at
-   *  that location and use the existing parametric generator to drop a
-   *  Building. The IFC's GlobalId, source filename, and dimensions are
-   *  recorded as private `_ifc*` attributes for traceability. */
+  /** Step 2: user clicked the map — drop the IFC's full triangulated mesh
+   *  at that location. The mesh is emitted as an LoD 3 MultiSurface (with
+   *  GroundSurface / RoofSurface / WallSurface inferred from triangle
+   *  normals), preceded by a clean LoD 1 GroundSurface rectangle so the
+   *  map's footprint extractor renders a tidy outline. */
   const handleIfcPlacement = useCallback(
     async (lngLat: [number, number]) => {
       if (!cityjson || !ifcPending) return;
-      const crs = detectCrs(cityjson);
-      if (!crs.supported) {
-        alert(`Cannot place — host doc CRS ${crs.code} not supported`);
-        setIfcPending(null);
-        return;
-      }
-      const m = ifcPending.metadata;
       try {
         pushUndo(`Import IFC: ${ifcPending.fileName}`);
-        // Dynamic import keeps `buildFootprintFromIfc` (and its web-ifc
-        // dep graph) out of the initial bundle even though we use it here.
-        // The dynamic chunk is already in cache from step 1.
-        const { buildFootprintFromIfc } = await import('./lib/ifc-import');
-        const footprint = buildFootprintFromIfc(m, lngLat);
-        // Pick a sensible storey count — clamp to 1+ so DIN validation is happy.
-        const storeys = Math.max(1, m.storeyCount);
-        const result = generateBuilding(cityjson, {
-          targetCrs: crs.code,
-          footprintWgs84: footprint,
-          storeys,
-          eaveHeight: m.height,
-          ridgeHeight: m.height,
-          roofType: 'flat',
-          attributes: {
-            function: 'mixed',
-            _ifcSource: ifcPending.fileName,
-            _ifcGlobalId: m.globalId,
-            _ifcName: m.name,
-            _ifcWidth: m.width,
-            _ifcDepth: m.depth,
-            _ifcHeight: m.height,
-            _ifcStoreyCount: m.storeyCount,
-            ...(m.refLat !== null
-              ? { _ifcRefLatitude: m.refLat, _ifcRefLongitude: m.refLon }
-              : {}),
-          },
-        });
-        const id = insertBuilding(cityjson, result);
+        const { convertIfcToCityJsonBuilding } = await import('./lib/ifc-to-cityjson');
+        const result = convertIfcToCityJsonBuilding(
+          cityjson,
+          ifcPending.parsed,
+          lngLat,
+          ifcPending.fileName
+        );
+        // Append vertices + insert the CityObject (manual — generator's
+        // insertBuilding asserts vertexOffset === doc.vertices.length, which
+        // matches our converter's contract).
+        if (result.vertexOffset !== cityjson.vertices.length) {
+          throw new Error(
+            `Vertex offset mismatch: expected ${cityjson.vertices.length}, got ${result.vertexOffset}`
+          );
+        }
+        cityjson.vertices.push(...result.newVertices);
+        cityjson.CityObjects[result.id] = result.cityObject;
         setDirtyIds((prev) => {
           const next = new Set(prev);
-          next.add(id);
+          next.add(result.id);
           return next;
         });
-        setSelection({ objectId: id });
+        setSelection({ objectId: result.id });
         setReloadToken((t) => t + 1);
       } catch (e) {
         alert(
@@ -881,7 +863,7 @@ export default function App() {
         <div className="viewer-host" style={{ position: 'relative' }}>
           {ifcPending && (
             <IfcPlacementBanner
-              metadata={ifcPending.metadata}
+              parsed={ifcPending.parsed}
               fileName={ifcPending.fileName}
               onCancel={handleCancelIfcPlacement}
             />
@@ -1083,14 +1065,15 @@ function AttributePanelInline(props: {
  * also works). Click anywhere on the map to drop the building.
  */
 function IfcPlacementBanner({
-  metadata,
+  parsed,
   fileName,
   onCancel,
 }: {
-  metadata: IfcImportMetadata;
+  parsed: IfcImportResult;
   fileName: string;
   onCancel: () => void;
 }) {
+  const triCount = parsed.indices.length / 3;
   return (
     <div
       style={{
@@ -1112,21 +1095,22 @@ function IfcPlacementBanner({
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: 13 }}>
-            ⌂ Click on the map to place &ldquo;{metadata.name ?? fileName}&rdquo;
+            ⌂ Click on the map to place &ldquo;{parsed.name ?? fileName}&rdquo;
           </div>
           <div style={{ marginTop: 2, color: 'rgba(255,255,255,0.78)' }}>
-            {metadata.width.toFixed(1)} × {metadata.depth.toFixed(1)} ×{' '}
-            {metadata.height.toFixed(1)} m · {metadata.storeyCount} storey
-            {metadata.storeyCount === 1 ? '' : 's'}
-            {metadata.refLat !== null && metadata.refLon !== null && (
+            {parsed.width.toFixed(1)} × {parsed.depth.toFixed(1)} ×{' '}
+            {parsed.height.toFixed(1)} m · {parsed.storeyCount} storey
+            {parsed.storeyCount === 1 ? '' : 's'} · {triCount.toLocaleString()}{' '}
+            triangles
+            {parsed.refLat !== null && parsed.refLon !== null && (
               <>
-                {' '}· IFC site geo-ref {metadata.refLat.toFixed(4)}°N,{' '}
-                {metadata.refLon.toFixed(4)}°E
+                {' '}· IFC site geo-ref {parsed.refLat.toFixed(4)}°N,{' '}
+                {parsed.refLon.toFixed(4)}°E
               </>
             )}
           </div>
           <div style={{ marginTop: 2, fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>
-            ESC to cancel · parsed in {metadata.parseMs} ms
+            ESC to cancel · parsed in {parsed.parseMs} ms
           </div>
         </div>
         <button

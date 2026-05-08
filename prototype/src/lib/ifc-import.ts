@@ -1,34 +1,27 @@
 /**
- * IFC import — parses an IFC file via web-ifc (WASM), extracts the
- * IfcBuilding's bounding box and any IfcSite geo-reference, and surfaces
- * just enough metadata for the editor to drop a parametric LoD 2 box
- * onto the map at the caller's chosen location.
+ * IFC import — parses an IFC file via web-ifc (WASM), extracts both:
+ *   - the metadata the editor needs to surface in the placement banner
+ *     (bbox, storey count, IfcSite RefLatitude / RefLongitude),
+ *   - and the full triangulated mesh, transformed into a single coordinate
+ *     system anchored at the bbox's XY centre. The caller then translates
+ *     that mesh to a user-clicked map location and emits it as the
+ *     building's LoD 3 MultiSurface — the actual IFC shape, not a box.
  *
- * v1 scope: the IFC's actual triangulated geometry is NOT preserved in
- * the resulting CityJSON Building. Instead we extract:
- *   - bbox dimensions (width × depth × height)
- *   - storey count (from IfcBuildingStorey lines)
- *   - rough footprint orientation (long-axis bearing) for rectangle
- *     placement
- *   - IfcSite RefLatitude / RefLongitude / RefElevation if present
- *
- * The editor then uses its existing parametric generator to produce a
- * CityJSON Building with those dimensions, which renders cleanly on the
- * map and can be edited like any other parametric building. The original
- * IFC is referenced by `_ifcSource` (filename) and `_ifcGlobalId` so a
- * future v2 can pull in the full mesh as an LoD 3 sidecar.
+ * Per-triangle normals are computed during the stream so the conversion
+ * step can tag faces with their CityJSON 2.0 semantic surface
+ * (`GroundSurface` / `RoofSurface` / `WallSurface`) based on orientation.
  */
 
 import { IfcAPI, IFCSITE, IFCBUILDING, IFCBUILDINGSTOREY } from 'web-ifc';
 import wasmUrl from 'web-ifc/web-ifc.wasm?url';
 
-export interface IfcImportMetadata {
+export interface IfcImportResult {
   /** IFC IfcBuilding GlobalId (UUID-like). */
   globalId: string | null;
   /** Building name from IfcBuilding.Name, if present. */
   name: string | null;
-  /** Bounding box in IFC's local CRS (metres typically; some files use mm
-   *  but web-ifc normalises units). */
+  /** Bounding box of the FINAL mesh (after centring on XY-centre, Z left
+   *  in IFC's local frame). minX/minY are equal-and-opposite to maxX/maxY. */
   bbox: {
     minX: number;
     minY: number;
@@ -37,35 +30,38 @@ export interface IfcImportMetadata {
     maxY: number;
     maxZ: number;
   };
-  /** Width (X), depth (Y), height (Z) in metres derived from the bbox. */
   width: number;
   depth: number;
   height: number;
-  /** Number of IfcBuildingStorey entities — used as the editor's
-   *  default `storeys` value. */
   storeyCount: number;
-  /** IfcSite reference latitude (decimal degrees) if present. */
   refLat: number | null;
-  /** IfcSite reference longitude (decimal degrees) if present. */
   refLon: number | null;
-  /** IfcSite reference elevation (metres) if present. */
   refElevation: number | null;
-  /** Number of IFC entities scanned — debug / progress info. */
   entityCount: number;
-  /** Time spent parsing in ms. */
   parseMs: number;
+
+  // ── Triangulated mesh ────────────────────────────────────────────────
+  /** Vertex positions, flat XYZ XYZ XYZ … in IFC-local metres,
+   *  centred on the XY bbox-centre (so X∈[-w/2, w/2], Y∈[-d/2, d/2]).
+   *  Z is left as the IFC's local Z, with `minZ` reported separately so
+   *  the caller can ground the building at z=0 if it wants. */
+  vertices: Float32Array;
+  /** Triangle indices (3 per triangle). */
+  indices: Uint32Array;
+  /** Per-triangle face normal (3 floats per triangle, normalised). */
+  triangleNormals: Float32Array;
+  /** Per-triangle source object class — coarse string used to back-fill
+   *  semantic surface tagging when the normal alone is ambiguous. Currently
+   *  always 'unknown' but reserved for future use (IFCWALL → wall, etc.). */
+  triangleSourceClass: string[];
 }
 
 let apiPromise: Promise<IfcAPI> | null = null;
 
-/** Lazily initialise the web-ifc WASM module. The module is ~2 MB so we
- *  defer loading until the user actually imports an IFC. */
 async function getIfcApi(): Promise<IfcAPI> {
   if (!apiPromise) {
     apiPromise = (async () => {
       const api = new IfcAPI();
-      // Vite resolves `?url` imports to a final asset path; web-ifc's
-      // SetWasmPath wants the directory, so we strip the filename.
       const wasmDir = wasmUrl.substring(0, wasmUrl.lastIndexOf('/') + 1);
       api.SetWasmPath(wasmDir);
       await api.Init();
@@ -76,12 +72,15 @@ async function getIfcApi(): Promise<IfcAPI> {
 }
 
 /**
- * Parse an IFC file and extract the metadata listed above. Throws with a
- * friendly message if the file is malformed, has no IfcBuilding, or uses
- * an unsupported IFC schema (web-ifc covers IFC2x3 and IFC4 — anything
- * older is rare in modern files).
+ * Parse an IFC file. Streams every PlacedGeometry, applies its 4×4 placement
+ * matrix, accumulates a single global mesh + per-triangle normals, and
+ * returns everything alongside the bbox / georef metadata.
+ *
+ * The vertex array is centred on the XY bbox-centre at the end of the pass,
+ * so a placement step on the caller's side just adds an offset to land the
+ * IFC at any lng/lat.
  */
-export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
+export async function parseIfc(file: File): Promise<IfcImportResult> {
   const t0 = performance.now();
   const api = await getIfcApi();
   const data = new Uint8Array(await file.arrayBuffer());
@@ -99,7 +98,6 @@ export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
     const globalId = readIfcStringValue(buildingLine.GlobalId);
     const name = readIfcStringValue(buildingLine.Name);
 
-    // ── IfcSite georef ────────────────────────────────────────────────
     let refLat: number | null = null;
     let refLon: number | null = null;
     let refElevation: number | null = null;
@@ -115,11 +113,13 @@ export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
       refElevation = readIfcNumber(siteLine.RefElevation);
     }
 
-    // ── Storey count ──────────────────────────────────────────────────
     const storeys = api.GetLineIDsWithType(modelID, IFCBUILDINGSTOREY);
     const storeyCount = Math.max(1, storeys.size());
 
-    // ── Bounding box from streamed geometry ───────────────────────────
+    // ── Stream meshes — accumulate world-space vertices + indices ─────
+    // We collect into JS arrays first, then pack into Float32/Uint32Array.
+    const positions: number[] = [];
+    const indexBuffer: number[] = [];
     let minX = Infinity,
       minY = Infinity,
       minZ = Infinity;
@@ -134,16 +134,22 @@ export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
         const placed = placedGeoms.get(i);
         const geom = api.GetGeometry(modelID, placed.geometryExpressID);
         const verts = api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
+        const idx = api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
         const m = placed.flatTransformation;
-        // verts is interleaved: pos(3) + normal(3) per vertex = 6 floats.
+
+        // Append vertices, applying the placement matrix as we go.
+        // verts is interleaved pos(3) + normal(3) per vertex; we only keep
+        // positions because triangle normals are recomputed below to avoid
+        // accumulated float error from IFC's per-vertex normals.
+        const base = positions.length / 3;
         for (let v = 0; v < verts.length; v += 6) {
           const x = verts[v];
           const y = verts[v + 1];
           const z = verts[v + 2];
-          // Apply the placement matrix (column-major 4x4).
           const wx = m[0] * x + m[4] * y + m[8] * z + m[12];
           const wy = m[1] * x + m[5] * y + m[9] * z + m[13];
           const wz = m[2] * x + m[6] * y + m[10] * z + m[14];
+          positions.push(wx, wy, wz);
           if (wx < minX) minX = wx;
           if (wy < minY) minY = wy;
           if (wz < minZ) minZ = wz;
@@ -151,23 +157,77 @@ export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
           if (wy > maxY) maxY = wy;
           if (wz > maxZ) maxZ = wz;
         }
+
+        // Append indices, shifted by the new vertex range start.
+        for (let j = 0; j < idx.length; j++) indexBuffer.push(idx[j] + base);
         geom.delete();
       }
     });
 
-    if (minX === Infinity) {
+    if (positions.length === 0) {
       throw new Error('IFC file contained no triangulatable geometry');
     }
+
+    // Centre the mesh on the XY bbox-centre — leave Z alone so floor stays
+    // at minZ. Caller adds a horizontal offset for placement and we know the
+    // IFC's "ground" is at z = minZ if needed.
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const positionsArr = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i += 3) {
+      positionsArr[i] = positions[i] - cx;
+      positionsArr[i + 1] = positions[i + 1] - cy;
+      positionsArr[i + 2] = positions[i + 2];
+    }
+    const indicesArr = new Uint32Array(indexBuffer);
+
+    // Triangle face normals (one per triangle, normalised).
+    const triCount = indicesArr.length / 3;
+    const normals = new Float32Array(triCount * 3);
+    for (let t = 0; t < triCount; t++) {
+      const i0 = indicesArr[t * 3] * 3;
+      const i1 = indicesArr[t * 3 + 1] * 3;
+      const i2 = indicesArr[t * 3 + 2] * 3;
+      const ux = positionsArr[i1] - positionsArr[i0];
+      const uy = positionsArr[i1 + 1] - positionsArr[i0 + 1];
+      const uz = positionsArr[i1 + 2] - positionsArr[i0 + 2];
+      const vx = positionsArr[i2] - positionsArr[i0];
+      const vy = positionsArr[i2 + 1] - positionsArr[i0 + 1];
+      const vz = positionsArr[i2 + 2] - positionsArr[i0 + 2];
+      let nx = uy * vz - uz * vy;
+      let ny = uz * vx - ux * vz;
+      let nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+      normals[t * 3] = nx;
+      normals[t * 3 + 1] = ny;
+      normals[t * 3 + 2] = nz;
+    }
+    const sourceClass = new Array<string>(triCount).fill('unknown');
 
     const entityCount = api.GetAllLines(modelID).size();
     api.CloseModel(modelID);
 
+    // The bbox we report is centred-on-XY (so minX = -width/2, etc.),
+    // matching the position layout the caller will operate on.
+    const width = maxX - minX;
+    const depth = maxY - minY;
+
     return {
       globalId,
       name,
-      bbox: { minX, minY, minZ, maxX, maxY, maxZ },
-      width: maxX - minX,
-      depth: maxY - minY,
+      bbox: {
+        minX: -width / 2,
+        minY: -depth / 2,
+        minZ,
+        maxX: width / 2,
+        maxY: depth / 2,
+        maxZ,
+      },
+      width,
+      depth,
       height: maxZ - minZ,
       storeyCount,
       refLat,
@@ -175,6 +235,10 @@ export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
       refElevation,
       entityCount,
       parseMs: Math.round(performance.now() - t0),
+      vertices: positionsArr,
+      indices: indicesArr,
+      triangleNormals: normals,
+      triangleSourceClass: sourceClass,
     };
   } catch (e) {
     api.CloseModel(modelID);
@@ -183,17 +247,28 @@ export async function parseIfcMetadata(file: File): Promise<IfcImportMetadata> {
 }
 
 /**
- * Convert an IFC's bbox metadata + a placement (centre lng/lat) into a
- * footprint rectangle in WGS84. The footprint is axis-aligned in WGS84 —
- * for v1 we don't try to preserve the IFC's local rotation. Rotating after
- * placement is the user's job (they have the editor's transform tool).
+ * Tag a triangle's face normal with a CityJSON 2.0 semantic surface type:
+ *   - normal pointing -Z dominantly  → GroundSurface
+ *   - normal pointing +Z dominantly  → RoofSurface
+ *   - mostly horizontal              → WallSurface
  *
- * The rectangle is centred on `placement` and sized to (width × depth) in
- * metres, projected via small equirectangular approximations. For
- * building-scale (≤ 1 km) this is plenty accurate.
+ * Threshold: |nz| > 0.7 counts as "dominantly vertical" (≈ 45° pitch). Above
+ * that threshold normals are nearly horizontal, well within the typical roof
+ * pitch range without misclassifying steep walls.
+ */
+export function classifySurfaceFromNormal(nz: number): 'GroundSurface' | 'RoofSurface' | 'WallSurface' {
+  if (nz < -0.7) return 'GroundSurface';
+  if (nz > 0.7) return 'RoofSurface';
+  return 'WallSurface';
+}
+
+/**
+ * Build a 4-vertex closed CCW WGS84 footprint rectangle centred on
+ * `placementWgs84` and sized to (width × depth) in metres. Used both as a
+ * fallback for the map's extractFootprints AND as a quick sanity outline.
  */
 export function buildFootprintFromIfc(
-  metadata: IfcImportMetadata,
+  metadata: { width: number; depth: number },
   placementWgs84: [number, number]
 ): [number, number][] {
   const [lng, lat] = placementWgs84;
@@ -233,11 +308,6 @@ function readIfcNumber(v: unknown): number | null {
   return null;
 }
 
-/**
- * IFC stores RefLatitude / RefLongitude as `[degrees, minutes, seconds,
- * (microseconds optional)]`. Convert to a single signed decimal degree.
- * Returns null if the input isn't a usable list.
- */
 function readIfcDmsToDecimal(v: unknown): number | null {
   if (!Array.isArray(v) || v.length < 3) return null;
   const parts = v.map((entry) => {

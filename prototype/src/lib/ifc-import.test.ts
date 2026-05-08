@@ -1,21 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildFootprintFromIfc, type IfcImportMetadata } from './ifc-import';
+import {
+  buildFootprintFromIfc,
+  classifySurfaceFromNormal,
+} from './ifc-import';
 
-function meta(width: number, depth: number, height = 10): IfcImportMetadata {
-  return {
-    globalId: 'test-guid',
-    name: 'TestBuilding',
-    bbox: { minX: 0, minY: 0, minZ: 0, maxX: width, maxY: depth, maxZ: height },
-    width,
-    depth,
-    height,
-    storeyCount: 3,
-    refLat: null,
-    refLon: null,
-    refElevation: null,
-    entityCount: 100,
-    parseMs: 50,
-  };
+function meta(width: number, depth: number) {
+  return { width, depth };
 }
 
 describe('buildFootprintFromIfc', () => {
@@ -66,5 +56,30 @@ describe('buildFootprintFromIfc', () => {
     const maxY = Math.max(...fp.map((p) => p[1]));
     expect(maxX - placement[0]).toBeCloseTo(placement[0] - minX, 6);
     expect(maxY - placement[1]).toBeCloseTo(placement[1] - minY, 6);
+  });
+});
+
+describe('classifySurfaceFromNormal', () => {
+  it('strongly downward normal → GroundSurface', () => {
+    expect(classifySurfaceFromNormal(-0.95)).toBe('GroundSurface');
+    expect(classifySurfaceFromNormal(-1.0)).toBe('GroundSurface');
+  });
+
+  it('strongly upward normal → RoofSurface', () => {
+    expect(classifySurfaceFromNormal(0.95)).toBe('RoofSurface');
+    expect(classifySurfaceFromNormal(1.0)).toBe('RoofSurface');
+  });
+
+  it('horizontal-ish normal → WallSurface', () => {
+    expect(classifySurfaceFromNormal(0)).toBe('WallSurface');
+    expect(classifySurfaceFromNormal(0.5)).toBe('WallSurface');
+    expect(classifySurfaceFromNormal(-0.5)).toBe('WallSurface');
+  });
+
+  it('the 0.7 threshold matches a 45° pitch — anything steeper is wall', () => {
+    expect(classifySurfaceFromNormal(0.71)).toBe('RoofSurface');
+    expect(classifySurfaceFromNormal(0.69)).toBe('WallSurface');
+    expect(classifySurfaceFromNormal(-0.71)).toBe('GroundSurface');
+    expect(classifySurfaceFromNormal(-0.69)).toBe('WallSurface');
   });
 });
