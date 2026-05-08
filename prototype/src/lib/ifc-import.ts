@@ -363,12 +363,42 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
       );
     }
 
-    // The IFC standard pins Z as up, web-ifc preserves that, and our
-    // matrix multiply respects it — so we trust the mesh's own min/max
-    // Z as ground / roof rather than reading IfcBuildingStorey.Elevation
-    // (which is in IFC's logical Z frame, NOT the mesh frame after
-    // placement-chain transforms — the two only agree when every
-    // placement is identity, which we cannot rely on).
+    // ── Y-up → Z-up rotation ──────────────────────────────────────────
+    // The IFC spec puts Z up, but web-ifc's `flatTransformation` matrices
+    // bake in a -90° rotation around X — i.e. each per-mesh placement
+    // sends IFC's local Z (the up axis, e.g. wall extrusion direction)
+    // to world +Y, and IFC's local Y to world -Z. The output mesh ends
+    // up Y-up. (You can see it in the matrices web-ifc returns: column 2,
+    // the local-Z basis vector in world coords, is consistently
+    // (0, 1, 0) regardless of IfcLocalPlacement rotation around the
+    // vertical axis.) We undo that by rotating the assembled mesh +90°
+    // around X — `(x, y, z) → (x, -z, y)` — so the rest of the pipeline
+    // (CityJSON converter, three.js viewer with `camera.up = (0,0,1)`,
+    // Three.js loader's surface materials) sees a Z-up mesh.
+    //
+    // Sanity check on FZK-Haus: pre-rotation Y range = 6.52 (the actual
+    // building height, ground at y≈-3.2, gable peak at y≈+3.2);
+    // pre-rotation Z range = 11.0 (the building's plan-depth, slab's
+    // local Y direction). Post-rotation: Z range = 6.52 (height ✓),
+    // Y range = 11.0 (plan-depth ✓).
+    for (let i = 0; i < positions.length; i += 3) {
+      const oldY = positions[i + 1];
+      const oldZ = positions[i + 2];
+      positions[i + 1] = -oldZ;
+      positions[i + 2] = oldY;
+    }
+    // After the rotation, X is unchanged but Y and Z are swapped/negated.
+    // Recompute the affected min/max.
+    {
+      const newMinY = -maxZ;
+      const newMaxY = -minZ;
+      const newMinZ = minY;
+      const newMaxZ = maxY;
+      minY = newMinY;
+      maxY = newMaxY;
+      minZ = newMinZ;
+      maxZ = newMaxZ;
+    }
 
     // Centre the mesh on the XY bbox-centre — leave Z alone so floor stays
     // at minZ. Caller adds a horizontal offset for placement and we know the
