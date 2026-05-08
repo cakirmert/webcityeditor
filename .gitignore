@@ -55,3 +55,19 @@ data/
 
 # Third-party CLI tools downloaded during setup (citygml-tools, citydb-tool, …)
 tools/
+
+# Local demo folder — see demo/README.md. Sample IFCs and CityJSON tiles
+# get downloaded here for in-person demos; they're public-domain test
+# fixtures but we don't want to bloat the repo with binaries.
+demo/
+
+# Browser-driven test artefacts. The dev server serves /public for fetch
+# during in-browser demos; we stage demo .ifc / .city.json here when
+# automating the flow but they're never source. Vite's vite-env.d.ts +
+# any TS files in /public stay tracked (none today).
+.ifc-test/
+.docx-build/
+.docx-extract/
+prototype/public/*.ifc
+prototype/public/*.city.json
+prototype/public/*.city.jsonl
