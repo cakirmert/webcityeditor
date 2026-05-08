@@ -1,6 +1,10 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument, CityObject } from '../types';
-import { classifySurfaceFromNormal, type IfcImportResult } from './ifc-import';
+import {
+  classifyTriangleSurface,
+  type CitySurfaceType,
+  type IfcImportResult,
+} from './ifc-import';
 import { detectCrs } from './projection';
 
 export interface IfcConversionResult {
@@ -90,18 +94,52 @@ export function convertIfcToCityJsonBuilding(
   const meshOffset = vertexOffset + meshStartLocal;
 
   // Triangulated faces — one face per triangle, single ring of 3 verts.
+  // Each face is tagged with a CityJSON 2.0 semantic surface type derived
+  // from BOTH the IFC source class AND (for slabs) the triangle's Z position
+  // relative to the IFC's storey elevations.
   const triCount = ifc.indices.length / 3;
   const meshFaces: number[][] = [];
   const meshFaceSemantics: number[] = [];
-  // Surfaces array indices: 0=Ground, 1=Roof, 2=Wall (we'll define below).
+  const surfaceTypeOrder: CitySurfaceType[] = [
+    'GroundSurface',
+    'RoofSurface',
+    'WallSurface',
+    'Window',
+    'Door',
+  ];
+  const idxFor: Record<CitySurfaceType, number> = {
+    GroundSurface: 0,
+    RoofSurface: 1,
+    WallSurface: 2,
+    Window: 3,
+    Door: 4,
+  };
+
+  // Storey-elevation extrema with the same z-shift the converter applies to
+  // vertices (so triangle Z and storey Z compare in the same frame).
+  const topStoreyZ =
+    ifc.storeyElevations.length > 0
+      ? ifc.storeyElevations[ifc.storeyElevations.length - 1] + zShift
+      : null;
+  const bottomStoreyZ =
+    ifc.storeyElevations.length > 0 ? ifc.storeyElevations[0] + zShift : null;
+
   for (let t2 = 0; t2 < triCount; t2++) {
     const i0 = ifc.indices[t2 * 3];
     const i1 = ifc.indices[t2 * 3 + 1];
     const i2 = ifc.indices[t2 * 3 + 2];
     meshFaces.push([meshOffset + i0, meshOffset + i1, meshOffset + i2]);
     const nz = ifc.triangleNormals[t2 * 3 + 2];
-    const semType = classifySurfaceFromNormal(nz);
-    meshFaceSemantics.push(semType === 'GroundSurface' ? 0 : semType === 'RoofSurface' ? 1 : 2);
+    // Triangle centroid Z (in the post-shift frame, where ifc.bbox.minZ → 0).
+    const centerZ =
+      (ifc.vertices[i0 * 3 + 2] +
+        ifc.vertices[i1 * 3 + 2] +
+        ifc.vertices[i2 * 3 + 2]) /
+        3 +
+      zShift;
+    const cls = ifc.triangleSourceClass[t2];
+    const sem = classifyTriangleSurface(cls, nz, centerZ, topStoreyZ, bottomStoreyZ);
+    meshFaceSemantics.push(idxFor[sem]);
   }
 
   // ── 3. CityObject ─────────────────────────────────────────────────────
@@ -138,17 +176,14 @@ export function convertIfcToCityJsonBuilding(
           values: [0],
         },
       } as unknown,
-      // [1] LoD 3.0 — the actual IFC triangulated mesh, semantically tagged.
+      // [1] LoD 3.0 — the actual IFC triangulated mesh, semantically tagged
+      // using both IFC source class and triangle position (for slabs).
       {
         type: 'MultiSurface',
         lod: '3.0',
         boundaries: meshFaces.map((f) => [f]),
         semantics: {
-          surfaces: [
-            { type: 'GroundSurface' },
-            { type: 'RoofSurface' },
-            { type: 'WallSurface' },
-          ],
+          surfaces: surfaceTypeOrder.map((t) => ({ type: t })),
           values: meshFaceSemantics,
         },
       } as unknown,

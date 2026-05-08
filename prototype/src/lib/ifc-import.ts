@@ -12,8 +12,115 @@
  * (`GroundSurface` / `RoofSurface` / `WallSurface`) based on orientation.
  */
 
-import { IfcAPI, IFCSITE, IFCBUILDING, IFCBUILDINGSTOREY } from 'web-ifc';
+import {
+  IfcAPI,
+  IFCSITE,
+  IFCBUILDING,
+  IFCBUILDINGSTOREY,
+  IFCWALL,
+  IFCWALLSTANDARDCASE,
+  IFCWALLELEMENTEDCASE,
+  IFCCURTAINWALL,
+  IFCSLAB,
+  IFCSLABSTANDARDCASE,
+  IFCSLABELEMENTEDCASE,
+  IFCROOF,
+  IFCWINDOW,
+  IFCWINDOWSTANDARDCASE,
+  IFCDOOR,
+  IFCDOORSTANDARDCASE,
+  IFCSTAIR,
+  IFCSTAIRFLIGHT,
+  IFCRAMP,
+  IFCRAMPFLIGHT,
+  IFCCOLUMN,
+  IFCCOLUMNSTANDARDCASE,
+  IFCBEAM,
+  IFCBEAMSTANDARDCASE,
+  IFCRAILING,
+  IFCMEMBER,
+  IFCMEMBERSTANDARDCASE,
+  IFCPLATE,
+  IFCPLATESTANDARDCASE,
+  IFCFOOTING,
+  IFCBUILDINGELEMENTPROXY,
+  IFCCOVERING,
+  IFCCHIMNEY,
+} from 'web-ifc';
 import wasmUrl from 'web-ifc/web-ifc.wasm?url';
+
+/**
+ * IFC entity-type IDs that contribute geometry we want to keep. We
+ * deliberately EXCLUDE site terrain (IfcSite, IfcGeographicElement),
+ * vegetation, and furniture — they bloat the building bbox and aren't part
+ * of the building shell we care about. Any future "include site terrain"
+ * mode would expand this list.
+ */
+const BUILDING_ELEMENT_TYPES = [
+  IFCWALL,
+  IFCWALLSTANDARDCASE,
+  IFCWALLELEMENTEDCASE,
+  IFCCURTAINWALL,
+  IFCSLAB,
+  IFCSLABSTANDARDCASE,
+  IFCSLABELEMENTEDCASE,
+  IFCROOF,
+  IFCWINDOW,
+  IFCWINDOWSTANDARDCASE,
+  IFCDOOR,
+  IFCDOORSTANDARDCASE,
+  IFCSTAIR,
+  IFCSTAIRFLIGHT,
+  IFCRAMP,
+  IFCRAMPFLIGHT,
+  IFCCOLUMN,
+  IFCCOLUMNSTANDARDCASE,
+  IFCBEAM,
+  IFCBEAMSTANDARDCASE,
+  IFCRAILING,
+  IFCMEMBER,
+  IFCMEMBERSTANDARDCASE,
+  IFCPLATE,
+  IFCPLATESTANDARDCASE,
+  IFCFOOTING,
+  IFCCOVERING,
+  IFCCHIMNEY,
+  IFCBUILDINGELEMENTPROXY,
+];
+
+/**
+ * Map IFC entity-type IDs to a coarse class string we use downstream for
+ * semantic-surface tagging. The mapping is deliberately lossy — CityJSON
+ * 2.0 only has GroundSurface / WallSurface / RoofSurface / Window / Door
+ * / OuterCeilingSurface / OuterFloorSurface, so finer-grained IFC classes
+ * (IfcStair, IfcColumn, IfcBeam) collapse into 'wall' which renders as
+ * generic envelope.
+ */
+function classFromIfcType(typeId: number): IfcSourceClass {
+  switch (typeId) {
+    case IFCWALL:
+    case IFCWALLSTANDARDCASE:
+    case IFCWALLELEMENTEDCASE:
+    case IFCCURTAINWALL:
+      return 'wall';
+    case IFCSLAB:
+    case IFCSLABSTANDARDCASE:
+    case IFCSLABELEMENTEDCASE:
+      return 'slab';
+    case IFCROOF:
+      return 'roof';
+    case IFCWINDOW:
+    case IFCWINDOWSTANDARDCASE:
+      return 'window';
+    case IFCDOOR:
+    case IFCDOORSTANDARDCASE:
+      return 'door';
+    default:
+      return 'other';
+  }
+}
+
+export type IfcSourceClass = 'wall' | 'slab' | 'roof' | 'window' | 'door' | 'other';
 
 export interface IfcImportResult {
   /** IFC IfcBuilding GlobalId (UUID-like). */
@@ -50,10 +157,14 @@ export interface IfcImportResult {
   indices: Uint32Array;
   /** Per-triangle face normal (3 floats per triangle, normalised). */
   triangleNormals: Float32Array;
-  /** Per-triangle source object class — coarse string used to back-fill
-   *  semantic surface tagging when the normal alone is ambiguous. Currently
-   *  always 'unknown' but reserved for future use (IFCWALL → wall, etc.). */
-  triangleSourceClass: string[];
+  /** Per-triangle source IFC class. Used by the converter to assign
+   *  CityJSON semantic surfaces (IfcWall→Wall, IfcWindow→Window, …) — this
+   *  is far more reliable than guessing from the triangle normal alone. */
+  triangleSourceClass: IfcSourceClass[];
+  /** Storey elevations from the IFC's IfcBuildingStorey entries. Used to
+   *  decide whether an IfcSlab triangle is a roof (top storey) or ground
+   *  (bottom storey) when the normal is ambiguous. */
+  storeyElevations: number[];
 }
 
 let apiPromise: Promise<IfcAPI> | null = null;
@@ -115,11 +226,24 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
 
     const storeys = api.GetLineIDsWithType(modelID, IFCBUILDINGSTOREY);
     const storeyCount = Math.max(1, storeys.size());
+    // Capture storey elevations — used downstream to decide
+    // top-vs-bottom slab classification.
+    const storeyElevations: number[] = [];
+    for (let i = 0; i < storeys.size(); i++) {
+      const st = api.GetLine(modelID, storeys.get(i), true) as { Elevation?: { value: number } | number | null };
+      const e = readIfcNumber(st.Elevation);
+      if (e !== null) storeyElevations.push(e);
+    }
+    storeyElevations.sort((a, b) => a - b);
 
-    // ── Stream meshes — accumulate world-space vertices + indices ─────
-    // We collect into JS arrays first, then pack into Float32/Uint32Array.
+    // ── Stream BUILDING-ELEMENT meshes only — terrain/site geometry is
+    // ── deliberately skipped so the bbox stays tight on the actual
+    // ── building shell. Each PlacedGeometry is tagged with its source
+    // ── IFC class (wall/slab/roof/window/door/other) for downstream
+    // ── semantic-surface assignment.
     const positions: number[] = [];
     const indexBuffer: number[] = [];
+    const triClasses: IfcSourceClass[] = [];
     let minX = Infinity,
       minY = Infinity,
       minZ = Infinity;
@@ -127,7 +251,9 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
       maxY = -Infinity,
       maxZ = -Infinity;
 
-    api.StreamAllMeshes(modelID, (flatMesh) => {
+    api.StreamAllMeshesWithTypes(modelID, BUILDING_ELEMENT_TYPES, (flatMesh) => {
+      const ifcType = api.GetLineType(modelID, flatMesh.expressID);
+      const sourceClass = classFromIfcType(ifcType);
       const placedGeoms = flatMesh.geometries;
       const n = placedGeoms.size();
       for (let i = 0; i < n; i++) {
@@ -137,10 +263,6 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
         const idx = api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
         const m = placed.flatTransformation;
 
-        // Append vertices, applying the placement matrix as we go.
-        // verts is interleaved pos(3) + normal(3) per vertex; we only keep
-        // positions because triangle normals are recomputed below to avoid
-        // accumulated float error from IFC's per-vertex normals.
         const base = positions.length / 3;
         for (let v = 0; v < verts.length; v += 6) {
           const x = verts[v];
@@ -157,15 +279,21 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
           if (wy > maxY) maxY = wy;
           if (wz > maxZ) maxZ = wz;
         }
-
-        // Append indices, shifted by the new vertex range start.
         for (let j = 0; j < idx.length; j++) indexBuffer.push(idx[j] + base);
+        // One class entry per emitted triangle (3 indices = 1 triangle).
+        const triCountFromThis = idx.length / 3;
+        for (let t = 0; t < triCountFromThis; t++) triClasses.push(sourceClass);
         geom.delete();
       }
     });
 
     if (positions.length === 0) {
-      throw new Error('IFC file contained no triangulatable geometry');
+      throw new Error(
+        'IFC file has no triangulatable building geometry. (Looked for ' +
+          'IfcWall, IfcSlab, IfcRoof, IfcWindow, IfcDoor, IfcStair, IfcColumn, ' +
+          'IfcBeam, IfcRailing, IfcMember, IfcPlate, IfcFooting, ' +
+          'IfcCovering, IfcChimney, IfcBuildingElementProxy.)'
+      );
     }
 
     // Centre the mesh on the XY bbox-centre — leave Z alone so floor stays
@@ -205,7 +333,11 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
       normals[t * 3 + 1] = ny;
       normals[t * 3 + 2] = nz;
     }
-    const sourceClass = new Array<string>(triCount).fill('unknown');
+    if (triClasses.length !== triCount) {
+      throw new Error(
+        `Internal error: tri-class array (${triClasses.length}) doesn't match triangle count (${triCount})`
+      );
+    }
 
     const entityCount = api.GetAllLines(modelID).size();
     api.CloseModel(modelID);
@@ -238,7 +370,8 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
       vertices: positionsArr,
       indices: indicesArr,
       triangleNormals: normals,
-      triangleSourceClass: sourceClass,
+      triangleSourceClass: triClasses,
+      storeyElevations,
     };
   } catch (e) {
     api.CloseModel(modelID);
@@ -246,17 +379,66 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
   }
 }
 
+export type CitySurfaceType =
+  | 'GroundSurface'
+  | 'RoofSurface'
+  | 'WallSurface'
+  | 'Window'
+  | 'Door';
+
 /**
- * Tag a triangle's face normal with a CityJSON 2.0 semantic surface type:
- *   - normal pointing -Z dominantly  → GroundSurface
- *   - normal pointing +Z dominantly  → RoofSurface
- *   - mostly horizontal              → WallSurface
+ * Tag a triangle with its CityJSON 2.0 semantic surface using BOTH the IFC's
+ * source class (IfcWall, IfcWindow, IfcDoor, IfcRoof, IfcSlab, …) AND the
+ * triangle's vertical normal component / Z position relative to the
+ * building's storey elevations. Falls back to normal-only when the IFC
+ * class is `other`.
  *
- * Threshold: |nz| > 0.7 counts as "dominantly vertical" (≈ 45° pitch). Above
- * that threshold normals are nearly horizontal, well within the typical roof
- * pitch range without misclassifying steep walls.
+ * Mapping rules:
+ *   IfcWindow                 → Window
+ *   IfcDoor                   → Door
+ *   IfcRoof                   → RoofSurface
+ *   IfcWall                   → WallSurface (almost always vertical anyway)
+ *   IfcSlab → top-most storey → RoofSurface
+ *           → ground-level    → GroundSurface
+ *           → mid-storey      → WallSurface (it's an inter-floor partition,
+ *                                            not visible exterior; classifying
+ *                                            it as wall keeps the cream tint
+ *                                            for floor edges that show through
+ *                                            staircase voids)
+ *   other  → fall back to normal-only classification
+ *
+ * `nz` is the Z component of the triangle's outward normal.
+ * `triCenterZ` is its centroid Z (used to decide top/bottom slab).
+ * `topStoreyZ` / `bottomStoreyZ` come from the IFC's IfcBuildingStorey
+ * elevations (callers pass null when the IFC has no storeys declared).
  */
-export function classifySurfaceFromNormal(nz: number): 'GroundSurface' | 'RoofSurface' | 'WallSurface' {
+export function classifyTriangleSurface(
+  cls: IfcSourceClass,
+  nz: number,
+  triCenterZ: number,
+  topStoreyZ: number | null,
+  bottomStoreyZ: number | null
+): CitySurfaceType {
+  if (cls === 'window') return 'Window';
+  if (cls === 'door') return 'Door';
+  if (cls === 'roof') return 'RoofSurface';
+  if (cls === 'wall') return 'WallSurface';
+  if (cls === 'slab') {
+    if (topStoreyZ !== null && triCenterZ >= topStoreyZ - 0.5) return 'RoofSurface';
+    if (bottomStoreyZ !== null && triCenterZ <= bottomStoreyZ + 0.5) {
+      return nz < 0 ? 'GroundSurface' : 'WallSurface';
+    }
+    return 'WallSurface';
+  }
+  // 'other' — fall back to normal-only.
+  return classifySurfaceFromNormal(nz);
+}
+
+/** Original simple normal-only classifier, kept for backward compat with
+ *  tests + the converter's `other` fallback path. */
+export function classifySurfaceFromNormal(
+  nz: number
+): 'GroundSurface' | 'RoofSurface' | 'WallSurface' {
   if (nz < -0.7) return 'GroundSurface';
   if (nz > 0.7) return 'RoofSurface';
   return 'WallSurface';

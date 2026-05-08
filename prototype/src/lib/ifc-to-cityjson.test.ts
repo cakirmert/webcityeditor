@@ -77,7 +77,8 @@ function syntheticBoxMesh(): IfcImportResult {
     vertices,
     indices,
     triangleNormals,
-    triangleSourceClass: new Array(12).fill('unknown'),
+    triangleSourceClass: new Array(12).fill('other') as Array<'other'>,
+    storeyElevations: [0],
   };
 }
 
@@ -121,16 +122,26 @@ describe('convertIfcToCityJsonBuilding', () => {
       expect(face).toHaveLength(1); // one ring per triangle
       expect(face[0]).toHaveLength(3); // 3 verts
     }
-    // Surfaces array has Ground/Roof/Wall in fixed order
+    // Surfaces array always has the same 5 types in fixed order so the
+    // index mapping is stable across IFCs (Window/Door are always reachable
+    // even if no triangle of that class exists).
     expect(lod3.semantics.surfaces).toEqual([
       { type: 'GroundSurface' },
       { type: 'RoofSurface' },
       { type: 'WallSurface' },
+      { type: 'Window' },
+      { type: 'Door' },
     ]);
-    // Semantics tags: 2 ground (0), 2 roof (1), 8 wall (2)
-    const counts = { 0: 0, 1: 0, 2: 0 };
-    for (const v of lod3.semantics.values) counts[v as 0 | 1 | 2]++;
-    expect(counts).toEqual({ 0: 2, 1: 2, 2: 8 });
+    // With cls='other' for every triangle and 'other' falling back to
+    // normal-only classification, the counts match the previous behaviour:
+    // 2 ground (0), 2 roof (1), 8 wall (2).
+    const counts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
+    for (const v of lod3.semantics.values) counts[v]++;
+    expect(counts[0]).toBe(2);
+    expect(counts[1]).toBe(2);
+    expect(counts[2]).toBe(8);
+    expect(counts[3]).toBe(0);
+    expect(counts[4]).toBe(0);
   });
 
   it('extractFootprints renders the LoD 1 rectangle on the map (not a tiny mesh tri)', () => {
@@ -201,5 +212,63 @@ describe('convertIfcToCityJsonBuilding', () => {
     expect(() =>
       convertIfcToCityJsonBuilding(doc, ifc, [4.3571, 52.0116], 'box.ifc')
     ).toThrow(/CRS/);
+  });
+
+  it('IfcWindow triangles tag as Window regardless of normal direction', () => {
+    const doc = buildSampleCube();
+    const ifc = syntheticBoxMesh();
+    // Tag every triangle as window
+    ifc.triangleSourceClass = new Array(12).fill('window') as Array<'window'>;
+    const result = convertIfcToCityJsonBuilding(doc, ifc, [4.3571, 52.0116], 'box.ifc');
+    const lod3 = (result.cityObject.geometry as Array<{
+      semantics: { values: number[] };
+    }>)[1];
+    // All 12 should map to Window (index 3 in the fixed surfaces array).
+    expect(lod3.semantics.values.every((v) => v === 3)).toBe(true);
+  });
+
+  it('IfcDoor triangles tag as Door', () => {
+    const doc = buildSampleCube();
+    const ifc = syntheticBoxMesh();
+    ifc.triangleSourceClass = new Array(12).fill('door') as Array<'door'>;
+    const result = convertIfcToCityJsonBuilding(doc, ifc, [4.3571, 52.0116], 'box.ifc');
+    const lod3 = (result.cityObject.geometry as Array<{
+      semantics: { values: number[] };
+    }>)[1];
+    expect(lod3.semantics.values.every((v) => v === 4)).toBe(true);
+  });
+
+  it('IfcWall triangles tag as WallSurface even for ground/roof-facing tris', () => {
+    const doc = buildSampleCube();
+    const ifc = syntheticBoxMesh();
+    ifc.triangleSourceClass = new Array(12).fill('wall') as Array<'wall'>;
+    const result = convertIfcToCityJsonBuilding(doc, ifc, [4.3571, 52.0116], 'box.ifc');
+    const lod3 = (result.cityObject.geometry as Array<{
+      semantics: { values: number[] };
+    }>)[1];
+    // All 12 → WallSurface (index 2), no GroundSurface/RoofSurface even
+    // though 4 of them have ±Z normals.
+    expect(lod3.semantics.values.every((v) => v === 2)).toBe(true);
+  });
+
+  it('IfcSlab triangles use elevation: top → Roof, ground → Ground, mid → Wall', () => {
+    const doc = buildSampleCube();
+    const ifc = syntheticBoxMesh();
+    ifc.triangleSourceClass = new Array(12).fill('slab') as Array<'slab'>;
+    // Two storeys: ground=0, roof=4. The synthetic box has Z ∈ [0, 4],
+    // so slab triangles at z=0 → Ground, at z=4 → Roof, walls (mid Z) → Wall.
+    ifc.storeyElevations = [0, 4];
+    const result = convertIfcToCityJsonBuilding(doc, ifc, [4.3571, 52.0116], 'box.ifc');
+    const lod3 = (result.cityObject.geometry as Array<{
+      semantics: { values: number[] };
+    }>)[1];
+    const counts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
+    for (const v of lod3.semantics.values) counts[v]++;
+    // 2 ground tris (z=0, normal -Z) → Ground (0)
+    // 2 roof tris  (z=4, normal +Z) → Roof  (1)
+    // 8 wall tris  (z mid)         → Wall  (2)
+    expect(counts[0]).toBe(2);
+    expect(counts[1]).toBe(2);
+    expect(counts[2]).toBe(8);
   });
 });
