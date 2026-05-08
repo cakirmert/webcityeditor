@@ -236,6 +236,24 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
     }
     storeyElevations.sort((a, b) => a - b);
 
+    // ── Coordination matrix ──────────────────────────────────────────
+    // web-ifc derives a 4×4 coordination matrix from IfcSite +
+    // IfcGeometricRepresentationContext that puts the model close to
+    // origin in a standard orientation. For files where authoring tools
+    // exported the building far from origin (Revit's "shared coords",
+    // or geo-referenced models that put a building millions of metres
+    // out in some projected CRS), this matrix is the only thing that
+    // makes the resulting mesh sane to handle. Skipping it leaves
+    // vertices in their raw coords and our XY-centring at the end
+    // produces tight bboxes anyway, but rotations/scales we miss show
+    // up as obviously-wrong orientations. Apply it before placement
+    // transforms so the rest of the pipeline operates in the
+    // coordinated frame.
+    const coordRaw = api.GetCoordinationMatrix(modelID);
+    // Some web-ifc builds return a typed array, others a JS array.
+    const C = Array.from(coordRaw as ArrayLike<number>);
+    const hasCoordMat = C.length === 16 && !isIdentityMatrix(C);
+
     // ── Stream BUILDING-ELEMENT meshes only — terrain/site geometry is
     // ── deliberately skipped so the bbox stays tight on the actual
     // ── building shell. Each PlacedGeometry is tagged with its source
@@ -268,9 +286,19 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
           const x = verts[v];
           const y = verts[v + 1];
           const z = verts[v + 2];
-          const wx = m[0] * x + m[4] * y + m[8] * z + m[12];
-          const wy = m[1] * x + m[5] * y + m[9] * z + m[13];
-          const wz = m[2] * x + m[6] * y + m[10] * z + m[14];
+          // Apply placement matrix (per-instance) first.
+          let wx = m[0] * x + m[4] * y + m[8] * z + m[12];
+          let wy = m[1] * x + m[5] * y + m[9] * z + m[13];
+          let wz = m[2] * x + m[6] * y + m[10] * z + m[14];
+          // Then the global coordination matrix (per-model).
+          if (hasCoordMat) {
+            const cx = C[0] * wx + C[4] * wy + C[8] * wz + C[12];
+            const cy = C[1] * wx + C[5] * wy + C[9] * wz + C[13];
+            const cz = C[2] * wx + C[6] * wy + C[10] * wz + C[14];
+            wx = cx;
+            wy = cy;
+            wz = cz;
+          }
           positions.push(wx, wy, wz);
           if (wx < minX) minX = wx;
           if (wy < minY) minY = wy;
@@ -488,6 +516,20 @@ function readIfcNumber(v: unknown): number | null {
     return typeof inner === 'number' ? inner : null;
   }
   return null;
+}
+
+/** Identity-matrix detection — skip the per-vertex coordination multiply
+ *  when the matrix is identity (most Revit/ArchiCAD exports). Tolerates a
+ *  small float epsilon so floating-point noise doesn't force unnecessary
+ *  multiplies. */
+function isIdentityMatrix(m: number[]): boolean {
+  if (m.length !== 16) return false;
+  const ε = 1e-9;
+  const expected = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  for (let i = 0; i < 16; i++) {
+    if (Math.abs(m[i] - expected[i]) > ε) return false;
+  }
+  return true;
 }
 
 function readIfcDmsToDecimal(v: unknown): number | null {
