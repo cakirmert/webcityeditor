@@ -12,6 +12,7 @@ import type { CityJsonDocument, SelectionInfo } from '../types';
 import { detectCrs } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType } from '../lib/footprint-tint';
+import type { ParcelZone } from '../lib/zoning';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -84,6 +85,8 @@ interface Props {
   onDragMove?: (dx: number, dy: number) => void;
   /** Multi-selection: set of building IDs highlighted in addition to selectedId. */
   multiSelectedIds?: Set<string> | null;
+  /** Parcel zoning overlay polygons. */
+  zones?: ParcelZone[];
 }
 
 /**
@@ -119,6 +122,7 @@ export default function MapView({
   dragTransformId = null,
   onDragMove,
   multiSelectedIds = null,
+  zones = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -273,6 +277,30 @@ export default function MapView({
       | SimpleMeshLayer<{ position: [number, number] }>
     > = [];
 
+    // Zoning parcels layer
+    if (zones.length > 0) {
+      layers.push(
+        new PolygonLayer<ParcelZone>({
+          id: 'zoning-parcels',
+          data: zones,
+          getPolygon: (d) => d.polygon,
+          getFillColor: (d) => d.color,
+          getLineColor: (d) => [d.color[0], d.color[1], d.color[2], 180],
+          getLineWidth: 2,
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          extruded: false,
+          pickable: true,
+          onClick: (info: PickingInfo<ParcelZone>) => {
+            if (info.object) {
+              // No action needed, just tooltip-like feedback
+            }
+          },
+        }) as unknown as PolygonLayer<Footprint>
+      );
+    }
+
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
     // thing drawn, at high zoom it still fires picking when clicking a roof edge.
     layers.push(
@@ -401,7 +429,7 @@ export default function MapView({
     }
 
     overlay.setProps({ layers });
-  }, [footprints, selectedId, onSelect, zoom, preview, multiSelectedIds, filteredIds]);
+  }, [footprints, selectedId, onSelect, zoom, preview, multiSelectedIds, filteredIds, zones]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
   useEffect(() => {

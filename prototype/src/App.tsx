@@ -37,6 +37,12 @@ import {
 import { buildPreviewMesh } from './lib/preview-mesh';
 import { cloneBuildings } from './lib/clipboard';
 import { extractOpenings, moveOpening, type OpeningInfo } from './lib/opening-edit';
+import {
+  generateZonesAroundCenter,
+  findZoneForPoint,
+  validateBuildingType,
+  type ParcelZone,
+} from './lib/zoning';
 import type { AttributeValue, CityJsonDocument, SelectionInfo } from './types';
 
 export default function App() {
@@ -91,6 +97,10 @@ export default function App() {
   // ── Multi-selection + Copy/Paste ──────────────────────────────────────────
   const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
   const [clipboardIds, setClipboardIds] = useState<Set<string> | null>(null);
+
+  // ── Zoning ────────────────────────────────────────────────────────────────
+  const [zones, setZones] = useState<ParcelZone[]>([]);
+  const [zoningEnabled, setZoningEnabled] = useState(false);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -469,6 +479,26 @@ export default function App() {
     if (!pendingTransform) dragBaseRef.current = null;
   }, [pendingTransform]);
 
+  // ── Zoning toggle ─────────────────────────────────────────────────────────
+  const handleToggleZoning = useCallback(() => {
+    if (!cityjson) return;
+    if (zoningEnabled) {
+      setZoningEnabled(false);
+      setZones([]);
+      return;
+    }
+    const fps = extractFootprints(cityjson);
+    if (fps.length === 0) return;
+    let sx = 0, sy = 0, n = 0;
+    for (const fp of fps) {
+      for (const [lng, lat] of fp.polygon) { sx += lng; sy += lat; n++; }
+    }
+    if (n === 0) return;
+    const center: [number, number] = [sx / n, sy / n];
+    setZones(generateZonesAroundCenter(center));
+    setZoningEnabled(true);
+  }, [cityjson, zoningEnabled]);
+
   const handleStartDraw = useCallback(() => {
     setSelection(null);
     setDrawMode('polygon');
@@ -488,6 +518,17 @@ export default function App() {
   const handleCreateBuilding = useCallback(
     (form: NewBuildingForm) => {
       if (!cityjson || !pendingFootprint) return;
+      // Zoning check
+      if (zoningEnabled && zones.length > 0) {
+        const cx = pendingFootprint.reduce((a, v) => a + v[0], 0) / pendingFootprint.length;
+        const cy = pendingFootprint.reduce((a, v) => a + v[1], 0) / pendingFootprint.length;
+        const zone = findZoneForPoint(zones, [cx, cy]);
+        const check = validateBuildingType(zone, form.function);
+        if (!check.allowed) {
+          alert(`Zoning violation: ${check.reason}`);
+          return;
+        }
+      }
       const crs = detectCrs(cityjson);
       if (!crs.supported) {
         alert(`Can't generate: CRS ${crs.code} isn't supported. Add a proj4 def.`);
@@ -558,7 +599,7 @@ export default function App() {
         setPendingForm(null);
       }
     },
-    [cityjson, pendingFootprint, pushUndo]
+    [cityjson, pendingFootprint, pushUndo, zoningEnabled, zones]
   );
 
   const handleSaveLocal = useCallback(async () => {
@@ -927,6 +968,8 @@ export default function App() {
         onPaste={handlePaste}
         canCopy={!!selection || multiSelection.size > 0}
         canPaste={!!clipboardIds && clipboardIds.size > 0}
+        zoningEnabled={zoningEnabled}
+        onToggleZoning={handleToggleZoning}
       />
       {cityjson && footprintsForFilter.length > 0 && (
         <FilterBar
@@ -968,6 +1011,7 @@ export default function App() {
               dragTransformId={pendingTransform?.id ?? null}
               onDragMove={handleDragMove}
               multiSelectedIds={multiSelection.size > 0 ? multiSelection : null}
+              zones={zoningEnabled ? zones : []}
               footprintEdit={
                 footprintEdit
                   ? {

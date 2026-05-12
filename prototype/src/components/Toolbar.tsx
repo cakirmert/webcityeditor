@@ -62,6 +62,8 @@ interface Props {
   onPaste?: () => void;
   canCopy?: boolean;
   canPaste?: boolean;
+  zoningEnabled?: boolean;
+  onToggleZoning?: () => void;
 }
 
 export default function Toolbar({
@@ -91,6 +93,8 @@ export default function Toolbar({
   onPaste,
   canCopy = false,
   canPaste = false,
+  zoningEnabled = false,
+  onToggleZoning,
 }: Props) {
   return (
     <header className="flex h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
@@ -223,6 +227,17 @@ export default function Toolbar({
               title="Paste copied buildings (Ctrl+V)"
             >
               ⎘ Paste
+            </Button>
+          )}
+
+          {onToggleZoning && (
+            <Button
+              size="sm"
+              variant={zoningEnabled ? 'primary' : 'ghost'}
+              onClick={onToggleZoning}
+              title={zoningEnabled ? 'Disable zoning overlay' : 'Show parcel zoning overlay'}
+            >
+              {zoningEnabled ? '▦ Zoning ON' : '▦ Zoning'}
             </Button>
           )}
 
