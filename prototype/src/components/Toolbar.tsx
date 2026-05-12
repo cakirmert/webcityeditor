@@ -58,6 +58,10 @@ interface Props {
   drawMode?: 'none' | 'polygon';
   onStartDraw?: () => void;
   onCancelDraw?: () => void;
+  onCopy?: () => void;
+  onPaste?: () => void;
+  canCopy?: boolean;
+  canPaste?: boolean;
 }
 
 export default function Toolbar({
@@ -83,6 +87,10 @@ export default function Toolbar({
   drawMode = 'none',
   onStartDraw,
   onCancelDraw,
+  onCopy,
+  onPaste,
+  canCopy = false,
+  canPaste = false,
 }: Props) {
   return (
     <header className="flex h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
@@ -193,6 +201,29 @@ export default function Toolbar({
                 ↷ Redo
               </Button>
             </>
+          )}
+
+          {onCopy && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canCopy}
+              onClick={onCopy}
+              title="Copy selected buildings (Ctrl+C)"
+            >
+              ⧉ Copy
+            </Button>
+          )}
+          {onPaste && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canPaste}
+              onClick={onPaste}
+              title="Paste copied buildings (Ctrl+V)"
+            >
+              ⎘ Paste
+            </Button>
           )}
 
           <Button onClick={onReloadView} title="Re-parse modified data and refresh map + 3D view">

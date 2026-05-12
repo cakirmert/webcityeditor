@@ -36,4 +36,6 @@ export interface SelectionInfo {
   geometryIndex?: number;
   boundaryIndex?: number;
   lodIndex?: number;
+  /** True when the click was Ctrl/Cmd+click (for multi-selection). */
+  ctrlKey?: boolean;
 }

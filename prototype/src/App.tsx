@@ -35,6 +35,7 @@ import {
   type PendingTransform,
 } from './lib/transform-preview';
 import { buildPreviewMesh } from './lib/preview-mesh';
+import { cloneBuildings } from './lib/clipboard';
 import type { AttributeValue, CityJsonDocument, SelectionInfo } from './types';
 
 export default function App() {
@@ -85,6 +86,10 @@ export default function App() {
   /** True while the WASM is loading and parsing — disables the toolbar
    *  button so a slow IFC parse doesn't get re-triggered. */
   const [ifcParsing, setIfcParsing] = useState(false);
+
+  // ── Multi-selection + Copy/Paste ──────────────────────────────────────────
+  const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
+  const [clipboardIds, setClipboardIds] = useState<Set<string> | null>(null);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -152,9 +157,31 @@ export default function App() {
     setUndoVersion((v) => v + 1);
   }, [cityjson, dirtyIds, selection]);
 
+  // ── Copy / Paste ─────────────────────────────────────────────────────────
+  const handleCopy = useCallback(() => {
+    const ids = new Set(multiSelection);
+    if (selection) ids.add(selection.objectId);
+    if (ids.size === 0) return;
+    setClipboardIds(ids);
+  }, [selection, multiSelection]);
+
+  const handlePaste = useCallback(() => {
+    if (!cityjson || !clipboardIds || clipboardIds.size === 0) return;
+    pushUndo('Paste buildings');
+    const { clonedIds } = cloneBuildings(cityjson, clipboardIds, 5, 5);
+    setDirtyIds((prev) => {
+      const next = new Set(prev);
+      for (const id of clonedIds) next.add(id);
+      return next;
+    });
+    setReloadToken((t) => t + 1);
+    if (clonedIds.length === 1) setSelection({ objectId: clonedIds[0] });
+    setMultiSelection(new Set(clonedIds));
+  }, [cityjson, clipboardIds, pushUndo]);
+
   // Keyboard shortcuts: Ctrl+Z / Cmd+Z for undo, Ctrl+Shift+Z / Cmd+Shift+Z
-  // for redo. Skip when focus is in an input/textarea so editing fields
-  // can still use their native undo.
+  // for redo. Ctrl+C / Ctrl+V for copy/paste. Skip when focus is in an
+  // input/textarea so editing fields can still use their native shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -170,21 +197,38 @@ export default function App() {
       } else if (e.key === 'y') {
         e.preventDefault();
         handleRedo();
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        handleCopy();
+      } else if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        handlePaste();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, handleCopy, handlePaste]);
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
+      if (info?.ctrlKey) {
+        setMultiSelection((prev) => {
+          const next = new Set(prev);
+          if (next.has(info.objectId)) next.delete(info.objectId);
+          else next.add(info.objectId);
+          return next;
+        });
+        if (!selection) setSelection(info);
+        return;
+      }
       setSelection(info);
+      if (!info?.ctrlKey) setMultiSelection(new Set());
       if (info && cityjson && !originals.has(info.objectId)) {
         const obj = cityjson.CityObjects[info.objectId];
         originals.set(info.objectId, { ...(obj?.attributes ?? {}) });
       }
     },
-    [cityjson, originals]
+    [cityjson, originals, selection]
   );
 
   const handleAttributeChange = useCallback(
@@ -862,6 +906,10 @@ export default function App() {
         drawMode={drawMode}
         onStartDraw={handleStartDraw}
         onCancelDraw={handleCancelDraw}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        canCopy={!!selection || multiSelection.size > 0}
+        canPaste={!!clipboardIds && clipboardIds.size > 0}
       />
       {cityjson && footprintsForFilter.length > 0 && (
         <FilterBar
@@ -902,6 +950,7 @@ export default function App() {
               onPlacementClick={ifcPending ? handleIfcPlacement : undefined}
               dragTransformId={pendingTransform?.id ?? null}
               onDragMove={handleDragMove}
+              multiSelectedIds={multiSelection.size > 0 ? multiSelection : null}
               footprintEdit={
                 footprintEdit
                   ? {

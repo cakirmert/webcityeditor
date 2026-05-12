@@ -82,6 +82,8 @@ interface Props {
    *  CRS-metre deltas accumulated from the drag start position. */
   dragTransformId?: string | null;
   onDragMove?: (dx: number, dy: number) => void;
+  /** Multi-selection: set of building IDs highlighted in addition to selectedId. */
+  multiSelectedIds?: Set<string> | null;
 }
 
 /**
@@ -116,6 +118,7 @@ export default function MapView({
   onPlacementClick,
   dragTransformId = null,
   onDragMove,
+  multiSelectedIds = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -279,12 +282,14 @@ export default function MapView({
         getPolygon: (d) => d.polygon,
         getFillColor: (d) => {
           if (d.id === selectedId) return [255, 150, 40, 140];
+          if (multiSelectedIds?.has(d.id)) return [255, 180, 80, 120];
           const matched = !filteredIds || filteredIds.has(d.id);
           if (!matched) return [120, 120, 130, 35]; // dimmed
           return tintByRoofType(d, 120);
         },
         getLineColor: (d) => {
           if (d.id === selectedId) return [255, 120, 10, 255];
+          if (multiSelectedIds?.has(d.id)) return [255, 150, 40, 200];
           const matched = !filteredIds || filteredIds.has(d.id);
           if (!matched) return [80, 80, 90, 60]; // dimmed
           return [60, 70, 85, 220];
@@ -296,12 +301,16 @@ export default function MapView({
         extruded: false,
         pickable: true,
         updateTriggers: {
-          getFillColor: [selectedId, filteredIds],
-          getLineColor: [selectedId, filteredIds],
+          getFillColor: [selectedId, filteredIds, multiSelectedIds],
+          getLineColor: [selectedId, filteredIds, multiSelectedIds],
         },
-        onClick: (info: PickingInfo<Footprint>) => {
-          if (info.object) onSelect({ objectId: info.object.id });
-          else onSelect(null);
+        onClick: (info: PickingInfo<Footprint>, event: unknown) => {
+          const src = (event as { srcEvent?: { ctrlKey?: boolean; metaKey?: boolean } })?.srcEvent;
+          if (info.object) {
+            onSelect({ objectId: info.object.id, ctrlKey: !!(src?.ctrlKey || src?.metaKey) });
+          } else {
+            onSelect(null);
+          }
         },
       })
     );
@@ -317,6 +326,7 @@ export default function MapView({
           getElevation: (d) => d.height,
           getFillColor: (d) => {
             if (d.id === selectedId) return [255, 150, 40, 240];
+            if (multiSelectedIds?.has(d.id)) return [255, 180, 80, 200];
             const matched = !filteredIds || filteredIds.has(d.id);
             if (!matched) return [120, 120, 130, 60]; // dimmed
             return tintByRoofType(d, 230);
@@ -331,11 +341,15 @@ export default function MapView({
             specularColor: [60, 64, 70],
           },
           updateTriggers: {
-            getFillColor: [selectedId, filteredIds],
+            getFillColor: [selectedId, filteredIds, multiSelectedIds],
           },
-          onClick: (info: PickingInfo<Footprint>) => {
-            if (info.object) onSelect({ objectId: info.object.id });
-            else onSelect(null);
+          onClick: (info: PickingInfo<Footprint>, event: unknown) => {
+            const src = (event as { srcEvent?: { ctrlKey?: boolean; metaKey?: boolean } })?.srcEvent;
+            if (info.object) {
+              onSelect({ objectId: info.object.id, ctrlKey: !!(src?.ctrlKey || src?.metaKey) });
+            } else {
+              onSelect(null);
+            }
           },
         })
       );
@@ -387,7 +401,7 @@ export default function MapView({
     }
 
     overlay.setProps({ layers });
-  }, [footprints, selectedId, onSelect, zoom, preview]);
+  }, [footprints, selectedId, onSelect, zoom, preview, multiSelectedIds, filteredIds]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
   useEffect(() => {
