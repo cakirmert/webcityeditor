@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AttributeValue, CityJsonDocument } from '../types';
 import { canSplitBuilding, MIN_STOREY_HEIGHT, MIN_SIDE_WIDTH } from '../lib/subdivision';
+import { extractOpenings, type OpeningInfo } from '../lib/opening-edit';
 import type { PendingTransform } from '../lib/transform-preview';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -33,6 +34,7 @@ interface Props {
   onStartFootprintEdit?: (id: string) => void;
   onSaveFootprintEdit?: () => void;
   onCancelFootprintEdit?: () => void;
+  onMoveOpening?: (buildingId: string, opening: OpeningInfo, dx: number, dy: number, dz: number) => void;
   hideHeader?: boolean;
 }
 
@@ -56,6 +58,7 @@ export default function AttributePanel({
   onStartFootprintEdit,
   onSaveFootprintEdit,
   onCancelFootprintEdit,
+  onMoveOpening,
   hideHeader = false,
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
@@ -77,6 +80,11 @@ export default function AttributePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildingId]);
   const inTransformMode = !!pendingTransform;
+  const openings = useMemo(
+    () => extractOpenings(cityjson, buildingId),
+    [cityjson, buildingId]
+  );
+  const [selectedOpening, setSelectedOpening] = useState<number | null>(null);
 
   const splitGate = useMemo(
     () => canSplitBuilding(cityjson, buildingId),
@@ -329,6 +337,67 @@ export default function AttributePanel({
             </>
           )}
         </section>
+      )}
+
+      {onMoveOpening && openings.length > 0 && (
+        <Section label={`Openings (${openings.length})`}>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {openings.map((op, i) => (
+              <div
+                key={i}
+                className={`flex items-center gap-2 rounded px-2 py-1 text-[11px] cursor-pointer ${
+                  selectedOpening === i
+                    ? 'bg-[rgba(255,150,40,0.15)] border border-[var(--select)]'
+                    : 'hover:bg-[var(--surface-2)]'
+                }`}
+                onClick={() => setSelectedOpening(selectedOpening === i ? null : i)}
+              >
+                <span className={`inline-block w-2 h-2 rounded-full ${
+                  op.type === 'Window' ? 'bg-[#3d6f8f]' : 'bg-[#4a2f1f]'
+                }`} />
+                <span className="flex-1">
+                  {op.type} — {op.width.toFixed(1)}×{op.height.toFixed(1)} m
+                </span>
+                <span className="text-[var(--text-faint)] tabular-nums">
+                  z={op.center[2].toFixed(1)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {selectedOpening !== null && openings[selectedOpening] && (
+            <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2">
+              <div className="text-[10px] text-[var(--text-dim)] mb-1.5">
+                Move {openings[selectedOpening].type} (metres)
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { label: '← 0.5', dx: -0.5, dy: 0, dz: 0 },
+                  { label: '→ 0.5', dx: 0.5, dy: 0, dz: 0 },
+                  { label: '↑ 0.3', dx: 0, dy: 0, dz: 0.3 },
+                  { label: '↓ 0.3', dx: 0, dy: 0, dz: -0.3 },
+                  { label: 'Fwd 0.5', dx: 0, dy: 0.5, dz: 0 },
+                  { label: 'Back 0.5', dx: 0, dy: -0.5, dz: 0 },
+                ].map((m) => (
+                  <Button
+                    key={m.label}
+                    size="sm"
+                    onClick={() => {
+                      onMoveOpening(
+                        buildingId,
+                        openings[selectedOpening!],
+                        m.dx,
+                        m.dy,
+                        m.dz
+                      );
+                    }}
+                  >
+                    {m.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
       )}
 
       {(onSplitByFloor || onSplitBySide) && (

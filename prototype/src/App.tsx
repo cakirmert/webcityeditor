@@ -36,6 +36,7 @@ import {
 } from './lib/transform-preview';
 import { buildPreviewMesh } from './lib/preview-mesh';
 import { cloneBuildings } from './lib/clipboard';
+import { extractOpenings, moveOpening, type OpeningInfo } from './lib/opening-edit';
 import type { AttributeValue, CityJsonDocument, SelectionInfo } from './types';
 
 export default function App() {
@@ -156,6 +157,22 @@ export default function App() {
     setReloadToken((t) => t + 1);
     setUndoVersion((v) => v + 1);
   }, [cityjson, dirtyIds, selection]);
+
+  // ── Opening move ─────────────────────────────────────────────────────────
+  const handleMoveOpening = useCallback(
+    (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => {
+      if (!cityjson) return;
+      pushUndo(`Move ${opening.type} on ${buildingId}`);
+      moveOpening(cityjson, buildingId, opening, dx, dy, dz);
+      setDirtyIds((prev) => {
+        const next = new Set(prev);
+        next.add(buildingId);
+        return next;
+      });
+      setReloadToken((t) => t + 1);
+    },
+    [cityjson, pushUndo]
+  );
 
   // ── Copy / Paste ─────────────────────────────────────────────────────────
   const handleCopy = useCallback(() => {
@@ -1085,6 +1102,7 @@ export default function App() {
               onStartFootprintEdit={handleStartFootprintEdit}
               onSaveFootprintEdit={handleSaveFootprintEdit}
               onCancelFootprintEdit={handleCancelFootprintEdit}
+              onMoveOpening={handleMoveOpening}
             />
           </aside>
         )}
@@ -1113,6 +1131,7 @@ function AttributePanelInline(props: {
   onStartFootprintEdit: (id: string) => void;
   onSaveFootprintEdit: () => void;
   onCancelFootprintEdit: () => void;
+  onMoveOpening?: (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => void;
 }) {
   return (
     <AttributePanel
@@ -1135,6 +1154,7 @@ function AttributePanelInline(props: {
       onStartFootprintEdit={props.onStartFootprintEdit}
       onSaveFootprintEdit={props.onSaveFootprintEdit}
       onCancelFootprintEdit={props.onCancelFootprintEdit}
+      onMoveOpening={props.onMoveOpening}
       hideHeader
     />
   );
