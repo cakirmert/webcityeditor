@@ -387,6 +387,26 @@ export default function App() {
     setFootprintEdit(null);
   }, [cityjson, footprintEdit, pushUndo, dirtyIds, selection]);
 
+  // ── Map drag for position transform ─────────────────────────────────────
+  const dragBaseRef = useRef<{ dx: number; dy: number } | null>(null);
+  const handleDragMove = useCallback(
+    (dx: number, dy: number) => {
+      if (!pendingTransform) return;
+      if (!dragBaseRef.current) {
+        dragBaseRef.current = { dx: pendingTransform.dx, dy: pendingTransform.dy };
+      }
+      setPendingTransform((cur) =>
+        cur
+          ? { ...cur, dx: dragBaseRef.current!.dx + dx, dy: dragBaseRef.current!.dy + dy }
+          : cur
+      );
+    },
+    [pendingTransform]
+  );
+  useEffect(() => {
+    if (!pendingTransform) dragBaseRef.current = null;
+  }, [pendingTransform]);
+
   const handleStartDraw = useCallback(() => {
     setSelection(null);
     setDrawMode('polygon');
@@ -879,6 +899,8 @@ export default function App() {
               onDrawCanceled={handleCancelDraw}
               filteredIds={filterIsEmpty ? null : filteredIds}
               onPlacementClick={ifcPending ? handleIfcPlacement : undefined}
+              dragTransformId={pendingTransform?.id ?? null}
+              onDragMove={handleDragMove}
               footprintEdit={
                 footprintEdit
                   ? {

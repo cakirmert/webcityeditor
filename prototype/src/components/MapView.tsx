@@ -78,6 +78,10 @@ interface Props {
    * import to let the user drop the imported building wherever they like.
    */
   onPlacementClick?: (lngLat: [number, number]) => void;
+  /** When set, drag on the map moves the building. Fires onDragMove with
+   *  CRS-metre deltas accumulated from the drag start position. */
+  dragTransformId?: string | null;
+  onDragMove?: (dx: number, dy: number) => void;
 }
 
 /**
@@ -110,6 +114,8 @@ export default function MapView({
   onFootprintChange,
   filteredIds = null,
   onPlacementClick,
+  dragTransformId = null,
+  onDragMove,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -494,6 +500,59 @@ export default function MapView({
       map.getCanvas().style.cursor = prevCursor;
     };
   }, [onPlacementClick]);
+
+  // ── Drag-to-move mode ─────────────────────────────────────────────────────
+  // When `dragTransformId` is set, mouse-drag on the map translates the
+  // building's ghost preview. The delta is computed in CRS metres so the
+  // numeric dX/dY fields in the side panel stay in sync.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !dragTransformId || !onDragMove) return;
+
+    const crs = detectCrs(cityjson);
+    if (!crs.supported) return;
+
+    let dragging = false;
+    let startLngLat: [number, number] | null = null;
+    let startCrs: [number, number] | null = null;
+
+    const canvas = map.getCanvas();
+    const prevCursor = canvas.style.cursor;
+    canvas.style.cursor = 'move';
+
+    const onMouseDown = (e: maplibregl.MapMouseEvent) => {
+      dragging = true;
+      startLngLat = [e.lngLat.lng, e.lngLat.lat];
+      startCrs = proj4('EPSG:4326', crs.code, startLngLat) as [number, number];
+      map.dragPan.disable();
+    };
+    const onMouseMove = (e: maplibregl.MapMouseEvent) => {
+      if (!dragging || !startCrs) return;
+      const curCrs = proj4('EPSG:4326', crs.code, [e.lngLat.lng, e.lngLat.lat]) as [number, number];
+      onDragMove(curCrs[0] - startCrs[0], curCrs[1] - startCrs[1]);
+    };
+    const onMouseUp = () => {
+      if (dragging) {
+        dragging = false;
+        startLngLat = null;
+        startCrs = null;
+        map.dragPan.enable();
+      }
+    };
+
+    map.on('mousedown', onMouseDown);
+    map.on('mousemove', onMouseMove);
+    map.on('mouseup', onMouseUp);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      map.off('mousedown', onMouseDown);
+      map.off('mousemove', onMouseMove);
+      map.off('mouseup', onMouseUp);
+      window.removeEventListener('mouseup', onMouseUp);
+      canvas.style.cursor = prevCursor;
+      if (dragging) map.dragPan.enable();
+    };
+  }, [dragTransformId, onDragMove, cityjson]);
 
   // ── Footprint-edit mode (TerraDrawSelectMode) ─────────────────────────────
   // When `footprintEdit` is set, load the building's polygon as a single
