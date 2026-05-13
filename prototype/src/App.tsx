@@ -4,8 +4,7 @@ import FileLoader from './components/FileLoader';
 import MapView from './components/MapView';
 import Viewer from './components/Viewer';
 import AttributePanel from './components/AttributePanel';
-import NewBuildingDialog, { type NewBuildingForm } from './components/NewBuildingDialog';
-import CreationPreviewPanel from './components/CreationPreviewPanel';
+import BuildingCreator, { type NewBuildingForm } from './components/BuildingCreator';
 // `NewBuildingForm` shape is re-used by App to carry the live-updating dialog state.
 import { filterToBuilding } from './lib/footprints';
 import { saveDocument } from './lib/storage';
@@ -1180,22 +1179,15 @@ export default function App() {
           ) : (
             <FileLoader onLoaded={handleLoaded} />
           )}
-          {pendingFootprint && (
-            <>
-              <NewBuildingDialog
-                vertexCount={pendingFootprint.length}
-                onFormChange={setPendingForm}
-                onCreate={handleCreateBuilding}
-                onCancel={handleCancelDraw}
-              />
-              {cityjson && pendingForm && (
-                <CreationPreviewPanel
-                  footprint={pendingFootprint}
-                  form={pendingForm}
-                  cityjson={cityjson}
-                />
-              )}
-            </>
+          {pendingFootprint && cityjson && (
+            <BuildingCreator
+              vertexCount={pendingFootprint.length}
+              footprint={pendingFootprint}
+              cityjson={cityjson}
+              onFormChange={setPendingForm}
+              onCreate={handleCreateBuilding}
+              onCancel={handleCancelDraw}
+            />
           )}
         </div>
 
