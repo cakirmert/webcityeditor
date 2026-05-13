@@ -43,7 +43,8 @@ function hashForm(form: NewBuildingForm | null): number {
     form.roofHeight * 10 +
     (form.addWindows ? 1 : 0) +
     (form.addDoor ? 2 : 0) +
-    form.eaveOverhang * 5
+    form.eaveOverhang * 5 +
+    form.rakeOverhang * 7
   );
 }
 
@@ -77,6 +78,7 @@ function buildPreviewDoc(
       attributes: { function: form.function },
       openings: (form.addWindows || form.addDoor) ? { windows: form.addWindows, door: form.addDoor } : undefined,
       eaveOverhang: form.eaveOverhang,
+      rakeOverhang: form.rakeOverhang,
     });
     insertBuilding(doc, result);
     return doc;

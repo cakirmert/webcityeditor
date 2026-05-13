@@ -352,6 +352,222 @@ describe('LoD 2.2 eave overhang (flat roofs)', () => {
     expect(roofUsesWallTop).toBe(0);
   });
 
+  it('gable: rake overhang extends ridge along its axis, replaces rake-corner caps with rake gable triangles', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116], // ~14 m east (long axis)
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0.4,
+        rakeOverhang: 0.5,
+      })
+    );
+    const g = geomOf(r);
+    expect(g.lod).toBe('2.2');
+    // 1 ground + 2 roof + 4 walls + 2 long-side soffits + 2 rake gable
+    // triangles = 11 faces (vs 13 without rake — the 4 rake-corner caps are
+    // replaced with 2 rake gable triangles).
+    expect(g.boundaries[0]).toHaveLength(11);
+    // 4 ground + 4 wall-top + 2 ridge + 4 eave-edge + 2 rake-ridge + 4
+    // rake-eave = 20 vertices.
+    expect(r.newVertices).toHaveLength(20);
+    // Semantics: 1 ground + 2 roof + 4 walls + 4 overhang. Last 4 (soffits +
+    // rake gables) are all OuterCeilingSurface.
+    expect(g.semantics.values[0].slice(7)).toEqual([3, 3, 3, 3]);
+  });
+
+  it('gable: rake-only (no eave overhang) extends the slope along the ridge axis', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0,
+        rakeOverhang: 0.6,
+      })
+    );
+    const g = geomOf(r);
+    // Rake-only still bumps LoD to 2.2 (the rake gable triangles are
+    // OuterCeilingSurface, that's a 2.2-ish feature).
+    expect(g.lod).toBe('2.2');
+    // 1 ground + 2 roof + 4 walls + 2 rake gable triangles = 9 faces
+    // (no long-side soffits because eaveOverhang = 0).
+    expect(g.boundaries[0]).toHaveLength(9);
+    // 4 ground + 4 wall-top + 2 ridge + 2 rake-ridge + 4 rake-eave = 16 verts
+    // (no perpendicular roof-edge ring).
+    expect(r.newVertices).toHaveLength(16);
+  });
+
+  it('gable rake overhang offsets the extended ridge in projected XY', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0,
+        rakeOverhang: 0.6,
+      })
+    );
+    const t = doc.transform!;
+    const decode = (v: [number, number, number]): [number, number, number] => [
+      v[0] * t.scale[0] + t.translate[0],
+      v[1] * t.scale[1] + t.translate[1],
+      v[2] * t.scale[2] + t.translate[2],
+    ];
+    // No-eave layout: 0..3 ground, 4..7 wall-top, 8..9 ridge (rA, rB),
+    // 10..11 rA_ext + rB_ext, 12..15 rake eave corners.
+    const all = r.newVertices.map(decode);
+    const rA = all[8];
+    const rB = all[9];
+    const rAExt = all[10];
+    const rBExt = all[11];
+    // Each extended ridge endpoint should be ~0.6 m past its original.
+    expect(Math.hypot(rAExt[0] - rA[0], rAExt[1] - rA[1])).toBeCloseTo(0.6, 1);
+    expect(Math.hypot(rBExt[0] - rB[0], rBExt[1] - rB[1])).toBeCloseTo(0.6, 1);
+    // And the extension points OUTWARD — i.e. rA_ext is farther from rB than rA.
+    expect(Math.hypot(rAExt[0] - rB[0], rAExt[1] - rB[1])).toBeGreaterThan(
+      Math.hypot(rA[0] - rB[0], rA[1] - rB[1])
+    );
+    // Z stays at ridgeZ for the extension.
+    expect(rAExt[2]).toBeCloseTo(rA[2], 2);
+    expect(rBExt[2]).toBeCloseTo(rB[2], 2);
+  });
+
+  it('gable rake overhang: roof slopes use extended ridge vertices', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0,
+        rakeOverhang: 0.6,
+      })
+    );
+    const g = geomOf(r);
+    // Roof faces (boundaries[0][1..2]) must reference rA_ext / rB_ext (offsets
+    // +10 / +11) and NOT the original rA / rB (offsets +8 / +9).
+    const rAOrig = r.vertexOffset + 8;
+    const rBOrig = r.vertexOffset + 9;
+    const rAExt = r.vertexOffset + 10;
+    const rBExt = r.vertexOffset + 11;
+    let roofUsesOrigRidge = 0;
+    let roofUsesExtRidge = 0;
+    for (let f = 1; f <= 2; f++) {
+      for (const v of g.boundaries[0][f][0]) {
+        if (v === rAOrig || v === rBOrig) roofUsesOrigRidge++;
+        if (v === rAExt || v === rBExt) roofUsesExtRidge++;
+      }
+    }
+    expect(roofUsesOrigRidge).toBe(0);
+    expect(roofUsesExtRidge).toBe(4); // 2 ridge corners × 2 slopes
+  });
+
+  it('gable rake overhang: walls keep the ORIGINAL ridge endpoints as their apex', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0,
+        rakeOverhang: 0.6,
+      })
+    );
+    const g = geomOf(r);
+    const rAOrig = r.vertexOffset + 8;
+    const rBOrig = r.vertexOffset + 9;
+    const rAExt = r.vertexOffset + 10;
+    const rBExt = r.vertexOffset + 11;
+    // Walls are boundaries[0][3..6]. The gable walls (pentagons) reference
+    // rA or rB as their apex; with rake overhang we expect ORIGINAL ridge
+    // endpoints there, never the extended ones (the wall stays put).
+    let wallUsesOrigRidge = 0;
+    let wallUsesExtRidge = 0;
+    for (let f = 3; f <= 6; f++) {
+      for (const v of g.boundaries[0][f][0]) {
+        if (v === rAOrig || v === rBOrig) wallUsesOrigRidge++;
+        if (v === rAExt || v === rBExt) wallUsesExtRidge++;
+      }
+    }
+    expect(wallUsesOrigRidge).toBeGreaterThan(0);
+    expect(wallUsesExtRidge).toBe(0);
+  });
+
+  it('gable rake overhang survives JSON round-trip with valid indices', () => {
+    const doc = buildSampleCube();
+    const r = generateBuilding(
+      doc,
+      baseParams({
+        footprintWgs84: [
+          [4.3571, 52.0116],
+          [4.357302, 52.0116],
+          [4.357302, 52.011672],
+          [4.3571, 52.011672],
+        ],
+        roofType: 'gable',
+        eaveHeight: 6,
+        ridgeHeight: 9,
+        eaveOverhang: 0.3,
+        rakeOverhang: 0.4,
+      })
+    );
+    insertBuilding(doc, r);
+    const parsed = parseCityJson(JSON.stringify(doc));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const total = parsed.doc.vertices.length;
+    const reloaded = parsed.doc.CityObjects[r.id];
+    const gReload = reloaded.geometry![0] as SolidGeom;
+    for (const face of gReload.boundaries[0]) {
+      for (const ring of face) {
+        for (const idx of ring) {
+          expect(idx).toBeGreaterThanOrEqual(0);
+          expect(idx).toBeLessThan(total);
+        }
+      }
+    }
+    expect(gReload.semantics.values[0].length).toBe(gReload.boundaries[0].length);
+  });
+
   it('gable: zero overhang preserves the original 7-face / 10-vertex topology', () => {
     const doc = buildSampleCube();
     const r = generateBuilding(

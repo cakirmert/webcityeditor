@@ -120,6 +120,7 @@ export function regenerateBuilding(
     roofType,
     baseElevation,
     eaveOverhang: Number(a._eaveOverhang ?? 0),
+    rakeOverhang: Number(a._rakeOverhang ?? 0),
     openings:
       a._addWindows || a._addDoor
         ? {
@@ -167,6 +168,7 @@ function stripPrivateAttrs(a: Record<string, unknown>): Record<string, string | 
     '_ridgeHeight',
     '_baseElevation',
     '_eaveOverhang',
+    '_rakeOverhang',
     '_addWindows',
     '_addDoor',
     '_createdBy',

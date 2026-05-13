@@ -611,6 +611,7 @@ export default function App() {
               ? { windows: form.addWindows, door: form.addDoor }
               : undefined,
           eaveOverhang: form.eaveOverhang,
+          rakeOverhang: form.rakeOverhang,
         });
         const id = insertBuilding(cityjson, result);
         const newIds = new Set([id]);

@@ -37,6 +37,12 @@ export interface NewBuildingParams {
    *  `OuterCeilingSurface` (soffit) faces. Only flat roofs support overhang
    *  in this version; pitched roofs ignore the value. */
   eaveOverhang?: number;
+  /** LoD 2.2 gable rake overhang in metres (default 0 = no overhang). Only
+   *  applies to `roofType: 'gable'`; ignored otherwise. When > 0, the ridge
+   *  and the roof slopes extend past each gable wall along the ridge axis,
+   *  and a small "rake gable triangle" closes each extreme end. The gable
+   *  walls themselves are unchanged. */
+  rakeOverhang?: number;
 }
 
 export interface GenerateResult {
@@ -116,6 +122,7 @@ export function generateBuilding(
 
   let out: BuildOut;
   const eaveOverhang = Math.max(0, params.eaveOverhang ?? 0);
+  const rakeOverhang = Math.max(0, params.rakeOverhang ?? 0);
   if (params.roofType === 'flat') {
     out = buildFlat(projected, baseZ, eaveZAbs, toInt, toGlobal, eaveOverhang);
   } else if (params.roofType === 'pyramid') {
@@ -127,7 +134,7 @@ export function generateBuilding(
           'Use pyramid for N-sided polygons, or flat.'
       );
     }
-    out = buildGable(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal, eaveOverhang);
+    out = buildGable(projected, baseZ, eaveZAbs, ridgeZAbs, toInt, toGlobal, eaveOverhang, rakeOverhang);
   } else if (params.roofType === 'hip') {
     if (projected.length !== 4) {
       throw new Error(
@@ -155,7 +162,7 @@ export function generateBuilding(
   // overhang. Gable produces 2 long-side soffits + 4 rake-corner-cap
   // triangles (only the long sides physically overhang; the rake-corner caps
   // close the geometric gap at each gable-end corner).
-  const hasSoffits = eaveOverhang > 0;
+  const hasSoffits = eaveOverhang > 0 || (params.roofType === 'gable' && rakeOverhang > 0);
   if (hasSoffits) {
     surfaces.push({ type: 'OuterCeilingSurface' });
     lodLabel = '2.2';
@@ -202,6 +209,7 @@ export function generateBuilding(
       _ridgeHeight: params.ridgeHeight,
       _baseElevation: params.baseElevation ?? 0,
       _eaveOverhang: params.eaveOverhang ?? 0,
+      _rakeOverhang: params.rakeOverhang ?? 0,
       _addWindows: params.openings?.windows ?? false,
       _addDoor: params.openings?.door ?? false,
       ...(params.attributes ?? {}),
@@ -495,7 +503,8 @@ function buildGable(
   ridgeZ: number,
   toInt: (x: number, y: number, z: number) => [number, number, number],
   toGlobal: (local: number) => number,
-  eaveOverhang: number = 0
+  eaveOverhang: number = 0,
+  rakeOverhang: number = 0
 ): BuildOut {
   // 4 corners in order: v0, v1, v2, v3 (forming a quad).
   // Edges: e0=(v0-v1), e1=(v1-v2), e2=(v2-v3), e3=(v3-v0).
@@ -567,11 +576,22 @@ function buildGable(
   // diverge at the bottom, leaving a small triangular gap. We close it with a
   // "rake-corner-cap" triangle [e0v, re_v0, rB] tagged as OuterCeilingSurface.
   const hasOverhang = eaveOverhang > 0;
+  const hasRakeOverhang = rakeOverhang > 0;
   // Long-edge roof-edge vertex globals — only valid when hasOverhang.
   let re0 = -1,
     re1 = -1,
     re2 = -1,
     re3 = -1;
+  // Rake-extended vertex globals — only valid when hasRakeOverhang.
+  // rA_ext, rB_ext: ridge endpoints extended along the ridge axis past the
+  // gable walls. _rake corners: gable-end eave corners extended along the
+  // ridge axis (NOT perpendicular to long edges — that's the eaveOverhang).
+  let rA_ext = -1,
+    rB_ext = -1;
+  let re0_rake = -1,
+    re1_rake = -1,
+    re2_rake = -1,
+    re3_rake = -1;
   if (hasOverhang) {
     // For ridgeOnE0=true: long edges are e0 (v0→v1) and e2 (v2→v3).
     //   outwardE0 = perpendicular to (v1-v0), pointing away from polygon
@@ -610,6 +630,96 @@ function buildGable(
     }
   }
 
+  if (hasRakeOverhang) {
+    // Ridge axis direction in plan (from rB toward rA, unit length).
+    const ridgeLen =
+      Math.hypot(ridgeA[0] - ridgeB[0], ridgeA[1] - ridgeB[1]) || 1;
+    const rdx = (ridgeA[0] - ridgeB[0]) / ridgeLen;
+    const rdy = (ridgeA[1] - ridgeB[1]) / ridgeLen;
+
+    // Extended ridge endpoints — rA moves away from rB (+ridgeDir), rB the
+    // opposite (-ridgeDir). Distance: rakeOverhang.
+    newVertices.push(
+      toInt(ridgeA[0] + rdx * rakeOverhang, ridgeA[1] + rdy * rakeOverhang, ridgeZ)
+    );
+    rA_ext = G(newVertices.length - 1);
+    newVertices.push(
+      toInt(ridgeB[0] - rdx * rakeOverhang, ridgeB[1] - rdy * rakeOverhang, ridgeZ)
+    );
+    rB_ext = G(newVertices.length - 1);
+
+    // Extended gable-end eave corners. The base XY for each corner is either
+    // the perpendicular-offset re_ position (when hasOverhang) or the raw
+    // wall corner (when rake-only). Each corner shifts along the ridge axis
+    // by rakeOverhang in the direction "away from its gable end".
+    //
+    // For ridgeOnE0 = true: v0/v3 sit on the rB side (extend -ridgeDir);
+    // v1/v2 on the rA side (extend +ridgeDir).
+    // For ridgeOnE0 = false: v0/v1 on rA side (+ridgeDir); v2/v3 on rB side
+    // (-ridgeDir).
+    let baseX0: number, baseY0: number;
+    let baseX1: number, baseY1: number;
+    let baseX2: number, baseY2: number;
+    let baseX3: number, baseY3: number;
+    if (hasOverhang) {
+      // re0..re3 were just pushed at indices 10..13 — recompute their XYs by
+      // running the same perpOutward math we used above. (Storing intermediate
+      // results would require a wider refactor; this is one extra cheap pass.)
+      const perpOutward = (a: [number, number], b: [number, number]): [number, number] => {
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const len = Math.hypot(dx, dy) || 1;
+        return [dy / len, -dx / len];
+      };
+      if (ridgeOnE0) {
+        const oE0 = perpOutward(v0, v1);
+        const oE2 = perpOutward(v2, v3);
+        baseX0 = v0[0] + oE0[0] * eaveOverhang;
+        baseY0 = v0[1] + oE0[1] * eaveOverhang;
+        baseX1 = v1[0] + oE0[0] * eaveOverhang;
+        baseY1 = v1[1] + oE0[1] * eaveOverhang;
+        baseX2 = v2[0] + oE2[0] * eaveOverhang;
+        baseY2 = v2[1] + oE2[1] * eaveOverhang;
+        baseX3 = v3[0] + oE2[0] * eaveOverhang;
+        baseY3 = v3[1] + oE2[1] * eaveOverhang;
+      } else {
+        const oE1 = perpOutward(v1, v2);
+        const oE3 = perpOutward(v3, v0);
+        baseX0 = v0[0] + oE3[0] * eaveOverhang;
+        baseY0 = v0[1] + oE3[1] * eaveOverhang;
+        baseX1 = v1[0] + oE1[0] * eaveOverhang;
+        baseY1 = v1[1] + oE1[1] * eaveOverhang;
+        baseX2 = v2[0] + oE1[0] * eaveOverhang;
+        baseY2 = v2[1] + oE1[1] * eaveOverhang;
+        baseX3 = v3[0] + oE3[0] * eaveOverhang;
+        baseY3 = v3[1] + oE3[1] * eaveOverhang;
+      }
+    } else {
+      baseX0 = v0[0]; baseY0 = v0[1];
+      baseX1 = v1[0]; baseY1 = v1[1];
+      baseX2 = v2[0]; baseY2 = v2[1];
+      baseX3 = v3[0]; baseY3 = v3[1];
+    }
+
+    // Direction signs per corner: +1 = use +ridgeDir, -1 = use -ridgeDir.
+    let s0: 1 | -1, s1: 1 | -1, s2: 1 | -1, s3: 1 | -1;
+    if (ridgeOnE0) {
+      // v0, v3 on rB side → -ridgeDir; v1, v2 on rA side → +ridgeDir
+      s0 = -1; s1 = 1; s2 = 1; s3 = -1;
+    } else {
+      // v0, v1 on rA side → +ridgeDir; v2, v3 on rB side → -ridgeDir
+      s0 = 1; s1 = 1; s2 = -1; s3 = -1;
+    }
+    newVertices.push(toInt(baseX0 + s0 * rdx * rakeOverhang, baseY0 + s0 * rdy * rakeOverhang, eaveZ));
+    re0_rake = G(newVertices.length - 1);
+    newVertices.push(toInt(baseX1 + s1 * rdx * rakeOverhang, baseY1 + s1 * rdy * rakeOverhang, eaveZ));
+    re1_rake = G(newVertices.length - 1);
+    newVertices.push(toInt(baseX2 + s2 * rdx * rakeOverhang, baseY2 + s2 * rdy * rakeOverhang, eaveZ));
+    re2_rake = G(newVertices.length - 1);
+    newVertices.push(toInt(baseX3 + s3 * rdx * rakeOverhang, baseY3 + s3 * rdy * rakeOverhang, eaveZ));
+    re3_rake = G(newVertices.length - 1);
+  }
+
   // Walls + roof depend on ridge orientation. When hasOverhang, roof slopes
   // use roof-edge vertices instead of wall-top eXv on the long-edge corners.
   let wallRings: number[][];
@@ -618,28 +728,58 @@ function buildGable(
   // each gable corner (small triangles closing the geometric gap).
   const overhangFaces: number[][] = [];
 
+  // When rake overhang is active, the slope quads use the extended ridge
+  // endpoints AND extended gable-end eave corners — the slope plane is
+  // unchanged (same pitch), just longer along the ridge axis. The original
+  // rake-corner-cap triangles no longer make sense (they sat in the gable
+  // wall plane and would float "inside" the rake overhang volume), so we
+  // replace them with a single triangular "rake gable" face at each extreme
+  // end. Long-side soffits are unchanged: they cover the eave overhang
+  // perpendicular to the long edges, which is independent of the rake.
+  const slopeRA = hasRakeOverhang ? rA_ext : rA;
+  const slopeRB = hasRakeOverhang ? rB_ext : rB;
   if (ridgeOnE0) {
     wallRings = [
       [g0, g1, e1v, e0v], // long wall e0
-      [g1, g2, e2v, rA, e1v], // gable wall e1
+      [g1, g2, e2v, rA, e1v], // gable wall e1 — uses ORIGINAL rA
       [g2, g3, e3v, e2v], // long wall e2
-      [g3, g0, e0v, rB, e3v], // gable wall e3
+      [g3, g0, e0v, rB, e3v], // gable wall e3 — uses ORIGINAL rB
     ];
-    if (hasOverhang) {
+    if (hasOverhang || hasRakeOverhang) {
+      const slope0 = hasRakeOverhang ? re0_rake : re0;
+      const slope1 = hasRakeOverhang ? re1_rake : re1;
+      const slope2 = hasRakeOverhang ? re2_rake : re2;
+      const slope3 = hasRakeOverhang ? re3_rake : re3;
+      const baseE0 = hasOverhang ? re0 : e0v;
+      const baseE1 = hasOverhang ? re1 : e1v;
+      const baseE2 = hasOverhang ? re2 : e2v;
+      const baseE3 = hasOverhang ? re3 : e3v;
       roofRings = [
-        [re0, re1, rA, rB], // e0 slope, anchored to roof-edge
-        [re2, re3, rB, rA], // e2 slope, anchored to roof-edge
+        [slope0, slope1, slopeRA, slopeRB], // e0 slope
+        [slope2, slope3, slopeRB, slopeRA], // e2 slope
       ];
-      // Long-side soffits (wall-top → roof-edge, normal -Z).
-      overhangFaces.push([e0v, re0, re1, e1v]); // soffit under e0 slope
-      overhangFaces.push([e2v, re2, re3, e3v]); // soffit under e2 slope
-      // Rake-corner caps. At v0, slope's lower edge goes re0→rB; gable wall
-      // e3's edge near v0 goes e0v→rB. Close the wedge: [e0v, re0, rB].
-      // Wind so the normal points generally outward + downward.
-      overhangFaces.push([e0v, re0, rB]); // v0 rake corner (between e0 long & e3 gable)
-      overhangFaces.push([e1v, rA, re1]); // v1 rake corner (between e0 long & e1 gable)
-      overhangFaces.push([e2v, re2, rA]); // v2 rake corner (between e2 long & e1 gable)
-      overhangFaces.push([e3v, rB, re3]); // v3 rake corner (between e2 long & e3 gable)
+      if (hasOverhang) {
+        // Long-side soffits (wall-top → roof-edge), still needed since the
+        // eave overhang perpendicular extension is independent of rake.
+        overhangFaces.push([e0v, re0, re1, e1v]); // soffit under e0 slope
+        overhangFaces.push([e2v, re2, re3, e3v]); // soffit under e2 slope
+      }
+      if (hasRakeOverhang) {
+        // Rake gable triangles at each extreme end. At the rA side (x of rA_ext):
+        //   slope1 (rA-side eave on e0) → rA_ext → slope2 (rA-side eave on e2).
+        // At rB side: slope3 (rB-side eave on e2) → rB_ext → slope0 (rB-side eave on e0).
+        // These three points all share the same projected XY along the ridge
+        // axis (offset = ±rakeOverhang), so the triangle is planar.
+        overhangFaces.push([slope1, rA_ext, slope2]); // rA-side rake gable
+        overhangFaces.push([slope3, rB_ext, slope0]); // rB-side rake gable
+      } else {
+        // Original rake-corner-cap triangles closing the wedge between the
+        // long-side eave overhang and the gable wall at each ground corner.
+        overhangFaces.push([baseE0, re0, rB]); // v0 (note: baseE0 == e0v when hasOverhang)
+        overhangFaces.push([baseE1, rA, re1]); // v1
+        overhangFaces.push([baseE2, re2, rA]); // v2
+        overhangFaces.push([baseE3, rB, re3]); // v3
+      }
     } else {
       roofRings = [
         [e0v, e1v, rA, rB],
@@ -653,18 +793,34 @@ function buildGable(
       [g2, g3, e3v, rB, e2v], // gable wall e2
       [g3, g0, e0v, e3v], // long wall e3
     ];
-    if (hasOverhang) {
+    if (hasOverhang || hasRakeOverhang) {
+      const slope0 = hasRakeOverhang ? re0_rake : re0;
+      const slope1 = hasRakeOverhang ? re1_rake : re1;
+      const slope2 = hasRakeOverhang ? re2_rake : re2;
+      const slope3 = hasRakeOverhang ? re3_rake : re3;
+      const baseE0 = hasOverhang ? re0 : e0v;
+      const baseE1 = hasOverhang ? re1 : e1v;
+      const baseE2 = hasOverhang ? re2 : e2v;
+      const baseE3 = hasOverhang ? re3 : e3v;
       roofRings = [
-        [re1, re2, rB, rA], // e1 slope
-        [re3, re0, rA, rB], // e3 slope
+        [slope1, slope2, slopeRB, slopeRA], // e1 slope
+        [slope3, slope0, slopeRA, slopeRB], // e3 slope
       ];
-      overhangFaces.push([e1v, re1, re2, e2v]); // soffit under e1 slope
-      overhangFaces.push([e3v, re3, re0, e0v]); // soffit under e3 slope
-      // Rake-corner caps. Mirror the ridgeOnE0 layout swapped to e1/e3.
-      overhangFaces.push([e1v, re1, rA]); // v1 corner (between e0 gable & e1 long)
-      overhangFaces.push([e2v, rB, re2]); // v2 corner (between e1 long & e2 gable)
-      overhangFaces.push([e3v, re3, rB]); // v3 corner (between e2 gable & e3 long)
-      overhangFaces.push([e0v, rA, re0]); // v0 corner (between e3 long & e0 gable)
+      if (hasOverhang) {
+        overhangFaces.push([e1v, re1, re2, e2v]); // soffit under e1 slope
+        overhangFaces.push([e3v, re3, re0, e0v]); // soffit under e3 slope
+      }
+      if (hasRakeOverhang) {
+        // rA side (between e0 gable and ridge): slope0 → rA_ext → slope1
+        // rB side (between e2 gable and ridge): slope2 → rB_ext → slope3
+        overhangFaces.push([slope0, rA_ext, slope1]); // rA-side rake gable
+        overhangFaces.push([slope2, rB_ext, slope3]); // rB-side rake gable
+      } else {
+        overhangFaces.push([baseE1, re1, rA]); // v1
+        overhangFaces.push([baseE2, rB, re2]); // v2
+        overhangFaces.push([baseE3, re3, rB]); // v3
+        overhangFaces.push([baseE0, rA, re0]); // v0
+      }
     } else {
       roofRings = [
         [e1v, e2v, rB, rA],

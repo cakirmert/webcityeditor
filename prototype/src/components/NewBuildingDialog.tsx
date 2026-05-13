@@ -43,6 +43,9 @@ export interface NewBuildingForm {
   /** LoD 2.2 eave overhang in metres. 0 = no overhang. Currently honored only
    *  by flat roofs; pitched roofs ignore it. */
   eaveOverhang: number;
+  /** LoD 2.2 gable rake overhang in metres. 0 = no overhang. Only meaningful
+   *  for gable roofs — extends the ridge past each gable wall. */
+  rakeOverhang: number;
 }
 
 interface Props {
@@ -73,6 +76,7 @@ export default function NewBuildingDialog({
   const [addWindows, setAddWindows] = useState(true);
   const [addDoor, setAddDoor] = useState(true);
   const [eaveOverhang, setEaveOverhang] = useState(0); // metres
+  const [rakeOverhang, setRakeOverhang] = useState(0); // metres (gable only)
 
   useEffect(() => {
     if (storeysAutoSync) {
@@ -101,6 +105,7 @@ export default function NewBuildingDialog({
       addWindows,
       addDoor,
       eaveOverhang,
+      rakeOverhang: roofType === 'gable' ? rakeOverhang : 0,
     }),
     [
       totalHeight,
@@ -114,6 +119,7 @@ export default function NewBuildingDialog({
       addWindows,
       addDoor,
       eaveOverhang,
+      rakeOverhang,
     ]
   );
 
@@ -276,8 +282,9 @@ export default function NewBuildingDialog({
             </div>
           </Row>
 
-          {/* All four roof types now honour eaveOverhang. Gable's variant only
-              overhangs on the long sides (no rake overhang). */}
+          {/* All four roof types honour eaveOverhang. Gable additionally
+              supports rakeOverhang, which extends the ridge past each gable
+              wall along the ridge axis. */}
           {(roofType === 'flat' ||
             roofType === 'pyramid' ||
             roofType === 'hip' ||
@@ -294,6 +301,24 @@ export default function NewBuildingDialog({
                 />
                 {eaveOverhang > 0 && (
                   <span className="text-[10px] text-[var(--text-faint)]">→ LoD 2.2 soffit</span>
+                )}
+              </div>
+            </Row>
+          )}
+
+          {roofType === 'gable' && (
+            <Row label="Rake overhang (m)">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step="0.1"
+                  value={rakeOverhang}
+                  onChange={(e) => setRakeOverhang(Math.max(0, Number(e.target.value) || 0))}
+                />
+                {rakeOverhang > 0 && (
+                  <span className="text-[10px] text-[var(--text-faint)]">→ ridge extends past gable walls</span>
                 )}
               </div>
             </Row>
