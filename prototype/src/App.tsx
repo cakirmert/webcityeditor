@@ -1027,6 +1027,7 @@ export default function App() {
               onCancel={handleCancelIfcPlacement}
             />
           )}
+          {zoningEnabled && zones.length > 0 && <ZoneLegend zones={zones} />}
           {cityjson ? (
             <MapView
               cityjson={cityjson}
@@ -1239,6 +1240,60 @@ function AttributePanelInline(props: {
  * mode. Surfaces the parsed IFC's headline numbers + a Cancel button (Esc
  * also works). Click anywhere on the map to drop the building.
  */
+function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 12,
+        left: 12,
+        zIndex: 11,
+        background: 'rgba(20, 20, 24, 0.88)',
+        color: '#fff',
+        padding: '8px 10px',
+        borderRadius: 6,
+        fontSize: 11,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+        backdropFilter: 'blur(4px)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        minWidth: 180,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: 'rgba(255,255,255,0.55)',
+          marginBottom: 6,
+        }}
+      >
+        Zoning
+      </div>
+      {zones.map((z) => (
+        <div
+          key={z.id}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
+          title={`Allowed: ${z.allowedTypes.join(', ')}`}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 12,
+              height: 12,
+              borderRadius: 2,
+              background: `rgb(${z.color[0]}, ${z.color[1]}, ${z.color[2]})`,
+              border: '1px solid rgba(255,255,255,0.25)',
+              flexShrink: 0,
+            }}
+          />
+          <span>{z.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function IfcPlacementBanner({
   parsed,
   fileName,
