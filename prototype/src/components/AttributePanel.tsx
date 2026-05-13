@@ -41,6 +41,12 @@ interface Props {
   onSaveFootprintEdit?: () => void;
   onCancelFootprintEdit?: () => void;
   onMoveOpening?: (buildingId: string, opening: OpeningInfo, dx: number, dy: number, dz: number) => void;
+  /** Convert an imported building into one the editor's regenerate /
+   *  footprint-edit / openings toolchain can work with. Replaces the
+   *  original geometry with a parametric one inferred from attributes +
+   *  vertex analysis. Distinct from regenerate so the user can opt in
+   *  explicitly. */
+  onMakeEditable?: (buildingId: string) => void;
   hideHeader?: boolean;
 }
 
@@ -65,6 +71,7 @@ export default function AttributePanel({
   onSaveFootprintEdit,
   onCancelFootprintEdit,
   onMoveOpening,
+  onMakeEditable,
   hideHeader = false,
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
@@ -337,10 +344,25 @@ export default function AttributePanel({
               >
                 ✦ Edit footprint corners
               </Button>
+            ) : onMakeEditable ? (
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-[var(--text-faint)] italic">
+                  This building was imported — its original geometry is
+                  read-only. Make it editable to enable footprint editing,
+                  roof-type changes, openings, and overhangs.
+                </div>
+                <Button
+                  variant="primary"
+                  onClick={() => onMakeEditable(buildingId)}
+                  className="w-full"
+                  title="Replaces the imported geometry with a parametric regeneration inferred from its attributes (roof type, height, storeys). Original detail is lost; the building becomes fully editable."
+                >
+                  ✦ Make editable (replace with parametric)
+                </Button>
+              </div>
             ) : (
               <div className="text-[11px] text-[var(--text-faint)] italic">
-                Available only for buildings created in the editor — imported
-                buildings keep their original geometry.
+                Available only for buildings created in the editor.
               </div>
             )
           ) : (

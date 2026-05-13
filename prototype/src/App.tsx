@@ -40,6 +40,7 @@ import { buildPreviewMesh } from './lib/preview-mesh';
 import { cloneBuildings } from './lib/clipboard';
 import { deleteBuildings } from './lib/delete';
 import { extractOpenings, moveOpening, type OpeningInfo } from './lib/opening-edit';
+import { parametriseBuilding } from './lib/parametrise';
 import {
   generateZonesAroundCenter,
   findZoneForPoint,
@@ -185,6 +186,33 @@ export default function App() {
       if (!cityjson) return;
       pushUndo(`Move ${opening.type} on ${buildingId}`);
       moveOpening(cityjson, buildingId, opening, dx, dy, dz);
+      setDirtyIds((prev) => {
+        const next = new Set(prev);
+        next.add(buildingId);
+        return next;
+      });
+      setReloadToken((t) => t + 1);
+    },
+    [cityjson, pushUndo]
+  );
+
+  // ── Make-editable (parametrise imported building) ────────────────────────
+  const handleMakeEditable = useCallback(
+    (buildingId: string) => {
+      if (!cityjson) return;
+      const ok = window.confirm(
+        'Replace this imported building with a parametric regeneration inferred ' +
+          'from its attributes?\n\n' +
+          'Original geometry detail will be lost. After conversion you can edit ' +
+          'its footprint, roof type, openings, and overhangs.'
+      );
+      if (!ok) return;
+      pushUndo(`Make ${buildingId} editable`);
+      const r = parametriseBuilding(cityjson, buildingId);
+      if (!r.ok) {
+        alert(`Couldn't make this building editable: ${r.reason}`);
+        return;
+      }
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(buildingId);
@@ -1261,6 +1289,7 @@ export default function App() {
               onSaveFootprintEdit={handleSaveFootprintEdit}
               onCancelFootprintEdit={handleCancelFootprintEdit}
               onMoveOpening={handleMoveOpening}
+              onMakeEditable={handleMakeEditable}
             />
           </aside>
         )}
@@ -1290,6 +1319,7 @@ function AttributePanelInline(props: {
   onSaveFootprintEdit: () => void;
   onCancelFootprintEdit: () => void;
   onMoveOpening?: (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => void;
+  onMakeEditable?: (buildingId: string) => void;
 }) {
   return (
     <AttributePanel
@@ -1313,6 +1343,7 @@ function AttributePanelInline(props: {
       onSaveFootprintEdit={props.onSaveFootprintEdit}
       onCancelFootprintEdit={props.onCancelFootprintEdit}
       onMoveOpening={props.onMoveOpening}
+      onMakeEditable={props.onMakeEditable}
       hideHeader
     />
   );
