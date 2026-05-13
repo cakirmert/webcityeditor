@@ -6,7 +6,13 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 
 interface Props {
-  onLoaded: (doc: CityJsonDocument, fileName: string) => void;
+  /**
+   * Called when a file has parsed successfully. `rawText` is included only
+   * for CityJSONSeq inputs (where viewport-filtered re-parsing is useful);
+   * monolithic files don't need it because they hold the whole city in
+   * memory anyway. `null` for `rawText` means "don't keep me around."
+   */
+  onLoaded: (doc: CityJsonDocument, fileName: string, rawText: string | null) => void;
 }
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
@@ -72,7 +78,9 @@ export default function FileLoader({ onLoaded }: Props) {
           Object.keys(data.CityObjects).length
         } objects, ${data.vertices.length.toLocaleString()} vertices`,
       });
-      onLoaded(data, name);
+      // Hold on to the raw text only for CityJSONSeq — it's used by the
+      // toolbar's "Filter to viewport" action to re-parse with a bbox.
+      onLoaded(data, name, isSeq ? text : null);
     },
     [onLoaded]
   );
@@ -171,7 +179,7 @@ export default function FileLoader({ onLoaded }: Props) {
       try {
         const stored = await loadDocument(name);
         if (!stored) throw new Error('Not found');
-        onLoaded(stored.doc, stored.name);
+        onLoaded(stored.doc, stored.name, null);
       } catch (e) {
         setStatus({
           kind: 'err',

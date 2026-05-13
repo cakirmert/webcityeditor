@@ -26,6 +26,7 @@ import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
 import { mergeCityJson } from './lib/merge';
 import { parseCityJsonAuto } from './lib/cityjson';
+import proj4 from 'proj4';
 import type { IfcImportResult } from './lib/ifc-import';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
@@ -104,13 +105,21 @@ export default function App() {
   const [zones, setZones] = useState<ParcelZone[]>([]);
   const [zoningEnabled, setZoningEnabled] = useState(false);
 
+  // ── Raw CityJSONSeq cache for viewport re-parse ───────────────────────────
+  // Held only for CityJSONSeq inputs. The "Filter to viewport" toolbar action
+  // re-parses this with parseCityJsonSeq(text, undefined, bboxInCrs) to drop
+  // features outside the current map view — useful on city-scale jsonl files.
+  const [seqRawText, setSeqRawText] = useState<string | null>(null);
+  const mapBboxRef = useRef<[number, number, number, number] | null>(null);
+
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
 
   const handleLoaded = useCallback(
-    (doc: CityJsonDocument, name: string) => {
+    (doc: CityJsonDocument, name: string, rawText: string | null = null) => {
       setCityjson(doc);
       setFileName(name);
+      setSeqRawText(rawText);
       setSelection(null);
       setDirtyIds(new Set());
       setFilter({}); // reset filters when loading a new doc
@@ -512,6 +521,54 @@ export default function App() {
     },
     []
   );
+
+  // ── Viewport-filter re-parse ───────────────────────────────────────────
+  // Re-parses the cached CityJSONSeq text with parseCityJsonAuto's bbox
+  // filter using the map's current viewport. Re-projects the WGS84 bounds
+  // to the data's CRS (taking the AABB of the four reprojected corners so
+  // the filter covers any rotation the projection introduces).
+  const handleReloadViewport = useCallback(() => {
+    if (!seqRawText || !cityjson) return;
+    const bboxWgs = mapBboxRef.current;
+    if (!bboxWgs) {
+      alert('Map viewport not ready yet. Move the map once, then try again.');
+      return;
+    }
+    const crs = detectCrs(cityjson);
+    if (!crs.supported) {
+      alert(`Can't reload: CRS ${crs.code} isn't supported by proj4.`);
+      return;
+    }
+    const [w, s, e, n] = bboxWgs;
+    const corners: [number, number][] = [
+      [w, s],
+      [e, s],
+      [e, n],
+      [w, n],
+    ];
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const c of corners) {
+      const p = proj4('EPSG:4326', crs.code, c) as [number, number];
+      if (p[0] < minX) minX = p[0];
+      if (p[1] < minY) minY = p[1];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] > maxY) maxY = p[1];
+    }
+    const result = parseCityJsonAuto(seqRawText, undefined, [minX, minY, maxX, maxY]);
+    if (!result.ok) {
+      alert(`Reload failed: ${result.error}`);
+      return;
+    }
+    pushUndo('Filter to viewport');
+    setCityjson(result.doc);
+    setDirtyIds(new Set());
+    setSelection(null);
+    setMultiSelection(new Set());
+    setReloadToken((t) => t + 1);
+  }, [seqRawText, cityjson, pushUndo]);
 
   // ── Map drag for position transform ─────────────────────────────────────
   const dragBaseRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -1027,6 +1084,8 @@ export default function App() {
         canDelete={!!selection || multiSelection.size > 0}
         zoningEnabled={zoningEnabled}
         onToggleZoning={handleToggleZoning}
+        onFilterViewport={handleReloadViewport}
+        canFilterViewport={!!seqRawText}
       />
       {cityjson && footprintsForFilter.length > 0 && (
         <FilterBar
@@ -1066,6 +1125,9 @@ export default function App() {
               onDrawCanceled={handleCancelDraw}
               filteredIds={filterIsEmpty ? null : filteredIds}
               onPlacementClick={ifcPending ? handleIfcPlacement : undefined}
+              onViewportChange={(bbox) => {
+                mapBboxRef.current = bbox;
+              }}
               dragTransformId={pendingTransform?.id ?? null}
               onDragMove={handleDragMove}
               multiSelectedIds={multiSelection.size > 0 ? multiSelection : null}

@@ -79,6 +79,9 @@ interface Props {
    * import to let the user drop the imported building wherever they like.
    */
   onPlacementClick?: (lngLat: [number, number]) => void;
+  /** Called on map moveend with the current WGS84 viewport [w, s, e, n]. The
+   *  parent uses this to feed the bbox to viewport-filtered re-parsing. */
+  onViewportChange?: (bbox: [number, number, number, number]) => void;
   /** When set, drag on the map moves the building. Fires onDragMove with
    *  CRS-metre deltas accumulated from the drag start position. */
   dragTransformId?: string | null;
@@ -119,6 +122,7 @@ export default function MapView({
   onFootprintChange,
   filteredIds = null,
   onPlacementClick,
+  onViewportChange,
   dragTransformId = null,
   onDragMove,
   multiSelectedIds = null,
@@ -542,6 +546,27 @@ export default function MapView({
       map.getCanvas().style.cursor = prevCursor;
     };
   }, [onPlacementClick]);
+
+  // ── Viewport-change broadcast ─────────────────────────────────────────────
+  // Fire onViewportChange after every pan/zoom settles so the parent can
+  // feed the bbox to viewport-filtered re-parsing. Uses moveend (not move)
+  // to avoid per-frame callbacks during drag.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !onViewportChange) return;
+    const broadcast = () => {
+      const b = map.getBounds();
+      onViewportChange([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    };
+    // Emit once on mount so the parent has an initial bbox without waiting
+    // for the first user pan.
+    if (map.isStyleLoaded()) broadcast();
+    else map.once('load', broadcast);
+    map.on('moveend', broadcast);
+    return () => {
+      map.off('moveend', broadcast);
+    };
+  }, [onViewportChange]);
 
   // ── Drag-to-move mode ─────────────────────────────────────────────────────
   // When `dragTransformId` is set, mouse-drag on the map translates the

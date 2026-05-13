@@ -66,6 +66,11 @@ interface Props {
   canDelete?: boolean;
   zoningEnabled?: boolean;
   onToggleZoning?: () => void;
+  /** Re-parse the loaded CityJSONSeq file with the current map viewport as a
+   *  bbox filter. Only meaningful for jsonl inputs — the button hides when
+   *  the loaded file isn't a CityJSONSeq. */
+  onFilterViewport?: () => void;
+  canFilterViewport?: boolean;
 }
 
 export default function Toolbar({
@@ -99,6 +104,8 @@ export default function Toolbar({
   canDelete = false,
   zoningEnabled = false,
   onToggleZoning,
+  onFilterViewport,
+  canFilterViewport = false,
 }: Props) {
   return (
     <header className="flex h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
@@ -253,6 +260,17 @@ export default function Toolbar({
               title={zoningEnabled ? 'Disable zoning overlay' : 'Show parcel zoning overlay'}
             >
               {zoningEnabled ? '▦ Zoning ON' : '▦ Zoning'}
+            </Button>
+          )}
+
+          {onFilterViewport && canFilterViewport && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onFilterViewport}
+              title="Re-parse the loaded CityJSONSeq file dropping every feature outside the current map view"
+            >
+              ▢ Filter to viewport
             </Button>
           )}
 
