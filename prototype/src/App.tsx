@@ -15,6 +15,7 @@ import {
   splitBuildingByFloorHeights,
   splitBuildingBySide,
   MIN_STOREY_HEIGHT,
+  type SplitAxis,
 } from './lib/subdivision';
 import { moveBuilding, rotateBuilding } from './lib/transform';
 import { regenerateBuilding } from './lib/regenerate';
@@ -377,11 +378,11 @@ export default function App() {
   );
 
   const handleSplitBySide = useCallback(
-    (id: string, partCount: number) => {
+    (id: string, partCount: number, axis: SplitAxis = 'auto') => {
       if (!cityjson) return;
       try {
         pushUndo(`Split ${id} into ${partCount} side parts`);
-        const { partIds } = splitBuildingBySide(cityjson, id, partCount);
+        const { partIds } = splitBuildingBySide(cityjson, id, partCount, axis);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -685,7 +686,7 @@ export default function App() {
           }
         } else if (form.splitMode === 'sides') {
           try {
-            const { partIds } = splitBuildingBySide(cityjson, id, form.splitCount);
+            const { partIds } = splitBuildingBySide(cityjson, id, form.splitCount, form.splitAxis);
             for (const p of partIds) newIds.add(p);
           } catch (e) {
             alert(
@@ -1278,7 +1279,7 @@ function AttributePanelInline(props: {
   onSplitByFloor: (id: string, floorCount: number) => void;
   onSplitByFloorHeights: (id: string, heights: number[]) => void;
   onCustomHeightsPreview: (heights: number[] | null) => void;
-  onSplitBySide: (id: string, partCount: number) => void;
+  onSplitBySide: (id: string, partCount: number, axis: SplitAxis) => void;
   pendingTransform: PendingTransform | null;
   onStartTransform: (id: string) => void;
   onUpdateTransform: (patch: Partial<Omit<PendingTransform, 'id'>>) => void;

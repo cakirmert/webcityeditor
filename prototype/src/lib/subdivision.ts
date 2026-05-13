@@ -196,10 +196,22 @@ export function splitBuildingByFloorHeights(
  *
  * Preconditions: 4-vertex rectangular footprint, each resulting part ≥ MIN_SIDE_WIDTH.
  */
+/**
+ * Which axis to lay the side-split parts along.
+ *   'auto' (default) — pick the longer axis (matches pre-axis behaviour).
+ *   'longer'         — explicitly pick the longer axis.
+ *   'shorter'        — force the shorter axis. Useful when the user wants
+ *                      the cuts to run with the long side rather than across
+ *                      it (e.g. for a row of narrow attached houses sitting
+ *                      on a wide footprint).
+ */
+export type SplitAxis = 'auto' | 'longer' | 'shorter';
+
 export function splitBuildingBySide(
   doc: CityJsonDocument,
   buildingId: string,
-  partCount: number
+  partCount: number,
+  axis: SplitAxis = 'auto'
 ): SplitResult {
   const gate = canSplitBuilding(doc, buildingId);
   if (!gate.ok || !gate.params) throw new Error(gate.reason ?? 'Cannot split');
@@ -232,12 +244,15 @@ export function splitBuildingBySide(
   };
   const len0 = toMeters(ring[0], ring[1]);
   const len1 = toMeters(ring[1], ring[2]);
-  const longAxisOnE0 = len0 >= len1;
-  const longLen = longAxisOnE0 ? len0 : len1;
-  if (longLen / partCount < MIN_SIDE_WIDTH) {
+  // Resolve the requested axis to an "is the split along edge e0?" boolean.
+  // 'auto' and 'longer' both pick the longer edge; 'shorter' inverts.
+  const naturalLongOnE0 = len0 >= len1;
+  const longAxisOnE0 = axis === 'shorter' ? !naturalLongOnE0 : naturalLongOnE0;
+  const cutAxisLen = longAxisOnE0 ? len0 : len1;
+  if (cutAxisLen / partCount < MIN_SIDE_WIDTH) {
     throw new Error(
-      `Per-part width ${(longLen / partCount).toFixed(2)} m is below the ${MIN_SIDE_WIDTH} m minimum. ` +
-        `Reduce part count or extend the footprint.`
+      `Per-part width ${(cutAxisLen / partCount).toFixed(2)} m is below the ${MIN_SIDE_WIDTH} m minimum. ` +
+        `Reduce part count, switch axis, or extend the footprint.`
     );
   }
 

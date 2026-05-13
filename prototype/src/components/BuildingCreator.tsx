@@ -5,6 +5,7 @@ import {
   insertBuilding,
   type RoofType,
 } from '../lib/generator';
+import type { SplitAxis } from '../lib/subdivision';
 import { detectCrs } from '../lib/projection';
 import type { CityJsonDocument } from '../types';
 import Viewer from './Viewer';
@@ -33,6 +34,7 @@ export interface NewBuildingForm {
   yearOfConstruction: number | null;
   splitMode: 'none' | 'floors' | 'sides';
   splitCount: number;
+  splitAxis: SplitAxis;
   addWindows: boolean;
   addDoor: boolean;
   eaveOverhang: number;
@@ -75,6 +77,7 @@ export default function BuildingCreator({
   const [storeysAutoSync, setStoreysAutoSync] = useState(true);
   const [splitMode, setSplitMode] = useState<'none' | 'floors' | 'sides'>('none');
   const [splitCount, setSplitCount] = useState(2);
+  const [splitAxis, setSplitAxis] = useState<SplitAxis>('auto');
   const [addWindows, setAddWindows] = useState(true);
   const [addDoor, setAddDoor] = useState(true);
   const [eaveOverhang, setEaveOverhang] = useState(0);
@@ -107,6 +110,7 @@ export default function BuildingCreator({
       yearOfConstruction: year,
       splitMode,
       splitCount,
+      splitAxis,
       addWindows,
       addDoor,
       eaveOverhang,
@@ -121,6 +125,7 @@ export default function BuildingCreator({
       year,
       splitMode,
       splitCount,
+      splitAxis,
       addWindows,
       addDoor,
       eaveOverhang,
@@ -375,10 +380,37 @@ export default function BuildingCreator({
                       }
                     />
                   </Row>
+                  {splitMode === 'sides' && (
+                    <div className="flex items-center gap-1 text-[10px] pl-[42%]">
+                      <span className="text-[var(--text-dim)] mr-1">Axis:</span>
+                      {(['auto', 'longer', 'shorter'] as const).map((a) => (
+                        <button
+                          key={a}
+                          type="button"
+                          onClick={() => setSplitAxis(a)}
+                          className={`rounded px-2 py-0.5 ${
+                            splitAxis === a
+                              ? 'bg-[var(--accent)] text-white'
+                              : 'bg-[var(--surface-2)] text-[var(--text-dim)] hover:text-[var(--text)]'
+                          }`}
+                          title={
+                            a === 'auto'
+                              ? 'Pick the longer axis (default)'
+                              : a === 'longer'
+                              ? 'Force the longer axis'
+                              : 'Force the shorter axis'
+                          }
+                        >
+                          {a}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <SplitPreview
                     footprint={footprint}
                     splitMode={splitMode}
                     splitCount={splitCount}
+                    splitAxis={splitAxis}
                   />
                 </>
               )}
@@ -574,10 +606,12 @@ function SplitPreview({
   footprint,
   splitMode,
   splitCount,
+  splitAxis = 'auto',
 }: {
   footprint: [number, number][];
   splitMode: 'none' | 'floors' | 'sides';
   splitCount: number;
+  splitAxis?: SplitAxis;
 }) {
   const { svgPath, splitLines, viewBox } = useMemo(() => {
     if (footprint.length < 3) {
@@ -618,7 +652,8 @@ function SplitPreview({
       // Compute the AABB long axis and draw N-1 cuts perpendicular to it.
       // For a non-rectangular polygon this is approximate — but the
       // generator's split-by-side also assumes rectangular-ish footprints.
-      const longAlongX = w >= h;
+      const naturalLongX = w >= h;
+      const longAlongX = splitAxis === 'shorter' ? !naturalLongX : naturalLongX;
       for (let i = 1; i < splitCount; i++) {
         const t = i / splitCount;
         if (longAlongX) {
@@ -631,7 +666,7 @@ function SplitPreview({
       }
     }
     return { svgPath: path, splitLines: lines, viewBox: '0 0 100 60' };
-  }, [footprint, splitMode, splitCount]);
+  }, [footprint, splitMode, splitCount, splitAxis]);
 
   if (splitMode === 'none' || splitCount < 2 || !svgPath) return null;
 

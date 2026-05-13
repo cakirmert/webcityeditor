@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AttributeValue, CityJsonDocument } from '../types';
-import { canSplitBuilding, MIN_STOREY_HEIGHT, MIN_SIDE_WIDTH } from '../lib/subdivision';
+import {
+  canSplitBuilding,
+  MIN_STOREY_HEIGHT,
+  MIN_SIDE_WIDTH,
+  type SplitAxis,
+} from '../lib/subdivision';
 import { extractOpenings, type OpeningInfo } from '../lib/opening-edit';
 import { extractFootprints } from '../lib/footprints';
 import type { PendingTransform } from '../lib/transform-preview';
@@ -23,7 +28,7 @@ interface Props {
    *  and the heights array changes. Lets the parent draw a live 3D preview
    *  of the split lines. `null` means "leave custom mode". */
   onCustomHeightsPreview?: (heights: number[] | null) => void;
-  onSplitBySide?: (id: string, partCount: number) => void;
+  onSplitBySide?: (id: string, partCount: number, axis: SplitAxis) => void;
   pendingTransform?: PendingTransform | null;
   onStartTransform?: (id: string) => void;
   onUpdateTransform?: (patch: Partial<Omit<PendingTransform, 'id'>>) => void;
@@ -64,6 +69,7 @@ export default function AttributePanel({
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
   const [sideCount, setSideCount] = useState(2);
+  const [sideAxis, setSideAxis] = useState<SplitAxis>('auto');
   /** Custom per-floor wall heights in metres (only used when "Custom heights"
    *  mode is active). Length must match floorCount, sum must match the
    *  building's eave height. */
@@ -452,15 +458,40 @@ export default function AttributePanel({
                     />
                     <Button
                       size="sm"
-                      onClick={() => onSplitBySide(buildingId, sideCount)}
+                      onClick={() => onSplitBySide(buildingId, sideCount, sideAxis)}
                     >
                       Split by side
                     </Button>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1 text-[10px]">
+                    <span className="text-[var(--text-dim)] mr-1">Axis:</span>
+                    {(['auto', 'longer', 'shorter'] as const).map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => setSideAxis(a)}
+                        className={`rounded px-2 py-0.5 ${
+                          sideAxis === a
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'bg-[var(--surface-2)] text-[var(--text-dim)] hover:text-[var(--text)]'
+                        }`}
+                        title={
+                          a === 'auto'
+                            ? 'Pick the longer axis (default)'
+                            : a === 'longer'
+                            ? 'Force the longer axis'
+                            : 'Force the shorter axis'
+                        }
+                      >
+                        {a}
+                      </button>
+                    ))}
                   </div>
                   <SidePlanPreview
                     cityjson={cityjson}
                     buildingId={buildingId}
                     sideCount={sideCount}
+                    axis={sideAxis}
                   />
                 </div>
               )}
@@ -703,10 +734,12 @@ function SidePlanPreview({
   cityjson,
   buildingId,
   sideCount,
+  axis = 'auto',
 }: {
   cityjson: CityJsonDocument;
   buildingId: string;
   sideCount: number;
+  axis?: SplitAxis;
 }) {
   const { svgPath, splitLines } = useMemo(() => {
     const all = extractFootprints(cityjson);
@@ -745,7 +778,8 @@ function SidePlanPreview({
 
     const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
     if (sideCount >= 2) {
-      const longAlongX = w >= h;
+      const naturalLongX = w >= h;
+      const longAlongX = axis === 'shorter' ? !naturalLongX : naturalLongX;
       for (let i = 1; i < sideCount; i++) {
         const t = i / sideCount;
         if (longAlongX) {
@@ -758,7 +792,7 @@ function SidePlanPreview({
       }
     }
     return { svgPath: path, splitLines: lines };
-  }, [cityjson, buildingId, sideCount]);
+  }, [cityjson, buildingId, sideCount, axis]);
 
   if (!svgPath) return null;
 

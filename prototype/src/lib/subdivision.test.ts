@@ -146,6 +146,43 @@ describe('splitBuildingBySide', () => {
     const { partIds } = splitBuildingBySide(doc, id, 2);
     expect(doc.CityObjects[id].children).toEqual(partIds);
   });
+
+  it("axis='auto' uses the longer axis (matches pre-axis behaviour)", () => {
+    // makeBuilding default is 10×20 with the long axis north-south. partCount=2
+    // along the long axis should produce per-part widths of ~10 m each.
+    const { doc, id } = makeBuilding();
+    const auto = splitBuildingBySide(doc, id, 2, 'auto');
+    expect(auto.partIds).toHaveLength(2);
+    // Both parts should still pass the integrity check (a smoke test for
+    // 'sane geometry').
+    for (const pid of auto.partIds) {
+      expect(doc.CityObjects[pid].geometry).toBeTruthy();
+    }
+  });
+
+  it("axis='shorter' inverts the cut direction and may trip MIN_SIDE_WIDTH on a thin building", () => {
+    // 10 × 20 m default. With axis='shorter', cuts run along the 10 m side.
+    // 2 parts × ~5 m each is above MIN_SIDE_WIDTH so it must succeed.
+    const { doc, id } = makeBuilding();
+    const shorter = splitBuildingBySide(doc, id, 2, 'shorter');
+    expect(shorter.partIds).toHaveLength(2);
+  });
+
+  it("axis='shorter' rejects when the shorter side is too narrow for partCount", () => {
+    // 10 × 20: 10 m short side / 5 parts = 2 m per part, below MIN_SIDE_WIDTH.
+    const { doc, id } = makeBuilding();
+    expect(() => splitBuildingBySide(doc, id, 5, 'shorter')).toThrow(/minimum/i);
+  });
+
+  it("axis='longer' is explicit and equivalent to 'auto' here", () => {
+    const { doc: docA, id: idA } = makeBuilding();
+    const { doc: docB, id: idB } = makeBuilding();
+    const a = splitBuildingBySide(docA, idA, 3, 'auto');
+    const b = splitBuildingBySide(docB, idB, 3, 'longer');
+    // Same number of parts (any deeper equality would risk false negatives
+    // on internal ids).
+    expect(a.partIds.length).toBe(b.partIds.length);
+  });
 });
 
 describe('splitBuildingByFloorHeights (custom per-floor heights)', () => {
