@@ -281,6 +281,7 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
     const coordRaw = api.GetCoordinationMatrix(modelID);
     const C = Array.from(coordRaw as ArrayLike<number>);
     const hasCoordMat = C.length === 16 && !isIdentityMatrix(C);
+    const coordDetSign = hasCoordMat ? Math.sign(det3x3ColMajor(C)) : 1;
 
     // ── Stream BUILDING-ELEMENT meshes only — terrain/site geometry is
     // ── deliberately skipped so the bbox stays tight on the actual
@@ -346,7 +347,18 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
           if (wy > maxY) maxY = wy;
           if (wz > maxZ) maxZ = wz;
         }
-        for (let j = 0; j < idx.length; j++) indexBuffer.push(idx[j] + base);
+        // Detect mirrored geometry: if the combined transform has a negative
+        // 3×3 determinant, the triangle winding is reversed. Without
+        // correction, backface culling in Three.js hides those faces —
+        // typically about half the walls in a real IFC file.
+        const flipWinding = (det3x3ColMajor(m) * coordDetSign) < 0;
+        for (let j = 0; j < idx.length; j += 3) {
+          if (flipWinding) {
+            indexBuffer.push(idx[j] + base, idx[j + 2] + base, idx[j + 1] + base);
+          } else {
+            indexBuffer.push(idx[j] + base, idx[j + 1] + base, idx[j + 2] + base);
+          }
+        }
         // One class entry per emitted triangle (3 indices = 1 triangle).
         const triCountFromThis = idx.length / 3;
         for (let t = 0; t < triCountFromThis; t++) triClasses.push(sourceClass);
@@ -608,6 +620,18 @@ function readIfcNumber(v: unknown): number | null {
     return typeof inner === 'number' ? inner : null;
   }
   return null;
+}
+
+/** 3×3 determinant of the upper-left sub-matrix of a 4×4 column-major
+ *  matrix. Negative means the transform mirrors (reflects) the geometry,
+ *  which reverses triangle winding — used to detect when we need to swap
+ *  two indices per triangle to keep outward-facing normals. */
+function det3x3ColMajor(m: ArrayLike<number>): number {
+  return (
+    m[0] * (m[5] * m[10] - m[6] * m[9]) -
+    m[4] * (m[1] * m[10] - m[2] * m[9]) +
+    m[8] * (m[1] * m[6] - m[2] * m[5])
+  );
 }
 
 /** Identity-matrix detection — skip the per-vertex coordination multiply
