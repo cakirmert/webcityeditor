@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AttributeValue, CityJsonDocument } from '../types';
 import { canSplitBuilding, MIN_STOREY_HEIGHT, MIN_SIDE_WIDTH } from '../lib/subdivision';
 import { extractOpenings, type OpeningInfo } from '../lib/opening-edit';
+import { extractFootprints } from '../lib/footprints';
 import type { PendingTransform } from '../lib/transform-preview';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -420,24 +421,31 @@ export default function AttributePanel({
                 />
               )}
               {onSplitBySide && (
-                <div className="mt-3 flex items-center gap-2">
-                  <Label className="w-14">Sides</Label>
-                  <Input
-                    type="number"
-                    min={2}
-                    max={8}
-                    value={sideCount}
-                    onChange={(e) =>
-                      setSideCount(Math.max(2, Number(e.target.value) || 2))
-                    }
-                    className="w-16"
+                <div className="mt-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="w-14">Sides</Label>
+                    <Input
+                      type="number"
+                      min={2}
+                      max={8}
+                      value={sideCount}
+                      onChange={(e) =>
+                        setSideCount(Math.max(2, Number(e.target.value) || 2))
+                      }
+                      className="w-16"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => onSplitBySide(buildingId, sideCount)}
+                    >
+                      Split by side
+                    </Button>
+                  </div>
+                  <SidePlanPreview
+                    cityjson={cityjson}
+                    buildingId={buildingId}
+                    sideCount={sideCount}
                   />
-                  <Button
-                    size="sm"
-                    onClick={() => onSplitBySide(buildingId, sideCount)}
-                  >
-                    Split by side
-                  </Button>
                 </div>
               )}
               <div className="mt-2 text-[10px] text-[var(--text-faint)]">
@@ -664,6 +672,105 @@ function AttributeRow({ attrKey, value, onChange }: RowProps) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * 2D plan view of the selected building's footprint with N-1 dashed cut
+ * lines along the AABB long axis. Visualises where `splitBuildingBySide`
+ * will cut before the user clicks "Split by side". Hidden when the
+ * building has no extractable footprint (e.g. imported buildings without
+ * GroundSurface semantics).
+ */
+function SidePlanPreview({
+  cityjson,
+  buildingId,
+  sideCount,
+}: {
+  cityjson: CityJsonDocument;
+  buildingId: string;
+  sideCount: number;
+}) {
+  const { svgPath, splitLines } = useMemo(() => {
+    const all = extractFootprints(cityjson);
+    const fp = all.find((f) => f.id === buildingId);
+    if (!fp || fp.polygon.length < 3) {
+      return { svgPath: '', splitLines: [] };
+    }
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const [x, y] of fp.polygon) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const w = maxX - minX || 1;
+    const h = maxY - minY || 1;
+    const targetW = 88;
+    const targetH = 48;
+    const scale = Math.min(targetW / w, targetH / h);
+    const drawW = w * scale;
+    const drawH = h * scale;
+    const ox = 6 + (targetW - drawW) / 2;
+    const oy = 6 + (targetH - drawH) / 2;
+    const px = (x: number) => ox + (x - minX) * scale;
+    const py = (y: number) => oy + (maxY - y) * scale; // flip Y so north is up
+
+    const path =
+      'M ' +
+      fp.polygon
+        .map(([x, y]) => `${px(x).toFixed(1)} ${py(y).toFixed(1)}`)
+        .join(' L ') +
+      ' Z';
+
+    const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    if (sideCount >= 2) {
+      const longAlongX = w >= h;
+      for (let i = 1; i < sideCount; i++) {
+        const t = i / sideCount;
+        if (longAlongX) {
+          const x = px(minX + t * w);
+          lines.push({ x1: x, y1: py(minY), x2: x, y2: py(maxY) });
+        } else {
+          const y = py(minY + t * h);
+          lines.push({ x1: px(minX), y1: y, x2: px(maxX), y2: y });
+        }
+      }
+    }
+    return { svgPath: path, splitLines: lines };
+  }, [cityjson, buildingId, sideCount]);
+
+  if (!svgPath) return null;
+
+  return (
+    <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2">
+      <div className="mb-1 text-[10px] text-[var(--text-dim)]">
+        Plan view · {sideCount} parts along the long axis
+      </div>
+      <svg viewBox="0 0 100 60" className="w-full" style={{ height: 70 }}>
+        <path
+          d={svgPath}
+          fill="rgba(76, 126, 255, 0.18)"
+          stroke="rgb(76, 126, 255)"
+          strokeWidth="1"
+        />
+        {splitLines.map((l, i) => (
+          <line
+            key={i}
+            x1={l.x1}
+            y1={l.y1}
+            x2={l.x2}
+            y2={l.y2}
+            stroke="rgb(255, 138, 61)"
+            strokeWidth="1.2"
+            strokeDasharray="3 2"
+          />
+        ))}
+      </svg>
     </div>
   );
 }
