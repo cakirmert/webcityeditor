@@ -101,6 +101,54 @@ describe('parseCityJsonSeq', () => {
   });
 });
 
+describe('parseCityJsonSeq viewport filter', () => {
+  it('keeps only features inside the requested viewport bbox', () => {
+    // feat1 vertices are 0..10 (decoded ×0.001 + 0 → 0..0.01); feat2 are 20..30
+    // (decoded → 0.02..0.03). A viewport bbox of [0, 0, 0.015, 0.015] should
+    // include feat1 and exclude feat2.
+    const result = parseCityJsonSeq(makeSeq(), undefined, [0, 0, 0.015, 0.015]);
+    if (!result.ok) throw new Error(result.error);
+    expect(Object.keys(result.doc.CityObjects).sort()).toEqual(['Building_1']);
+    // Building_2's vertices must not have been copied either.
+    expect(result.doc.vertices).toHaveLength(4);
+  });
+
+  it('keeps features overlapping the bbox even partially', () => {
+    // bbox [0.005, 0.005, 0.025, 0.025] straddles both feat1 (0..0.01) and
+    // feat2 (0.02..0.03), so both are kept.
+    const result = parseCityJsonSeq(makeSeq(), undefined, [0.005, 0.005, 0.025, 0.025]);
+    if (!result.ok) throw new Error(result.error);
+    expect(Object.keys(result.doc.CityObjects).sort()).toEqual(['Building_1', 'Building_2']);
+  });
+
+  it('drops all features when the bbox is far from the data', () => {
+    const result = parseCityJsonSeq(makeSeq(), undefined, [1000, 1000, 2000, 2000]);
+    if (!result.ok) throw new Error(result.error);
+    expect(Object.keys(result.doc.CityObjects)).toEqual([]);
+    expect(result.doc.vertices).toHaveLength(0);
+  });
+
+  it('treats edge-touching bboxes as intersecting (inclusive)', () => {
+    // feat1 maxX = 0.01 exactly; a bbox starting at 0.01 should still match.
+    const result = parseCityJsonSeq(makeSeq(), undefined, [0.01, 0.01, 0.02, 0.02]);
+    if (!result.ok) throw new Error(result.error);
+    expect(Object.keys(result.doc.CityObjects).sort()).toEqual(['Building_1', 'Building_2']);
+  });
+
+  it('combines viewport filter with limitFeatures', () => {
+    // Both feat1 and feat2 intersect this bbox, but limit=1 takes only feat1.
+    const result = parseCityJsonSeq(makeSeq(), 1, [0, 0, 1, 1]);
+    if (!result.ok) throw new Error(result.error);
+    expect(Object.keys(result.doc.CityObjects)).toEqual(['Building_1']);
+  });
+
+  it('parseCityJsonAuto forwards the viewport bbox to the seq parser', () => {
+    const result = parseCityJsonAuto(makeSeq(), undefined, [0, 0, 0.015, 0.015]);
+    if (!result.ok) throw new Error(result.error);
+    expect(Object.keys(result.doc.CityObjects)).toEqual(['Building_1']);
+  });
+});
+
 describe('parseCityJsonAuto', () => {
   it('routes CityJSONSeq to the seq parser', () => {
     const result = parseCityJsonAuto(makeSeq());

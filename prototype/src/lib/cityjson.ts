@@ -54,7 +54,11 @@ export function parseCityJson(text: string): ValidationResult {
  * Use this from the FileLoader; it replaces the plain `parseCityJson` call and
  * handles both formats transparently.
  */
-export function parseCityJsonAuto(text: string, limitFeatures?: number): ValidationResult {
+export function parseCityJsonAuto(
+  text: string,
+  limitFeatures?: number,
+  viewportBbox?: [number, number, number, number]
+): ValidationResult {
   // Heuristic: if the first newline-trimmed line parses as a CityJSON header
   // AND there's a second non-empty line, treat as CityJSONSeq.
   const firstNewline = text.indexOf('\n');
@@ -80,7 +84,7 @@ export function parseCityJsonAuto(text: string, limitFeatures?: number): Validat
     return parseCityJson(text);
   }
 
-  return parseCityJsonSeq(text, limitFeatures);
+  return parseCityJsonSeq(text, limitFeatures, viewportBbox);
 }
 
 /**
@@ -91,8 +95,17 @@ export function parseCityJsonAuto(text: string, limitFeatures?: number): Validat
  * geometry boundaries to reference a combined global vertices array. For
  * feature counts into the thousands this is fine in memory; above that,
  * pass `limitFeatures` to load only the first N.
+ *
+ * `viewportBbox` (optional, in the data's CRS — same coords as the decoded
+ * vertices, NOT WGS84) skips features whose vertex bbox doesn't intersect.
+ * This is a big memory win on city-scale CityJSONSeq files: only the tiles
+ * the user is actually looking at get parsed and held in memory.
  */
-export function parseCityJsonSeq(text: string, limitFeatures?: number): ValidationResult {
+export function parseCityJsonSeq(
+  text: string,
+  limitFeatures?: number,
+  viewportBbox?: [number, number, number, number]
+): ValidationResult {
   const lines = text.split(/\r?\n/);
   if (lines.length === 0) {
     return { ok: false, error: 'Empty file' };
@@ -141,6 +154,15 @@ export function parseCityJsonSeq(text: string, limitFeatures?: number): Validati
       continue; // Skip malformed lines rather than failing the whole load
     }
     if (feature.type !== 'CityJSONFeature' || !feature.CityObjects) continue;
+
+    // Viewport bbox check: drop features whose decoded XY extent doesn't
+    // intersect the requested viewport. This is the streaming win — we avoid
+    // copying their vertices and CityObjects into the in-memory doc at all.
+    if (viewportBbox && feature.vertices && feature.vertices.length > 0) {
+      if (!featureIntersectsBbox(feature.vertices, doc.transform, viewportBbox)) {
+        continue;
+      }
+    }
 
     const offset = doc.vertices.length;
     if (feature.vertices && feature.vertices.length > 0) {
@@ -193,6 +215,41 @@ export function parseCityJsonSeq(text: string, limitFeatures?: number): Validati
   }
 
   return { ok: true, doc };
+}
+
+/**
+ * Decode the feature's integer-encoded vertex XY extent and test whether it
+ * intersects the supplied bbox. Used by `parseCityJsonSeq` to drop features
+ * outside the user's viewport before they consume any memory.
+ *
+ * Bbox format: [minX, minY, maxX, maxY] in the SAME CRS as the doc transform
+ * (typically the projected CRS of the source data — e.g. EPSG:28992 for
+ * Dutch RD New). Callers must reproject WGS84 map viewports themselves
+ * before invoking the parser.
+ */
+function featureIntersectsBbox(
+  vertices: [number, number, number][],
+  transform: CityJsonDocument['transform'],
+  bbox: [number, number, number, number]
+): boolean {
+  const sx = transform?.scale?.[0] ?? 1;
+  const sy = transform?.scale?.[1] ?? 1;
+  const tx = transform?.translate?.[0] ?? 0;
+  const ty = transform?.translate?.[1] ?? 0;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const [vx, vy] of vertices) {
+    const x = vx * sx + tx;
+    const y = vy * sy + ty;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  // Standard AABB intersection test (inclusive on edges).
+  return !(maxX < bbox[0] || minX > bbox[2] || maxY < bbox[1] || minY > bbox[3]);
 }
 
 /**
