@@ -91,6 +91,22 @@ export default function AttributePanel({
     () => canSplitBuilding(cityjson, buildingId),
     [cityjson, buildingId]
   );
+
+  // Always feed the parent's splitPreview state — either with the explicit
+  // custom-heights array OR an implicit uniform split derived from floorCount
+  // and eaveHeight. The 3D viewer's split-line rings appear in both cases so
+  // the user sees the cut placement even without entering custom mode.
+  useEffect(() => {
+    if (customHeights !== null) return; // setCustomHeights already drove the preview
+    if (!splitGate.ok || floorCount < 2) {
+      onCustomHeightsPreview?.(null);
+      return;
+    }
+    const eaveH = splitGate.params!.eaveHeight;
+    const per = eaveH / floorCount;
+    onCustomHeightsPreview?.(new Array(floorCount).fill(per));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customHeights, floorCount, splitGate.ok, splitGate.params?.eaveHeight]);
   const obj = cityjson.CityObjects[buildingId];
   const attrs = obj?.attributes ?? {};
   const childCount = obj?.children?.length ?? 0;
