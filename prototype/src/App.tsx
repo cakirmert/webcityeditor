@@ -15,6 +15,7 @@ import {
   splitBuildingByFloor,
   splitBuildingByFloorHeights,
   splitBuildingBySide,
+  MIN_STOREY_HEIGHT,
 } from './lib/subdivision';
 import { moveBuilding, rotateBuilding } from './lib/transform';
 import { regenerateBuilding } from './lib/regenerate';
@@ -486,6 +487,31 @@ export default function App() {
     setReloadToken((t) => t + 1);
     setFootprintEdit(null);
   }, [cityjson, footprintEdit, pushUndo, dirtyIds, selection]);
+
+  // ── Drag a split-line ring in the 3D viewer ─────────────────────────────
+  // The Viewer raycasts the user's mouse onto the ring and reports dZ each
+  // mousemove. We translate that into a transfer between heights[ringIndex]
+  // (the floor below) and heights[ringIndex+1] (the floor above), clamping
+  // both to MIN_STOREY_HEIGHT so the user can't crush a floor flat.
+  const handleAdjustSplit = useCallback(
+    (ringIndex: number, deltaZ: number) => {
+      setSplitPreviewHeights((prev) => {
+        if (!prev || ringIndex < 0 || ringIndex >= prev.length - 1) return prev;
+        const lower = prev[ringIndex];
+        const upper = prev[ringIndex + 1];
+        // Clamp to keep BOTH adjacent floors >= MIN_STOREY_HEIGHT.
+        const minDelta = MIN_STOREY_HEIGHT - lower;
+        const maxDelta = upper - MIN_STOREY_HEIGHT;
+        const d = Math.max(minDelta, Math.min(maxDelta, deltaZ));
+        if (Math.abs(d) < 1e-4) return prev;
+        const next = prev.slice();
+        next[ringIndex] = lower + d;
+        next[ringIndex + 1] = upper - d;
+        return next;
+      });
+    },
+    []
+  );
 
   // ── Map drag for position transform ─────────────────────────────────────
   const dragBaseRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -1151,6 +1177,7 @@ export default function App() {
                     ? { buildingId: selection.objectId, heights: splitPreviewHeights }
                     : null
                 }
+                onAdjustSplit={handleAdjustSplit}
               />
             </div>
 

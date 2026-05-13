@@ -49,9 +49,22 @@ interface Props {
   reloadToken: number;
   onSelect: (info: SelectionInfo | null) => void;
   splitPreview?: SplitPreviewInfo | null;
+  /** Drag handler — fires while the user is dragging a split-line ring in 3D.
+   *  `ringIndex` is the ring's position in `splitPreview.heights` (0-based);
+   *  `deltaZ` is the requested vertical movement in metres since the previous
+   *  callback (positive = up). The parent decides whether to apply, clamp, or
+   *  reject the delta (e.g. to enforce MIN_STOREY_HEIGHT on both adjacent
+   *  floors). */
+  onAdjustSplit?: (ringIndex: number, deltaZ: number) => void;
 }
 
-export default function Viewer({ cityjson, reloadToken, onSelect, splitPreview }: Props) {
+export default function Viewer({
+  cityjson,
+  reloadToken,
+  onSelect,
+  splitPreview,
+  onAdjustSplit,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const splitOverlayRef = useRef<THREE.Group | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('surface');
@@ -291,6 +304,100 @@ export default function Viewer({ cityjson, reloadToken, onSelect, splitPreview }
     return () => el.removeEventListener('dblclick', onDblClick);
   }, [onSelect, cityjson]);
 
+  // 4. Drag split-line rings — mousedown on a ring, drag up/down, ring's
+  // height in the heights[] array changes (with the floor above taking the
+  // opposite delta so the total building height is preserved).
+  useEffect(() => {
+    const state = sceneRef.current;
+    if (!state || !onAdjustSplit) return;
+    const el = state.renderer.domElement;
+    const overlay = splitOverlayRef.current;
+    if (!overlay) return;
+
+    // 1 metre line-picking threshold — without this, the thin Line geometry
+    // is essentially impossible to click.
+    const prevLineThreshold = state.raycaster.params.Line?.threshold;
+    state.raycaster.params.Line = { ...(state.raycaster.params.Line ?? {}), threshold: 1.0 };
+
+    let drag: {
+      ringIndex: number;
+      plane: THREE.Plane;
+      lastZ: number;
+    } | null = null;
+    const mouseNdc = new THREE.Vector2();
+    const planeNormal = new THREE.Vector3();
+    const hitPoint = new THREE.Vector3();
+
+    const ndcFromEvent = (e: MouseEvent): void => {
+      const rect = el.getBoundingClientRect();
+      mouseNdc.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return; // left-click only
+      ndcFromEvent(e);
+      state.raycaster.setFromCamera(mouseNdc, state.camera);
+      // Restrict to the overlay group; ignores the building mesh underneath.
+      const hits = state.raycaster.intersectObject(overlay, true);
+      for (const hit of hits) {
+        const ud = hit.object.userData as {
+          splitRingIndex?: number;
+          ringCenterLocal?: [number, number, number];
+        } | undefined;
+        if (typeof ud?.splitRingIndex !== 'number' || !ud.ringCenterLocal) continue;
+        // Build a vertical plane through the ring's centre, oriented so its
+        // normal is horizontal and roughly faces the camera. Raycasting this
+        // plane on every mouse move gives a stable world-Z under the cursor.
+        const local = new THREE.Vector3(...ud.ringCenterLocal);
+        const world = local.clone().applyMatrix4(overlay.matrixWorld);
+        state.camera.getWorldDirection(planeNormal);
+        planeNormal.z = 0;
+        if (planeNormal.lengthSq() < 1e-6) planeNormal.set(1, 0, 0);
+        planeNormal.normalize();
+        const plane = new THREE.Plane(planeNormal, -planeNormal.dot(world));
+        if (!state.raycaster.ray.intersectPlane(plane, hitPoint)) continue;
+        drag = { ringIndex: ud.splitRingIndex, plane, lastZ: hitPoint.z };
+        state.controls.enabled = false; // suspend orbit/pan/zoom during drag
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!drag) return;
+      ndcFromEvent(e);
+      state.raycaster.setFromCamera(mouseNdc, state.camera);
+      if (!state.raycaster.ray.intersectPlane(drag.plane, hitPoint)) return;
+      const delta = hitPoint.z - drag.lastZ;
+      if (Math.abs(delta) < 1e-4) return; // ignore sub-mm jitter
+      drag.lastZ = hitPoint.z;
+      onAdjustSplit(drag.ringIndex, delta);
+    };
+    const onMouseUp = () => {
+      if (drag) {
+        drag = null;
+        state.controls.enabled = true;
+      }
+    };
+
+    el.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      el.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      if (drag) state.controls.enabled = true;
+      if (prevLineThreshold !== undefined) {
+        state.raycaster.params.Line = { ...state.raycaster.params.Line, threshold: prevLineThreshold };
+      }
+    };
+    // splitPreview re-runs this effect so the new overlay's rings are picked up.
+  }, [onAdjustSplit, splitPreview, cityjson]);
+
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />
@@ -404,6 +511,10 @@ function buildSplitOverlay(
   let cumH = 0;
   // Draw a ring at every floor boundary EXCEPT the very top (which is the
   // eave — already where the wall ends, no split there).
+  // Compute the ring's XY centroid once — useful for drag interaction
+  // (we raycast a vertical plane through this point on mousemove).
+  const cx = ring.reduce((s, [x]) => s + x, 0) / ring.length;
+  const cy = ring.reduce((s, [, y]) => s + y, 0) / ring.length;
   for (let i = 0; i < preview.heights.length - 1; i++) {
     cumH += preview.heights[i];
     const z = baseZ + cumH;
@@ -412,6 +523,13 @@ function buildSplitOverlay(
     const geom = new THREE.BufferGeometry().setFromPoints(pts);
     const line = new THREE.Line(geom, lineMat);
     line.renderOrder = 999; // draw after the building so depthTest: false sticks
+    // userData tags used by the drag interaction in Viewer:
+    //   splitRingIndex: which entry in heights[] this ring sits above
+    //   ringCenterLocal: XY centroid in pre-matrix (CRS-metric) coords
+    line.userData = {
+      splitRingIndex: i,
+      ringCenterLocal: [cx, cy, z] as [number, number, number],
+    };
     group.add(line);
   }
   group.applyMatrix4(loader.matrix);
