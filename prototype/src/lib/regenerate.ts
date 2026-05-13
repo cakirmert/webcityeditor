@@ -44,10 +44,30 @@ export interface RegenerateResult {
  * On any precondition failure the doc is NOT modified and `ok: false` is
  * returned with a reason string suitable for surfacing in the UI.
  */
+/**
+ * Optional parametric overrides for `regenerateBuilding`. When any of these
+ * are present, they win over the building's stashed `_*` attributes — useful
+ * for "change roof type" / "raise the ridge" inline edits without having to
+ * push the user through the full new-building flow. The new values are also
+ * persisted back as `_*` attributes so a follow-up footprint-edit still picks
+ * them up.
+ */
+export interface RegenerateOverrides {
+  roofType?: RoofType;
+  eaveHeight?: number;
+  ridgeHeight?: number;
+  eaveOverhang?: number;
+  rakeOverhang?: number;
+  addWindows?: boolean;
+  addDoor?: boolean;
+  storeys?: number;
+}
+
 export function regenerateBuilding(
   doc: CityJsonDocument,
   buildingId: string,
-  newFootprintWgs84: [number, number][]
+  newFootprintWgs84: [number, number][],
+  overrides?: RegenerateOverrides
 ): RegenerateResult {
   const obj = doc.CityObjects[buildingId];
   if (!obj) return { ok: false, reason: 'Building not found' };
@@ -68,11 +88,23 @@ export function regenerateBuilding(
         'Footprint editing is only available for buildings created in the editor — imported buildings keep their original geometry',
     };
   }
-  const eaveHeight = Number(a._eaveHeight);
-  const ridgeHeight = Number(a._ridgeHeight);
+  const eaveHeightStored = Number(a._eaveHeight);
+  const ridgeHeightStored = Number(a._ridgeHeight);
   const baseElevation = Number(a._baseElevation ?? 0);
-  const roofType = a.roofType as RoofType | undefined;
-  const storeys = Number(a.storeysAboveGround);
+  const roofTypeStored = a.roofType as RoofType | undefined;
+  const storeysStored = Number(a.storeysAboveGround);
+  // Resolve effective parameters: overrides win, else stashed values.
+  const roofType = overrides?.roofType ?? roofTypeStored;
+  let eaveHeight = overrides?.eaveHeight ?? eaveHeightStored;
+  let ridgeHeight = overrides?.ridgeHeight ?? ridgeHeightStored;
+  const storeys = overrides?.storeys ?? storeysStored;
+  // Constraint-fix the resolved heights given the (possibly new) roofType.
+  if (roofType === 'flat') {
+    eaveHeight = ridgeHeight;
+  } else if (Number.isFinite(eaveHeight) && Number.isFinite(ridgeHeight) && eaveHeight >= ridgeHeight) {
+    const slack = Math.min(2.5, ridgeHeight * 0.25);
+    eaveHeight = Math.max(0.5, ridgeHeight - slack);
+  }
   if (!Number.isFinite(eaveHeight) || eaveHeight <= 0) {
     return { ok: false, reason: 'Building is missing parametric data (_eaveHeight)' };
   }
@@ -119,15 +151,13 @@ export function regenerateBuilding(
     ridgeHeight,
     roofType,
     baseElevation,
-    eaveOverhang: Number(a._eaveOverhang ?? 0),
-    rakeOverhang: Number(a._rakeOverhang ?? 0),
-    openings:
-      a._addWindows || a._addDoor
-        ? {
-            windows: Boolean(a._addWindows),
-            door: Boolean(a._addDoor),
-          }
-        : undefined,
+    eaveOverhang: overrides?.eaveOverhang ?? Number(a._eaveOverhang ?? 0),
+    rakeOverhang: overrides?.rakeOverhang ?? Number(a._rakeOverhang ?? 0),
+    openings: (() => {
+      const w = overrides?.addWindows ?? Boolean(a._addWindows);
+      const d = overrides?.addDoor ?? Boolean(a._addDoor);
+      return w || d ? { windows: w, door: d } : undefined;
+    })(),
     // Pass through user-facing attributes (function, year, etc.). We strip the
     // private parametric ones because generator.ts will re-derive and write
     // them itself.

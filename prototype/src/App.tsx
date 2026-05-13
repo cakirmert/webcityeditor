@@ -196,6 +196,42 @@ export default function App() {
     [cityjson, pushUndo]
   );
 
+  // ── Reshape (regenerate parametric building with new roof/heights) ──────
+  const handleReshapeBuilding = useCallback(
+    (
+      id: string,
+      overrides: {
+        roofType?: 'flat' | 'pyramid' | 'gable' | 'hip';
+        eaveHeight?: number;
+        ridgeHeight?: number;
+        eaveOverhang?: number;
+        rakeOverhang?: number;
+        addWindows?: boolean;
+        addDoor?: boolean;
+      }
+    ) => {
+      if (!cityjson) return;
+      const fp = extractFootprints(cityjson).find((f) => f.id === id);
+      if (!fp) {
+        alert(`Cannot reshape ${id}: no extractable footprint.`);
+        return;
+      }
+      pushUndo(`Reshape ${id}`);
+      const r = regenerateBuilding(cityjson, id, fp.polygon, overrides);
+      if (!r.ok) {
+        alert(`Reshape failed: ${r.reason}`);
+        return;
+      }
+      setDirtyIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setReloadToken((t) => t + 1);
+    },
+    [cityjson, pushUndo]
+  );
+
   // ── Make-editable (parametrise imported building) ────────────────────────
   const handleMakeEditable = useCallback(
     (buildingId: string) => {
@@ -1290,6 +1326,7 @@ export default function App() {
               onCancelFootprintEdit={handleCancelFootprintEdit}
               onMoveOpening={handleMoveOpening}
               onMakeEditable={handleMakeEditable}
+              onReshapeBuilding={handleReshapeBuilding}
             />
           </aside>
         )}
@@ -1320,6 +1357,18 @@ function AttributePanelInline(props: {
   onCancelFootprintEdit: () => void;
   onMoveOpening?: (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => void;
   onMakeEditable?: (buildingId: string) => void;
+  onReshapeBuilding?: (
+    buildingId: string,
+    overrides: {
+      roofType?: 'flat' | 'pyramid' | 'gable' | 'hip';
+      eaveHeight?: number;
+      ridgeHeight?: number;
+      eaveOverhang?: number;
+      rakeOverhang?: number;
+      addWindows?: boolean;
+      addDoor?: boolean;
+    }
+  ) => void;
 }) {
   return (
     <AttributePanel
@@ -1344,6 +1393,7 @@ function AttributePanelInline(props: {
       onCancelFootprintEdit={props.onCancelFootprintEdit}
       onMoveOpening={props.onMoveOpening}
       onMakeEditable={props.onMakeEditable}
+      onReshapeBuilding={props.onReshapeBuilding}
       hideHeader
     />
   );

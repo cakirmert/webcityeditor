@@ -47,6 +47,22 @@ interface Props {
    *  vertex analysis. Distinct from regenerate so the user can opt in
    *  explicitly. */
   onMakeEditable?: (buildingId: string) => void;
+  /** Re-run the parametric generator on the existing footprint with
+   *  overridden roof / height / opening / overhang values. Lets the user
+   *  switch roof type or raise the ridge without having to re-draw a
+   *  footprint or delete & recreate the building. */
+  onReshapeBuilding?: (
+    buildingId: string,
+    overrides: {
+      roofType?: 'flat' | 'pyramid' | 'gable' | 'hip';
+      eaveHeight?: number;
+      ridgeHeight?: number;
+      eaveOverhang?: number;
+      rakeOverhang?: number;
+      addWindows?: boolean;
+      addDoor?: boolean;
+    }
+  ) => void;
   hideHeader?: boolean;
 }
 
@@ -72,6 +88,7 @@ export default function AttributePanel({
   onCancelFootprintEdit,
   onMoveOpening,
   onMakeEditable,
+  onReshapeBuilding,
   hideHeader = false,
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
@@ -382,6 +399,14 @@ export default function AttributePanel({
             </>
           )}
         </section>
+      )}
+
+      {onReshapeBuilding && attrs._createdBy === 'city-editor-prototype' && (
+        <ReshapeSection
+          buildingId={buildingId}
+          attrs={attrs}
+          onReshape={onReshapeBuilding}
+        />
       )}
 
       {onMoveOpening && openings.length > 0 && (
@@ -742,6 +767,203 @@ function AttributeRow({ attrKey, value, onChange }: RowProps) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Inline "Reshape" controls — lets the user switch roof type, raise the
+ * ridge, toggle openings, and dial overhangs on a parametric building, then
+ * re-runs the generator in place. The visual roof picker mirrors the one in
+ * BuildingCreator so the UX is consistent between create-time and edit-time.
+ */
+function ReshapeSection({
+  buildingId,
+  attrs,
+  onReshape,
+}: {
+  buildingId: string;
+  attrs: Record<string, AttributeValue>;
+  onReshape: (
+    id: string,
+    overrides: {
+      roofType?: 'flat' | 'pyramid' | 'gable' | 'hip';
+      eaveHeight?: number;
+      ridgeHeight?: number;
+      eaveOverhang?: number;
+      rakeOverhang?: number;
+      addWindows?: boolean;
+      addDoor?: boolean;
+    }
+  ) => void;
+}) {
+  const currentRoof = (attrs.roofType as 'flat' | 'pyramid' | 'gable' | 'hip') ?? 'flat';
+  const currentEave = Number(attrs._eaveHeight ?? 0);
+  const currentRidge = Number(attrs._ridgeHeight ?? 0);
+  const currentEaveOverhang = Number(attrs._eaveOverhang ?? 0);
+  const currentRakeOverhang = Number(attrs._rakeOverhang ?? 0);
+  const currentAddWindows = Boolean(attrs._addWindows);
+  const currentAddDoor = Boolean(attrs._addDoor);
+
+  const [roofType, setRoofType] = useState(currentRoof);
+  const [eave, setEave] = useState(currentEave);
+  const [ridge, setRidge] = useState(currentRidge);
+  const [eaveOverhang, setEaveOverhang] = useState(currentEaveOverhang);
+  const [rakeOverhang, setRakeOverhang] = useState(currentRakeOverhang);
+  const [addWindows, setAddWindows] = useState(currentAddWindows);
+  const [addDoor, setAddDoor] = useState(currentAddDoor);
+
+  // Re-seed local state whenever the selected building changes.
+  useEffect(() => {
+    setRoofType(currentRoof);
+    setEave(currentEave);
+    setRidge(currentRidge);
+    setEaveOverhang(currentEaveOverhang);
+    setRakeOverhang(currentRakeOverhang);
+    setAddWindows(currentAddWindows);
+    setAddDoor(currentAddDoor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingId]);
+
+  const isDirty =
+    roofType !== currentRoof ||
+    Math.abs(eave - currentEave) > 1e-3 ||
+    Math.abs(ridge - currentRidge) > 1e-3 ||
+    Math.abs(eaveOverhang - currentEaveOverhang) > 1e-3 ||
+    Math.abs(rakeOverhang - currentRakeOverhang) > 1e-3 ||
+    addWindows !== currentAddWindows ||
+    addDoor !== currentAddDoor;
+
+  const apply = () => {
+    onReshape(buildingId, {
+      roofType,
+      eaveHeight: roofType === 'flat' ? ridge : eave,
+      ridgeHeight: ridge,
+      eaveOverhang,
+      rakeOverhang: roofType === 'gable' ? rakeOverhang : 0,
+      addWindows,
+      addDoor,
+    });
+  };
+  const reset = () => {
+    setRoofType(currentRoof);
+    setEave(currentEave);
+    setRidge(currentRidge);
+    setEaveOverhang(currentEaveOverhang);
+    setRakeOverhang(currentRakeOverhang);
+    setAddWindows(currentAddWindows);
+    setAddDoor(currentAddDoor);
+  };
+
+  return (
+    <Section label="Reshape (roof, height, openings)">
+      <div className="grid grid-cols-4 gap-1.5">
+        {(['flat', 'pyramid', 'gable', 'hip'] as const).map((rt) => (
+          <button
+            key={rt}
+            type="button"
+            onClick={() => setRoofType(rt)}
+            className={`rounded-md border px-1.5 py-1 text-[10px] transition-colors ${
+              roofType === rt
+                ? 'border-[var(--accent)] bg-[rgba(76,126,255,0.12)] text-[var(--text)]'
+                : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)] hover:text-[var(--text)]'
+            }`}
+            title={rt}
+          >
+            {rt}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <label className="flex items-center gap-1 text-[11px]">
+          <span className="text-[var(--text-dim)] w-12">Ridge</span>
+          <Input
+            type="number"
+            min={0.5}
+            max={300}
+            step="0.1"
+            value={ridge}
+            onChange={(e) => setRidge(Math.max(0.5, Number(e.target.value) || ridge))}
+          />
+        </label>
+        {roofType !== 'flat' && (
+          <label className="flex items-center gap-1 text-[11px]">
+            <span className="text-[var(--text-dim)] w-12">Eave</span>
+            <Input
+              type="number"
+              min={0.5}
+              max={Math.max(0.5, ridge - 0.5)}
+              step="0.1"
+              value={eave}
+              onChange={(e) =>
+                setEave(
+                  Math.min(Math.max(0.5, Number(e.target.value) || eave), Math.max(0.5, ridge - 0.5))
+                )
+              }
+            />
+          </label>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <label className="flex items-center gap-1 text-[11px]">
+          <span className="text-[var(--text-dim)] w-12">Eave OH</span>
+          <Input
+            type="number"
+            min={0}
+            max={2}
+            step="0.1"
+            value={eaveOverhang}
+            onChange={(e) => setEaveOverhang(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </label>
+        {roofType === 'gable' && (
+          <label className="flex items-center gap-1 text-[11px]">
+            <span className="text-[var(--text-dim)] w-12">Rake OH</span>
+            <Input
+              type="number"
+              min={0}
+              max={2}
+              step="0.1"
+              value={rakeOverhang}
+              onChange={(e) => setRakeOverhang(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </label>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={addWindows}
+            onChange={(e) => setAddWindows(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          <span>Windows</span>
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={addDoor}
+            onChange={(e) => setAddDoor(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          <span>Door</span>
+        </label>
+      </div>
+      <div className="flex gap-1.5">
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!isDirty}
+          onClick={apply}
+          className="flex-1"
+        >
+          Apply reshape
+        </Button>
+        <Button size="sm" disabled={!isDirty} onClick={reset}>
+          Reset
+        </Button>
+      </div>
+    </Section>
   );
 }
 

@@ -164,4 +164,45 @@ describe('regenerateBuilding', () => {
       }
     }
   });
+
+  it('honours `overrides.roofType` to switch from flat to pitched', () => {
+    const { doc, id } = makeBuilding({ roofType: 'flat', eaveHeight: 9, ridgeHeight: 9 });
+    const res = regenerateBuilding(doc, id, FP_DELFT_A, { roofType: 'gable' });
+    expect(res.ok).toBe(true);
+    expect(doc.CityObjects[id].attributes?.roofType).toBe('gable');
+    // Ridge must now be strictly greater than the auto-adjusted eave.
+    const eave = Number(doc.CityObjects[id].attributes?._eaveHeight);
+    const ridge = Number(doc.CityObjects[id].attributes?._ridgeHeight);
+    expect(ridge).toBeGreaterThan(eave);
+  });
+
+  it('honours `overrides.ridgeHeight` to raise the ridge in place', () => {
+    const { doc, id } = makeBuilding({ roofType: 'gable', eaveHeight: 6, ridgeHeight: 9 });
+    const res = regenerateBuilding(doc, id, FP_DELFT_A, { ridgeHeight: 14 });
+    expect(res.ok).toBe(true);
+    expect(doc.CityObjects[id].attributes?._ridgeHeight).toBe(14);
+    expect(doc.CityObjects[id].attributes?.measuredHeight).toBe(14);
+  });
+
+  it('honours `overrides.addWindows / addDoor` to add openings on reshape', () => {
+    const { doc, id } = makeBuilding({ roofType: 'flat' });
+    expect(doc.CityObjects[id].attributes?._addWindows).toBeFalsy();
+    const res = regenerateBuilding(doc, id, FP_DELFT_A, {
+      addWindows: true,
+      addDoor: true,
+    });
+    expect(res.ok).toBe(true);
+    expect(doc.CityObjects[id].attributes?._addWindows).toBe(true);
+    expect(doc.CityObjects[id].attributes?._addDoor).toBe(true);
+  });
+
+  it('switching roofType to flat clamps eave to ridge automatically', () => {
+    const { doc, id } = makeBuilding({ roofType: 'gable', eaveHeight: 6, ridgeHeight: 9 });
+    const res = regenerateBuilding(doc, id, FP_DELFT_A, { roofType: 'flat' });
+    expect(res.ok).toBe(true);
+    const eave = Number(doc.CityObjects[id].attributes?._eaveHeight);
+    const ridge = Number(doc.CityObjects[id].attributes?._ridgeHeight);
+    expect(eave).toBe(ridge);
+    expect(doc.CityObjects[id].attributes?.roofType).toBe('flat');
+  });
 });
