@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-05-07 (evening). **Test suite**: 240 passing across 23 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
+**Last updated**: 2026-05-13. **Test suite**: 320 passing across 30 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
 
 ---
 
@@ -194,7 +194,19 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 
 ## 8. What's left — roadmap (priority order)
 
-**Done since the last status update (2026-04-23 → 2026-05-07):**
+**Done since the last status update (2026-05-07 → 2026-05-13):**
+- ✅ **Drag-to-move buildings on the map** — when a building's transform is pending, mouse drag on the map translates the ghost preview; WGS84 deltas are projected to the data's CRS so the numeric dX/dY fields stay in sync.
+- ✅ **Floating 3D preview panel during creation** — Three.js viewer in the top-right corner of the map while drawing a new building; shows the actual generated roof shape (incl. windows/doors/overhang) in real time.
+- ✅ **Multi-select + copy/paste** — Ctrl+click adds buildings to a secondary selection set (highlighted warm orange); Ctrl+C copies, Ctrl+V pastes with a 5m CRS offset and rewired parent/child relationships.
+- ✅ **Delete buildings** — Delete/Backspace or toolbar button removes the primary + multi-selection; cascades into BuildingParts and cleans up surviving parents' `children` arrays.
+- ✅ **Door / window detail editing** — `extractOpenings` finds Window/Door semantic surfaces; AttributePanel lists each with dimensions + elevation and exposes directional move buttons (±0.5m lateral, ±0.3m vertical).
+- ✅ **Parcel zoning compliance** — toolbar toggle generates three demo zones (residential / commercial / industrial) around the data centroid; new-building creation validates the footprint against the zone allow-list; a floating legend identifies each colour.
+- ✅ **Viewport-filtered CityJSONSeq streaming** — `parseCityJsonSeq` (and `parseCityJsonAuto`) accept an optional `viewportBbox` in the data's CRS; features whose decoded XY extent doesn't intersect are skipped before merging.
+- ✅ **Drag-on-3D split-line handles** — split-preview rings in the side-panel viewer are now grab-and-drag; mousedown raycasts onto the ring (1m line threshold), vertical-plane raycasts follow the cursor, height transfers between adjacent floors with sum conservation and MIN_STOREY_HEIGHT clamping.
+- ✅ **Gable rake overhang** — new `rakeOverhang` param (separate from `eaveOverhang`) extends the ridge past each gable wall along the ridge axis; rake-corner-caps are replaced with planar "rake gable" triangles at the extreme ends. Walls keep the original ridge endpoints as their apex. Round-trip preserved via `_rakeOverhang` private attr.
+- ✅ **IFC import correctness** — fixed Y-up→Z-up rotation, refined IfcSlab classification, and triangle-winding correction for IFCs whose `flatTransformation` contains a reflection (negative-determinant 3×3 sub-matrix) — fixes "half the walls invisible" symptom on some IFC sources.
+
+**Done in the previous status update (2026-04-23 → 2026-05-07):**
 - ✅ **LoD 2.2 eave overhang** — all 4 roof types, with `OuterCeilingSurface` soffits and (for gable) rake-corner-cap triangles.
 - ✅ **Procedural doors + windows** — full LoD 2.2 with per-storey window placement, hole-cut walls + standalone semantic Window/Door faces, narrow-wall + lintel-clearance skip logic.
 - ✅ **Per-object / per-surface colouring mode** in the side-panel viewer — top-right toggle, warm architectural palette.
@@ -212,14 +224,14 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 
 **Remaining roadmap (priority order):**
 
-1. **IFC → CityJSON import** — route #1 is doc-only (`ifc-to-cityjson` CLI); route #2 is `web-ifc` WASM in-browser (~1 week).
-2. **Batch Hamburg tile conversion** — a little script to convert all 788 tiles at once, plus a quick-picker in the FileLoader listing all converted tiles. ~2 h.
-3. **Viewport-filtered streaming** — in CityJSONSeq mode, skip features outside the current map viewport. Unlocks much larger files. ~½ day.
-4. **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build. ~3-7 days.
-5. **Visual division editor — drag-on-3D handles** — let the user drag the split rings up/down in the 3D viewer instead of typing numbers. The numeric editor is already wired; this is a UX layer on top. ~1 day.
-6. **Gable rake overhang** — extend the ridge past the gable wall + rebuild gable triangles. ~½ day (the long-side eave overhang already in place).
-7. **Hamburg pipeline end-to-end with 3DCityDB** — spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-8. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+1. **IFC → CityJSON import** — Route #2 (`web-ifc` WASM in-browser) is working but unpolished; the winding-fix landed but error reporting and edge-case coverage (some IFC versions, complex storey layouts) need work. Lower priority — current quality is "demo-able but rough."
+2. **Batch Hamburg tile conversion** — Convert all 788 tiles up front + a quick-picker in the FileLoader listing them. Pre-requisite: CityGML files + `citygml-tools` CLI available in `tools/`. ~2 h.
+3. **Viewport-filtered streaming UI wiring** — Lib is shipped (`parseCityJsonSeq` accepts `viewportBbox`); still need a FileLoader checkbox + map-viewport bbox passthrough to expose it. ~1-2 h.
+4. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
+5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+
+**Deferred (good ROI not obvious right now):**
+- **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build is 3-7 days for a narrow case (concave L/U/T shapes wanting gable/hip). Workaround: split into rectangular BuildingParts via the existing "Subdivide by side" path, then apply gable/hip per part. Re-evaluate if a demo requires real concave gables.
 
 ---
 
