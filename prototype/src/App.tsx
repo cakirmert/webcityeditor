@@ -36,6 +36,7 @@ import {
 } from './lib/transform-preview';
 import { buildPreviewMesh } from './lib/preview-mesh';
 import { cloneBuildings } from './lib/clipboard';
+import { deleteBuildings } from './lib/delete';
 import { extractOpenings, moveOpening, type OpeningInfo } from './lib/opening-edit';
 import {
   generateZonesAroundCenter,
@@ -206,13 +207,40 @@ export default function App() {
     setMultiSelection(new Set(clonedIds));
   }, [cityjson, clipboardIds, pushUndo]);
 
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDelete = useCallback(() => {
+    if (!cityjson) return;
+    const ids = new Set(multiSelection);
+    if (selection) ids.add(selection.objectId);
+    if (ids.size === 0) return;
+    const label =
+      ids.size === 1 ? `Delete ${[...ids][0]}` : `Delete ${ids.size} buildings`;
+    pushUndo(label);
+    const { deletedIds } = deleteBuildings(cityjson, ids);
+    const gone = new Set(deletedIds);
+    setDirtyIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) if (!gone.has(id)) next.add(id);
+      return next;
+    });
+    setSelection(null);
+    setMultiSelection(new Set());
+    setReloadToken((t) => t + 1);
+  }, [cityjson, selection, multiSelection, pushUndo]);
+
   // Keyboard shortcuts: Ctrl+Z / Cmd+Z for undo, Ctrl+Shift+Z / Cmd+Shift+Z
-  // for redo. Ctrl+C / Ctrl+V for copy/paste. Skip when focus is in an
-  // input/textarea so editing fields can still use their native shortcuts.
+  // for redo. Ctrl+C / Ctrl+V for copy/paste. Delete / Backspace removes the
+  // selected building(s). Skip when focus is in an input/textarea so editing
+  // fields can still use their native shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleDelete();
         return;
       }
       const meta = e.ctrlKey || e.metaKey;
@@ -234,7 +262,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleUndo, handleRedo, handleCopy, handlePaste]);
+  }, [handleUndo, handleRedo, handleCopy, handlePaste, handleDelete]);
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
@@ -968,6 +996,8 @@ export default function App() {
         onPaste={handlePaste}
         canCopy={!!selection || multiSelection.size > 0}
         canPaste={!!clipboardIds && clipboardIds.size > 0}
+        onDelete={handleDelete}
+        canDelete={!!selection || multiSelection.size > 0}
         zoningEnabled={zoningEnabled}
         onToggleZoning={handleToggleZoning}
       />

@@ -62,6 +62,8 @@ interface Props {
   onPaste?: () => void;
   canCopy?: boolean;
   canPaste?: boolean;
+  onDelete?: () => void;
+  canDelete?: boolean;
   zoningEnabled?: boolean;
   onToggleZoning?: () => void;
 }
@@ -93,6 +95,8 @@ export default function Toolbar({
   onPaste,
   canCopy = false,
   canPaste = false,
+  onDelete,
+  canDelete = false,
   zoningEnabled = false,
   onToggleZoning,
 }: Props) {
@@ -227,6 +231,17 @@ export default function Toolbar({
               title="Paste copied buildings (Ctrl+V)"
             >
               ⎘ Paste
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canDelete}
+              onClick={onDelete}
+              title="Delete selected buildings (Delete)"
+            >
+              ✕ Delete
             </Button>
           )}
 
