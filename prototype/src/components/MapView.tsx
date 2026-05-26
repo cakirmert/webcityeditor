@@ -173,9 +173,9 @@ export default function MapView({
         sources: {
           osm: {
             type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
             tileSize: 256,
-            attribution: '© OpenStreetMap contributors',
+            attribution: '© OpenStreetMap contributors © CARTO',
             maxzoom: 19,
           },
         },
@@ -277,33 +277,10 @@ export default function MapView({
     const layers: Array<
       | SolidPolygonLayer<Footprint>
       | PolygonLayer<Footprint>
+      | PolygonLayer<ParcelZone>
       | SolidPolygonLayer<{ polygon: [number, number][]; height: number }>
       | SimpleMeshLayer<{ position: [number, number] }>
     > = [];
-
-    // Planning polygons layer
-    if (zones.length > 0) {
-      layers.push(
-        new PolygonLayer<ParcelZone>({
-          id: 'planning-polygons',
-          data: zones,
-          getPolygon: (d) => d.polygon,
-          getFillColor: (d) => d.color,
-          getLineColor: (d) => [d.color[0], d.color[1], d.color[2], 180],
-          getLineWidth: 2,
-          lineWidthMinPixels: 1,
-          stroked: true,
-          filled: true,
-          extruded: false,
-          pickable: true,
-          onClick: (info: PickingInfo<ParcelZone>) => {
-            if (info.object) {
-              // No action needed, just tooltip-like feedback
-            }
-          },
-        }) as unknown as PolygonLayer<Footprint>
-      );
-    }
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
     // thing drawn, at high zoom it still fires picking when clicking a roof edge.
@@ -427,6 +404,32 @@ export default function MapView({
             diffuse: 0.6,
             shininess: 10,
             specularColor: [120, 90, 40],
+          },
+        })
+      );
+    }
+
+    // Planning polygons are drawn last with depth testing disabled so they
+    // remain visible over extruded buildings.
+    if (zones.length > 0) {
+      layers.push(
+        new PolygonLayer<ParcelZone>({
+          id: 'planning-polygons',
+          data: zones,
+          getPolygon: (d) => d.polygon,
+          getFillColor: (d) => d.color,
+          getLineColor: (d) => [d.color[0], d.color[1], d.color[2], 230],
+          getLineWidth: 2,
+          lineWidthMinPixels: 2,
+          stroked: true,
+          filled: true,
+          extruded: false,
+          pickable: true,
+          parameters: { depthTest: false } as unknown as never,
+          onClick: (info: PickingInfo<ParcelZone>) => {
+            if (info.object) {
+              // No action needed, just tooltip-like feedback
+            }
           },
         })
       );

@@ -14,13 +14,13 @@ Browser-only React app. Everything client-side; no backend yet.
 - Monolithic CityJSON 2.0 (`.json`, `.city.json`)
 - **CityJSONSeq** (`.jsonl`, `.city.jsonl`) — streaming format, one feature per line, merged into a single in-memory document with consistent vertex indices
 - Drop / file browse / URL fetch / built-in sample cube
-- Hosted sample manifest under `public/data/manifest.json`; FileLoader only surfaces same-origin hosted CityJSONSeq samples when the referenced file exists, so a Hamburg demo tile can be served from GitHub Pages without CORS.
+- Hosted Hamburg center sample under `public/data/hamburg/hamburg-center-alkis.city.jsonl`; FileLoader surfaces it from the same origin through `public/data/manifest.json`, so it works on GitHub Pages without CORS.
 - Recent-saves list from IndexedDB
 - Auto-detects CRS, either from `metadata.referenceSystem` OR from the magnitude of `transform.translate` (UTM 32N / 33N / Dutch RD New) as a fallback
 - 10 CRS registered via proj4: EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514
 
 ### Display
-- **MapLibre** basemap (OSM raster tiles)
+- **MapLibre** basemap (CARTO light raster tiles with OSM attribution; switched away from `tile.openstreetmap.org` after Hamburg tiles returned 404)
 - **deck.gl** context layer — LoD by zoom: outlined footprints below 14.5, extruded blocks above
 - **Hamburg planning overlay** — toolbar fetches real Hamburg XPlan `BP_BaugebietsTeilFlaeche` polygons for the current viewport, falls back to FNP land-use GeoJSON when XPlan has no polygons, and renders the result as a semi-transparent planning layer. This is a planning-data aid, not a legal compliance decision.
 - Click a building → side panel with a per-building Three.js scene
@@ -99,24 +99,25 @@ Browser-only React app. Everything client-side; no backend yet.
 | S16 | nginx tile serving | ❌ deferred | Backend phase |
 | S17 | Incremental tile regeneration | ❌ deferred | Backend phase |
 | S18 | Custom picking in Tile3DLayer | 🟢 different | deck.gl picking on SolidPolygonLayer is built-in; when we adopt Tile3DLayer, the workaround plan applies |
-| S19 | 3DBAG as primary test data; Hamburg via CityGML | ✅ | 3DBAG default quick-sample; Hamburg pipeline runnable (citygml-tools installed, one tile converted successfully, 917 buildings loaded) |
+| S19 | 3DBAG as primary test data; Hamburg via CityGML | ✅ / partial | 3DBAG quick-sample; committed Hamburg center ALKIS footprint sample for demos; authoritative LoD2 CityGML conversion remains the next data-quality step |
 
 ---
 
-## 3. Hamburg workflow — confirmed working
+## 3. Hamburg workflow — current state
 
-1. Hamburg publishes LoD 2 as a ZIP with `.GML` extension containing 788 tile `.xml` files (8 GB uncompressed).
-2. Extract ZIP → pick a tile → run `citygml-tools to-cityjson -l -v 2.0 -c -e 25832 tile.xml`.
-3. Output: `.jsonl` CityJSONSeq file, ~10× smaller than input.
-4. Drop the `.jsonl` into the prototype's FileLoader.
-5. Map auto-fits to the Hamburg tile, deck.gl extrudes the buildings, you can click-edit.
+1. Committed browser-safe demo: `public/data/hamburg/hamburg-center-alkis.city.jsonl`.
+2. Source: official Hamburg ALKIS building footprints via the public ArcGIS FeatureServer, regenerated with `npm run data:hamburg-center`.
+3. Output: 180 real Hamburg center footprints as CityJSONSeq. Heights are demo extrusions derived from storey count, not official LoD2 roof geometry.
+4. FileLoader exposes it automatically from GitHub Pages with no CORS issue.
+5. The Planning toolbar then fetches live Hamburg XPlan polygons for the same area and renders them above the buildings.
 
-**Tested**: tile `LoD2_565_5936_1_HH` → 35 MB CityGML → 3.8 MB CityJSONSeq → 917 buildings, loads in ~1 s.
+**Tested**: Hamburg center ALKIS sample → 180 buildings → 6,034 vertices; Planning toggle returned 238 XPlan polygons in the local browser check.
 
 Caveats:
 - `citygml-tools` defaults to writing `.jsonl` rather than `.city.jsonl` for `-l` output; we accept both extensions.
 - Hamburg's LoD 2 files have a Building → BuildingPart hierarchy (the Building has no geometry, its children carry it). Our `extractFootprints` walks children, so this works.
 - Full Hamburg (788 tiles) would be several GB of CityJSON — not browser-loadable in one go. Use per-tile or move to backend.
+- The committed Hamburg center sample is not LoD2. Use it for demo/data-loading/planning-overlay feedback, then replace or complement it with a converted LoD2 tile.
 
 Full step-by-step: [`HAMBURG_PIPELINE.md`](HAMBURG_PIPELINE.md).
 
@@ -240,8 +241,8 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 **Remaining roadmap (priority order):**
 
 1. **IFC → CityJSON import polish** — Route #2 (`web-ifc` WASM in-browser) is working and covered by unit tests, but should be exercised against known real IFC files for error reporting, IFC-version quirks, and complex storey layouts. Lower priority — current quality is "demo-able but rough."
-2. **Hosted Hamburg demo tile** — Convert one known-clean Hamburg tile to CityJSONSeq and commit it under `prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl` if it stays small (~4 MB). The FileLoader manifest will expose it automatically on GitHub Pages with no CORS issue.
-3. **Batch Hamburg tile conversion** — Convert all 788 tiles up front + a quick-picker/manifest in the FileLoader listing them. Pre-requisite: CityGML files + `citygml-tools` CLI available in `tools/`. Larger tiles should move to GitHub Releases or the future backend instead of git.
+2. **Authoritative Hamburg LoD2 tile** — The current hosted Hamburg sample uses official ALKIS footprints with demo extrusion heights. Next data step is still to convert one known-clean Hamburg LoD2 CityGML tile to CityJSONSeq and compare it against the ALKIS sample.
+3. **Batch Hamburg tile conversion** — Convert central LoD2 tiles up front + a quick-picker/manifest in the FileLoader listing them. Pre-requisite: CityGML files + `citygml-tools` CLI available in `tools/`. Larger tiles should move to GitHub Releases or the future backend instead of git.
 4. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
 5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
@@ -267,6 +268,8 @@ webcityeditor/
     ├── package.json                     React 18, Three 0.165, deck.gl 9, MapLibre 4, Terra Draw 1.28,
     │                                    pinned cityjson-threejs-loader, web-ifc, shadcn deps, proj4 2
     ├── public/data/manifest.json         Same-origin hosted sample manifest for GitHub Pages demos
+    ├── public/data/hamburg/              Hamburg center ALKIS CityJSONSeq demo sample
+    ├── scripts/build-hamburg-center-sample.mjs
     ├── tailwind.config.js / postcss.config.js / vitest.config.ts
     ├── vite.config.ts                   resolve.dedupe:['three']; exclude loader from pre-bundle
     ├── index.html

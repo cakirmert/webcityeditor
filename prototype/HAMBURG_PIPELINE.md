@@ -55,7 +55,12 @@ Hamburg's LoD2 ATOM feed:
 - The current download is a citywide CityGML zip (2026 feed: ~628 MB) containing many tile XML/GML files. Extract the zip, pick one tile, and convert only that tile for the browser demo.
 - Latest model in the feed: 2026, derived from ALS 2022 + image-matching 2024/2025.
 
-For the pilot, pick **one small tile close to the centre** (e.g. around Rathausmarkt). The known pilot tile `LoD2_565_5936_1_HH` converted to a ~3.8 MB CityJSONSeq file and loaded in the prototype.
+For the committed browser demo we currently use a smaller ALKIS footprint sample:
+`prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl`. It is generated
+from official Hamburg ALKIS footprints with `npm run data:hamburg-center`; heights
+are demo extrusions derived from storey count, not LoD2 roof geometry. For the
+LoD2-quality pass, pick one small CityGML tile close to the centre (e.g. around
+Rathausmarkt), convert it, and compare it against this ALKIS sample.
 
 ### Alternate (smaller) starting point
 
@@ -234,17 +239,25 @@ npm run dev
 
 ### Step 8 — Host a small Pages demo tile
 
-If the converted tile is small enough for git (the known pilot tile was ~3.8 MB
-as CityJSONSeq), place it at:
+The repo already commits one small Hamburg center demo:
 
 ```text
-prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl
+prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl
 ```
 
-`prototype/public/data/manifest.json` already references that path. FileLoader
-checks that the file exists before showing the hosted Hamburg quick sample, so
-the GitHub Pages demo will not expose a broken button. Because the file is served
+Regenerate it with:
+
+```bash
+npm run data:hamburg-center
+```
+
+`prototype/public/data/manifest.json` references that path. FileLoader checks
+that the file exists before showing the hosted Hamburg quick sample, so the
+GitHub Pages demo will not expose a broken button. Because the file is served
 from the same Pages origin as the app, there is no CORS issue.
+
+When a converted LoD2 CityGML tile is small enough for git, add it beside the
+ALKIS sample and list it in the manifest with a clear LoD2 label.
 
 ---
 

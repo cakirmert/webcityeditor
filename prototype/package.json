@@ -9,7 +9,8 @@
     "build:pages": "tsc -b && vite build --base=/webcityeditor/",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "data:hamburg-center": "node scripts/build-hamburg-center-sample.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.1",

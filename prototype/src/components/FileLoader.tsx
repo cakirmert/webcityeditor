@@ -17,6 +17,7 @@ interface Props {
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
 
+const DEFAULT_HAMBURG_SAMPLE = 'data/hamburg/hamburg-center-alkis.city.jsonl';
 const DEFAULT_3DBAG =
   'https://3d.bk.tudelft.nl/opendata/cityjson/3dcities/v2.0/9-284-556.city.json';
 
@@ -35,9 +36,9 @@ const QUICK_SAMPLES: QuickSample[] = [
     url: 'https://3d.bk.tudelft.nl/opendata/cityjson/3dcities/v2.0/9-284-556.city.json',
   },
   {
-    label: 'Hamburg - official LoD2 portal',
+    label: 'Hamburg - official LoD2 citywide portal',
     description:
-      'Hamburg publishes CityGML. Convert one tile to CityJSONSeq, then host it under public/data.',
+      'Hamburg publishes the full LoD2 city model as CityGML. Use this for source/reference downloads.',
     url: 'https://suche.transparenz.hamburg.de/dataset/3d-stadtmodell-lod2-de-hamburg2',
     guideOnly: true,
     badge: 'GUIDE',
@@ -62,7 +63,7 @@ interface HostedCityJsonSample {
 }
 
 export default function FileLoader({ onLoaded }: Props) {
-  const [url, setUrl] = useState(DEFAULT_3DBAG);
+  const [url, setUrl] = useState(() => publicAssetUrl(DEFAULT_HAMBURG_SAMPLE));
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [dragActive, setDragActive] = useState(false);
   const [recent, setRecent] = useState<{ name: string; savedAt: number }[]>([]);
@@ -115,7 +116,7 @@ export default function FileLoader({ onLoaded }: Props) {
   }, []);
 
   const quickSamples = useMemo(
-    () => [QUICK_SAMPLES[0], ...hostedSamples, ...QUICK_SAMPLES.slice(1)],
+    () => [...hostedSamples, QUICK_SAMPLES[0], ...QUICK_SAMPLES.slice(1)],
     [hostedSamples]
   );
 

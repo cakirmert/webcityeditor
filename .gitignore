@@ -57,6 +57,7 @@ data/
 !prototype/public/data/hamburg/
 !prototype/public/data/hamburg/README.md
 !prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl
+!prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl
 # keep the built-in sample cube in source tests unaffected — none on disk
 
 # Third-party CLI tools downloaded during setup (citygml-tools, citydb-tool, …)

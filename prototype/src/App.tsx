@@ -129,6 +129,7 @@ export default function App() {
       setZones([]);
       setZoningEnabled(false);
       setZoningLoading(false);
+      mapBboxRef.current = null;
       undoRef.current.clear();
       setUndoVersion((v) => v + 1);
       originals.clear();
@@ -668,7 +669,14 @@ export default function App() {
       return;
     }
 
-    const bbox = mapBboxRef.current ?? computeFootprintBbox(extractFootprints(cityjson));
+    const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
+    const viewportBbox = mapBboxRef.current;
+    const bbox =
+      viewportBbox && isBboxNearHamburg(expandBbox(viewportBbox))
+        ? viewportBbox
+        : footprintBbox && isBboxNearHamburg(expandBbox(footprintBbox))
+        ? footprintBbox
+        : viewportBbox ?? footprintBbox;
     if (!bbox) {
       alert('Could not derive a map bbox for the planning query.');
       return;
@@ -1462,6 +1470,7 @@ function expandBbox(
  * also works). Click anywhere on the map to drop the building.
  */
 function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
+  const visibleZones = uniqueZonesByLabel(zones).slice(0, 6);
   return (
     <div
       style={{
@@ -1491,7 +1500,10 @@ function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
       >
         Planning
       </div>
-      {zones.map((z) => (
+      <div style={{ marginBottom: 4, color: 'rgba(255,255,255,0.75)' }}>
+        {zones.length} polygons loaded
+      </div>
+      {visibleZones.map((z) => (
         <div
           key={z.id}
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
@@ -1517,8 +1529,24 @@ function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
           <span>{z.label}</span>
         </div>
       ))}
+      {zones.length > visibleZones.length && (
+        <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.5)' }}>
+          +{zones.length - visibleZones.length} more
+        </div>
+      )}
     </div>
   );
+}
+
+function uniqueZonesByLabel(zones: ParcelZone[]): ParcelZone[] {
+  const seen = new Set<string>();
+  const unique: ParcelZone[] = [];
+  for (const zone of zones) {
+    if (seen.has(zone.label)) continue;
+    seen.add(zone.label);
+    unique.push(zone);
+  }
+  return unique;
 }
 
 function IfcPlacementBanner({

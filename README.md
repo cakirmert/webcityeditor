@@ -44,12 +44,13 @@ From `prototype/`:
 | `npm run test:watch` | Watch-mode tests |
 | `npm run build` | Production bundle + TypeScript type-check |
 | `npm run build:pages` | Production bundle with GitHub Pages asset base |
+| `npm run data:hamburg-center` | Regenerate the small Hamburg center CityJSONSeq demo from official ALKIS footprints |
 
 ## Hosting
 
 The prototype can be hosted as a static GitHub Pages site; no backend is required for the current client-only feature set. For `cakirmert/webcityeditor`, Pages is currently configured to serve the built static bundle from the `gh-pages` branch so the demo does not depend on backend infrastructure.
 
-Small demo datasets can also be hosted from GitHub Pages without CORS issues. Put converted CityJSONSeq fixtures under `prototype/public/data/` and list them in `prototype/public/data/manifest.json`; FileLoader only shows hosted samples whose files exist.
+Small demo datasets can also be hosted from GitHub Pages without CORS issues. The repo now includes `prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl`, a small Hamburg-center CityJSONSeq sample generated from official ALKIS building footprints. FileLoader reads `prototype/public/data/manifest.json` and only shows hosted samples whose files exist.
 
 For `cakirmert/webcityeditor`, the deployed URL is:
 

@@ -1,12 +1,12 @@
 {
   "cityjsonSamples": [
     {
-      "label": "Hamburg - hosted LoD2 demo tile",
-      "description": "Same-origin CityJSONSeq sample converted from Hamburg LoD2 CityGML; appears when the file is present.",
-      "url": "data/hamburg/LoD2_565_5936_1_HH.city.jsonl",
+      "label": "Hamburg center - official ALKIS footprints",
+      "description": "Same-origin CityJSONSeq sample from official Hamburg ALKIS building footprints; demo heights are derived from storey count.",
+      "url": "data/hamburg/hamburg-center-alkis.city.jsonl",
       "enabled": true,
       "checkAvailability": true,
-      "source": "https://metaver.de/search/dls/service/4E1EE3EF-4E5B-4607-B6AD-6D950C6A9134"
+      "source": "https://www.arcgis.com/home/item.html?id=1ef87c53adff4c07b9b3010e9d8264fb"
     }
   ],
   "planningLayers": [
