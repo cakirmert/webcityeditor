@@ -4,8 +4,8 @@ node_modules/
 prototype/node_modules/
 spike/cityjson-threejs-loader/node_modules/
 
-# The cityjson-threejs-loader is a third-party clone — don't commit their source
-# as ours. Users run the setup step in README.md to clone it themselves.
+# Optional legacy/local checkout of the CityJSON loader. Normal setup uses the
+# pinned Git dependency in prototype/package.json.
 spike/cityjson-threejs-loader/
 
 # Build output
@@ -40,6 +40,7 @@ desktop.ini
 # Temporary / generated
 *.log
 *.tmp
+*.tsbuildinfo
 ~$*.docx
 ~$*.xlsx
 

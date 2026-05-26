@@ -8,18 +8,16 @@ export default defineConfig({
     open: false,
   },
   resolve: {
-    // Critical: cityjson-threejs-loader ships its own copy of three via the file:
-    // protocol. Without dedupe, Three.js objects constructed inside the loader are
-    // instances of a different THREE.* class than the ones in our app, which silently
-    // breaks raycasting, scene.add, and bounding-box math. Dedupe forces a single
-    // THREE instance across the whole bundle.
+    // Critical: keep CityJSON loader and app meshes on the same Three.js
+    // instance. Without dedupe, objects constructed inside the loader can come
+    // from a different THREE.* class than the app's raycaster/scene utilities.
     dedupe: ['three'],
   },
   optimizeDeps: {
     // EXCLUDE rather than include: pre-bundling the loader into node_modules/.vite
     // rewrites its import.meta.url, breaking `new Worker(new URL(...), import.meta.url)`
-    // in CityJSONWorkerParser and confusing resolution of its deep imports. Serving
-    // the loader's source files directly (via file: link) preserves the relative paths.
+    // in CityJSONWorkerParser and confusing resolution of its deep imports. Let
+    // Vite serve the pinned package source files directly.
     exclude: ['cityjson-threejs-loader'],
   },
 });
