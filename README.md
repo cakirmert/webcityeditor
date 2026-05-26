@@ -42,6 +42,19 @@ From `prototype/`:
 | `npm test` | Run all tests once |
 | `npm run test:watch` | Watch-mode tests |
 | `npm run build` | Production bundle + TypeScript type-check |
+| `npm run build:pages` | Production bundle with GitHub Pages asset base |
+
+## Hosting
+
+The prototype can be hosted as a static GitHub Pages site; no backend is required for the current client-only feature set. The repository includes a Pages workflow at `.github/workflows/deploy-pages.yml` that installs dependencies, runs tests, builds `prototype/dist`, and deploys it after pushes to `main`.
+
+For `cakirmert/webcityeditor`, the deployed URL is:
+
+```text
+https://cakirmert.github.io/webcityeditor/
+```
+
+In GitHub, set **Settings → Pages → Source** to **GitHub Actions** if it is not already selected, then push `main` and watch the **Deploy GitHub Pages** workflow.
 
 ## Project layout
 
