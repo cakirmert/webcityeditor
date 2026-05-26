@@ -29,6 +29,10 @@ interface StoredDocument {
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB is not available in this environment'));
+      return;
+    }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -59,6 +63,7 @@ export async function saveDocument(name: string, doc: CityJsonDocument): Promise
 }
 
 export async function loadDocument(name: string): Promise<StoredDocument | null> {
+  if (typeof indexedDB === 'undefined') return null;
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -75,6 +80,7 @@ export async function loadDocument(name: string): Promise<StoredDocument | null>
 }
 
 export async function listDocuments(): Promise<Omit<StoredDocument, 'doc'>[]> {
+  if (typeof indexedDB === 'undefined') return [];
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -96,6 +102,7 @@ export async function listDocuments(): Promise<Omit<StoredDocument, 'doc'>[]> {
 }
 
 export async function deleteDocument(name: string): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');

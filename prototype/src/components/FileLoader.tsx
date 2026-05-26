@@ -119,6 +119,7 @@ export default function FileLoader({ onLoaded }: Props) {
     () => [...hostedSamples, QUICK_SAMPLES[0], ...QUICK_SAMPLES.slice(1)],
     [hostedSamples]
   );
+  const primaryHostedSample = hostedSamples[0] ?? null;
 
   const parseAndEmit = useCallback(
     (text: string, name: string) => {
@@ -177,6 +178,37 @@ export default function FileLoader({ onLoaded }: Props) {
       });
     }
   }, [url, parseAndEmit]);
+
+  const handleQuickSample = useCallback(
+    (sample: QuickSample) => {
+      if (sample.guideOnly) {
+        setStatus({
+          kind: 'info',
+          msg: `${sample.description} - download portal opens in a new tab.`,
+        });
+        window.open(sample.url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+
+      setUrl(sample.url);
+      void (async () => {
+        setStatus({ kind: 'info', msg: `Fetching ${sample.label}...` });
+        try {
+          const resp = await fetch(sample.url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const text = await resp.text();
+          const name = sample.url.split('/').pop() ?? sample.label;
+          parseAndEmit(text, name);
+        } catch (e) {
+          setStatus({
+            kind: 'err',
+            msg: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+      })();
+    },
+    [parseAndEmit]
+  );
 
   const handleSample = useCallback(() => {
     const sample: CityJsonDocument = {
@@ -314,7 +346,14 @@ export default function FileLoader({ onLoaded }: Props) {
           />
           <Button onClick={handleUrl}>Fetch URL</Button>
         </div>
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-2">
+          {primaryHostedSample ? (
+            <Button onClick={() => handleQuickSample(primaryHostedSample)}>
+              Load Hamburg demo
+            </Button>
+          ) : (
+            <span />
+          )}
           <Button onClick={handleSample} variant="outline">
             Use built-in sample cube
           </Button>
