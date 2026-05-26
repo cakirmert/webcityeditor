@@ -8,13 +8,13 @@ Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`pr
 
 - MapLibre basemap + deck.gl extruded building context (LoD-by-zoom: outlines below z 14.5, blocks above).
 - Side-panel Three.js editor for the selected building (uses TU Delft's [`cityjson-threejs-loader`](https://github.com/cityjson/cityjson-threejs-loader)).
-- Parametric new-building flow: Terra Draw footprint → dialog with live preview on the map → flat / pyramid / gable / hip roofs.
+- Parametric new-building flow: Terra Draw footprint -> fullscreen creator with live 3D preview -> flat / pyramid / gable / hip roofs.
 - Snap-to-existing-footprints while drawing (auto-collected from the loaded CityJSON).
 - Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence.
 - Subdivision into BuildingParts: split by floor (stacked) or by side (adjacent). Works on any loaded building, not just ones created in the editor.
 - Live-preview transforms: translate and rotate buildings with a ghost preview on the map, then save or cancel.
 - 10 CRS registered via proj4 (EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514).
-- 100+ tests across validation, round-trip, generation, subdivision, transforms.
+- 344 tests across validation, round-trip, generation, subdivision, transforms, IFC import, and UI components.
 
 ## Setup
 
@@ -23,11 +23,6 @@ Prerequisites: Node.js 20+, npm, Git.
 ```bash
 git clone https://github.com/YOUR-USER/webcityeditor.git
 cd webcityeditor
-
-# Clone the TU Delft CityJSON-Three.js loader into the expected location.
-# It's referenced via a file: link from prototype/package.json and intentionally
-# not vendored into this repo.
-git clone https://github.com/cityjson/cityjson-threejs-loader.git spike/cityjson-threejs-loader
 
 # Install and run the prototype
 cd prototype
@@ -62,10 +57,9 @@ webcityeditor/
 │       ├── components/                   React + shadcn/ui components
 │       └── lib/                          Pure-function libraries (well-tested)
 └── spike/                                Early spikes
-    ├── spike.html                        Hand-rolled CityJSON parser for baseline risk check
-    └── cityjson-threejs-loader/          (cloned on setup — not in this repo)
+    └── spike.html                        Hand-rolled CityJSON parser for baseline risk check
 ```
 
 ## License
 
-See `spike/cityjson-threejs-loader` upstream for its MIT license. This project is currently unlicensed (all rights reserved pending HiWi outcome). Add a LICENSE file before open-sourcing more broadly.
+The pinned `cityjson-threejs-loader` dependency is MIT licensed upstream. This project is currently unlicensed (all rights reserved pending HiWi outcome). Add a LICENSE file before open-sourcing more broadly.

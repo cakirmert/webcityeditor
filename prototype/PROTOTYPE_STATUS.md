@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-05-13. **Test suite**: 320 passing across 30 files. **TypeScript**: clean. **Production build**: clean. **Published**: [github.com/cakirmert/webcityeditor](https://github.com/cakirmert/webcityeditor).
+**Last updated**: 2026-05-26. **Test suite**: 344 passing across 31 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -28,8 +28,9 @@ Browser-only React app. Everything client-side; no backend yet.
 ### Create new buildings
 - **＋ New Building** toolbar action activates Terra Draw polygon mode
 - **Snap-to-existing-footprints** within 20 px while drawing
-- Dialog prompts for total height / storeys / roof type (**flat, pyramid, gable, hip**) with DIN-inspired storey-height validation
-- **Live roof mesh preview** on the map via deck.gl `SimpleMeshLayer` — roof shape, **windows, and door** all update as you type
+- Fullscreen creator overlay with dimensions, overhang, attributes, openings, and subdivision sections
+- Visual roof picker for **flat, pyramid, gable, hip** with DIN-inspired storey-height validation
+- **Live 3D preview** while creating — roof shape, **windows, door, eave overhang, rake overhang, and split previews** update as you type
 - **Procedural openings (LoD 2.2)** — Windows / Door checkboxes in the dialog. When enabled, the generator emits per-storey window holes (1.4 × 1.5 m, 0.9 m sill, ~3 m spacing) on every rectangular wall and a single 1.0 × 2.1 m door on the first wall. Each opening is both an inner-ring hole on the parent wall AND a separate co-planar `Window`/`Door` semantic surface. Bumps the geometry's LoD label from `2.0` to `2.2`.
 - **LoD 2.2 eave overhang** — `Eave overhang (m)` input. Adds extending wall-top + roof-edge vertex rings, `OuterCeilingSurface` soffits, and (for gable) rake-corner-cap triangles. **Supports all 4 roof types**: flat, pyramid, hip, gable.
 - **Subdivide-on-create**: choose "none / floors / sides" with a count; split applies immediately after insertion
@@ -39,12 +40,14 @@ Browser-only React app. Everything client-side; no backend yet.
 - Attribute editor with priority-sorted rows, type coercion (number/string/boolean)
 - Dirty tracking, per-building revert, toolbar dirty-count
 - **Transform mode**: "Start editing position" enters a live-preview mode with dX/dY/angle inputs + quick-step buttons; map renders a ghost of the transformed footprint; Save commits, Cancel discards. Works on ANY building (generated or imported).
-- **Edit footprint mode** (editor-created buildings only): "Edit footprint corners" loads the building's outline as a TerraDrawSelectMode polygon with draggable vertex handles + midpoint dots that split edges into new corners. Save calls `regenerateBuilding` which re-runs the parametric generator with the new shape and the building's stashed parametric attributes (`_eaveHeight`, `_addWindows`, `_eaveOverhang`, …) intact. Imported buildings show a friendly disabled-state explanation.
+- **Make editable for imports**: imported CityJSON / Hamburg / IFC-derived buildings can be promoted to parametric form after a confirmation that original mesh detail will be replaced.
+- **Edit footprint mode** (parametric/editor-created/promoted buildings): "Edit footprint corners" loads the building's outline as a TerraDrawSelectMode polygon with draggable vertex handles + midpoint dots that split edges into new corners. Save calls `regenerateBuilding` which re-runs the parametric generator with the new shape and the building's stashed parametric attributes (`_eaveHeight`, `_addWindows`, `_eaveOverhang`, …) intact.
+- **Reshape mode**: editable buildings expose in-place roof type, ridge/eave height, eave/rake overhang, and window/door toggles. Apply regenerates geometry without changing the id, footprint, or parent/child linkage.
 - **Subdivide — visual division editor**: split-by-floor with two modes:
   - **"Split equally"**: the original uniform N-floor split.
   - **"Custom heights…"**: per-floor wall-height input (auto-seeded with 3.5 m ground + equal upper floors — German residential pattern), live Σ display turning red when heights drift, ⚠ badge when any floor falls below MIN_STOREY_HEIGHT, sum-conservation enforced before Apply unlocks.
   - **Live 3D split-line preview**: the side-panel Three.js viewer draws horizontal accent rings around the building outline at each cumulative split height as you edit — no more "edit numbers blind".
-- **Subdivide — split-by-side** with MIN_SIDE_WIDTH=3m enforced.
+- **Subdivide — split-by-side** with MIN_SIDE_WIDTH=3m enforced, visual plan preview, and selectable auto / longer / shorter split axis.
 - Both split modes work on any Building (imported buildings supported, not just editor-created).
 - **Map tinting by roofType**: outline + extruded layers colour each footprint by its `roofType` attribute (flat=cool grey, gable=terracotta, hip=deeper terra, pyramid=walnut, +shed/mansard/barrel). Recognises CityGML/3DBAG integer codes (1000, 2100, 3100, 3200, 3300, 3400, 5100) AND human-readable strings, including 3DBAG's `roofType: 1000` / `roofType: "flat"` mixed convention.
 - **3D viewer color-mode toggle**: top-right of the side-panel viewer flips between "By surface" (semantic — distinct tints for Wall / Roof / Window / Door / OuterCeiling) and "By object" (CityObject type — Building / Bridge / Plant / Road). No re-load; flips a uniform on the parser's mesh material.
@@ -65,7 +68,7 @@ Browser-only React app. Everything client-side; no backend yet.
 - **Building list sidebar** (toolbar "☰ List" toggle): 300px-wide left rail with one row per building, sortable by id / year / height / function, capped at 300 visible rows. Filter narrows it; clicking a row selects on the map and opens its AttributePanel.
 
 ### UI
-- Full shadcn/ui — Button, Input, Label, Dialog, Select — across Toolbar, FileLoader, AttributePanel, NewBuildingDialog
+- Full shadcn/ui — Button, Input, Label, Dialog, Select — across Toolbar, FileLoader, AttributePanel, BuildingCreator
 - Tailwind utility classes for layout; CSS variables for theme
 - Dark palette; focus rings; consistent hover states; polished scrollbars
 
@@ -84,7 +87,7 @@ Browser-only React app. Everything client-side; no backend yet.
 | S7 | ENU / local metric for edits | ✅ | proj4 handles WGS84 ↔ CRS, Three.js in model-local metres |
 | S8 | LoD0 + LoD2 coexist per Building | ✅ | Native CityJSON hierarchy; LoD-by-zoom rendering on map |
 | S9 | Three.js | ✅ | three 0.165, dedupe configured |
-| S10 | cityjson-threejs-loader | ✅ | via file: link, cloned during setup |
+| S10 | cityjson-threejs-loader | ✅ | pinned GitHub dependency at `cf8db910`; no manual clone needed |
 | S11 | Custom serializer | ✅ | Mutate-in-place + JSON.stringify |
 | S12 | Azul not used | ✅ | — |
 | S13 | deck.gl + 3D Tiles + pg2b3dm | 🟡 partial | deck.gl ✓; Tile3DLayer and pg2b3dm need the backend phase |
@@ -125,7 +128,7 @@ Full step-by-step: [`HAMBURG_PIPELINE.md`](HAMBURG_PIPELINE.md).
 | MapLibre GL JS 4.7 | ✅ |
 | deck.gl 9.3 — core, layers, mapbox, mesh-layers | ✅ |
 | Three.js 0.165 | ✅ (dedupe configured) |
-| cityjson-threejs-loader (TU Delft) | ✅ (cloned during setup) |
+| cityjson-threejs-loader (TU Delft) | ✅ pinned GitHub dependency at `cf8db910` |
 | Terra Draw 1.28 + MapLibre adapter | ✅ (incl. snap-to-existing) |
 | proj4 | ✅ — 10 CRS + coord-magnitude inference fallback |
 | **shadcn/ui** (Button/Input/Label/Dialog/Select) | ✅ — across every component |
@@ -194,7 +197,16 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 
 ## 8. What's left — roadmap (priority order)
 
-**Done since the last status update (2026-05-07 → 2026-05-13):**
+**Done since the last status update (2026-05-13 → 2026-05-26):**
+- ✅ **Viewport-filtered streaming UI wiring** — toolbar action reads the current map viewport, projects it into the dataset CRS, and re-parses cached CityJSONSeq text with `viewportBbox`.
+- ✅ **Fullscreen BuildingCreator** — replaced the modal + floating preview with a single full-screen creator, visual roof picker, live Three.js geometry preview, and side-split plan preview.
+- ✅ **Visual split previews** — side-subdivision now shows dashed plan-view cut lines in both create and edit flows; floor subdivision always shows 3D split rings, including equal-height mode.
+- ✅ **Selectable side-split axis** — split-by-side accepts auto / longer / shorter axis choice, with preview and MIN_SIDE_WIDTH tests.
+- ✅ **Make imported buildings editable** — imported CityJSON / Hamburg / IFC-derived objects can be converted into parametric geometry, preserving ids and user attributes.
+- ✅ **In-place reshape** — editable buildings can switch roof type, raise/lower ridge/eave, toggle openings, and change eave/rake overhangs without changing selection identity or hierarchy.
+- ✅ **Reproducible loader setup** — removed the manual local loader clone requirement; `cityjson-threejs-loader` is now pinned to upstream commit `cf8db910`, and `regenerator-runtime` is tracked as an app runtime dependency.
+
+**Done in the previous status window (2026-05-07 → 2026-05-13):**
 - ✅ **Drag-to-move buildings on the map** — when a building's transform is pending, mouse drag on the map translates the ghost preview; WGS84 deltas are projected to the data's CRS so the numeric dX/dY fields stay in sync.
 - ✅ **Floating 3D preview panel during creation** — Three.js viewer in the top-right corner of the map while drawing a new building; shows the actual generated roof shape (incl. windows/doors/overhang) in real time.
 - ✅ **Multi-select + copy/paste** — Ctrl+click adds buildings to a secondary selection set (highlighted warm orange); Ctrl+C copies, Ctrl+V pastes with a 5m CRS offset and rewired parent/child relationships.
@@ -224,11 +236,10 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 
 **Remaining roadmap (priority order):**
 
-1. **IFC → CityJSON import** — Route #2 (`web-ifc` WASM in-browser) is working but unpolished; the winding-fix landed but error reporting and edge-case coverage (some IFC versions, complex storey layouts) need work. Lower priority — current quality is "demo-able but rough."
+1. **IFC → CityJSON import polish** — Route #2 (`web-ifc` WASM in-browser) is working and covered by unit tests, but should be exercised against known real IFC files for error reporting, IFC-version quirks, and complex storey layouts. Lower priority — current quality is "demo-able but rough."
 2. **Batch Hamburg tile conversion** — Convert all 788 tiles up front + a quick-picker in the FileLoader listing them. Pre-requisite: CityGML files + `citygml-tools` CLI available in `tools/`. ~2 h.
-3. **Viewport-filtered streaming UI wiring** — Lib is shipped (`parseCityJsonSeq` accepts `viewportBbox`); still need a FileLoader checkbox + map-viewport bbox passthrough to expose it. ~1-2 h.
-4. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+3. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
+4. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 **Deferred (good ROI not obvious right now):**
 - **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build is 3-7 days for a narrow case (concave L/U/T shapes wanting gable/hip). Workaround: split into rectangular BuildingParts via the existing "Subdivide by side" path, then apply gable/hip per part. Re-evaluate if a demo requires real concave gables.
@@ -245,13 +256,12 @@ webcityeditor/
 ├── Data/                                LOCAL ONLY (gitignored) — user's CityGML/CityJSON fixtures
 ├── tools/                               LOCAL ONLY (gitignored) — citygml-tools, future citydb-tool
 ├── spike/
-│   ├── spike.html                       Hand-rolled CityJSON parser (baseline spike)
-│   └── cityjson-threejs-loader/         Cloned during setup (gitignored)
+│   └── spike.html                       Hand-rolled CityJSON parser (baseline spike)
 └── prototype/
     ├── PROTOTYPE_STATUS.md              THIS FILE
     ├── HAMBURG_PIPELINE.md              Hamburg CityGML pilot (CityGML→CityJSON→DB→prototype)
     ├── package.json                     React 18, Three 0.165, deck.gl 9, MapLibre 4, Terra Draw 1.28,
-    │                                    shadcn deps (Radix, Tailwind, CVA, lucide), proj4 2
+    │                                    pinned cityjson-threejs-loader, web-ifc, shadcn deps, proj4 2
     ├── tailwind.config.js / postcss.config.js / vitest.config.ts
     ├── vite.config.ts                   resolve.dedupe:['three']; exclude loader from pre-bundle
     ├── index.html
@@ -264,7 +274,7 @@ webcityeditor/
         │   ├── MapView.tsx              MapLibre + deck.gl + Terra Draw + preview + auto-fit
         │   ├── Viewer.tsx               Three.js side-panel canvas
         │   ├── AttributePanel.tsx       Attrs + transform + subdivide
-        │   └── NewBuildingDialog.tsx    New-building form (shadcn)
+        │   └── BuildingCreator.tsx      Fullscreen new-building creator + live preview
         ├── lib/
         │   ├── cityjson.ts              Validate, parse (mono + seq), sample, diff
         │   ├── projection.ts            proj4 CRS registry + coord-magnitude CRS inference
@@ -291,33 +301,41 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (240 tests across 23 files)
+## 10. Test suite (344 tests across 31 files)
 
 | File | Tests | Coverage |
 |---|---|---|
 | `lib/cityjson.test.ts` | 23 | Validation, parsing, root buildings, setAttribute, diff |
-| `lib/cityjsonseq.test.ts` | 7 | CityJSONSeq parse, index-shift merge, limit, malformed-line tolerance, auto-detect |
+| `lib/cityjsonseq.test.ts` | 13 | CityJSONSeq parse, index-shift merge, limit, viewport bbox filtering, malformed-line tolerance, auto-detect |
 | `lib/synthetic-parent.test.ts` | 4 | Hamburg LoD2 non-conformant `parents` recovery (synthesises a missing root Building) |
-| `lib/projection.test.ts` | 8 | CRS detection + coord-magnitude fallback; 2D+3D reprojection for EPSG:28992/7415/4978/25832 |
-| `lib/roundtrip.test.ts` | 6 | edit → stringify → re-parse preserves every edit; geometry untouched |
+| `lib/projection.test.ts` | 9 | CRS detection + coord-magnitude fallback; 2D+3D reprojection for EPSG:28992/7415/4978/25832 |
+| `lib/roundtrip.test.ts` | 6 | edit -> stringify -> re-parse preserves every edit; geometry untouched |
 | `lib/footprints.test.ts` | 7 | Extraction returns closed polygons in the right region; filterToBuilding scopes correctly |
-| `lib/footprint-tint.test.ts` | 7 | roofType mapping: human strings ↔ CityGML/3DBAG integer codes; alpha pass-through; fallback for unknown |
+| `lib/footprint-tint.test.ts` | 7 | roofType mapping: human strings <-> CityGML/3DBAG integer codes; alpha pass-through; fallback for unknown |
 | `lib/filter.test.ts` | 22 | Building filter: text/roof/year/height matching, AND combinations, range helpers, isFilterEmpty, matchingIds |
 | `lib/generator.test.ts` | 18 | Flat/pyramid/gable/hip generation, input validation, insertBuilding, round-trip for every roof type, storey-height validator |
 | `lib/openings.test.ts` | 11 | LoD 2.2 procedural windows + door; ring orientation; gable-end skip; round-trip survival; narrow-wall / lintel-clearance skip |
-| `lib/eave-overhang.test.ts` | 12 | LoD 2.2 eave overhang for all 4 roof types; soffit topology; rake-corner caps for gable; combine-with-openings without index collision |
+| `lib/eave-overhang.test.ts` | 18 | LoD 2.2 eave/rake overhang for all 4 roof types; soffit topology; combine-with-openings without index collision |
 | `lib/preview-mesh.test.ts` | 8 | Live preview mesh: window/door overlay vertex counts, gable-end skip, narrow-wall skip, additive (never replaces) |
-| `lib/3dbag-smoke.test.ts` | 8 | Synthetic 3DBAG fixture: EPSG:7415, multi-LoD geometry, `b3_*` attributes, vertex-index rewriting, roofType int↔str |
-| `lib/regenerate.test.ts` | 9 | regenerateBuilding: footprint swap, attr preservation, openings + overhang preservation, imported-building rejection, non-rectangular gable rejection, JSON round-trip |
+| `lib/3dbag-smoke.test.ts` | 8 | Synthetic 3DBAG fixture: EPSG:7415, multi-LoD geometry, `b3_*` attributes, vertex-index rewriting, roofType int<->str |
+| `lib/regenerate.test.ts` | 13 | regenerateBuilding: footprint swap, attr preservation, reshape overrides, opening toggles, non-rectangular gable rejection, JSON round-trip |
+| `lib/parametrise.test.ts` | 16 | Infer/import parametric attrs, normalise roofType, promote imported buildings to editable generated geometry |
 | `lib/compact.test.ts` | 8 | compactVertices: no-op on clean docs, reclaims orphans from regenerate, footprint shape preserved, idempotent |
 | `lib/integrity.test.ts` | 13 | Vertex-index bounds, dangling parent/child, asymmetric links, orphaned vertices, semantics shell/face mismatch, NaN vertices |
 | `lib/gltf-export.test.ts` | 13 | glb header validity, accessor counts/types, bufferView alignment, extras.cityjson metadata, refuses empty geometry |
 | `lib/undo.test.ts` | 11 | UndoStore: push, undo, redo, redo-invalidation on new push, maxDepth cap, peek labels, deep-clone integrity, selection + dirty restoration |
-| `lib/subdivision.test.ts` | 18 | canSplit, splitByFloor, splitByFloorHeights (German tall-ground-floor pattern, sum conservation), splitBySide, min-size enforcement |
-| `lib/transform.test.ts` | 7 | move preserves originals; rotate changes bbox; 360° returns to origin |
+| `lib/subdivision.test.ts` | 22 | canSplit, splitByFloor, splitByFloorHeights, selectable side-split axis, min-size enforcement |
+| `lib/transform.test.ts` | 6 | move preserves originals; rotate changes bbox; 360 degrees returns to origin |
+| `lib/ifc-to-cityjson.test.ts` | 14 | IFC mesh classification and CityJSON conversion helpers |
+| `lib/ifc-import.test.ts` | 9 | web-ifc import orchestration and error handling boundaries |
+| `lib/opening-edit.test.ts` | 9 | Opening extraction and directional window/door move operations |
+| `lib/merge.test.ts` | 10 | Merge/import id conflict handling and parent/child rewiring |
+| `lib/clipboard.test.ts` | 8 | Multi-select copy/paste cloning, offsets, and hierarchy rewiring |
+| `lib/delete.test.ts` | 6 | Cascading deletion and surviving parent child-list cleanup |
+| `lib/zoning.test.ts` | 12 | Demo zoning generation, footprint tests, and allow-list validation |
 | `components/Toolbar.test.tsx` | 6 | Title, stats, dirty counter, wiring |
 | `components/FileLoader.test.tsx` | 4 | Sample button, fetch errors, non-CityJSON rejection |
-| `components/AttributePanel.test.tsx` | 11 | Attribute rendering, priority sort, numeric/string/boolean coercion, revert gating |
+| `components/AttributePanel.test.tsx` | 10 | Attribute rendering, priority sort, numeric/string/boolean coercion, revert gating |
 
 ---
 
@@ -328,7 +346,6 @@ Prerequisites: Node.js 20+, npm, Git. (Java 21 + Docker are optional, for the Ha
 ```bash
 git clone https://github.com/cakirmert/webcityeditor.git
 cd webcityeditor
-git clone https://github.com/cityjson/cityjson-threejs-loader.git spike/cityjson-threejs-loader
 cd prototype
 npm install
 npm run dev        # http://localhost:5173
