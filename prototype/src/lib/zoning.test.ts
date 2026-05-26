@@ -1,80 +1,265 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
-  generateZonesAroundCenter,
+  buildHamburgFnpNutzungUrl,
+  buildHamburgXPlanBaugebietUrl,
+  fetchHamburgPlanningZones,
   findZoneForPoint,
-  validateBuildingType,
   getZoneCenter,
+  isBboxNearHamburg,
+  validateBuildingType,
+  zonesFromPlanningGeoJson,
   type ParcelZone,
 } from './zoning';
 
-describe('generateZonesAroundCenter', () => {
-  it('produces three demo zones with non-empty polygons', () => {
-    const zones = generateZonesAroundCenter([4.3571, 52.0116]);
-    expect(zones).toHaveLength(3);
-    for (const z of zones) {
-      expect(z.polygon.length).toBeGreaterThanOrEqual(4);
-      expect(z.allowedTypes.length).toBeGreaterThan(0);
-      expect(z.label).toBeTruthy();
-    }
+const HAMBURG_BBOX: [number, number, number, number] = [9.98, 53.54, 10.02, 53.57];
+
+describe('Hamburg planning URL builders', () => {
+  it('builds the XPlan Baugebiet OGC API URL with bbox and limit', () => {
+    const url = new URL(buildHamburgXPlanBaugebietUrl(HAMBURG_BBOX, 25));
+    expect(url.hostname).toBe('api.hamburg.de');
+    expect(url.pathname).toContain('/xplan/collections/bp_baugebietsteilflaeche/items');
+    expect(url.searchParams.get('f')).toBe('json');
+    expect(url.searchParams.get('bbox')).toBe(HAMBURG_BBOX.join(','));
+    expect(url.searchParams.get('limit')).toBe('25');
   });
 
-  it('zones have distinct ids and labels', () => {
-    const zones = generateZonesAroundCenter([0, 0]);
-    const ids = new Set(zones.map((z) => z.id));
-    const labels = new Set(zones.map((z) => z.label));
-    expect(ids.size).toBe(zones.length);
-    expect(labels.size).toBe(zones.length);
+  it('builds a WFS FNP GeoJSON URL with encoded output format', () => {
+    const url = new URL(buildHamburgFnpNutzungUrl(HAMBURG_BBOX, 50));
+    expect(url.hostname).toBe('geodienste.hamburg.de');
+    expect(url.searchParams.get('REQUEST')).toBe('GetFeature');
+    expect(url.searchParams.get('TYPENAMES')).toBe('de.hh.up:fnp_nutzung');
+    expect(url.searchParams.get('OUTPUTFORMAT')).toBe('application/geo+json');
+    expect(url.searchParams.get('BBOX')).toBe(`${HAMBURG_BBOX.join(',')},EPSG:4326`);
+    expect(url.searchParams.get('COUNT')).toBe('50');
   });
 
-  it('the residential zone allows mixed-use buildings', () => {
-    const zones = generateZonesAroundCenter([0, 0]);
-    const residential = zones.find((z) => z.label.toLowerCase().includes('residential'));
-    expect(residential).toBeDefined();
-    expect(residential!.allowedTypes).toContain('residential');
-    expect(residential!.allowedTypes).toContain('mixed');
+  it('detects whether a query bbox intersects Hamburg', () => {
+    expect(isBboxNearHamburg(HAMBURG_BBOX)).toBe(true);
+    expect(isBboxNearHamburg([4.3, 52.0, 4.4, 52.1])).toBe(false);
+  });
+});
+
+describe('zonesFromPlanningGeoJson', () => {
+  it('maps XPlan Baugebiet polygons into planning zones', () => {
+    const zones = zonesFromPlanningGeoJson(
+      {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'xplan-1',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [10, 53.5],
+                  [10.01, 53.5],
+                  [10.01, 53.51],
+                  [10, 53.51],
+                  [10, 53.5],
+                ],
+              ],
+            },
+            properties: {
+              xpPlanName: 'Altstadt47',
+              besondereArtDerBaulNutzungWert: 'Kerngebiet',
+              GRZ: 1,
+              rechtsstandWert: 'Festsetzung',
+            },
+          },
+        ],
+      },
+      'hamburg-xplan-baugebiet'
+    );
+
+    expect(zones).toHaveLength(1);
+    expect(zones[0].id).toBe('xplan-1');
+    expect(zones[0].label).toBe('Kerngebiet');
+    expect(zones[0].allowedTypes).toEqual(['mixed', 'commercial', 'residential', 'public']);
+    expect(zones[0].source).toBe('hamburg-xplan-baugebiet');
+    expect(zones[0].details).toContain('Altstadt47');
+  });
+
+  it('maps FNP land-use polygons into planning zones', () => {
+    const zones = zonesFromPlanningGeoJson(
+      {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'fnp-1',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [10, 53.5],
+                  [10.01, 53.5],
+                  [10.01, 53.51],
+                  [10, 53.51],
+                  [10, 53.5],
+                ],
+              ],
+            },
+            properties: {
+              nutzung: 'Wohnbauflächen',
+            },
+          },
+        ],
+      },
+      'hamburg-fnp-nutzung'
+    );
+
+    expect(zones).toHaveLength(1);
+    expect(zones[0].label).toBe('Wohnbauflächen');
+    expect(zones[0].allowedTypes).toEqual(['residential', 'mixed']);
+  });
+
+  it('splits MultiPolygon features and closes open rings', () => {
+    const zones = zonesFromPlanningGeoJson(
+      {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'MultiPolygon',
+              coordinates: [
+                [
+                  [
+                    [10, 53.5],
+                    [10.01, 53.5],
+                    [10.01, 53.51],
+                    [10, 53.51],
+                  ],
+                ],
+                [
+                  [
+                    [10.02, 53.5],
+                    [10.03, 53.5],
+                    [10.03, 53.51],
+                    [10.02, 53.51],
+                  ],
+                ],
+              ],
+            },
+            properties: { nutzung: 'Gewerbliche Bauflächen' },
+          },
+        ],
+      },
+      'hamburg-fnp-nutzung'
+    );
+
+    expect(zones).toHaveLength(2);
+    expect(zones[0].polygon.at(-1)).toEqual(zones[0].polygon[0]);
+    expect(zones[0].allowedTypes).toEqual(['commercial', 'mixed']);
+  });
+
+  it('returns no zones for non-GeoJSON or unsupported geometry', () => {
+    expect(zonesFromPlanningGeoJson({ type: 'FeatureCollection', features: [] }, 'hamburg-fnp-nutzung')).toEqual([]);
+    expect(
+      zonesFromPlanningGeoJson(
+        {
+          type: 'FeatureCollection',
+          features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [10, 53] } }],
+        },
+        'hamburg-fnp-nutzung'
+      )
+    ).toEqual([]);
+  });
+});
+
+describe('fetchHamburgPlanningZones', () => {
+  it('uses XPlan results when they are available', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [10, 53.5],
+                  [10.01, 53.5],
+                  [10.01, 53.51],
+                  [10, 53.51],
+                  [10, 53.5],
+                ],
+              ],
+            },
+            properties: { besondereArtDerBaulNutzungWert: 'AllgWohngebiet' },
+          },
+        ],
+      }),
+    } as Response);
+
+    const zones = await fetchHamburgPlanningZones(HAMBURG_BBOX, fetchImpl);
+    expect(zones).toHaveLength(1);
+    expect(zones[0].allowedTypes).toEqual(['residential', 'mixed']);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to FNP when the XPlan viewport has no polygons', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ type: 'FeatureCollection', features: [] }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'Polygon',
+                coordinates: [
+                  [
+                    [10, 53.5],
+                    [10.01, 53.5],
+                    [10.01, 53.51],
+                    [10, 53.51],
+                    [10, 53.5],
+                  ],
+                ],
+              },
+              properties: { nutzung: 'Gemischte Bauflächen' },
+            },
+          ],
+        }),
+      } as Response);
+
+    const zones = await fetchHamburgPlanningZones(HAMBURG_BBOX, fetchImpl);
+    expect(zones).toHaveLength(1);
+    expect(zones[0].source).toBe('hamburg-fnp-nutzung');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
 
 describe('findZoneForPoint', () => {
   it('returns the matching zone when the point is inside', () => {
-    const zones = generateZonesAroundCenter([0, 0], 0.01);
-    // Point in lower-left quadrant (residential per generator layout)
-    const z = findZoneForPoint(zones, [-0.005, -0.005]);
+    const z = findZoneForPoint([makeZone(['residential', 'mixed'])], [0.5, 0.5]);
     expect(z).not.toBeNull();
   });
 
   it('returns null when no zone contains the point', () => {
-    const zones = generateZonesAroundCenter([0, 0], 0.001);
-    // Far outside any zone
-    const z = findZoneForPoint(zones, [10, 10]);
+    const z = findZoneForPoint([makeZone(['residential'])], [10, 10]);
     expect(z).toBeNull();
-  });
-
-  it('a point on the residential side maps to residential', () => {
-    const zones = generateZonesAroundCenter([0, 0], 0.01);
-    const z = findZoneForPoint(zones, [-0.003, -0.003]);
-    expect(z?.label.toLowerCase()).toContain('residential');
-  });
-
-  it('a point on the commercial side maps to commercial', () => {
-    const zones = generateZonesAroundCenter([0, 0], 0.01);
-    const z = findZoneForPoint(zones, [0.003, -0.003]);
-    expect(z?.label.toLowerCase()).toContain('commercial');
   });
 });
 
 describe('validateBuildingType', () => {
-  function makeZone(allowed: string[], label = 'Test Zone'): ParcelZone {
-    return {
-      id: 'test',
-      polygon: [],
-      allowedTypes: allowed,
-      label,
-      color: [0, 0, 0, 0],
-    };
-  }
-
-  it('allows when zone is null (no zoning constraints)', () => {
+  it('allows when zone is null (no planning constraints)', () => {
     expect(validateBuildingType(null, 'residential').allowed).toBe(true);
   });
 
@@ -85,11 +270,18 @@ describe('validateBuildingType', () => {
   });
 
   it('rejects with a reason when the building function is not allowed', () => {
-    const zone = makeZone(['residential'], 'Residential Zone');
+    const zone = makeZone(['residential'], 'Residential Area');
     const result = validateBuildingType(zone, 'industrial');
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('industrial');
-    expect(result.reason).toContain('Residential Zone');
+    expect(result.reason).toContain('Residential Area');
+  });
+
+  it('rejects all building functions when the planning class maps to no types', () => {
+    const zone = makeZone([], 'Water Area');
+    const result = validateBuildingType(zone, 'residential');
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('no mapped building types');
   });
 });
 
@@ -99,10 +291,25 @@ describe('getZoneCenter', () => {
   });
 
   it('returns the centroid across all zone polygons', () => {
-    const zones = generateZonesAroundCenter([4.3571, 52.0116], 0.001);
-    const c = getZoneCenter(zones);
+    const c = getZoneCenter([makeZone(['residential'])]);
     expect(c).not.toBeNull();
-    expect(c![0]).toBeCloseTo(4.3571, 3);
-    expect(c![1]).toBeCloseTo(52.0116, 3);
+    expect(c![0]).toBeCloseTo(0.4, 3);
+    expect(c![1]).toBeCloseTo(0.4, 3);
   });
 });
+
+function makeZone(allowed: string[], label = 'Test Zone'): ParcelZone {
+  return {
+    id: 'test',
+    polygon: [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+      [0, 0],
+    ],
+    allowedTypes: allowed,
+    label,
+    color: [0, 0, 0, 0],
+  };
+}

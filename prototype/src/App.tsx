@@ -42,8 +42,9 @@ import { deleteBuildings } from './lib/delete';
 import { extractOpenings, moveOpening, type OpeningInfo } from './lib/opening-edit';
 import { parametriseBuilding } from './lib/parametrise';
 import {
-  generateZonesAroundCenter,
+  fetchHamburgPlanningZones,
   findZoneForPoint,
+  isBboxNearHamburg,
   validateBuildingType,
   type ParcelZone,
 } from './lib/zoning';
@@ -102,9 +103,10 @@ export default function App() {
   const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
   const [clipboardIds, setClipboardIds] = useState<Set<string> | null>(null);
 
-  // ── Zoning ────────────────────────────────────────────────────────────────
+  // ── Planning layer ───────────────────────────────────────────────────────
   const [zones, setZones] = useState<ParcelZone[]>([]);
   const [zoningEnabled, setZoningEnabled] = useState(false);
+  const [zoningLoading, setZoningLoading] = useState(false);
 
   // ── Raw CityJSONSeq cache for viewport re-parse ───────────────────────────
   // Held only for CityJSONSeq inputs. The "Filter to viewport" toolbar action
@@ -124,6 +126,9 @@ export default function App() {
       setSelection(null);
       setDirtyIds(new Set());
       setFilter({}); // reset filters when loading a new doc
+      setZones([]);
+      setZoningEnabled(false);
+      setZoningLoading(false);
       undoRef.current.clear();
       setUndoVersion((v) => v + 1);
       originals.clear();
@@ -654,25 +659,44 @@ export default function App() {
     if (!pendingTransform) dragBaseRef.current = null;
   }, [pendingTransform]);
 
-  // ── Zoning toggle ─────────────────────────────────────────────────────────
-  const handleToggleZoning = useCallback(() => {
-    if (!cityjson) return;
+  // ── Planning toggle ───────────────────────────────────────────────────────
+  const handleToggleZoning = useCallback(async () => {
+    if (!cityjson || zoningLoading) return;
     if (zoningEnabled) {
       setZoningEnabled(false);
       setZones([]);
       return;
     }
-    const fps = extractFootprints(cityjson);
-    if (fps.length === 0) return;
-    let sx = 0, sy = 0, n = 0;
-    for (const fp of fps) {
-      for (const [lng, lat] of fp.polygon) { sx += lng; sy += lat; n++; }
+
+    const bbox = mapBboxRef.current ?? computeFootprintBbox(extractFootprints(cityjson));
+    if (!bbox) {
+      alert('Could not derive a map bbox for the planning query.');
+      return;
     }
-    if (n === 0) return;
-    const center: [number, number] = [sx / n, sy / n];
-    setZones(generateZonesAroundCenter(center));
-    setZoningEnabled(true);
-  }, [cityjson, zoningEnabled]);
+    const queryBbox = expandBbox(bbox);
+    if (!isBboxNearHamburg(queryBbox)) {
+      alert(
+        'Hamburg planning data is only available for Hamburg. Load a Hamburg tile or pan the map to Hamburg first.'
+      );
+      return;
+    }
+
+    setZoningLoading(true);
+    try {
+      const nextZones = await fetchHamburgPlanningZones(queryBbox);
+      if (nextZones.length === 0) {
+        alert('No Hamburg planning polygons returned for this viewport.');
+        return;
+      }
+      setZones(nextZones);
+      setZoningEnabled(true);
+    } catch (e) {
+      console.error(e);
+      alert(`Planning layer failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setZoningLoading(false);
+    }
+  }, [cityjson, zoningEnabled, zoningLoading]);
 
   const handleStartDraw = useCallback(() => {
     setSelection(null);
@@ -693,14 +717,15 @@ export default function App() {
   const handleCreateBuilding = useCallback(
     (form: NewBuildingForm) => {
       if (!cityjson || !pendingFootprint) return;
-      // Zoning check
+      // Planning compatibility check. This is a lightweight client-side
+      // classification over Hamburg planning attributes, not a legal decision.
       if (zoningEnabled && zones.length > 0) {
         const cx = pendingFootprint.reduce((a, v) => a + v[0], 0) / pendingFootprint.length;
         const cy = pendingFootprint.reduce((a, v) => a + v[1], 0) / pendingFootprint.length;
         const zone = findZoneForPoint(zones, [cx, cy]);
         const check = validateBuildingType(zone, form.function);
         if (!check.allowed) {
-          alert(`Zoning violation: ${check.reason}`);
+          alert(`Planning layer conflict: ${check.reason}`);
           return;
         }
       }
@@ -1147,6 +1172,7 @@ export default function App() {
         onDelete={handleDelete}
         canDelete={!!selection || multiSelection.size > 0}
         zoningEnabled={zoningEnabled}
+        zoningLoading={zoningLoading}
         onToggleZoning={handleToggleZoning}
         onFilterViewport={handleReloadViewport}
         canFilterViewport={!!seqRawText}
@@ -1399,6 +1425,37 @@ function AttributePanelInline(props: {
   );
 }
 
+function computeFootprintBbox(
+  footprints: { polygon: [number, number][] }[]
+): [number, number, number, number] | null {
+  let west = Infinity,
+    south = Infinity,
+    east = -Infinity,
+    north = -Infinity;
+  let any = false;
+  for (const fp of footprints) {
+    for (const [lng, lat] of fp.polygon) {
+      if (lng < west) west = lng;
+      if (lat < south) south = lat;
+      if (lng > east) east = lng;
+      if (lat > north) north = lat;
+      any = true;
+    }
+  }
+  return any ? [west, south, east, north] : null;
+}
+
+function expandBbox(
+  bbox: [number, number, number, number],
+  ratio = 0.15,
+  minPad = 0.002
+): [number, number, number, number] {
+  const [west, south, east, north] = bbox;
+  const lngPad = Math.max((east - west) * ratio, minPad);
+  const latPad = Math.max((north - south) * ratio, minPad);
+  return [west - lngPad, south - latPad, east + lngPad, north + latPad];
+}
+
 /**
  * Floating banner shown over the map while the user is in IFC-placement
  * mode. Surfaces the parsed IFC's headline numbers + a Cancel button (Esc
@@ -1432,13 +1489,19 @@ function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
           marginBottom: 6,
         }}
       >
-        Zoning
+        Planning
       </div>
       {zones.map((z) => (
         <div
           key={z.id}
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
-          title={`Allowed: ${z.allowedTypes.join(', ')}`}
+          title={
+            z.details
+              ? `${z.details} | Compatible: ${
+                  z.allowedTypes.length > 0 ? z.allowedTypes.join(', ') : 'none mapped'
+                }`
+              : `Compatible: ${z.allowedTypes.join(', ')}`
+          }
         >
           <span
             style={{

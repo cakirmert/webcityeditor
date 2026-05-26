@@ -65,6 +65,7 @@ interface Props {
   onDelete?: () => void;
   canDelete?: boolean;
   zoningEnabled?: boolean;
+  zoningLoading?: boolean;
   onToggleZoning?: () => void;
   /** Re-parse the loaded CityJSONSeq file with the current map viewport as a
    *  bbox filter. Only meaningful for jsonl inputs — the button hides when
@@ -103,6 +104,7 @@ export default function Toolbar({
   onDelete,
   canDelete = false,
   zoningEnabled = false,
+  zoningLoading = false,
   onToggleZoning,
   onFilterViewport,
   canFilterViewport = false,
@@ -257,9 +259,18 @@ export default function Toolbar({
               size="sm"
               variant={zoningEnabled ? 'primary' : 'ghost'}
               onClick={onToggleZoning}
-              title={zoningEnabled ? 'Disable zoning overlay' : 'Show parcel zoning overlay'}
+              disabled={zoningLoading}
+              title={
+                zoningEnabled
+                  ? 'Disable Hamburg planning overlay'
+                  : 'Load Hamburg planning overlay for the current map view'
+              }
             >
-              {zoningEnabled ? '▦ Zoning ON' : '▦ Zoning'}
+              {zoningLoading
+                ? '▦ Planning...'
+                : zoningEnabled
+                ? '▦ Planning ON'
+                : '▦ Planning'}
             </Button>
           )}
 

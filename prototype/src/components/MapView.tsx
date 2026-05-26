@@ -88,7 +88,7 @@ interface Props {
   onDragMove?: (dx: number, dy: number) => void;
   /** Multi-selection: set of building IDs highlighted in addition to selectedId. */
   multiSelectedIds?: Set<string> | null;
-  /** Parcel zoning overlay polygons. */
+  /** Planning overlay polygons. */
   zones?: ParcelZone[];
 }
 
@@ -281,11 +281,11 @@ export default function MapView({
       | SimpleMeshLayer<{ position: [number, number] }>
     > = [];
 
-    // Zoning parcels layer
+    // Planning polygons layer
     if (zones.length > 0) {
       layers.push(
         new PolygonLayer<ParcelZone>({
-          id: 'zoning-parcels',
+          id: 'planning-polygons',
           data: zones,
           getPolygon: (d) => d.polygon,
           getFillColor: (d) => d.color,
@@ -845,4 +845,3 @@ function computeTranslateCentre(doc: CityJsonDocument): [number, number] | null 
     return null;
   }
 }
-
