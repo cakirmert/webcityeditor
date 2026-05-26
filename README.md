@@ -47,7 +47,7 @@ From `prototype/`:
 
 ## Hosting
 
-The prototype can be hosted as a static GitHub Pages site; no backend is required for the current client-only feature set. The repository includes a Pages workflow at `.github/workflows/deploy-pages.yml` that installs dependencies, runs tests, builds `prototype/dist`, and deploys it after pushes to `main`.
+The prototype can be hosted as a static GitHub Pages site; no backend is required for the current client-only feature set. For `cakirmert/webcityeditor`, Pages is currently configured to serve the built static bundle from the `gh-pages` branch so the demo does not depend on backend infrastructure.
 
 Small demo datasets can also be hosted from GitHub Pages without CORS issues. Put converted CityJSONSeq fixtures under `prototype/public/data/` and list them in `prototype/public/data/manifest.json`; FileLoader only shows hosted samples whose files exist.
 
@@ -57,7 +57,7 @@ For `cakirmert/webcityeditor`, the deployed URL is:
 https://cakirmert.github.io/webcityeditor/
 ```
 
-In GitHub, set **Settings → Pages → Source** to **GitHub Actions** if it is not already selected, then push `main` and watch the **Deploy GitHub Pages** workflow.
+To refresh the hosted demo, run `npm run build:pages`, publish `prototype/dist` to `gh-pages`, then request a Pages build. The repository also keeps `.github/workflows/deploy-pages.yml` as a GitHub Actions deployment path; switch **Settings -> Pages -> Source** back to **GitHub Actions** when Actions dispatches are healthy again.
 
 ## Project layout
 
