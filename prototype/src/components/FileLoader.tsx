@@ -91,7 +91,8 @@ export default function FileLoader({ onLoaded }: Props) {
           const resolvedUrl = publicAssetUrl(sample.url);
           if (sample.checkAvailability) {
             const head = await fetch(resolvedUrl, { method: 'HEAD', cache: 'no-cache' });
-            if (!head.ok) continue;
+            const contentType = head.headers.get('content-type') ?? '';
+            if (!head.ok || contentType.toLowerCase().includes('text/html')) continue;
           }
           available.push({
             label: sample.label,
