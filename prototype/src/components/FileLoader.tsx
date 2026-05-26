@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CityJsonDocument } from '../types';
 import { deleteDocument, listDocuments, loadDocument } from '../lib/storage';
 import { parseCityJsonAuto } from '../lib/cityjson';
@@ -25,33 +25,48 @@ interface QuickSample {
   description: string;
   url: string;
   guideOnly?: boolean;
+  badge?: string;
 }
 
 const QUICK_SAMPLES: QuickSample[] = [
   {
-    label: '3DBAG — Delft tile',
+    label: '3DBAG - Delft tile',
     description: 'CityJSON 2.0, ~1 MB, hundreds of LoD2 buildings',
     url: 'https://3d.bk.tudelft.nl/opendata/cityjson/3dcities/v2.0/9-284-556.city.json',
   },
   {
-    label: 'Hamburg — local pipeline required',
+    label: 'Hamburg - official LoD2 portal',
     description:
-      'Hamburg publishes only CityGML. Follow prototype/HAMBURG_PIPELINE.md to convert to CityJSON.',
+      'Hamburg publishes CityGML. Convert one tile to CityJSONSeq, then host it under public/data.',
     url: 'https://suche.transparenz.hamburg.de/dataset/3d-stadtmodell-lod2-de-hamburg2',
     guideOnly: true,
+    badge: 'GUIDE',
   },
   {
-    label: 'twocube — minimal solid',
+    label: 'twocube - minimal solid',
     description: 'Two adjacent unit cubes, for round-trip testing',
     url: 'https://3d.bk.tudelft.nl/opendata/cityjson/simplegeom/v2.0/twocube.city.json',
   },
 ];
+
+interface HostedDataManifest {
+  cityjsonSamples?: HostedCityJsonSample[];
+}
+
+interface HostedCityJsonSample {
+  label: string;
+  description: string;
+  url: string;
+  enabled?: boolean;
+  checkAvailability?: boolean;
+}
 
 export default function FileLoader({ onLoaded }: Props) {
   const [url, setUrl] = useState(DEFAULT_3DBAG);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [dragActive, setDragActive] = useState(false);
   const [recent, setRecent] = useState<{ name: string; savedAt: number }[]>([]);
+  const [hostedSamples, setHostedSamples] = useState<QuickSample[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -59,6 +74,49 @@ export default function FileLoader({ onLoaded }: Props) {
       .then(setRecent)
       .catch((e) => console.warn('Could not list local saves:', e));
   }, []);
+
+  useEffect(() => {
+    if (import.meta.env.MODE === 'test') return;
+    let cancelled = false;
+
+    async function loadHostedSamples() {
+      try {
+        const resp = await fetch(publicAssetUrl('data/manifest.json'), { cache: 'no-cache' });
+        if (!resp.ok) return;
+        const manifest = (await resp.json()) as HostedDataManifest;
+        const available: QuickSample[] = [];
+
+        for (const sample of manifest.cityjsonSamples ?? []) {
+          if (sample.enabled === false) continue;
+          const resolvedUrl = publicAssetUrl(sample.url);
+          if (sample.checkAvailability) {
+            const head = await fetch(resolvedUrl, { method: 'HEAD', cache: 'no-cache' });
+            if (!head.ok) continue;
+          }
+          available.push({
+            label: sample.label,
+            description: sample.description,
+            url: resolvedUrl,
+            badge: 'HOSTED',
+          });
+        }
+
+        if (!cancelled) setHostedSamples(available);
+      } catch (e) {
+        console.warn('Could not load hosted sample manifest:', e);
+      }
+    }
+
+    void loadHostedSamples();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const quickSamples = useMemo(
+    () => [QUICK_SAMPLES[0], ...hostedSamples, ...QUICK_SAMPLES.slice(1)],
+    [hostedSamples]
+  );
 
   const parseAndEmit = useCallback(
     (text: string, name: string) => {
@@ -274,15 +332,15 @@ export default function FileLoader({ onLoaded }: Props) {
           </div>
         )}
 
-        <Section label="Quick samples (remote)">
-          {QUICK_SAMPLES.map((s) => (
+        <Section label="Quick samples">
+          {quickSamples.map((s) => (
             <button
               key={s.url}
               onClick={() => {
                 if (s.guideOnly) {
                   setStatus({
                     kind: 'info',
-                    msg: `${s.description} — download portal opens in a new tab.`,
+                    msg: `${s.description} - download portal opens in a new tab.`,
                   });
                   window.open(s.url, '_blank', 'noopener,noreferrer');
                   return;
@@ -308,9 +366,9 @@ export default function FileLoader({ onLoaded }: Props) {
             >
               <div className="flex items-center gap-2 font-semibold text-[var(--text)]">
                 {s.label}
-                {s.guideOnly && (
+                {(s.guideOnly || s.badge) && (
                   <span className="rounded bg-[var(--warn)] px-1.5 py-0 text-[9px] font-semibold text-black">
-                    GUIDE
+                    {s.badge ?? 'GUIDE'}
                   </span>
                 )}
               </div>
@@ -373,4 +431,10 @@ function formatRelative(ts: number): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
   return `${d}d ago`;
+}
+
+function publicAssetUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const base = import.meta.env.BASE_URL || '/';
+  return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }

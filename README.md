@@ -11,10 +11,11 @@ Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`pr
 - Parametric new-building flow: Terra Draw footprint -> fullscreen creator with live 3D preview -> flat / pyramid / gable / hip roofs.
 - Snap-to-existing-footprints while drawing (auto-collected from the loaded CityJSON).
 - Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence.
+- Hamburg planning overlay: fetches real XPlan building-use polygons by viewport, with FNP land-use fallback when XPlan has no polygons.
 - Subdivision into BuildingParts: split by floor (stacked) or by side (adjacent). Works on any loaded building, not just ones created in the editor.
 - Live-preview transforms: translate and rotate buildings with a ghost preview on the map, then save or cancel.
 - 10 CRS registered via proj4 (EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514).
-- 344 tests across validation, round-trip, generation, subdivision, transforms, IFC import, and UI components.
+- 349 tests across validation, round-trip, generation, subdivision, transforms, IFC import, planning data, and UI components.
 
 ## Setup
 
@@ -47,6 +48,8 @@ From `prototype/`:
 ## Hosting
 
 The prototype can be hosted as a static GitHub Pages site; no backend is required for the current client-only feature set. The repository includes a Pages workflow at `.github/workflows/deploy-pages.yml` that installs dependencies, runs tests, builds `prototype/dist`, and deploys it after pushes to `main`.
+
+Small demo datasets can also be hosted from GitHub Pages without CORS issues. Put converted CityJSONSeq fixtures under `prototype/public/data/` and list them in `prototype/public/data/manifest.json`; FileLoader only shows hosted samples whose files exist.
 
 For `cakirmert/webcityeditor`, the deployed URL is:
 

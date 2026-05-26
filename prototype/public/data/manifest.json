@@ -1,0 +1,24 @@
+{
+  "cityjsonSamples": [
+    {
+      "label": "Hamburg - hosted LoD2 demo tile",
+      "description": "Same-origin CityJSONSeq sample converted from Hamburg LoD2 CityGML; appears when the file is present.",
+      "url": "data/hamburg/LoD2_565_5936_1_HH.city.jsonl",
+      "enabled": true,
+      "checkAvailability": true,
+      "source": "https://metaver.de/search/dls/service/4E1EE3EF-4E5B-4607-B6AD-6D950C6A9134"
+    }
+  ],
+  "planningLayers": [
+    {
+      "label": "Hamburg XPlan building-use areas",
+      "source": "https://api.hamburg.de/datasets/v1/xplan/collections/bp_baugebietsteilflaeche/items?f=json",
+      "notes": "Fetched live by bbox; no backend needed while CORS remains open."
+    },
+    {
+      "label": "Hamburg FNP land-use fallback",
+      "source": "https://geodienste.hamburg.de/HH_WFS_FNP?SERVICE=WFS&REQUEST=GetCapabilities",
+      "notes": "Fetched as GeoJSON by bbox when XPlan has no polygons for the viewport."
+    }
+  ]
+}

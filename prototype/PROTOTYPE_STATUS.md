@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-05-26. **Test suite**: 344 passing across 31 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
+**Last updated**: 2026-05-26. **Test suite**: 349 passing across 31 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -14,6 +14,7 @@ Browser-only React app. Everything client-side; no backend yet.
 - Monolithic CityJSON 2.0 (`.json`, `.city.json`)
 - **CityJSONSeq** (`.jsonl`, `.city.jsonl`) — streaming format, one feature per line, merged into a single in-memory document with consistent vertex indices
 - Drop / file browse / URL fetch / built-in sample cube
+- Hosted sample manifest under `public/data/manifest.json`; FileLoader only surfaces same-origin hosted CityJSONSeq samples when the referenced file exists, so a Hamburg demo tile can be served from GitHub Pages without CORS.
 - Recent-saves list from IndexedDB
 - Auto-detects CRS, either from `metadata.referenceSystem` OR from the magnitude of `transform.translate` (UTM 32N / 33N / Dutch RD New) as a fallback
 - 10 CRS registered via proj4: EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514
@@ -21,6 +22,7 @@ Browser-only React app. Everything client-side; no backend yet.
 ### Display
 - **MapLibre** basemap (OSM raster tiles)
 - **deck.gl** context layer — LoD by zoom: outlined footprints below 14.5, extruded blocks above
+- **Hamburg planning overlay** — toolbar fetches real Hamburg XPlan `BP_BaugebietsTeilFlaeche` polygons for the current viewport, falls back to FNP land-use GeoJSON when XPlan has no polygons, and renders the result as a semi-transparent planning layer. This is a planning-data aid, not a legal compliance decision.
 - Click a building → side panel with a per-building Three.js scene
 - **Auto-fit on load**: bbox of footprints → `metadata.geographicalExtent` → `transform.translate` as centre — three fallbacks so EVERY file ends up focused.
 - Fullscreen toggle on the side panel for focused editing
@@ -34,6 +36,7 @@ Browser-only React app. Everything client-side; no backend yet.
 - **Procedural openings (LoD 2.2)** — Windows / Door checkboxes in the dialog. When enabled, the generator emits per-storey window holes (1.4 × 1.5 m, 0.9 m sill, ~3 m spacing) on every rectangular wall and a single 1.0 × 2.1 m door on the first wall. Each opening is both an inner-ring hole on the parent wall AND a separate co-planar `Window`/`Door` semantic surface. Bumps the geometry's LoD label from `2.0` to `2.2`.
 - **LoD 2.2 eave overhang** — `Eave overhang (m)` input. Adds extending wall-top + roof-edge vertex rings, `OuterCeilingSurface` soffits, and (for gable) rake-corner-cap triangles. **Supports all 4 roof types**: flat, pyramid, hip, gable.
 - **Subdivide-on-create**: choose "none / floors / sides" with a count; split applies immediately after insertion
+- **Planning compatibility check**: when the Hamburg planning overlay is loaded, new-building creation checks the footprint against the fetched planning polygon's mapped building-use categories.
 - The parametric generator produces a proper LoD 2 `Solid` with `GroundSurface` / `RoofSurface` / `WallSurface` (+ optional `OuterCeilingSurface` / `Window` / `Door`) semantics. Round-trip through JSON.stringify tested for every roof type and every opening combination.
 
 ### Edit existing buildings
@@ -212,7 +215,7 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - ✅ **Multi-select + copy/paste** — Ctrl+click adds buildings to a secondary selection set (highlighted warm orange); Ctrl+C copies, Ctrl+V pastes with a 5m CRS offset and rewired parent/child relationships.
 - ✅ **Delete buildings** — Delete/Backspace or toolbar button removes the primary + multi-selection; cascades into BuildingParts and cleans up surviving parents' `children` arrays.
 - ✅ **Door / window detail editing** — `extractOpenings` finds Window/Door semantic surfaces; AttributePanel lists each with dimensions + elevation and exposes directional move buttons (±0.5m lateral, ±0.3m vertical).
-- ✅ **Parcel zoning compliance** — toolbar toggle generates three demo zones (residential / commercial / industrial) around the data centroid; new-building creation validates the footprint against the zone allow-list; a floating legend identifies each colour.
+- ✅ **Hamburg planning overlay** — replaced the synthetic zoning demo with live Hamburg planning data: XPlan `BP_BaugebietsTeilFlaeche` by viewport, FNP land-use fallback, same client-side legend, and lightweight building-function compatibility checks for new buildings.
 - ✅ **Viewport-filtered CityJSONSeq streaming** — `parseCityJsonSeq` (and `parseCityJsonAuto`) accept an optional `viewportBbox` in the data's CRS; features whose decoded XY extent doesn't intersect are skipped before merging.
 - ✅ **Drag-on-3D split-line handles** — split-preview rings in the side-panel viewer are now grab-and-drag; mousedown raycasts onto the ring (1m line threshold), vertical-plane raycasts follow the cursor, height transfers between adjacent floors with sum conservation and MIN_STOREY_HEIGHT clamping.
 - ✅ **Gable rake overhang** — new `rakeOverhang` param (separate from `eaveOverhang`) extends the ridge past each gable wall along the ridge axis; rake-corner-caps are replaced with planar "rake gable" triangles at the extreme ends. Walls keep the original ridge endpoints as their apex. Round-trip preserved via `_rakeOverhang` private attr.
@@ -237,9 +240,10 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 **Remaining roadmap (priority order):**
 
 1. **IFC → CityJSON import polish** — Route #2 (`web-ifc` WASM in-browser) is working and covered by unit tests, but should be exercised against known real IFC files for error reporting, IFC-version quirks, and complex storey layouts. Lower priority — current quality is "demo-able but rough."
-2. **Batch Hamburg tile conversion** — Convert all 788 tiles up front + a quick-picker in the FileLoader listing them. Pre-requisite: CityGML files + `citygml-tools` CLI available in `tools/`. ~2 h.
-3. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-4. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+2. **Hosted Hamburg demo tile** — Convert one known-clean Hamburg tile to CityJSONSeq and commit it under `prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl` if it stays small (~4 MB). The FileLoader manifest will expose it automatically on GitHub Pages with no CORS issue.
+3. **Batch Hamburg tile conversion** — Convert all 788 tiles up front + a quick-picker/manifest in the FileLoader listing them. Pre-requisite: CityGML files + `citygml-tools` CLI available in `tools/`. Larger tiles should move to GitHub Releases or the future backend instead of git.
+4. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
+5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 **Deferred (good ROI not obvious right now):**
 - **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build is 3-7 days for a narrow case (concave L/U/T shapes wanting gable/hip). Workaround: split into rectangular BuildingParts via the existing "Subdivide by side" path, then apply gable/hip per part. Re-evaluate if a demo requires real concave gables.
@@ -262,6 +266,7 @@ webcityeditor/
     ├── HAMBURG_PIPELINE.md              Hamburg CityGML pilot (CityGML→CityJSON→DB→prototype)
     ├── package.json                     React 18, Three 0.165, deck.gl 9, MapLibre 4, Terra Draw 1.28,
     │                                    pinned cityjson-threejs-loader, web-ifc, shadcn deps, proj4 2
+    ├── public/data/manifest.json         Same-origin hosted sample manifest for GitHub Pages demos
     ├── tailwind.config.js / postcss.config.js / vitest.config.ts
     ├── vite.config.ts                   resolve.dedupe:['three']; exclude loader from pre-bundle
     ├── index.html
@@ -301,7 +306,7 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (344 tests across 31 files)
+## 10. Test suite (349 tests across 31 files)
 
 | File | Tests | Coverage |
 |---|---|---|
@@ -332,7 +337,7 @@ webcityeditor/
 | `lib/merge.test.ts` | 10 | Merge/import id conflict handling and parent/child rewiring |
 | `lib/clipboard.test.ts` | 8 | Multi-select copy/paste cloning, offsets, and hierarchy rewiring |
 | `lib/delete.test.ts` | 6 | Cascading deletion and surviving parent child-list cleanup |
-| `lib/zoning.test.ts` | 12 | Demo zoning generation, footprint tests, and allow-list validation |
+| `lib/zoning.test.ts` | 17 | Hamburg XPlan/FNP URL builders, GeoJSON-to-planning-zone mapping, fetch fallback, point-in-polygon checks, and allow-list validation |
 | `components/Toolbar.test.tsx` | 6 | Title, stats, dirty counter, wiring |
 | `components/FileLoader.test.tsx` | 4 | Sample button, fetch errors, non-CityJSON rejection |
 | `components/AttributePanel.test.tsx` | 10 | Attribute rendering, priority sort, numeric/string/boolean coercion, revert gating |

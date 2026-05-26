@@ -51,10 +51,11 @@ Each step is a potential point of data loss. We want to know where.
 Hamburg's LoD2 ATOM feed:
 
 - Portal: https://suche.transparenz.hamburg.de/dataset/3d-stadtmodell-lod2-de-hamburg2
-- Files are per-district 10km × 10km `.gml.zip` (roughly 50–200 MB each).
-- Latest model: 2025, derived from ALS 2022 + image-matching 2024.
+- Current ATOM feed: https://metaver.de/search/dls/service/4E1EE3EF-4E5B-4607-B6AD-6D950C6A9134
+- The current download is a citywide CityGML zip (2026 feed: ~628 MB) containing many tile XML/GML files. Extract the zip, pick one tile, and convert only that tile for the browser demo.
+- Latest model in the feed: 2026, derived from ALS 2022 + image-matching 2024/2025.
 
-For the pilot, pick **one small district close to the centre** (e.g. around Rathausmarkt). The file `LoD2_HH_582_5934_1_HH.gml.zip` or similar covers a named 1 km area. 3DBAG tiles span 1 km × 1 km, for comparison.
+For the pilot, pick **one small tile close to the centre** (e.g. around Rathausmarkt). The known pilot tile `LoD2_565_5936_1_HH` converted to a ~3.8 MB CityJSONSeq file and loaded in the prototype.
 
 ### Alternate (smaller) starting point
 
@@ -105,13 +106,13 @@ docker --version
 ```bash
 mkdir -p hamburg-pilot && cd hamburg-pilot
 
-# Pick one tile from the ATOM feed; replace with the actual file you downloaded.
-unzip LoD2_HH_582_5934_1_HH.gml.zip
-# Result: LoD2_HH_582_5934_1_HH.gml  (could be ~50-200 MB of XML)
+# Extract the current ATOM download, then pick one tile from inside it.
+unzip LoD2-DE_HH_2026-04-28.zip
+# Result: hundreds of tile XML/GML files. Pick one small central tile.
 
 # Option A: work with the whole tile. File count per tile is usually <10k
 #   buildings which the prototype can still hold comfortably.
-ln -s LoD2_HH_582_5934_1_HH.gml subset.gml
+ln -s LoD2_565_5936_1_HH.xml subset.gml
 
 # Option B: cut a smaller bbox with citygml-tools' "clip" or ogr2ogr. If you
 # hit render slowness in the prototype, reach for this.
@@ -230,6 +231,20 @@ npm run dev
 #   Verify map flies to Hamburg (EPSG:25832 is in our proj4 registry)
 #   Verify extrusions render, buildings are clickable, attributes show
 ```
+
+### Step 8 — Host a small Pages demo tile
+
+If the converted tile is small enough for git (the known pilot tile was ~3.8 MB
+as CityJSONSeq), place it at:
+
+```text
+prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl
+```
+
+`prototype/public/data/manifest.json` already references that path. FileLoader
+checks that the file exists before showing the hosted Hamburg quick sample, so
+the GitHub Pages demo will not expose a broken button. Because the file is served
+from the same Pages origin as the app, there is no CORS issue.
 
 ---
 
