@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CityJSONLoader, CityJSONParser } from 'cityjson-threejs-loader';
 import type { CityJsonDocument, SelectionInfo } from '../types';
+import type { FloorPlanDivision } from '../lib/subdivision';
 
 /**
  * Warm architectural surface palette. Replaces the loader's default Window=
@@ -42,6 +43,8 @@ export interface SplitPreviewInfo {
   buildingId: string;
   /** Per-floor wall heights in metres (in floor order, ground up). */
   heights: number[];
+  /** Optional footprint sections for each floor. */
+  floorPlans?: FloorPlanDivision[];
 }
 
 interface Props {
@@ -532,8 +535,68 @@ function buildSplitOverlay(
     };
     group.add(line);
   }
+  addFloorPlanDividers(group, ring, baseZ, preview, lineMat);
   group.applyMatrix4(loader.matrix);
   return group;
+}
+
+/** Draw vertical divider outlines for the manual footprint cuts on each floor. */
+function addFloorPlanDividers(
+  group: THREE.Group,
+  sourceRing: [number, number, number][],
+  baseZ: number,
+  preview: SplitPreviewInfo,
+  material: THREE.LineBasicMaterial
+): void {
+  if (!preview.floorPlans || preview.floorPlans.length !== preview.heights.length) return;
+  const ring = sourceRing.slice();
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first && last && first[0] === last[0] && first[1] === last[1]) ring.pop();
+  if (ring.length !== 4) return;
+
+  const lerp = (
+    a: [number, number, number],
+    b: [number, number, number],
+    t: number
+  ): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  const len0 = Math.hypot(ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]);
+  const len1 = Math.hypot(ring[2][0] - ring[1][0], ring[2][1] - ring[1][1]);
+  let floorBase = baseZ;
+
+  for (let floorIndex = 0; floorIndex < preview.heights.length; floorIndex++) {
+    const floorTop = floorBase + preview.heights[floorIndex];
+    const plan = preview.floorPlans[floorIndex];
+    const splitOnE0 = plan.axis === 'shorter' ? !(len0 >= len1) : len0 >= len1;
+    const cuts =
+      plan.cutFractions?.length === plan.partCount - 1
+        ? plan.cutFractions
+        : new Array(Math.max(0, plan.partCount - 1))
+            .fill(0)
+            .map((_, i) => (i + 1) / plan.partCount);
+    for (const cut of cuts) {
+      const [ax, ay] = splitOnE0
+        ? lerp(ring[0], ring[1], cut)
+        : lerp(ring[0], ring[3], cut);
+      const [bx, by] = splitOnE0
+        ? lerp(ring[3], ring[2], cut)
+        : lerp(ring[1], ring[2], cut);
+      const points = [
+        new THREE.Vector3(ax, ay, floorBase),
+        new THREE.Vector3(bx, by, floorBase),
+        new THREE.Vector3(bx, by, floorTop),
+        new THREE.Vector3(ax, ay, floorTop),
+        new THREE.Vector3(ax, ay, floorBase),
+      ];
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        material
+      );
+      line.renderOrder = 999;
+      group.add(line);
+    }
+    floorBase = floorTop;
+  }
 }
 
 /**

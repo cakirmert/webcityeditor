@@ -113,4 +113,38 @@ describe('<AttributePanel />', () => {
     await userEvent.click(btn);
     expect(onRevert).toHaveBeenCalledWith('Building_A');
   });
+
+  it('applies one manually adjusted footprint plan to every floor', async () => {
+    const onSplitByFloorPlans = vi.fn();
+    setup({ onSplitByFloorPlans });
+
+    await userEvent.click(screen.getByText('Edit plans'));
+    const checkbox = screen.getByLabelText(
+      'Use the same floor plan for all floors'
+    ) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+
+    const cut = screen.getByLabelText('Cut 1 percent') as HTMLInputElement;
+    fireEvent.change(cut, { target: { value: '40' } });
+    await userEvent.click(screen.getByText('Apply floor plans'));
+
+    expect(onSplitByFloorPlans).toHaveBeenCalledTimes(1);
+    const [id, heights, plans] = onSplitByFloorPlans.mock.calls[0];
+    expect(id).toBe('Building_A');
+    expect(heights).toEqual([5, 5]);
+    expect(plans).toHaveLength(2);
+    expect(plans[0].cutFractions).toEqual([0.4]);
+    expect(plans[1].cutFractions).toEqual([0.4]);
+  });
+
+  it('can expose separate footprint-plan controls for each floor', async () => {
+    setup({ onSplitByFloorPlans: vi.fn() });
+
+    await userEvent.click(screen.getByText('Edit plans'));
+    await userEvent.click(screen.getByLabelText('Use the same floor plan for all floors'));
+
+    expect(screen.getAllByText('Floor 1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Floor 2').length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('Cut 1 percent')).toHaveLength(2);
+  });
 });

@@ -102,10 +102,14 @@ export function generateBuilding(
   if (first[0] === last[0] && first[1] === last[1]) open.pop();
 
   // Project WGS84 ring → target CRS (metres)
-  const projected = open.map(([lng, lat]) => {
+  let projected = open.map(([lng, lat]) => {
     const [x, y] = proj4('EPSG:4326', params.targetCrs, [lng, lat]) as [number, number];
     return [x, y] as [number, number];
   });
+  // Roof builders emit outward-facing shells for counter-clockwise footprint
+  // rings. Terra Draw and geometry extracted from an existing GroundSurface
+  // can supply either order, so normalise before generating any faces.
+  if (signedArea(projected) < 0) projected = projected.reverse();
 
   // Integer encoding that matches the doc's transform
   const t = doc.transform ?? { scale: [1, 1, 1], translate: [0, 0, 0] };
@@ -228,6 +232,16 @@ export function generateBuilding(
   };
 
   return { id, cityObject, newVertices: out.newVertices, vertexOffset };
+}
+
+function signedArea(ring: [number, number][]): number {
+  let twiceArea = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[(i + 1) % ring.length];
+    twiceArea += x1 * y2 - x2 * y1;
+  }
+  return twiceArea / 2;
 }
 
 // ---------- roof builders ----------

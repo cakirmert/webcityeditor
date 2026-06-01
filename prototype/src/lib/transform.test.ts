@@ -3,6 +3,7 @@ import { buildSampleCube } from './cityjson';
 import { generateBuilding, insertBuilding, type NewBuildingParams } from './generator';
 import { moveBuilding, rotateBuilding } from './transform';
 import { extractFootprints } from './footprints';
+import { checkIntegrity } from './integrity';
 
 function makeBuilding(overrides: Partial<NewBuildingParams> = {}) {
   const doc = buildSampleCube();
@@ -79,6 +80,54 @@ describe('moveBuilding', () => {
     const text = JSON.stringify(doc);
     const parsed = JSON.parse(text);
     expect(parsed.CityObjects[id]).toBeDefined();
+  });
+
+  it('keeps hierarchical imported geometry valid and refreshes stored extents', () => {
+    const doc = buildSampleCube();
+    const root = doc.CityObjects.Building_A;
+    root.geographicalExtent = [85000, 447000, 0, 85010, 447008, 10];
+    doc.metadata!.geographicalExtent = [85000, 447000, 0, 85010, 447008, 10];
+    root.type = 'Building';
+    root.children = ['BuildingPart_A'];
+    doc.CityObjects.BuildingPart_A = {
+      type: 'BuildingPart',
+      parents: ['Building_A'],
+      geographicalExtent: [85000, 447000, 0, 85010, 447008, 10],
+      geometry: root.geometry,
+    };
+    root.geometry = [];
+
+    moveBuilding(doc, 'Building_A', 12.5, -3.25);
+
+    expect(checkIntegrity(doc).ok).toBe(true);
+    expect(root.geographicalExtent).toEqual([85012.5, 446996.75, 0, 85022.5, 447004.75, 10]);
+    expect(doc.CityObjects.BuildingPart_A.geographicalExtent).toEqual(
+      root.geographicalExtent
+    );
+    expect(doc.metadata!.geographicalExtent).toEqual(root.geographicalExtent);
+  });
+
+  it('preserves fractional coordinates when the source has no transform block', () => {
+    const doc = buildSampleCube();
+    delete doc.transform;
+    doc.vertices = doc.vertices.map(([x, y, z]) => [x / 1000, y / 1000, z / 1000]);
+
+    moveBuilding(doc, 'Building_A', 0.25, 0.75);
+
+    const moved = doc.vertices.at(-1);
+    expect(moved).toBeDefined();
+    expect(moved![0] % 1).not.toBe(0);
+    expect(moved![1] % 1).not.toBe(0);
+    expect(checkIntegrity(doc).ok).toBe(true);
+  });
+
+  it('rejects non-finite edits before they can write invalid vertices', () => {
+    const doc = buildSampleCube();
+    expect(() => moveBuilding(doc, 'Building_A', Number.NaN, 0)).toThrow(/finite/);
+    expect(() => rotateBuilding(doc, 'Building_A', Number.POSITIVE_INFINITY)).toThrow(
+      /finite/
+    );
+    expect(checkIntegrity(doc).ok).toBe(true);
   });
 });
 

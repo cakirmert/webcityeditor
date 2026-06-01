@@ -84,16 +84,43 @@ describe('mergeCityJson', () => {
     expect(r.reason).toMatch(/CRS mismatch/);
   });
 
-  it('refuses transform mismatch (scale/translate)', () => {
+  it('re-encodes compatible transform mismatches onto the base integer grid', () => {
     const base = buildSampleCube();
     const inc = buildSampleCube();
     inc.transform = {
       scale: [0.001, 0.001, 0.001],
-      translate: [1000, 1000, 0], // different translate
+      translate: [85001, 447002, 0],
+    };
+    const r = mergeCityJson(base, inc);
+    expect(r.ok).toBe(true);
+    expect(base.vertices.slice(8, 12)).toEqual([
+      [1000, 2000, 0],
+      [11000, 2000, 0],
+      [11000, 10000, 0],
+      [1000, 10000, 0],
+    ]);
+    expect(checkIntegrity(base).ok).toBe(true);
+  });
+
+  it('refuses transform mismatches that cannot be represented without precision loss', () => {
+    const base = buildSampleCube();
+    const inc = buildSampleCube();
+    inc.transform = {
+      scale: [0.001, 0.001, 0.001],
+      translate: [85000.0004, 447000, 0],
     };
     const r = mergeCityJson(base, inc);
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/Transform mismatch/);
+    expect(r.reason).toMatch(/without precision loss/);
+  });
+
+  it('refuses an untransformed incoming doc when the base is integer-encoded', () => {
+    const base = buildSampleCube();
+    const inc = buildSampleCube();
+    delete inc.transform;
+    const r = mergeCityJson(base, inc);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/incoming has no transform/);
   });
 
   it('inherits CRS from incoming when base has none', () => {

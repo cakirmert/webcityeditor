@@ -4,6 +4,7 @@ import {
   canSplitBuilding,
   MIN_STOREY_HEIGHT,
   MIN_SIDE_WIDTH,
+  type FloorPlanDivision,
   type SplitAxis,
 } from '../lib/subdivision';
 import { extractOpenings, type OpeningInfo } from '../lib/opening-edit';
@@ -24,10 +25,18 @@ interface Props {
   /** New: split using a custom per-floor height array (in metres). The
    *  topmost entry keeps the parent's roof type. */
   onSplitByFloorHeights?: (id: string, heights: number[]) => void;
+  /** Split vertically and use an independently editable footprint plan for
+   *  every floor. */
+  onSplitByFloorPlans?: (
+    id: string,
+    heights: number[],
+    floorPlans: FloorPlanDivision[]
+  ) => void;
   /** Optional notifier — fires whenever the user is in custom-heights mode
    *  and the heights array changes. Lets the parent draw a live 3D preview
    *  of the split lines. `null` means "leave custom mode". */
   onCustomHeightsPreview?: (heights: number[] | null) => void;
+  onFloorPlansPreview?: (plans: FloorPlanDivision[] | null) => void;
   onSplitBySide?: (id: string, partCount: number, axis: SplitAxis) => void;
   pendingTransform?: PendingTransform | null;
   onStartTransform?: (id: string) => void;
@@ -75,7 +84,9 @@ export default function AttributePanel({
   onClose,
   onSplitByFloor,
   onSplitByFloorHeights,
+  onSplitByFloorPlans,
   onCustomHeightsPreview,
+  onFloorPlansPreview,
   onSplitBySide,
   pendingTransform,
   onStartTransform,
@@ -470,7 +481,7 @@ export default function AttributePanel({
         </Section>
       )}
 
-      {(onSplitByFloor || onSplitBySide) && (
+      {(onSplitByFloor || onSplitBySide || onSplitByFloorPlans) && (
         <Section label="Subdivide into BuildingParts">
           {splitGate.ok ? (
             <>
@@ -541,6 +552,21 @@ export default function AttributePanel({
                     axis={sideAxis}
                   />
                 </div>
+              )}
+              {onSplitByFloorPlans && (
+                <FloorPlanEditor
+                  cityjson={cityjson}
+                  buildingId={buildingId}
+                  floorCount={floorCount}
+                  heights={
+                    customHeights ??
+                    new Array(floorCount).fill(splitGate.params!.eaveHeight / floorCount)
+                  }
+                  onPreview={onFloorPlansPreview}
+                  onApply={(heights, plans) =>
+                    onSplitByFloorPlans(buildingId, heights, plans)
+                  }
+                />
               )}
               <div className="mt-2 text-[10px] text-[var(--text-faint)]">
                 Min floor height: {MIN_STOREY_HEIGHT} m · min side width:{' '}
@@ -731,6 +757,233 @@ function FloorSplitEditor({
       )}
     </div>
   );
+}
+
+function FloorPlanEditor({
+  cityjson,
+  buildingId,
+  floorCount,
+  heights,
+  onPreview,
+  onApply,
+}: {
+  cityjson: CityJsonDocument;
+  buildingId: string;
+  floorCount: number;
+  heights: number[];
+  onPreview?: (plans: FloorPlanDivision[] | null) => void;
+  onApply: (heights: number[], plans: FloorPlanDivision[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [applyAllFloors, setApplyAllFloors] = useState(true);
+  const [plans, setPlans] = useState<FloorPlanDivision[]>(() =>
+    makeFloorPlans(floorCount)
+  );
+
+  useEffect(() => {
+    setPlans((prev) => {
+      const fallback = prev[0] ?? defaultFloorPlan();
+      return new Array(floorCount)
+        .fill(null)
+        .map((_, i) => cloneFloorPlan(prev[i] ?? fallback));
+    });
+  }, [floorCount]);
+
+  useEffect(() => {
+    onPreview?.(open ? plans : null);
+    return () => onPreview?.(null);
+  }, [open, plans, onPreview]);
+
+  const updatePlan = (floorIndex: number, patch: Partial<FloorPlanDivision>) => {
+    setPlans((prev) => {
+      const source = { ...(prev[floorIndex] ?? defaultFloorPlan()), ...patch };
+      const nextPlan = normaliseFloorPlan(source);
+      if (applyAllFloors) {
+        return new Array(floorCount).fill(null).map(() => cloneFloorPlan(nextPlan));
+      }
+      const next = prev.map(cloneFloorPlan);
+      next[floorIndex] = nextPlan;
+      return next;
+    });
+  };
+
+  const setCut = (floorIndex: number, cutIndex: number, percent: number) => {
+    const current = plans[floorIndex] ?? defaultFloorPlan();
+    const cuts = normaliseFloorPlan(current).cutFractions ?? [];
+    cuts[cutIndex] = percent / 100;
+    updatePlan(floorIndex, { cutFractions: cuts });
+  };
+
+  const validHeights =
+    heights.length === floorCount &&
+    heights.every((h) => h >= MIN_STOREY_HEIGHT) &&
+    Number.isFinite(heights.reduce((sum, h) => sum + h, 0));
+  const editorFloors = applyAllFloors ? [0] : plans.map((_, i) => i);
+
+  return (
+    <div className="mt-3 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[11px] font-medium">Footprint sections per floor</div>
+          <div className="text-[10px] text-[var(--text-faint)]">
+            Divide each floor plan and preview every section before applying.
+          </div>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
+          {open ? 'Close' : 'Edit plans'}
+        </Button>
+      </div>
+
+      {open && (
+        <div className="mt-2 space-y-2">
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px]">
+            <input
+              type="checkbox"
+              checked={applyAllFloors}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setApplyAllFloors(checked);
+                if (checked) {
+                  const first = cloneFloorPlan(plans[0] ?? defaultFloorPlan());
+                  setPlans(new Array(floorCount).fill(null).map(() => cloneFloorPlan(first)));
+                }
+              }}
+              className="h-3.5 w-3.5"
+            />
+            <span>Use the same floor plan for all floors</span>
+          </label>
+
+          {editorFloors.map((floorIndex) => {
+            const plan = plans[floorIndex] ?? defaultFloorPlan();
+            return (
+              <div
+                key={floorIndex}
+                className="rounded border border-[var(--border)] bg-[var(--surface)] p-2"
+              >
+                <div className="mb-1 text-[10px] font-medium text-[var(--text-dim)]">
+                  {applyAllFloors ? 'All floors' : `Floor ${floorIndex + 1}`}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Label>Sections</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={8}
+                    value={plan.partCount}
+                    onChange={(e) =>
+                      updatePlan(floorIndex, {
+                        partCount: Math.max(1, Math.min(8, Number(e.target.value) || 1)),
+                      })
+                    }
+                    className="w-14"
+                  />
+                  <Label>Axis</Label>
+                  {(['auto', 'longer', 'shorter'] as const).map((axis) => (
+                    <button
+                      key={axis}
+                      type="button"
+                      onClick={() => updatePlan(floorIndex, { axis })}
+                      className={`rounded px-1.5 py-0.5 text-[10px] ${
+                        plan.axis === axis
+                          ? 'bg-[var(--accent)] text-white'
+                          : 'bg-[var(--surface-2)] text-[var(--text-dim)]'
+                      }`}
+                    >
+                      {axis}
+                    </button>
+                  ))}
+                </div>
+                {plan.partCount > 1 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(plan.cutFractions ?? equalCuts(plan.partCount)).map((cut, cutIndex) => (
+                      <label
+                        key={cutIndex}
+                        className="flex items-center gap-1 text-[10px] text-[var(--text-faint)]"
+                      >
+                        Cut {cutIndex + 1}
+                        <Input
+                          aria-label={`Cut ${cutIndex + 1} percent`}
+                          type="number"
+                          min={1}
+                          max={99}
+                          step={1}
+                          value={(cut * 100).toFixed(0)}
+                          onChange={(e) =>
+                            setCut(floorIndex, cutIndex, Number(e.target.value) || 0)
+                          }
+                          className="w-14"
+                        />
+                        %
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div className="max-h-64 space-y-1 overflow-y-auto">
+            {plans.map((plan, floorIndex) => (
+              <SidePlanPreview
+                key={floorIndex}
+                cityjson={cityjson}
+                buildingId={buildingId}
+                sideCount={plan.partCount}
+                axis={plan.axis}
+                cutFractions={plan.cutFractions}
+                title={`Floor ${floorIndex + 1}: ${plan.partCount} section${
+                  plan.partCount === 1 ? '' : 's'
+                }`}
+              />
+            ))}
+          </div>
+          <div className="text-[10px] text-[var(--text-faint)]">
+            Manual cuts must stay ordered and leave at least {MIN_SIDE_WIDTH} m
+            per section. A subdivided top floor uses flat section roofs.
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={!validHeights}
+            onClick={() => onApply(heights, plans)}
+            className="w-full"
+          >
+            Apply floor plans
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function defaultFloorPlan(): FloorPlanDivision {
+  return { partCount: 2, axis: 'auto', cutFractions: [0.5] };
+}
+
+function makeFloorPlans(count: number): FloorPlanDivision[] {
+  return new Array(count).fill(null).map(() => defaultFloorPlan());
+}
+
+function equalCuts(partCount: number): number[] {
+  return new Array(Math.max(0, partCount - 1))
+    .fill(0)
+    .map((_, i) => (i + 1) / partCount);
+}
+
+function normaliseFloorPlan(plan: FloorPlanDivision): FloorPlanDivision {
+  const partCount = Math.max(1, Math.min(8, Math.round(plan.partCount)));
+  const cuts =
+    plan.cutFractions?.length === partCount - 1
+      ? [...plan.cutFractions]
+      : equalCuts(partCount);
+  return { partCount, axis: plan.axis, cutFractions: cuts };
+}
+
+function cloneFloorPlan(plan: FloorPlanDivision): FloorPlanDivision {
+  return {
+    ...plan,
+    cutFractions: plan.cutFractions ? [...plan.cutFractions] : undefined,
+  };
 }
 
 function AttributeRow({ attrKey, value, onChange }: RowProps) {
@@ -979,11 +1232,15 @@ function SidePlanPreview({
   buildingId,
   sideCount,
   axis = 'auto',
+  cutFractions,
+  title,
 }: {
   cityjson: CityJsonDocument;
   buildingId: string;
   sideCount: number;
   axis?: SplitAxis;
+  cutFractions?: number[];
+  title?: string;
 }) {
   const { svgPath, splitLines } = useMemo(() => {
     const all = extractFootprints(cityjson);
@@ -1024,8 +1281,9 @@ function SidePlanPreview({
     if (sideCount >= 2) {
       const naturalLongX = w >= h;
       const longAlongX = axis === 'shorter' ? !naturalLongX : naturalLongX;
-      for (let i = 1; i < sideCount; i++) {
-        const t = i / sideCount;
+      const cuts =
+        cutFractions?.length === sideCount - 1 ? cutFractions : equalCuts(sideCount);
+      for (const t of cuts) {
         if (longAlongX) {
           const x = px(minX + t * w);
           lines.push({ x1: x, y1: py(minY), x2: x, y2: py(maxY) });
@@ -1036,14 +1294,14 @@ function SidePlanPreview({
       }
     }
     return { svgPath: path, splitLines: lines };
-  }, [cityjson, buildingId, sideCount, axis]);
+  }, [cityjson, buildingId, sideCount, axis, cutFractions]);
 
   if (!svgPath) return null;
 
   return (
     <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2">
       <div className="mb-1 text-[10px] text-[var(--text-dim)]">
-        Plan view · {sideCount} parts along the long axis
+        {title ?? `Plan view: ${sideCount} parts along the selected axis`}
       </div>
       <svg viewBox="0 0 100 60" className="w-full" style={{ height: 70 }}>
         <path

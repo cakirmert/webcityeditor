@@ -113,4 +113,69 @@ describe('<Toolbar />', () => {
     await userEvent.click(screen.getByText(/Load another/));
     expect(onNewFile).toHaveBeenCalledTimes(1);
   });
+
+  it('shows the connected CityJSONSeq tile count and reloads the viewport on request', async () => {
+    const onLoadCatalogViewport = vi.fn();
+    render(
+      <Toolbar
+        fileName="Hamburg CityJSONSeq catalog"
+        stats={defaultStats}
+        dirtyCount={0}
+        hasData={true}
+        onExport={() => {}}
+        onReloadView={() => {}}
+        onNewFile={() => {}}
+        catalogState={{ loadedTiles: 9, loading: false }}
+        onLoadCatalogViewport={onLoadCatalogViewport}
+      />
+    );
+    await userEvent.click(screen.getByText(/Seq tiles 9/));
+    expect(onLoadCatalogViewport).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists dirty CityJSONSeq catalog tiles on request', async () => {
+    const onPersistCatalog = vi.fn();
+    render(
+      <Toolbar
+        fileName="Hamburg CityJSONSeq catalog"
+        stats={defaultStats}
+        dirtyCount={1}
+        hasData={true}
+        onExport={() => {}}
+        onReloadView={() => {}}
+        onNewFile={() => {}}
+        catalogState={{ loadedTiles: 9, loading: false, dirty: true }}
+        onPersistCatalog={onPersistCatalog}
+      />
+    );
+    await userEvent.click(screen.getByText('Save seq'));
+    expect(onPersistCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces browser structure and ISO primitive validation separately', async () => {
+    const onShow = vi.fn();
+    const onValidate = vi.fn();
+    render(
+      <Toolbar
+        fileName="x.city.json"
+        stats={defaultStats}
+        dirtyCount={0}
+        hasData={true}
+        onExport={() => {}}
+        onReloadView={() => {}}
+        onNewFile={() => {}}
+        integrity={{ errorCount: 0, warningCount: 0, onShow }}
+        primitiveValidation={{
+          kind: 'unchecked',
+          message: 'Run the local ISO 19107 check',
+          onValidate,
+        }}
+      />
+    );
+
+    await userEvent.click(screen.getByText('Structure: valid'));
+    await userEvent.click(screen.getByText('Check 3D'));
+    expect(onShow).toHaveBeenCalledTimes(1);
+    expect(onValidate).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,169 +1,334 @@
-# Hamburg Pilot Pipeline
+# Hamburg Whole-City LoD2 Pipeline
 
-Goal: take a small patch of Hamburg's authoritative LoD2 data, convert it to CityJSON that our prototype can load, import it into 3DCityDB to verify the full pipeline works, and document anything that breaks along the way.
+Goal: turn Hamburg's authoritative complete-city LoD2 release into a dependable,
+editable CityJSON source for the prototype. Keep the result tiled. A complete
+Hamburg export is several gigabytes after conversion and must not be loaded into
+one browser document.
 
-This is runnable on your machine with Docker + Java installed — **I can provide scripts, but you run them** since they require local downloads and containers that can't be driven from inside the conversation.
-
----
-
-## 1. What we're trying to prove
-
-Per the approval doc (§S19) and memory notes:
-
-- Hamburg's **direct CityJSON** exports have known quality problems. Don't use them.
-- Hamburg's **authoritative LoD2 is CityGML v1.0** on the Transparenzportal. This is the clean source.
-- 3D Tiles is an **output format**, never an input. No conversion back to CityJSON.
-
-Pipeline we're validating:
-
-```
-Hamburg Transparenzportal (CityGML v1.0, .gml/.zip)
-       │
-       │  (1) spatial subset — take ~1 km² to keep file sizes sane
-       ▼
-subset.gml (CityGML v1.0)
-       │
-       │  (2) citygml-tools to-cityjson
-       ▼
-subset.city.json (CityJSON 2.0)
-       │
-       │  (3) cjio validate
-       ▼
-validation report
-       │
-       │  (4) citydb-tool import into 3DCityDB v5
-       ▼
-rows in 3DCityDB
-       │
-       │  (5) optional: citydb-tool export back to CityJSON for the prototype
-       ▼
-Load in city editor prototype
-```
-
-Each step is a potential point of data loss. We want to know where.
+The repository now includes a batch command that resolves the newest official
+release, downloads and extracts it on demand, converts every CityGML tile to
+CityJSONSeq, validates each converted tile, emits a catalog, and serves the
+catalog locally. It also audits geometric primitives with `val3dity` and can
+build a strict editing catalog while retaining defective source features in a
+quarantine directory for later repair.
 
 ---
 
-## 2. Data sources
+## 1. Authoritative Source
 
-### CityGML download
+Hamburg's official source is the LGV LoD2-DE dataset:
 
-Hamburg's LoD2 ATOM feed:
+- Portal: <https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg2>
+- Machine-readable metadata:
+  <https://suche.transparenz.hamburg.de/api/3/action/package_show?id=3d-gebaeudemodell-lod2-de-hamburg2>
+- License: Datenlizenz Deutschland - Namensnennung - 2.0
+- Attribution: Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und
+  Vermessung (LGV)
 
-- Portal: https://suche.transparenz.hamburg.de/dataset/3d-stadtmodell-lod2-de-hamburg2
-- Current ATOM feed: https://metaver.de/search/dls/service/4E1EE3EF-4E5B-4607-B6AD-6D950C6A9134
-- The current download is a citywide CityGML zip (2026 feed: ~628 MB) containing many tile XML/GML files. Extract the zip, pick one tile, and convert only that tile for the browser demo.
-- Latest model in the feed: 2026, derived from ALS 2022 + image-matching 2024/2025.
+As of 2026-06-01, the newest listed archive is:
 
-For the committed browser demo we currently use a smaller ALKIS footprint sample:
-`prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl`. It is generated
-from official Hamburg ALKIS footprints with `npm run data:hamburg-center`; heights
-are demo extrusions derived from storey count, not LoD2 roof geometry. For the
-LoD2-quality pass, pick one small CityGML tile close to the centre (e.g. around
-Rathausmarkt), convert it, and compare it against this ALKIS sample.
+```text
+LoD2-DE_HH_2026-04-28.zip
+https://daten-hamburg.de/opendata/3d_stadtmodell_lod2/LoD2-DE_HH_2026-04-28.zip
+659,524,658 bytes
+```
 
-### Alternate (smaller) starting point
+The portal describes this as a complete-city CityGML 1.0 download covering
+roughly 750 km2, including Neuwerk. Its ground plans come from the official
+digital cadastral map; roof forms are generated from point clouds and image
+matching. Individual models are not manually corrected, so geometry validation
+still matters.
 
-If Hamburg's files are too large to iterate on, **3DBAG remains our primary test dataset** — tile `9-284-556.city.json` (~1 MB) is known-good CityJSON 2.0 and loads in the prototype directly.
+Hamburg does **not** currently publish an official native CityJSON LoD2 archive.
+The portal's JSON resource is a 3D Tiles tileset for web viewing. It is useful as
+a visual reference, but it is not an editable CityJSON source and should not be
+reverse-converted.
 
 ---
 
-## 3. Tools (install once)
+## 2. Output Shape
 
-```bash
-# Java 21+ (for citygml-tools and citydb-tool)
-# Pick your platform's install method (apt / brew / scoop / manual zip).
+The supported preparation flow is:
 
-# citygml-tools (CityGML ↔ CityJSON ↔ KML ↔ OBJ ↔ glTF conversion)
-# https://github.com/citygml4j/citygml-tools/releases
-wget https://github.com/citygml4j/citygml-tools/releases/download/v2.2.0/citygml-tools-2.2.0.zip
-unzip citygml-tools-2.2.0.zip
-export PATH=$PATH:$PWD/citygml-tools-2.2.0
-
-# cjio (CityJSON validation CLI; Python)
-pip install cjio
-
-# citydb-tool (3DCityDB v5 import/export)
-# https://github.com/3dcitydb/citydb-tool/releases
-wget https://github.com/3dcitydb/citydb-tool/releases/download/v1.3.0/citydb-tool-1.3.0.zip
-unzip citydb-tool-1.3.0.zip
-export PATH=$PATH:$PWD/citydb-tool-1.3.0
-
-# Docker (for 3DCityDB Postgres container)
-# https://docs.docker.com/get-docker/
+```text
+Official complete-city CityGML ZIP
+       |
+       | npm run data:hamburg-lod2 -- download
+       | npm run data:hamburg-lod2 -- extract
+       v
+CityGML tiles (.xml/.gml)
+       |
+       | npm run data:hamburg-lod2 -- convert
+       v
+Validated CityJSONSeq tiles (.city.jsonl)
+       |
+       +-- catalog.json
+       +-- logs/*.log
+       +-- optional logs/*.cjval.log
+       |
+       | npm run data:hamburg-lod2 -- geometry-audit --allow-invalid
+       | npm run data:hamburg-lod2 -- geometry-clean
+       v
+Primitive-valid CityJSONSeq editing tiles + quarantined source features
+       |
+       | npm run data:hamburg-lod2 -- serve --output-dir ../Data/hamburg-lod2/cityjsonseq-clean
+       v
+Local bbox-queryable tile catalog on http://127.0.0.1:8787
 ```
 
-Verify:
+CityJSONSeq is the primary city-scale input shape: every line after the header
+is one independent `CityJSONFeature` with local vertices. The prototype loads
+individual `.city.jsonl` files directly, and its **Connect catalog** action
+queries strict sequence tiles by viewport. Adjacent source tiles can have
+different local transforms, so the browser normalizes them onto the first
+loaded tile's integer grid with an exactness check before merging them into the
+current editable viewport document. Export remains ordinary CityJSON. When the
+user chooses **Save seq**, the editor reconstructs edited source feature lines
+in each tile's original integer grid and persists them through the local
+server. Directly loaded `.city.jsonl` files also use strict line parsing:
+malformed feature lines are surfaced instead of being silently skipped.
 
-```bash
-citygml-tools --version    # should print 2.2.x
-cjio --version              # 0.9.x or similar
-citydb --version            # 1.3.x
-docker --version
+The generated `catalog.json` records each tile's EPSG:25832 extent, feature
+count, CityObject count, vertex count, and any synthesized roots. The local
+server exposes:
+
+```text
+GET /health
+GET /api/hamburg/catalog
+GET /api/hamburg/tiles?bbox=minX,minY,maxX,maxY
+GET /tiles/LoD2_32_565_5936_1_HH.city.jsonl
+PUT /api/hamburg/tiles/LoD2_32_565_5936_1_HH
+DELETE /api/hamburg/tiles/LoD2_32_565_5936_1_HH
 ```
 
 ---
 
-## 4. Step-by-step
+## 3. Install Once
 
-### Step 1 — Download and subset
+Required:
 
-```bash
-mkdir -p hamburg-pilot && cd hamburg-pilot
-
-# Extract the current ATOM download, then pick one tile from inside it.
-unzip LoD2-DE_HH_2026-04-28.zip
-# Result: hundreds of tile XML/GML files. Pick one small central tile.
-
-# Option A: work with the whole tile. File count per tile is usually <10k
-#   buildings which the prototype can still hold comfortably.
-ln -s LoD2_565_5936_1_HH.xml subset.gml
-
-# Option B: cut a smaller bbox with citygml-tools' "clip" or ogr2ogr. If you
-# hit render slowness in the prototype, reach for this.
+```text
+Node.js 20+
+Java 17+
+tar
+citygml-tools 2.4.0 recommended
 ```
 
-### Step 2 — CityGML → CityJSON
+Download `citygml-tools` from:
+<https://github.com/citygml4j/citygml-tools/releases>
 
-```bash
-citygml-tools to-cityjson subset.gml \
-    --output subset.city.json \
-    --cityjson-version 2.0
+Unzip it under `tools/`. The batch script automatically checks these local
+folders before falling back to `PATH`:
 
-# Expected output: a single .city.json file, ideally a few MB for one tile.
-# Report anything that prints on stderr — warnings are informative.
+```text
+tools/citygml-tools-2.4.0/
+tools/citygml-tools-2.3.2/
+tools/citygml-tools-2.3.0/
 ```
 
-**Likely warnings to expect** (not failures, just loss signals):
-
-- `ImplicitGeometry skipped (no geometry)` — harmless, template trees etc.
-- `Non-planar polygon / warning: polygon is non-planar` — real warning; these surfaces may render oddly.
-- Reversed winding on some faces — renderable but val3dity will flag them.
-- `Texture resolution X not supported` — LoD2 usually has no textures, ignore.
-
-### Step 3 — CityJSON validation
+For the official CityJSON schema gate, install `cjval`:
 
 ```bash
-cjio subset.city.json validate
-
-# Reports structural + schema issues. Two kinds of messages:
-#   - "Schema validation: OK"  → passes spec
-#   - "Schema validation: errors found" → needs fixing before DB import
+cargo install cjval --features build-binary
 ```
 
-If the schema validation fails:
+`cjval` is the CityJSON project's validator for CityJSON and CityJSONSeq. The
+batch script always runs its own streaming structural checks; passing
+`--cjval cjval` adds the complete schema gate.
+
+For ISO 19107 geometric primitive validity, install `val3dity`:
+
+```text
+https://github.com/tudelft3d/val3dity/releases
+```
+
+Unzip it under `tools/val3dity-2.6.0/`. The batch script checks that local path
+before falling back to `PATH`.
+
+Optional later backend tools:
+
+```text
+Docker
+3DCityDB v5 image
+citydb-tool
+```
+
+---
+
+## 4. Prepare The Whole City
+
+Run from `prototype/`.
+
+Inspect the live portal metadata and selected release:
 
 ```bash
-# Try repair round-trip
-cjio subset.city.json repair --output subset.repaired.city.json
-cjio subset.repaired.city.json validate
+npm run data:hamburg-lod2 -- latest
 ```
 
-Log whichever errors appear — they are the concrete evidence for "Hamburg needs cleanup before it can round-trip cleanly" in the HiWi report.
+Download and extract the newest complete-city archive:
 
-### Step 4 — Spin up 3DCityDB v5 + Postgres
+```bash
+npm run data:hamburg-lod2 -- download
+npm run data:hamburg-lod2 -- extract
+```
 
-`compose.yml`:
+Before the full batch, prove one tile:
+
+```bash
+npm run data:hamburg-lod2 -- convert --match LoD2_32_565_5936_1_HH --limit 1 --cjval cjval
+```
+
+Then convert and validate the complete city:
+
+```bash
+npm run data:hamburg-lod2 -- convert --cjval cjval
+npm run data:hamburg-lod2 -- validate --cjval cjval
+npm run data:hamburg-lod2 -- geometry-audit --allow-invalid
+npm run data:hamburg-lod2 -- geometry-clean
+```
+
+Default local output:
+
+```text
+Data/hamburg-lod2/
+├── downloads/
+├── source/
+├── release.json
+├── cityjsonseq/            # untouched authoritative conversion
+├── geometry-audit/         # per-tile primitive defect reports
+├── quarantine/             # retained primitive-invalid originals
+└── cityjsonseq-clean/      # strict editing catalog
+```
+
+Useful options:
+
+```text
+--data-dir PATH
+--source-dir PATH
+--output-dir PATH
+--match TEXT
+--limit N
+--force
+--converter PATH
+--cjval PATH
+--val3dity PATH
+--report-dir PATH
+--clean-dir PATH
+--quarantine-dir PATH
+--allow-invalid
+--skip-fallback
+```
+
+The converter runs `citygml-tools to-cityjson -l -c -e 25832` tile by tile. It
+then streams every generated file through the repository validator before
+accepting it. A bad tile fails the batch instead of quietly entering the editor.
+
+For an already extracted CityGML archive, skip download and extraction:
+
+```bash
+npm run data:hamburg-lod2 -- convert --source-dir ../Data/extracted/LoD2_CityGML_HH_2016
+```
+
+---
+
+## 5. Validation Gates
+
+Use all applicable gates before treating a Hamburg release as production-ready:
+
+1. Validate CityGML XML against CityGML schemas:
+
+   ```bash
+   citygml-tools validate ../Data/hamburg-lod2/source
+   ```
+
+2. Convert with the mandatory repository structural validator:
+
+   ```bash
+   npm run data:hamburg-lod2 -- convert
+   ```
+
+3. Run the official CityJSONSeq schema validator:
+
+   ```bash
+   npm run data:hamburg-lod2 -- validate --cjval cjval
+   ```
+
+4. Load at least one generated `.city.jsonl` tile in the editor, move an
+   imported building, export, reopen the saved file, and run the editor
+   integrity check.
+
+5. Audit ISO 19107 geometric primitive validity and isolate any crashing
+   features:
+
+   ```bash
+   npm run data:hamburg-lod2 -- geometry-audit --allow-invalid
+   ```
+
+6. Build the strict editing catalog. Primitive-invalid originals remain under
+   `quarantine/` for repair:
+
+   ```bash
+   npm run data:hamburg-lod2 -- geometry-clean
+   npm run data:hamburg-lod2 -- geometry-audit \
+     --output-dir ../Data/hamburg-lod2/cityjsonseq-clean \
+     --report-dir ../Data/hamburg-lod2/geometry-audit-clean
+   ```
+
+The built-in streaming validator rejects malformed JSON, missing CityJSONSeq
+headers, invalid transforms, missing CRS metadata, omitted roots that cannot be
+reconstructed, dangling parent/child links, asymmetric hierarchy links,
+duplicate CityObject IDs, invalid vertices, out-of-range geometry references,
+and invalid semantic indices.
+
+---
+
+## 6. Serve Tiles Locally
+
+Start the lightweight local catalog server:
+
+```bash
+npm run data:hamburg-lod2 -- serve \
+  --output-dir ../Data/hamburg-lod2/cityjsonseq-clean
+```
+
+Examples:
+
+```text
+http://127.0.0.1:8787/health
+http://127.0.0.1:8787/api/hamburg/catalog
+http://127.0.0.1:8787/api/hamburg/tiles?bbox=565000,5936000,566000,5937000
+```
+
+Open the editor and use **Connect catalog** with:
+
+```text
+http://127.0.0.1:8787
+```
+
+The initial request loads a bounded Hamburg-centre viewport. Panning the map
+automatically queries the catalog and fetches only unseen nearby `.city.jsonl`
+tiles. The toolbar's **Seq tiles N** button reports the working-set size and can
+manually retry the current viewport. Requests above 25 unseen tiles are refused
+until the user zooms in, preventing an accidental whole-city browser load.
+
+After an edit, the toolbar's **Save seq** button reconstructs each affected
+feature line in the source tile's local coordinate grid and writes the tile
+back atomically. The server requires SHA-256 `If-Match` revisions, queues
+concurrent writes, retains the previous tile under `.history/`, runs structural
+validation and bundled `val3dity`, then updates `catalog.json`. Deleting the final feature
+from a sparse tile removes that tile from the catalog atomically instead of
+writing an invalid header-only file. Clean off-screen tiles unload
+automatically; dirty tiles stay resident until saved.
+
+The next backend slice is incremental downstream regeneration and optional
+database-backed publication for multi-user deployment.
+
+---
+
+## 7. Optional 3DCityDB Round-Trip
+
+The file conversion path does not require a database. Add 3DCityDB when testing
+server-side storage and export:
 
 ```yaml
 services:
@@ -173,7 +338,7 @@ services:
       POSTGRES_DB: citydb
       POSTGRES_USER: citydb
       POSTGRES_PASSWORD: citydb
-      SRID: 25832          # Hamburg's CRS (UTM zone 32N)
+      SRID: 25832
     ports:
       - "5432:5432"
     volumes:
@@ -185,107 +350,64 @@ volumes:
 
 ```bash
 docker compose up -d
-docker compose logs -f postgres   # wait for "3D City Database ... ready"
-```
 
-### Step 5 — Import the CityJSON into 3DCityDB
-
-```bash
 citydb import citygml \
-    --db-host localhost \
-    --db-port 5432 \
-    --db-name citydb \
-    --db-user citydb \
-    --db-password citydb \
-    subset.city.json
-
-# citydb-tool auto-detects CityJSON vs CityGML by file extension/content.
-# Watch for:
-#   - "Feature skipped: invalid geometry"  ← each one is data loss
-#   - "Attribute type mismatch"            ← attribute values coerced or dropped
-#   - End-of-run summary with counts
+  --db-host localhost \
+  --db-port 5432 \
+  --db-name citydb \
+  --db-user citydb \
+  --db-password citydb \
+  ../Data/hamburg-lod2/source/LoD2_32_565_5936_1_HH.gml
 ```
 
-### Step 6 — Export back to CityJSON (optional sanity check)
-
-```bash
-citydb export cityjson \
-    --db-host localhost \
-    --db-port 5432 \
-    --db-name citydb \
-    --db-user citydb \
-    --db-password citydb \
-    --output hamburg-from-db.city.json
-
-# Compare with the input:
-cjio subset.city.json info
-cjio hamburg-from-db.city.json info
-```
-
-If feature count, attribute count, or vertex count differ, you've found the import's lossy boundary. Write that delta into the HiWi report.
-
-### Step 7 — Load in the prototype
-
-```bash
-# From the prototype dir:
-cd prototype
-npm run dev
-
-# In the browser (http://localhost:5173):
-#   "Load another…" → pick subset.city.json or hamburg-from-db.city.json
-#   Verify map flies to Hamburg (EPSG:25832 is in our proj4 registry)
-#   Verify extrusions render, buildings are clickable, attributes show
-```
-
-### Step 8 — Host a small Pages demo tile
-
-The repo already commits one small Hamburg center demo:
-
-```text
-prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl
-```
-
-Regenerate it with:
-
-```bash
-npm run data:hamburg-center
-```
-
-`prototype/public/data/manifest.json` references that path. FileLoader checks
-that the file exists before showing the hosted Hamburg quick sample, so the
-GitHub Pages demo will not expose a broken button. Because the file is served
-from the same Pages origin as the app, there is no CORS issue.
-
-When a converted LoD2 CityGML tile is small enough for git, add it beside the
-ALKIS sample and list it in the manifest with a clear LoD2 label.
+Capture skipped features, attribute coercions, and exported feature-count
+deltas. The database round-trip is a separate persistence proof; it is not a
+prerequisite for generating clean editable CityJSONSeq tiles.
 
 ---
 
-## 5. Known failure modes to watch for
+## 8. Current Evidence
 
-| Symptom | Likely cause | What to capture for the HiWi report |
-|---|---|---|
-| `citygml-tools to-cityjson` fails with NullPointerException | ImplicitGeometry with missing body (citygml-tools issue #20) | Input filename + stack trace |
-| `cjio validate` reports schema errors | Non-spec extensions, invalid winding, duplicate vertex indices | Full validation output |
-| `citydb import` reports "feature skipped" | Geometry fails val3dity; usually non-planar polygons | Count of skips vs total |
-| Prototype shows "Reference system EPSG:XXXX not supported" | Hamburg uses EPSG:25832; we have it, but derived datasets might use compound CRS | Missing EPSG code |
-| Map flies nowhere when loading Hamburg file | CRS detection fails | `cjio info` output of the input file |
-| Buildings render but look lumpy or face-flipped | Polygon winding was reversed during conversion | Screenshot + affected feature id |
+Verified locally on 2026-06-01 with the current official archive:
 
-Whichever of these you see is useful evidence; the absence is also useful evidence ("Hamburg CityGML → 3DCityDB → CityJSON → prototype round-trips cleanly for district X").
+- Downloaded `LoD2-DE_HH_2026-04-28.zip` from the official portal and matched
+  its published 659,524,658-byte size.
+- Extracted 783 CityGML tiles.
+- `citygml-tools validate` passed on all 783 source GML files.
+- Converted all 783 source tiles with `citygml-tools 2.3.0`.
+- Repository streaming validation passed during conversion and again as an
+  explicit second pass with zero structural failures.
+- Generated 388,729 building features, 7,391,235 vertices, and 863,708,269
+  bytes of editable CityJSONSeq output. No synthetic root repairs were needed.
+- A full isolated `val3dity 2.6.0` audit checked all 388,729 source features.
+  It found 3,338 primitive-invalid features and 49 additional features that
+  crash the validator. These are source-model defects, not CityJSON structural
+  failures.
+- The strict editing build quarantined those 3,387 originals, retained them for
+  repair, and emitted 385,342 primitive-valid features across 782 tiles. One
+  sparse source tile was omitted because its only feature was quarantined.
+- A second full `val3dity` pass over the strict editing set completed with zero
+  primitive-invalid features and zero validator crashes.
+- Local strict-catalog serving reported all 782 editing tiles, bbox lookup
+  returned the centre tile, and direct centre-tile delivery returned HTTP 200.
+- The editor-library move/save/reopen smoke test passed on the strict generated
+  centre tile: parse, move imported building, compact, serialize, reopen, and
+  structural integrity check.
+- The catalog client loaded a real nine-tile strict centre viewport, fetched
+  unseen adjacent sequence tiles after a simulated pan, normalized their
+  differing local transforms exactly, moved an imported building, compacted
+  the multi-tile working set, serialized, reopened, and passed integrity checks.
+- A disposable strict HTTP server copied the current centre tile, moved one
+  real feature by exactly 1 m, required a SHA-256 `If-Match` revision, retained
+  a `.history/` backup, accepted the replacement through `val3dity`, and served
+  the changed tile again.
+- A generated two-floor hierarchy with independent upper-floor footprint
+  sections serialized as one `CityJSONFeature` and passed `val3dity`.
 
----
+Still required for release acceptance:
 
-## 6. Minimum viable pilot
-
-If you want the fastest possible sanity check before investing in the full pipeline:
-
-1. Skip steps 4–6 (no database).
-2. Run just: download → citygml-tools to-cityjson → cjio validate → open in prototype.
-3. This alone proves whether Hamburg CityGML converts cleanly enough to render. If it does, the database leg is likely fine too (the database is more tolerant than the validator).
-
----
-
-## 7. After the pilot
-
-Once a known-clean subset is confirmed, the follow-on work is to **automate** this pipeline so we can re-run it on every new Hamburg data release. A tiny `pnpm` script or a `make` target driving citygml-tools + cjio + citydb-tool covers it. Not urgent for the prototype, but a straightforward Phase-0 task.
+- Install `cjval` and run the whole generated city through it.
+- Run the user's manual browser editor move/save acceptance check on a current
+  2026 generated tile.
+- Repair and re-audit the quarantined originals if the handoff requires every
+  source building rather than the strict 385,342-feature editing catalog.

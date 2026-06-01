@@ -1,0 +1,256 @@
+import proj4 from 'proj4';
+import type { CityJsonDocument } from '../types';
+import { parseCityJsonSeq } from './cityjson';
+import { checkIntegrity } from './integrity';
+import { mergeCityJson } from './merge';
+import './projection';
+
+export type Bbox = [number, number, number, number];
+
+export const DEFAULT_HAMBURG_CATALOG_URL = 'http://127.0.0.1:8787';
+export const DEFAULT_HAMBURG_VIEWPORT_BBOX: Bbox = [565000, 5936000, 566000, 5937000];
+export const MAX_CATALOG_TILES_PER_VIEWPORT = 25;
+
+export interface CityJsonSeqCatalogTile {
+  id: string;
+  file: string;
+  url: string;
+  revision?: string;
+  extent: [number, number, number, number, number, number];
+  features: number;
+  cityObjects: number;
+  vertices: number;
+  syntheticRootsAdded: number;
+}
+
+export interface CityJsonSeqFeatureTemplate {
+  id: string;
+  objectIds: string[];
+  value: Record<string, unknown>;
+}
+
+export interface CityJsonSeqLoadedTile {
+  catalog: CityJsonSeqCatalogTile;
+  header: Record<string, unknown>;
+  features: CityJsonSeqFeatureTemplate[];
+}
+
+interface CityJsonSeqTileQuery {
+  crs: string;
+  count: number;
+  tiles: CityJsonSeqCatalogTile[];
+}
+
+export interface CityJsonSeqViewportLoad {
+  doc: CityJsonDocument | null;
+  crs: string;
+  queriedTileCount: number;
+  intersectingTileIds: string[];
+  tileIds: string[];
+  tiles: CityJsonSeqLoadedTile[];
+  features: number;
+}
+
+export async function fetchCityJsonSeqViewport(
+  catalogUrl: string,
+  bbox: Bbox,
+  loadedTileIds: ReadonlySet<string> = new Set(),
+  fetchImpl: typeof fetch = fetch,
+  maxTiles = MAX_CATALOG_TILES_PER_VIEWPORT
+): Promise<CityJsonSeqViewportLoad> {
+  const baseUrl = normalizeCatalogBaseUrl(catalogUrl);
+  const queryUrl = new URL('api/hamburg/tiles', baseUrl);
+  queryUrl.searchParams.set('bbox', bbox.join(','));
+  const response = await fetchImpl(queryUrl);
+  if (!response.ok) {
+    throw new Error(`Catalog query failed: HTTP ${response.status} ${response.statusText}`);
+  }
+  const query = validateTileQuery(await response.json());
+  const tiles = query.tiles.filter((tile) => !loadedTileIds.has(tile.id));
+  if (tiles.length > maxTiles) {
+    throw new Error(
+      `Viewport matches ${tiles.length} unloaded tiles. Zoom in before loading ` +
+        `(maximum ${maxTiles} tiles per request).`
+    );
+  }
+
+  const fetched = await Promise.all(
+    tiles.map(async (tile) => {
+      const tileResponse = await fetchImpl(new URL(tile.url, baseUrl));
+      if (!tileResponse.ok) {
+        throw new Error(`Tile ${tile.id} failed: HTTP ${tileResponse.status} ${tileResponse.statusText}`);
+      }
+      const text = await tileResponse.text();
+      return {
+        doc: parseCityJsonSeqStrict(text, tile.file),
+        tile: describeCityJsonSeqTileStrict(text, tile),
+      };
+    })
+  );
+
+  const docs = fetched.map(({ doc }) => doc);
+  const doc = docs.shift() ?? null;
+  if (doc) {
+    for (const incoming of docs) {
+      const merged = mergeCityJson(doc, incoming);
+      if (!merged.ok) {
+        throw new Error(`Could not merge catalog tile: ${merged.reason}`);
+      }
+    }
+  }
+  return {
+    doc,
+    crs: query.crs,
+    queriedTileCount: query.count,
+    intersectingTileIds: query.tiles.map((tile) => tile.id),
+    tileIds: tiles.map((tile) => tile.id),
+    tiles: fetched.map(({ tile }) => tile),
+    features: tiles.reduce((sum, tile) => sum + tile.features, 0),
+  };
+}
+
+export function projectWgs84BboxToCrs(bbox: Bbox, crs: string): Bbox {
+  const [west, south, east, north] = bbox;
+  const corners: [number, number][] = [
+    [west, south],
+    [east, south],
+    [east, north],
+    [west, north],
+  ];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const corner of corners) {
+    const [x, y] = proj4('EPSG:4326', crs, corner) as [number, number];
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) {
+    throw new Error(`Could not project viewport into ${crs}`);
+  }
+  return [minX, minY, maxX, maxY];
+}
+
+export function parseCityJsonSeqStrict(text: string, name = 'CityJSONSeq input'): CityJsonDocument {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) throw new Error(`${name}: expected a header and at least one feature`);
+  for (const [index, line] of lines.entries()) {
+    let value: { type?: unknown };
+    try {
+      value = JSON.parse(line) as { type?: unknown };
+    } catch (error) {
+      throw new Error(
+        `${name}:${index + 1}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    const expected = index === 0 ? 'CityJSON' : 'CityJSONFeature';
+    if (value.type !== expected) {
+      throw new Error(`${name}:${index + 1}: expected ${expected}, got ${String(value.type)}`);
+    }
+  }
+
+  const parsed = parseCityJsonSeq(text);
+  if (!parsed.ok) throw new Error(`${name}: ${parsed.error}`);
+  const integrity = checkIntegrity(parsed.doc);
+  if (!integrity.ok) {
+    const first = integrity.issues.find((issue) => issue.severity === 'error');
+    throw new Error(`${name}: structural integrity failed: ${first?.message ?? 'unknown error'}`);
+  }
+  return parsed.doc;
+}
+
+export function describeCityJsonSeqTileStrict(
+  text: string,
+  catalog: CityJsonSeqCatalogTile
+): CityJsonSeqLoadedTile {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) throw new Error(`${catalog.file}: expected a header and at least one feature`);
+  const values = lines.map((line, index) => {
+    try {
+      return JSON.parse(line) as unknown;
+    } catch (error) {
+      throw new Error(
+        `${catalog.file}:${index + 1}: invalid JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  });
+  const header = values[0];
+  if (!isObject(header) || header.type !== 'CityJSON') {
+    throw new Error(`${catalog.file}:1: expected CityJSON`);
+  }
+  const features = values.slice(1).map((value, index) => {
+    if (
+      !isObject(value) ||
+      value.type !== 'CityJSONFeature' ||
+      typeof value.id !== 'string' ||
+      !isObject(value.CityObjects)
+    ) {
+      throw new Error(`${catalog.file}:${index + 2}: expected CityJSONFeature`);
+    }
+    return {
+      id: value.id,
+      objectIds: Object.keys(value.CityObjects),
+      value,
+    };
+  });
+  return { catalog, header, features };
+}
+
+export function normalizeCatalogBaseUrl(value: string): URL {
+  const url = new URL(value.trim());
+  url.pathname = url.pathname.replace(/\/api\/hamburg\/(?:catalog|tiles)\/?$/, '/');
+  if (!url.pathname.endsWith('/')) url.pathname += '/';
+  url.search = '';
+  url.hash = '';
+  return url;
+}
+
+function validateTileQuery(value: unknown): CityJsonSeqTileQuery {
+  if (!isObject(value) || typeof value.crs !== 'string' || !Array.isArray(value.tiles)) {
+    throw new Error('Catalog query returned an invalid response');
+  }
+  const tiles = value.tiles.map((tile, index) => validateTile(tile, index));
+  return {
+    crs: value.crs,
+    count: typeof value.count === 'number' ? value.count : tiles.length,
+    tiles,
+  };
+}
+
+function validateTile(value: unknown, index: number): CityJsonSeqCatalogTile {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.file !== 'string' ||
+    typeof value.url !== 'string' ||
+    !Array.isArray(value.extent) ||
+    value.extent.length !== 6 ||
+    !value.extent.every(Number.isFinite)
+  ) {
+    throw new Error(`Catalog query returned an invalid tile at index ${index}`);
+  }
+  return {
+    id: value.id,
+    file: value.file,
+    url: value.url,
+    revision: typeof value.revision === 'string' ? value.revision : undefined,
+    extent: value.extent as CityJsonSeqCatalogTile['extent'],
+    features: numeric(value.features),
+    cityObjects: numeric(value.cityObjects),
+    vertices: numeric(value.vertices),
+    syntheticRootsAdded: numeric(value.syntheticRootsAdded),
+  };
+}
+
+function numeric(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

@@ -13,6 +13,8 @@ export interface CityObject {
   geometry?: unknown[];
   children?: string[];
   parents?: string[];
+  /** Optional CityJSONFeature extent carried by datasets such as 3DBAG. */
+  geographicalExtent?: number[];
 }
 
 export interface CityJsonDocument {

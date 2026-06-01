@@ -10,9 +10,30 @@ import {
 export const MIN_STOREY_HEIGHT = 2.4; // metres, residential habitable minimum
 export const MIN_SIDE_WIDTH = 3.0; // metres, minimum side-part width
 
+/**
+ * Which axis to lay footprint sections along.
+ *   'auto' (default) — pick the longer axis.
+ *   'longer'         — explicitly pick the longer axis.
+ *   'shorter'        — force the shorter axis.
+ */
+export type SplitAxis = 'auto' | 'longer' | 'shorter';
+
+/** One floor's footprint plan. Cut fractions are measured from 0 to 1 along
+ * the selected axis; omitted fractions produce equal-width sections. */
+export interface FloorPlanDivision {
+  partCount: number;
+  axis: SplitAxis;
+  cutFractions?: number[];
+}
+
 export interface SplitResult {
   /** IDs of the BuildingParts that were created. */
   partIds: string[];
+}
+
+export interface FloorPlanSplitResult extends SplitResult {
+  /** Created BuildingPart IDs grouped by floor, ground floor first. */
+  floorPartIds: string[][];
 }
 
 /**
@@ -129,10 +150,96 @@ export function splitBuildingByFloorHeights(
   buildingId: string,
   heights: number[]
 ): SplitResult {
+  return splitBuildingByFloorPlans(
+    doc,
+    buildingId,
+    heights,
+    heights.map(() => ({ partCount: 1, axis: 'auto' }))
+  );
+}
+
+/**
+ * Divide a building vertically and by footprint in one operation. Every floor
+ * receives its own plan, so a ground floor can have three sections while an
+ * upper floor stays open, or callers can pass the same plan for every floor.
+ *
+ * Each generated section is an ordinary BuildingPart with `_floorIndex` and
+ * `_footprintSectionIndex` attributes for downstream editing and reporting.
+ */
+export function splitBuildingByFloorPlans(
+  doc: CityJsonDocument,
+  buildingId: string,
+  heights: number[],
+  floorPlans: FloorPlanDivision[]
+): FloorPlanSplitResult {
   const gate = canSplitBuilding(doc, buildingId);
   if (!gate.ok || !gate.params) throw new Error(gate.reason ?? 'Cannot split');
   const p = gate.params;
 
+  validateFloorHeights(heights, p.eaveHeight);
+  if (floorPlans.length !== heights.length) {
+    throw new Error('Each floor must have exactly one footprint plan');
+  }
+
+  // Validate and prepare every footprint before appending any geometry. A bad
+  // cut must leave the source document untouched.
+  const footprintsByFloor = floorPlans.map((plan) =>
+    plan.partCount === 1
+      ? [openFootprint(p.footprintWgs84)]
+      : splitFootprintBySide(p.footprintWgs84, plan)
+  );
+
+  const partIds: string[] = [];
+  const floorPartIds: string[][] = [];
+  let cumulative = 0;
+  for (let floorIndex = 0; floorIndex < heights.length; floorIndex++) {
+    const isTop = floorIndex === heights.length - 1;
+    const wallH = heights[floorIndex];
+    const floorBase = p.baseElevation + cumulative;
+    const thisEave = floorBase + wallH;
+    const sectionFootprints = footprintsByFloor[floorIndex];
+    const idsForFloor: string[] = [];
+
+    for (let sectionIndex = 0; sectionIndex < sectionFootprints.length; sectionIndex++) {
+      const subFootprint = sectionFootprints[sectionIndex];
+      const keepPitchedRoof = isTop && sectionFootprints.length === 1;
+      const thisRidge = keepPitchedRoof ? p.baseElevation + p.totalHeight : thisEave;
+      const thisRoofType: RoofType = keepPitchedRoof ? p.roofType : 'flat';
+
+      const partParams: NewBuildingParams = {
+        targetCrs: p.targetCrs,
+        footprintWgs84: subFootprint,
+        storeys: 1,
+        eaveHeight: thisEave - floorBase,
+        ridgeHeight: thisRidge - floorBase,
+        roofType: thisRoofType,
+        baseElevation: floorBase,
+        attributes: {
+          function: String(doc.CityObjects[buildingId].attributes?.function ?? 'residential'),
+          _splitOrigin: buildingId,
+          _floorIndex: floorIndex,
+          _footprintSectionIndex: sectionIndex,
+          _footprintSectionCount: sectionFootprints.length,
+        },
+      };
+      const result = generateBuilding(doc, partParams);
+      result.cityObject.type = 'BuildingPart';
+      result.cityObject.parents = [buildingId];
+      const id = insertBuilding(doc, result);
+      partIds.push(id);
+      idsForFloor.push(id);
+    }
+    floorPartIds.push(idsForFloor);
+    cumulative += wallH;
+  }
+
+  const parent = doc.CityObjects[buildingId];
+  parent.geometry = [];
+  parent.children = [...(parent.children ?? []), ...partIds];
+  return { partIds, floorPartIds };
+}
+
+function validateFloorHeights(heights: number[], eaveHeight: number): void {
   if (heights.length < 2) throw new Error('Need at least 2 floor heights');
   for (const h of heights) {
     if (!Number.isFinite(h) || h <= 0) {
@@ -145,49 +252,12 @@ export function splitBuildingByFloorHeights(
     }
   }
   const sum = heights.reduce((a, b) => a + b, 0);
-  if (Math.abs(sum - p.eaveHeight) > 0.01) {
+  if (Math.abs(sum - eaveHeight) > 0.01) {
     throw new Error(
-      `Floor heights sum to ${sum.toFixed(2)} m but the building's eave height is ${p.eaveHeight.toFixed(2)} m. ` +
+      `Floor heights sum to ${sum.toFixed(2)} m but the building's eave height is ${eaveHeight.toFixed(2)} m. ` +
         `Each split must conserve total height.`
     );
   }
-
-  const partIds: string[] = [];
-  let cumulative = 0;
-  for (let i = 0; i < heights.length; i++) {
-    const isTop = i === heights.length - 1;
-    const wallH = heights[i];
-    const floorBase = p.baseElevation + cumulative;
-    const thisEave = floorBase + wallH;
-    const thisRidge = isTop ? p.baseElevation + p.totalHeight : thisEave;
-    const thisRoofType: RoofType = isTop ? p.roofType : 'flat';
-
-    const partParams: NewBuildingParams = {
-      targetCrs: p.targetCrs,
-      footprintWgs84: p.footprintWgs84,
-      storeys: 1,
-      eaveHeight: thisEave - floorBase,
-      ridgeHeight: thisRidge - floorBase,
-      roofType: thisRoofType,
-      baseElevation: floorBase,
-      attributes: {
-        function: String(doc.CityObjects[buildingId].attributes?.function ?? 'residential'),
-        _splitOrigin: buildingId,
-        _floorIndex: i,
-      },
-    };
-    const result = generateBuilding(doc, partParams);
-    result.cityObject.type = 'BuildingPart';
-    result.cityObject.parents = [buildingId];
-    const id = insertBuilding(doc, result);
-    partIds.push(id);
-    cumulative += wallH;
-  }
-
-  const parent = doc.CityObjects[buildingId];
-  parent.geometry = [];
-  parent.children = [...(parent.children ?? []), ...partIds];
-  return { partIds };
 }
 
 /**
@@ -196,17 +266,6 @@ export function splitBuildingByFloorHeights(
  *
  * Preconditions: 4-vertex rectangular footprint, each resulting part ≥ MIN_SIDE_WIDTH.
  */
-/**
- * Which axis to lay the side-split parts along.
- *   'auto' (default) — pick the longer axis (matches pre-axis behaviour).
- *   'longer'         — explicitly pick the longer axis.
- *   'shorter'        — force the shorter axis. Useful when the user wants
- *                      the cuts to run with the long side rather than across
- *                      it (e.g. for a row of narrow attached houses sitting
- *                      on a wide footprint).
- */
-export type SplitAxis = 'auto' | 'longer' | 'shorter';
-
 export function splitBuildingBySide(
   doc: CityJsonDocument,
   buildingId: string,
@@ -217,73 +276,10 @@ export function splitBuildingBySide(
   if (!gate.ok || !gate.params) throw new Error(gate.reason ?? 'Cannot split');
   const p = gate.params;
 
-  if (partCount < 2) throw new Error('Part count must be at least 2');
-  if (p.footprintWgs84.length !== 4 && p.footprintWgs84.length !== 5) {
-    throw new Error(
-      'Side-split currently requires a 4-vertex (rectangular) footprint.'
-    );
-  }
-
-  // Strip closing vertex if present
-  const ring = p.footprintWgs84.slice();
-  const [f, l] = [ring[0], ring[ring.length - 1]];
-  if (f[0] === l[0] && f[1] === l[1]) ring.pop();
-  if (ring.length !== 4) {
-    throw new Error('Side-split requires exactly 4 corners.');
-  }
-
-  // Identify the longer axis. WGS84 distances approximated with a small
-  // equirectangular projection (good enough for building-scale splits).
-  const latRef = (ring[0][1] + ring[2][1]) / 2;
-  const mPerDegLat = 111_320;
-  const mPerDegLng = 111_320 * Math.cos((latRef * Math.PI) / 180);
-  const toMeters = (a: [number, number], b: [number, number]) => {
-    const dx = (a[0] - b[0]) * mPerDegLng;
-    const dy = (a[1] - b[1]) * mPerDegLat;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-  const len0 = toMeters(ring[0], ring[1]);
-  const len1 = toMeters(ring[1], ring[2]);
-  // Resolve the requested axis to an "is the split along edge e0?" boolean.
-  // 'auto' and 'longer' both pick the longer edge; 'shorter' inverts.
-  const naturalLongOnE0 = len0 >= len1;
-  const longAxisOnE0 = axis === 'shorter' ? !naturalLongOnE0 : naturalLongOnE0;
-  const cutAxisLen = longAxisOnE0 ? len0 : len1;
-  if (cutAxisLen / partCount < MIN_SIDE_WIDTH) {
-    throw new Error(
-      `Per-part width ${(cutAxisLen / partCount).toFixed(2)} m is below the ${MIN_SIDE_WIDTH} m minimum. ` +
-        `Reduce part count, switch axis, or extend the footprint.`
-    );
-  }
-
-  // Linearly interpolate along the long edge to get partCount+1 cut points on each
-  // of the two long sides, then pair them up into rectangles.
-  const lerp = (
-    a: [number, number],
-    b: [number, number],
-    t: number
-  ): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-
-  const cuts: [[number, number], [number, number]][] = [];
-  for (let i = 0; i <= partCount; i++) {
-    const t = i / partCount;
-    if (longAxisOnE0) {
-      // Long edges: (v0→v1) and (v2→v3). Short edges parallel across.
-      cuts.push([lerp(ring[0], ring[1], t), lerp(ring[3], ring[2], t)]);
-    } else {
-      // Long edges: (v1→v2) and (v0→v3).
-      cuts.push([lerp(ring[0], ring[3], t), lerp(ring[1], ring[2], t)]);
-    }
-  }
-
+  const subFootprints = splitFootprintBySide(p.footprintWgs84, { partCount, axis });
   const partIds: string[] = [];
-  for (let i = 0; i < partCount; i++) {
-    const [a1, a2] = cuts[i];
-    const [b1, b2] = cuts[i + 1];
-    const subFootprint: [number, number][] = longAxisOnE0
-      ? [a1, b1, b2, a2]
-      : [a1, a2, b2, b1];
-
+  for (let i = 0; i < subFootprints.length; i++) {
+    const subFootprint = subFootprints[i];
     const partParams: NewBuildingParams = {
       targetCrs: p.targetCrs,
       footprintWgs84: subFootprint,
@@ -315,6 +311,84 @@ export function splitBuildingBySide(
 }
 
 // ---------- helpers ----------
+
+/** Resolve one rectangular footprint plan into section polygons. */
+export function splitFootprintBySide(
+  footprintWgs84: [number, number][],
+  plan: FloorPlanDivision
+): [number, number][][] {
+  const ring = openFootprint(footprintWgs84);
+  if (plan.partCount < 2) throw new Error('Part count must be at least 2');
+  if (ring.length !== 4) {
+    throw new Error('Side-split currently requires a 4-vertex (rectangular) footprint.');
+  }
+
+  const latRef = (ring[0][1] + ring[2][1]) / 2;
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos((latRef * Math.PI) / 180);
+  const toMeters = (a: [number, number], b: [number, number]) => {
+    const dx = (a[0] - b[0]) * mPerDegLng;
+    const dy = (a[1] - b[1]) * mPerDegLat;
+    return Math.hypot(dx, dy);
+  };
+  const len0 = toMeters(ring[0], ring[1]);
+  const len1 = toMeters(ring[1], ring[2]);
+  const naturalLongOnE0 = len0 >= len1;
+  const splitOnE0 = plan.axis === 'shorter' ? !naturalLongOnE0 : naturalLongOnE0;
+  const cutAxisLen = splitOnE0 ? len0 : len1;
+  const fractions = normaliseCutFractions(plan.partCount, plan.cutFractions);
+  const stops = [0, ...fractions, 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const width = (stops[i + 1] - stops[i]) * cutAxisLen;
+    if (width < MIN_SIDE_WIDTH) {
+      throw new Error(
+        `Section ${i + 1} width ${width.toFixed(2)} m is below the ${MIN_SIDE_WIDTH} m minimum. ` +
+          `Move a cut, reduce part count, switch axis, or extend the footprint.`
+      );
+    }
+  }
+
+  const lerp = (
+    a: [number, number],
+    b: [number, number],
+    t: number
+  ): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+  const cuts: [[number, number], [number, number]][] = stops.map((t) =>
+    splitOnE0
+      ? [lerp(ring[0], ring[1], t), lerp(ring[3], ring[2], t)]
+      : [lerp(ring[0], ring[3], t), lerp(ring[1], ring[2], t)]
+  );
+
+  return cuts.slice(0, -1).map(([a1, a2], i) => {
+    const [b1, b2] = cuts[i + 1];
+    return splitOnE0 ? [a1, b1, b2, a2] : [a1, a2, b2, b1];
+  });
+}
+
+function normaliseCutFractions(partCount: number, cuts?: number[]): number[] {
+  const fractions =
+    cuts ?? new Array(partCount - 1).fill(0).map((_, i) => (i + 1) / partCount);
+  if (fractions.length !== partCount - 1) {
+    throw new Error(`Expected ${partCount - 1} footprint cuts, got ${fractions.length}`);
+  }
+  let previous = 0;
+  for (const cut of fractions) {
+    if (!Number.isFinite(cut) || cut <= previous || cut >= 1) {
+      throw new Error('Footprint cuts must be increasing percentages between 0 and 100');
+    }
+    previous = cut;
+  }
+  return fractions;
+}
+
+function openFootprint(footprint: [number, number][]): [number, number][] {
+  const ring = footprint.slice();
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first && last && first[0] === last[0] && first[1] === last[1]) ring.pop();
+  return ring;
+}
 
 /** Read a building's footprint (first-child-inclusive) in WGS84 via extractFootprints. */
 function readFootprintWgs84(

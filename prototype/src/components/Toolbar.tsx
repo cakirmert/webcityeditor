@@ -24,6 +24,13 @@ interface Props {
     warningCount: number;
     onShow: () => void;
   };
+  /** ISO 19107 primitive validation is separate from browser structure checks.
+   *  The local catalog server runs val3dity for this status. */
+  primitiveValidation?: {
+    kind: 'unchecked' | 'checking' | 'valid' | 'invalid' | 'unavailable';
+    message: string;
+    onValidate: () => void;
+  };
   /** Optional vertex-compaction action. Shows a small "Compact" button in
    *  the toolbar when the doc has orphaned vertices (typical after
    *  footprint-edit regenerations). */
@@ -72,6 +79,18 @@ interface Props {
    *  the loaded file isn't a CityJSONSeq. */
   onFilterViewport?: () => void;
   canFilterViewport?: boolean;
+  /** Active bbox-queryable CityJSONSeq catalog. The button manually retries
+   *  the current viewport; nearby tiles also load automatically on map move. */
+  catalogState?: {
+    loadedTiles: number;
+    loading: boolean;
+    dirty?: boolean;
+    error?: string;
+    message?: string;
+  };
+  onLoadCatalogViewport?: () => void;
+  /** Persist edited catalog features back into their source CityJSONSeq tiles. */
+  onPersistCatalog?: () => void;
 }
 
 export default function Toolbar({
@@ -82,6 +101,7 @@ export default function Toolbar({
   onExport,
   onExportGltf,
   integrity,
+  primitiveValidation,
   orphanedVertexCount = 0,
   onCompactVertices,
   undoState,
@@ -108,6 +128,9 @@ export default function Toolbar({
   onToggleZoning,
   onFilterViewport,
   canFilterViewport = false,
+  catalogState,
+  onLoadCatalogViewport,
+  onPersistCatalog,
 }: Props) {
   return (
     <header className="flex h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
@@ -144,19 +167,48 @@ export default function Toolbar({
         </span>
       )}
 
-      {integrity && (integrity.errorCount > 0 || integrity.warningCount > 0) && (
+      {integrity && (
         <button
           onClick={integrity.onShow}
-          title="Click to see details — vertex-index bounds, parent/child links, orphaned vertices, etc."
+          title="Browser structure check: click for vertex-index bounds, parent/child links, orphaned vertices, and input status"
           className={
             integrity.errorCount > 0
               ? 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer'
-              : 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer'
+              : integrity.warningCount > 0
+              ? 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer'
+              : 'rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)] hover:bg-[rgba(34,197,94,0.12)] cursor-pointer'
           }
         >
           {integrity.errorCount > 0
-            ? `⚠ ${integrity.errorCount} error${integrity.errorCount === 1 ? '' : 's'}`
-            : `⚠ ${integrity.warningCount} warning${integrity.warningCount === 1 ? '' : 's'}`}
+            ? `Structure: ${integrity.errorCount} error${integrity.errorCount === 1 ? '' : 's'}`
+            : integrity.warningCount > 0
+            ? `Structure: ${integrity.warningCount} warning${integrity.warningCount === 1 ? '' : 's'}`
+            : 'Structure: valid'}
+        </button>
+      )}
+
+      {primitiveValidation && (
+        <button
+          onClick={primitiveValidation.onValidate}
+          disabled={primitiveValidation.kind === 'checking'}
+          title={primitiveValidation.message}
+          className={
+            primitiveValidation.kind === 'valid'
+              ? 'rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)] hover:bg-[rgba(34,197,94,0.12)] cursor-pointer'
+              : primitiveValidation.kind === 'invalid'
+              ? 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer'
+              : 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer disabled:cursor-wait'
+          }
+        >
+          {primitiveValidation.kind === 'checking'
+            ? '3D: checking...'
+            : primitiveValidation.kind === 'valid'
+            ? '3D: valid'
+            : primitiveValidation.kind === 'invalid'
+            ? '3D: invalid'
+            : primitiveValidation.kind === 'unavailable'
+            ? '3D: unavailable'
+            : 'Check 3D'}
         </button>
       )}
 
@@ -282,6 +334,36 @@ export default function Toolbar({
               title="Re-parse the loaded CityJSONSeq file dropping every feature outside the current map view"
             >
               ▢ Filter to viewport
+            </Button>
+          )}
+
+          {catalogState && onLoadCatalogViewport && (
+            <Button
+              size="sm"
+              variant={catalogState.error ? 'warn' : 'ghost'}
+              onClick={onLoadCatalogViewport}
+              disabled={catalogState.loading}
+              title={
+                catalogState.error ??
+                catalogState.message ??
+                'Load unseen CityJSONSeq tiles intersecting the current viewport'
+              }
+            >
+              {catalogState.loading
+                ? '▦ Seq tiles...'
+                : `▦ Seq tiles ${catalogState.loadedTiles}`}
+            </Button>
+          )}
+
+          {catalogState && onPersistCatalog && (
+            <Button
+              size="sm"
+              variant={catalogState.dirty ? 'primary' : 'ghost'}
+              onClick={onPersistCatalog}
+              disabled={catalogState.loading || !catalogState.dirty}
+              title="Validate edited features and persist them into their source CityJSONSeq tiles"
+            >
+              {catalogState.loading && catalogState.dirty ? 'Saving seq...' : 'Save seq'}
             </Button>
           )}
 

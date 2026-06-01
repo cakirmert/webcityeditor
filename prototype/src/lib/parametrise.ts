@@ -60,9 +60,17 @@ export function inferParametricAttrs(
   }
 
   const attrs = obj.attributes ?? {};
+  const holders = collectGeometryHolders(doc, obj);
+  const inheritedAttr = (key: string): unknown => {
+    for (const holder of holders) {
+      const value = holder.attributes?.[key];
+      if (value !== undefined && value !== null) return value;
+    }
+    return undefined;
+  };
 
   // ── Roof type ────────────────────────────────────────────────────────────
-  const roofType = normaliseRoofType(attrs.roofType);
+  const roofType = normaliseRoofType(inheritedAttr('roofType'));
 
   // ── Z analysis ───────────────────────────────────────────────────────────
   // Walk the building's geometry, classifying each vertex it touches by the
@@ -77,10 +85,10 @@ export function inferParametricAttrs(
   // datasets carry these and they're more reliable than vertex analysis on
   // partial/mesh-only imports (e.g. IFC).
   const measuredHeight =
-    typeof attrs.measuredHeight === 'number'
-      ? attrs.measuredHeight
-      : typeof attrs.h_max === 'number'
-      ? attrs.h_max
+    typeof inheritedAttr('measuredHeight') === 'number'
+      ? (inheritedAttr('measuredHeight') as number)
+      : typeof inheritedAttr('h_max') === 'number'
+      ? (inheritedAttr('h_max') as number)
       : null;
 
   let ridgeHeight: number;
@@ -118,8 +126,8 @@ export function inferParametricAttrs(
 
   // ── Storey count ────────────────────────────────────────────────────────
   const storeysAttr =
-    typeof attrs.storeysAboveGround === 'number'
-      ? Math.round(attrs.storeysAboveGround)
+    typeof inheritedAttr('storeysAboveGround') === 'number'
+      ? Math.round(inheritedAttr('storeysAboveGround') as number)
       : null;
   const wallH = Math.max(0.1, eaveHeight - baseZ);
   const storeys = storeysAttr
@@ -196,11 +204,9 @@ export function parametriseBuilding(
     return { ok: false, reason: `Unsupported CRS: ${crs.code}` };
   }
 
-  // Generate replacement geometry into a transient sub-doc so we can rewrite
-  // the existing CityObject in place without disturbing other buildings'
-  // vertex indices. (generateBuilding pushes into doc.vertices regardless,
-  // which is fine — the old vertices become orphans that compactVertices
-  // will reclaim.)
+  // Generate replacement geometry and graft it onto the existing CityObject
+  // id. `generateBuilding` only describes the new vertices; unlike
+  // `insertBuilding`, it does not append them to the document itself.
   let result;
   try {
     result = generateBuilding(doc, {
@@ -220,15 +226,25 @@ export function parametriseBuilding(
     };
   }
 
+  if (result.vertexOffset !== doc.vertices.length) {
+    return {
+      ok: false,
+      reason: `Vertex offset mismatch: expected ${doc.vertices.length}, got ${result.vertexOffset}`,
+    };
+  }
+  doc.vertices.push(...result.newVertices);
+
+  // Imported LoD2 roots often delegate all geometry to BuildingPart children.
+  // Promotion replaces that source detail with one editable parametric solid,
+  // so consume the old descendants and clear the root linkage.
+  consumeReplacedDescendants(doc, buildingId);
+
   // Replace the original CityObject's geometry + attributes in place.
   // Keep its existing parents/children linkage so the rest of the doc
   // (e.g. CityObjectGroups, BuildingParts) still references this id.
   const generated = result.cityObject;
   obj.geometry = generated.geometry;
   obj.attributes = generated.attributes;
-
-  // Drop the orphan placeholder the generator inserted under a fresh id.
-  delete doc.CityObjects[result.id];
 
   return { ok: true, params };
 }
@@ -287,36 +303,38 @@ function analyseGeometryHeights(
   let sawRoof = false;
   let sawGround = false;
 
-  for (const gRaw of (obj.geometry ?? []) as Array<{
-    type?: string;
-    boundaries?: unknown;
-    semantics?: { surfaces?: Array<{ type?: string }>; values?: unknown };
-  }>) {
-    const surfaces = gRaw.semantics?.surfaces ?? [];
-    const values = gRaw.semantics?.values;
-    visitFaces(gRaw.boundaries, values, (faceVerts, semIdx) => {
-      const surfType =
-        typeof semIdx === 'number' && surfaces[semIdx]
-          ? surfaces[semIdx].type
-          : null;
-      for (const idx of faceVerts) {
-        const z = decodeZ(idx);
-        if (z === null || !Number.isFinite(z)) continue;
-        sawAnyVertex = true;
-        if (z < minZ) minZ = z;
-        if (z > maxZ) maxZ = z;
-        if (surfType === 'WallSurface') {
-          sawWall = true;
-          if (z > wallMaxZ) wallMaxZ = z;
-        } else if (surfType === 'RoofSurface') {
-          sawRoof = true;
-          if (z > roofMaxZ) roofMaxZ = z;
-        } else if (surfType === 'GroundSurface') {
-          sawGround = true;
-          if (z < groundMinZ) groundMinZ = z;
+  for (const holder of collectGeometryHolders(doc, obj)) {
+    for (const gRaw of (holder.geometry ?? []) as Array<{
+      type?: string;
+      boundaries?: unknown;
+      semantics?: { surfaces?: Array<{ type?: string }>; values?: unknown };
+    }>) {
+      const surfaces = gRaw.semantics?.surfaces ?? [];
+      const values = gRaw.semantics?.values;
+      visitFaces(gRaw.boundaries, values, (faceVerts, semIdx) => {
+        const surfType =
+          typeof semIdx === 'number' && surfaces[semIdx]
+            ? surfaces[semIdx].type
+            : null;
+        for (const idx of faceVerts) {
+          const z = decodeZ(idx);
+          if (z === null || !Number.isFinite(z)) continue;
+          sawAnyVertex = true;
+          if (z < minZ) minZ = z;
+          if (z > maxZ) maxZ = z;
+          if (surfType === 'WallSurface') {
+            sawWall = true;
+            if (z > wallMaxZ) wallMaxZ = z;
+          } else if (surfType === 'RoofSurface') {
+            sawRoof = true;
+            if (z > roofMaxZ) roofMaxZ = z;
+          } else if (surfType === 'GroundSurface') {
+            sawGround = true;
+            if (z < groundMinZ) groundMinZ = z;
+          }
         }
-      }
-    });
+      });
+    }
   }
 
   return {
@@ -324,6 +342,64 @@ function analyseGeometryHeights(
     eaveZ: sawWall ? wallMaxZ : null,
     ridgeZ: sawRoof ? roofMaxZ : sawAnyVertex ? maxZ : null,
   };
+}
+
+function collectGeometryHolders(doc: CityJsonDocument, obj: CityObject): CityObject[] {
+  const out = [obj];
+  for (const childId of obj.children ?? []) {
+    const child = doc.CityObjects[childId];
+    if (child) out.push(...collectGeometryHolders(doc, child));
+  }
+  return out;
+}
+
+function consumeReplacedDescendants(doc: CityJsonDocument, rootId: string): void {
+  const root = doc.CityObjects[rootId];
+  if (!root?.children?.length) return;
+  const descendants = new Set<string>();
+  const visit = (id: string) => {
+    if (descendants.has(id)) return;
+    descendants.add(id);
+    for (const childId of doc.CityObjects[id]?.children ?? []) visit(childId);
+  };
+  for (const childId of root.children) visit(childId);
+
+  // Retain unusually shared descendants that still belong to an external
+  // parent, along with their nested subtree.
+  const keep = new Set<string>();
+  for (const id of descendants) {
+    if ((doc.CityObjects[id]?.parents ?? []).some((p) => p !== rootId && !descendants.has(p))) {
+      keep.add(id);
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const id of descendants) {
+      if (keep.has(id)) continue;
+      if ((doc.CityObjects[id]?.parents ?? []).some((p) => keep.has(p))) {
+        keep.add(id);
+        changed = true;
+      }
+    }
+  }
+
+  const removed = new Set([...descendants].filter((id) => !keep.has(id)));
+  for (const id of removed) delete doc.CityObjects[id];
+  delete root.children;
+
+  for (const [id, obj] of Object.entries(doc.CityObjects)) {
+    if (obj.children) {
+      obj.children = obj.children.filter((childId) => !removed.has(childId));
+      if (obj.children.length === 0) delete obj.children;
+    }
+    if (obj.parents) {
+      obj.parents = obj.parents.filter(
+        (parentId) => !removed.has(parentId) && !(descendants.has(id) && parentId === rootId)
+      );
+      if (obj.parents.length === 0) delete obj.parents;
+    }
+  }
 }
 
 /**

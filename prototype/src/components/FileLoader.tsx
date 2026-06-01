@@ -2,6 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CityJsonDocument } from '../types';
 import { deleteDocument, listDocuments, loadDocument } from '../lib/storage';
 import { parseCityJsonAuto } from '../lib/cityjson';
+import {
+  DEFAULT_HAMBURG_CATALOG_URL,
+  DEFAULT_HAMBURG_VIEWPORT_BBOX,
+  fetchCityJsonSeqViewport,
+  parseCityJsonSeqStrict,
+  type CityJsonSeqViewportLoad,
+} from '../lib/cityjsonseq-catalog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
@@ -11,8 +18,11 @@ interface Props {
    * for CityJSONSeq inputs (where viewport-filtered re-parsing is useful);
    * monolithic files don't need it because they hold the whole city in
    * memory anyway. `null` for `rawText` means "don't keep me around."
-   */
+  */
   onLoaded: (doc: CityJsonDocument, fileName: string, rawText: string | null) => void;
+  /** Connect a bbox-queryable CityJSONSeq tile catalog. The initial centre
+   *  viewport is loaded here; subsequent viewport expansion is owned by App. */
+  onCatalogLoaded?: (loaded: CityJsonSeqViewportLoad, catalogUrl: string) => void;
 }
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
@@ -39,7 +49,7 @@ const QUICK_SAMPLES: QuickSample[] = [
     label: 'Hamburg - official LoD2 citywide portal',
     description:
       'Hamburg publishes the full LoD2 city model as CityGML. Use this for source/reference downloads.',
-    url: 'https://suche.transparenz.hamburg.de/dataset/3d-stadtmodell-lod2-de-hamburg2',
+    url: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg2',
     guideOnly: true,
     badge: 'GUIDE',
   },
@@ -62,8 +72,9 @@ interface HostedCityJsonSample {
   checkAvailability?: boolean;
 }
 
-export default function FileLoader({ onLoaded }: Props) {
+export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
   const [url, setUrl] = useState(() => publicAssetUrl(DEFAULT_HAMBURG_SAMPLE));
+  const [catalogUrl, setCatalogUrl] = useState(DEFAULT_HAMBURG_CATALOG_URL);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [dragActive, setDragActive] = useState(false);
   const [recent, setRecent] = useState<{ name: string; savedAt: number }[]>([]);
@@ -126,13 +137,24 @@ export default function FileLoader({ onLoaded }: Props) {
       // parseCityJsonAuto handles both monolithic CityJSON and CityJSONSeq
       // (one JSON per line: header + CityJSONFeature per feature). It also
       // merges vertex indices correctly across features.
-      const result = parseCityJsonAuto(text);
+      const isSeq = /\.(city\.)?jsonl(?:$|[?#])/i.test(name);
+      let result: ReturnType<typeof parseCityJsonAuto>;
+      try {
+        result = isSeq
+          ? { ok: true as const, doc: parseCityJsonSeqStrict(text, name) }
+          : parseCityJsonAuto(text);
+      } catch (error) {
+        setStatus({
+          kind: 'err',
+          msg: `Parse error: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        return;
+      }
       if (!result.ok) {
         setStatus({ kind: 'err', msg: `Parse error: ${result.error}` });
         return;
       }
       const data = result.doc;
-      const isSeq = /\.(city\.)?jsonl$/i.test(name);
       setStatus({
         kind: 'ok',
         msg: `Loaded v${data.version}${isSeq ? ' (CityJSONSeq)' : ''}, ${
@@ -178,6 +200,32 @@ export default function FileLoader({ onLoaded }: Props) {
       });
     }
   }, [url, parseAndEmit]);
+
+  const handleCatalogUrl = useCallback(async () => {
+    if (!catalogUrl.trim() || !onCatalogLoaded) return;
+    setStatus({ kind: 'info', msg: `Connecting to CityJSONSeq catalog ${catalogUrl}…` });
+    try {
+      const loaded = await fetchCityJsonSeqViewport(
+        catalogUrl,
+        DEFAULT_HAMBURG_VIEWPORT_BBOX
+      );
+      if (!loaded.doc || loaded.tileIds.length === 0) {
+        throw new Error('The Hamburg centre viewport returned no CityJSONSeq tiles');
+      }
+      onCatalogLoaded(loaded, catalogUrl);
+      setStatus({
+        kind: 'ok',
+        msg:
+          `Connected CityJSONSeq catalog: ${loaded.tileIds.length} tiles, ` +
+          `${loaded.features.toLocaleString()} editable features. Map panning loads nearby tiles.`,
+      });
+    } catch (e) {
+      setStatus({
+        kind: 'err',
+        msg: `Catalog connection failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }, [catalogUrl, onCatalogLoaded]);
 
   const handleQuickSample = useCallback(
     (sample: QuickSample) => {
@@ -308,8 +356,10 @@ export default function FileLoader({ onLoaded }: Props) {
       <div className="w-[460px] max-w-[92%] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
         <h2 className="mb-1 text-[15px] font-semibold">Load CityJSON</h2>
         <p className="mb-4 text-xs text-[var(--text-dim)]">
-          Drop a <code className="rounded bg-[var(--bg)] px-1">.city.json</code> file, paste a
-          URL, or pick a quick sample. CityJSON 2.0 is the primary format.
+          Prefer <code className="rounded bg-[var(--bg)] px-1">.city.jsonl</code>{' '}
+          CityJSONSeq input for editable city tiles. Monolithic{' '}
+          <code className="rounded bg-[var(--bg)] px-1">.city.json</code> files remain
+          supported for smaller models.
         </p>
 
         <div
@@ -341,11 +391,33 @@ export default function FileLoader({ onLoaded }: Props) {
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://... .city.json"
+            placeholder="https://... .city.jsonl or .city.json"
             className="flex-1"
           />
           <Button onClick={handleUrl}>Fetch URL</Button>
         </div>
+        {onCatalogLoaded && (
+          <div className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)]">
+              Hamburg whole-city CityJSONSeq
+            </div>
+            <div className="flex gap-2">
+              <Input
+                type="url"
+                value={catalogUrl}
+                onChange={(e) => setCatalogUrl(e.target.value)}
+                placeholder="http://127.0.0.1:8787"
+                className="flex-1"
+              />
+              <Button onClick={handleCatalogUrl} variant="primary">
+                Connect catalog
+              </Button>
+            </div>
+            <div className="mt-1 text-[10px] text-[var(--text-faint)]">
+              Loads primitive-valid sequence tiles by viewport from the local Hamburg server.
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2">
           {primaryHostedSample ? (
             <Button onClick={() => handleQuickSample(primaryHostedSample)}>

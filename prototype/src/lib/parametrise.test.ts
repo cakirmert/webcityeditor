@@ -7,6 +7,7 @@ import {
   normaliseRoofType,
 } from './parametrise';
 import { regenerateBuilding } from './regenerate';
+import { checkIntegrity } from './integrity';
 import './projection';
 
 function findBuildingId(doc: CityJsonDocument): string {
@@ -151,7 +152,19 @@ describe('parametriseBuilding', () => {
     expect(after.ok).toBe(true);
   });
 
-  it('preserves the building id (no orphan parents/children references)', () => {
+  it('appends replacement vertices so promotion is structurally valid immediately', () => {
+    const doc = buildSampleCube();
+    const id = findBuildingId(doc);
+    const before = doc.vertices.length;
+
+    const r = parametriseBuilding(doc, id);
+
+    expect(r.ok).toBe(true);
+    expect(doc.vertices.length).toBeGreaterThan(before);
+    expect(checkIntegrity(doc).ok).toBe(true);
+  });
+
+  it('preserves the building id while consuming replaced child parts', () => {
     const doc = buildSampleCube();
     const id = findBuildingId(doc);
     const childId = 'TestChild';
@@ -165,9 +178,36 @@ describe('parametriseBuilding', () => {
     const r = parametriseBuilding(doc, id);
     expect(r.ok).toBe(true);
     expect(doc.CityObjects[id]).toBeDefined();
-    // Children linkage is untouched — we don't drop existing relationships.
-    expect(doc.CityObjects[id].children).toContain(childId);
-    expect(doc.CityObjects[childId].parents).toContain(id);
+    expect(doc.CityObjects[id].children).toBeUndefined();
+    expect(doc.CityObjects[childId]).toBeUndefined();
+    expect(checkIntegrity(doc).ok).toBe(true);
+  });
+
+  it('promotes an imported hierarchy whose geometry lives only on a BuildingPart', () => {
+    const doc = buildSampleCube();
+    const id = findBuildingId(doc);
+    const originalGeometry = doc.CityObjects[id].geometry;
+    doc.CityObjects[id].geometry = [];
+    doc.CityObjects[id].children = ['DelegatedPart'];
+    doc.CityObjects[id].attributes = { function: 'residential' };
+    doc.CityObjects.DelegatedPart = {
+      type: 'BuildingPart',
+      parents: [id],
+      attributes: {
+        measuredHeight: 10,
+        storeysAboveGround: 3,
+        roofType: 1000,
+      },
+      geometry: originalGeometry,
+    };
+
+    const r = parametriseBuilding(doc, id);
+
+    expect(r.ok).toBe(true);
+    expect(doc.CityObjects.DelegatedPart).toBeUndefined();
+    expect(doc.CityObjects[id].children).toBeUndefined();
+    expect(doc.CityObjects[id].attributes?._createdBy).toBe('city-editor-prototype');
+    expect(checkIntegrity(doc).ok).toBe(true);
   });
 
   it('preserves user-visible attributes (function, year, etc.)', () => {

@@ -8,16 +8,16 @@ import BuildingCreator, { type NewBuildingForm } from './components/BuildingCrea
 // `NewBuildingForm` shape is re-used by App to carry the live-updating dialog state.
 import { filterToBuilding } from './lib/footprints';
 import { saveDocument } from './lib/storage';
-import { generateBuilding, insertBuilding } from './lib/generator';
 import { detectCrs } from './lib/projection';
 import {
   splitBuildingByFloor,
   splitBuildingByFloorHeights,
+  splitBuildingByFloorPlans,
   splitBuildingBySide,
   MIN_STOREY_HEIGHT,
+  type FloorPlanDivision,
   type SplitAxis,
 } from './lib/subdivision';
-import { moveBuilding, rotateBuilding } from './lib/transform';
 import { regenerateBuilding } from './lib/regenerate';
 import { extractFootprints } from './lib/footprints';
 import { exportToGltf } from './lib/gltf-export';
@@ -26,6 +26,29 @@ import { compactVertices } from './lib/compact';
 import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
 import { mergeCityJson } from './lib/merge';
 import { parseCityJsonAuto } from './lib/cityjson';
+import {
+  DEFAULT_HAMBURG_CATALOG_URL,
+  fetchCityJsonSeqViewport,
+  normalizeCatalogBaseUrl,
+  projectWgs84BboxToCrs,
+  type Bbox,
+  type CityJsonSeqLoadedTile,
+  type CityJsonSeqViewportLoad,
+} from './lib/cityjsonseq-catalog';
+import {
+  CatalogWritebackError,
+  evictCleanCityJsonSeqTiles,
+  persistDirtyCityJsonSeqTiles,
+} from './lib/cityjsonseq-writeback';
+import {
+  commitBuildingTransformFromEditor,
+  createBuildingFromEditor,
+  runStructurallyGuardedMutation,
+} from './lib/editor-actions';
+import {
+  prepareValidatedCityJsonExport,
+  validateExportGeometry,
+} from './lib/export-validation';
 import proj4 from 'proj4';
 import type { IfcImportResult } from './lib/ifc-import';
 import FilterBar from './components/FilterBar';
@@ -50,11 +73,23 @@ import {
 } from './lib/zoning';
 import type { AttributeValue, CityJsonDocument, SelectionInfo } from './types';
 
+interface CatalogConnection {
+  baseUrl: string;
+  crs: string;
+  loadedTiles: Map<string, CityJsonSeqLoadedTile>;
+}
+
+type PrimitiveValidationState = {
+  kind: 'unchecked' | 'checking' | 'valid' | 'invalid' | 'unavailable';
+  message: string;
+};
+
 export default function App() {
   const [cityjson, setCityjson] = useState<CityJsonDocument | null>(null);
   const [fileName, setFileName] = useState<string>('');
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
+  const dirtyIdsRef = useRef<Set<string>>(new Set());
   const [reloadToken, setReloadToken] = useState(0);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(
     'idle'
@@ -69,6 +104,10 @@ export default function App() {
    *  in custom-heights mode for the selected building. The 3D viewer reads
    *  this to draw horizontal split-line rings at each cumulative height. */
   const [splitPreviewHeights, setSplitPreviewHeights] = useState<number[] | null>(null);
+  /** Optional per-floor footprint plans shown as vertical dividers in Viewer. */
+  const [splitPreviewFloorPlans, setSplitPreviewFloorPlans] = useState<
+    FloorPlanDivision[] | null
+  >(null);
   /** Live-edit state for footprint editing. The map shows the building's
    *  outline as draggable Terra Draw polygon; pending updates flow through
    *  `pendingRing` until the user clicks Save (regenerate) or Cancel. */
@@ -114,6 +153,34 @@ export default function App() {
   // features outside the current map view — useful on city-scale jsonl files.
   const [seqRawText, setSeqRawText] = useState<string | null>(null);
   const mapBboxRef = useRef<[number, number, number, number] | null>(null);
+  const cityjsonRef = useRef<CityJsonDocument | null>(null);
+  const [catalogConnection, setCatalogConnection] = useState<CatalogConnection | null>(null);
+  const catalogConnectionRef = useRef<CatalogConnection | null>(null);
+  const catalogLoadingRef = useRef(false);
+  const catalogViewportTimerRef = useRef<number | null>(null);
+  const [catalogStatus, setCatalogStatus] = useState<{
+    kind: 'idle' | 'loading' | 'ok' | 'error';
+    message?: string;
+  }>({ kind: 'idle' });
+  const [inputIntegrity, setInputIntegrity] = useState<ReturnType<typeof checkIntegrity> | null>(
+    null
+  );
+  const [primitiveValidation, setPrimitiveValidation] = useState<PrimitiveValidationState>({
+    kind: 'unchecked',
+    message: '3D primitive validity has not been checked yet.',
+  });
+
+  const markGeometryChanged = useCallback((message = 'Geometry changed; run Check 3D or Save seq.') => {
+    setPrimitiveValidation({ kind: 'unchecked', message });
+  }, []);
+
+  useEffect(() => {
+    cityjsonRef.current = cityjson;
+  }, [cityjson]);
+
+  useEffect(() => {
+    dirtyIdsRef.current = dirtyIds;
+  }, [dirtyIds]);
 
   // Snapshot of original attributes per-building, for revert.
   const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
@@ -121,10 +188,16 @@ export default function App() {
   const handleLoaded = useCallback(
     (doc: CityJsonDocument, name: string, rawText: string | null = null) => {
       setCityjson(doc);
+      cityjsonRef.current = doc;
       setFileName(name);
       setSeqRawText(rawText);
+      setCatalogConnection(null);
+      catalogConnectionRef.current = null;
+      setCatalogStatus({ kind: 'idle' });
       setSelection(null);
-      setDirtyIds(new Set());
+      const clean = new Set<string>();
+      dirtyIdsRef.current = clean;
+      setDirtyIds(clean);
       setFilter({}); // reset filters when loading a new doc
       setZones([]);
       setZoningEnabled(false);
@@ -133,8 +206,36 @@ export default function App() {
       undoRef.current.clear();
       setUndoVersion((v) => v + 1);
       originals.clear();
+      setInputIntegrity(checkIntegrity(doc));
+      setPrimitiveValidation({
+        kind: 'unchecked',
+        message: 'Loaded input has not been checked for ISO 19107 primitive validity in this session.',
+      });
     },
     [originals]
+  );
+
+  const handleCatalogLoaded = useCallback(
+    (loaded: CityJsonSeqViewportLoad, catalogUrl: string) => {
+      if (!loaded.doc) return;
+      handleLoaded(loaded.doc, `Hamburg CityJSONSeq catalog (${loaded.tileIds.length} tiles)`);
+      const connection = {
+        baseUrl: normalizeCatalogBaseUrl(catalogUrl).toString(),
+        crs: loaded.crs,
+        loadedTiles: new Map(loaded.tiles.map((tile) => [tile.catalog.id, tile])),
+      };
+      catalogConnectionRef.current = connection;
+      setCatalogConnection(connection);
+      setCatalogStatus({
+        kind: 'ok',
+        message: `${loaded.tileIds.length} strict CityJSONSeq tiles loaded`,
+      });
+      setPrimitiveValidation({
+        kind: 'valid',
+        message: 'Loaded strict Hamburg catalog tiles passed the prepared val3dity audit.',
+      });
+    },
+    [handleLoaded]
   );
 
   /**
@@ -169,7 +270,8 @@ export default function App() {
     setSelection(popped.selectionId ? { objectId: popped.selectionId } : null);
     setReloadToken((t) => t + 1);
     setUndoVersion((v) => v + 1);
-  }, [cityjson, dirtyIds, selection]);
+    markGeometryChanged('Undo changed the working geometry; run Check 3D before export.');
+  }, [cityjson, dirtyIds, selection, markGeometryChanged]);
 
   const handleRedo = useCallback(() => {
     if (!cityjson) return;
@@ -184,22 +286,26 @@ export default function App() {
     setSelection(popped.selectionId ? { objectId: popped.selectionId } : null);
     setReloadToken((t) => t + 1);
     setUndoVersion((v) => v + 1);
-  }, [cityjson, dirtyIds, selection]);
+    markGeometryChanged('Redo changed the working geometry; run Check 3D before export.');
+  }, [cityjson, dirtyIds, selection, markGeometryChanged]);
 
   // ── Opening move ─────────────────────────────────────────────────────────
   const handleMoveOpening = useCallback(
     (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => {
       if (!cityjson) return;
       pushUndo(`Move ${opening.type} on ${buildingId}`);
-      moveOpening(cityjson, buildingId, opening, dx, dy, dz);
+      runStructurallyGuardedMutation(cityjson, `Moving ${opening.type} on ${buildingId}`, () =>
+        moveOpening(cityjson, buildingId, opening, dx, dy, dz)
+      );
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(buildingId);
         return next;
       });
       setReloadToken((t) => t + 1);
+      markGeometryChanged();
     },
-    [cityjson, pushUndo]
+    [cityjson, pushUndo, markGeometryChanged]
   );
 
   // ── Reshape (regenerate parametric building with new roof/heights) ──────
@@ -223,7 +329,9 @@ export default function App() {
         return;
       }
       pushUndo(`Reshape ${id}`);
-      const r = regenerateBuilding(cityjson, id, fp.polygon, overrides);
+      const { value: r } = runStructurallyGuardedMutation(cityjson, `Reshaping ${id}`, () =>
+        regenerateBuilding(cityjson, id, fp.polygon, overrides)
+      );
       if (!r.ok) {
         alert(`Reshape failed: ${r.reason}`);
         return;
@@ -234,8 +342,9 @@ export default function App() {
         return next;
       });
       setReloadToken((t) => t + 1);
+      markGeometryChanged();
     },
-    [cityjson, pushUndo]
+    [cityjson, pushUndo, markGeometryChanged]
   );
 
   // ── Make-editable (parametrise imported building) ────────────────────────
@@ -250,7 +359,11 @@ export default function App() {
       );
       if (!ok) return;
       pushUndo(`Make ${buildingId} editable`);
-      const r = parametriseBuilding(cityjson, buildingId);
+      const { value: r } = runStructurallyGuardedMutation(
+        cityjson,
+        `Making ${buildingId} editable`,
+        () => parametriseBuilding(cityjson, buildingId)
+      );
       if (!r.ok) {
         alert(`Couldn't make this building editable: ${r.reason}`);
         return;
@@ -261,8 +374,9 @@ export default function App() {
         return next;
       });
       setReloadToken((t) => t + 1);
+      markGeometryChanged();
     },
-    [cityjson, pushUndo]
+    [cityjson, pushUndo, markGeometryChanged]
   );
 
   // ── Copy / Paste ─────────────────────────────────────────────────────────
@@ -276,7 +390,11 @@ export default function App() {
   const handlePaste = useCallback(() => {
     if (!cityjson || !clipboardIds || clipboardIds.size === 0) return;
     pushUndo('Paste buildings');
-    const { clonedIds } = cloneBuildings(cityjson, clipboardIds, 5, 5);
+    const { value: { clonedIds } } = runStructurallyGuardedMutation(
+      cityjson,
+      'Pasting buildings',
+      () => cloneBuildings(cityjson, clipboardIds, 5, 5)
+    );
     setDirtyIds((prev) => {
       const next = new Set(prev);
       for (const id of clonedIds) next.add(id);
@@ -285,7 +403,8 @@ export default function App() {
     setReloadToken((t) => t + 1);
     if (clonedIds.length === 1) setSelection({ objectId: clonedIds[0] });
     setMultiSelection(new Set(clonedIds));
-  }, [cityjson, clipboardIds, pushUndo]);
+    markGeometryChanged();
+  }, [cityjson, clipboardIds, pushUndo, markGeometryChanged]);
 
   // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = useCallback(() => {
@@ -296,17 +415,23 @@ export default function App() {
     const label =
       ids.size === 1 ? `Delete ${[...ids][0]}` : `Delete ${ids.size} buildings`;
     pushUndo(label);
-    const { deletedIds } = deleteBuildings(cityjson, ids);
-    const gone = new Set(deletedIds);
+    const { value: { deletedIds } } = runStructurallyGuardedMutation(
+      cityjson,
+      label,
+      () => deleteBuildings(cityjson, ids)
+    );
     setDirtyIds((prev) => {
-      const next = new Set<string>();
-      for (const id of prev) if (!gone.has(id)) next.add(id);
+      const next = new Set(prev);
+      // Keep tombstones dirty so CityJSONSeq write-back can remove deleted
+      // source features instead of forgetting that they ever existed.
+      for (const id of deletedIds) next.add(id);
       return next;
     });
     setSelection(null);
     setMultiSelection(new Set());
     setReloadToken((t) => t + 1);
-  }, [cityjson, selection, multiSelection, pushUndo]);
+    markGeometryChanged();
+  }, [cityjson, selection, multiSelection, pushUndo, markGeometryChanged]);
 
   // Keyboard shortcuts: Ctrl+Z / Cmd+Z for undo, Ctrl+Shift+Z / Cmd+Shift+Z
   // for redo. Ctrl+C / Ctrl+V for copy/paste. Delete / Backspace removes the
@@ -412,7 +537,11 @@ export default function App() {
       if (!cityjson) return;
       try {
         pushUndo(`Split ${id} into ${floorCount} floors`);
-        const { partIds } = splitBuildingByFloor(cityjson, id, floorCount);
+        const { value: { partIds } } = runStructurallyGuardedMutation(
+          cityjson,
+          `Splitting ${id} into floors`,
+          () => splitBuildingByFloor(cityjson, id, floorCount)
+        );
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -420,11 +549,12 @@ export default function App() {
           return next;
         });
         setReloadToken((t) => t + 1);
+        markGeometryChanged();
       } catch (e) {
         alert(e instanceof Error ? e.message : String(e));
       }
     },
-    [cityjson, pushUndo]
+    [cityjson, pushUndo, markGeometryChanged]
   );
 
   const handleSplitByFloorHeights = useCallback(
@@ -432,7 +562,11 @@ export default function App() {
       if (!cityjson) return;
       try {
         pushUndo(`Split ${id} with custom heights`);
-        const { partIds } = splitBuildingByFloorHeights(cityjson, id, heights);
+        const { value: { partIds } } = runStructurallyGuardedMutation(
+          cityjson,
+          `Splitting ${id} with custom floor heights`,
+          () => splitBuildingByFloorHeights(cityjson, id, heights)
+        );
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -440,11 +574,38 @@ export default function App() {
           return next;
         });
         setReloadToken((t) => t + 1);
+        markGeometryChanged();
       } catch (e) {
         alert(e instanceof Error ? e.message : String(e));
       }
     },
-    [cityjson, pushUndo]
+    [cityjson, pushUndo, markGeometryChanged]
+  );
+
+  const handleSplitByFloorPlans = useCallback(
+    (id: string, heights: number[], floorPlans: FloorPlanDivision[]) => {
+      if (!cityjson) return;
+      try {
+        pushUndo(`Split ${id} into floor-plan sections`);
+        const { value: { partIds } } = runStructurallyGuardedMutation(
+          cityjson,
+          `Splitting ${id} into floor-plan sections`,
+          () => splitBuildingByFloorPlans(cityjson, id, heights, floorPlans)
+        );
+        setDirtyIds((prev) => {
+          const next = new Set(prev);
+          next.add(id);
+          for (const p of partIds) next.add(p);
+          return next;
+        });
+        setSplitPreviewFloorPlans(null);
+        setReloadToken((t) => t + 1);
+        markGeometryChanged();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [cityjson, pushUndo, markGeometryChanged]
   );
 
   const handleSplitBySide = useCallback(
@@ -452,7 +613,11 @@ export default function App() {
       if (!cityjson) return;
       try {
         pushUndo(`Split ${id} into ${partCount} side parts`);
-        const { partIds } = splitBuildingBySide(cityjson, id, partCount, axis);
+        const { value: { partIds } } = runStructurallyGuardedMutation(
+          cityjson,
+          `Splitting ${id} into side parts`,
+          () => splitBuildingBySide(cityjson, id, partCount, axis)
+        );
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -460,11 +625,12 @@ export default function App() {
           return next;
         });
         setReloadToken((t) => t + 1);
+        markGeometryChanged();
       } catch (e) {
         alert(e instanceof Error ? e.message : String(e));
       }
     },
-    [cityjson, pushUndo]
+    [cityjson, pushUndo, markGeometryChanged]
   );
 
   // Enter "edit position" mode for a building. While active, dX/dY/angle are
@@ -494,24 +660,22 @@ export default function App() {
       if (angle !== 0 || dx !== 0 || dy !== 0) {
         pushUndo(`Move ${id}`);
       }
-      // Order: rotate first (around centroid), then translate. Matches what the
-      // live preview does in computeTransformedFootprint.
-      if (angle !== 0) rotateBuilding(cityjson, id, angle);
-      if (dx !== 0 || dy !== 0) moveBuilding(cityjson, id, dx, dy, 0);
-      if (angle !== 0 || dx !== 0 || dy !== 0) {
+      const result = commitBuildingTransformFromEditor(cityjson, pendingTransform);
+      if (result.changed) {
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
           return next;
         });
         setReloadToken((t) => t + 1);
+        markGeometryChanged();
       }
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
     } finally {
       setPendingTransform(null);
     }
-  }, [cityjson, pendingTransform, pushUndo]);
+  }, [cityjson, pendingTransform, pushUndo, markGeometryChanged]);
 
   // ── Footprint editing (drag building polygon corners) ─────────────────────
   const handleStartFootprintEdit = useCallback(
@@ -545,7 +709,11 @@ export default function App() {
     if (!cityjson || !footprintEdit) return;
     const ring = footprintEdit.pendingRing ?? footprintEdit.initialFootprint;
     pushUndo(`Edit footprint of ${footprintEdit.buildingId}`);
-    const res = regenerateBuilding(cityjson, footprintEdit.buildingId, ring);
+    const { value: res } = runStructurallyGuardedMutation(
+      cityjson,
+      `Editing footprint of ${footprintEdit.buildingId}`,
+      () => regenerateBuilding(cityjson, footprintEdit.buildingId, ring)
+    );
     if (!res.ok) {
       // Roll back the snapshot we just pushed so the user doesn't have to
       // burn it.
@@ -565,7 +733,8 @@ export default function App() {
     });
     setReloadToken((t) => t + 1);
     setFootprintEdit(null);
-  }, [cityjson, footprintEdit, pushUndo, dirtyIds, selection]);
+    markGeometryChanged();
+  }, [cityjson, footprintEdit, pushUndo, dirtyIds, selection, markGeometryChanged]);
 
   // ── Drag a split-line ring in the 3D viewer ─────────────────────────────
   // The Viewer raycasts the user's mouse onto the ring and reports dZ each
@@ -588,6 +757,151 @@ export default function App() {
         next[ringIndex + 1] = upper - d;
         return next;
       });
+    },
+    []
+  );
+
+  // ── CityJSONSeq catalog viewport loading ───────────────────────────────
+  // Catalog tiles stay independent on the server. Newly encountered sequence
+  // features merge into one renderable working set. Clean tiles outside the
+  // current map view are compacted away; dirty tiles remain until checkpointed.
+  const loadCatalogViewport = useCallback(async (bboxWgs84: Bbox) => {
+    const source = catalogConnectionRef.current;
+    const doc = cityjsonRef.current;
+    if (!source || !doc || catalogLoadingRef.current) return;
+
+    catalogLoadingRef.current = true;
+    setCatalogStatus({
+      kind: 'loading',
+      message: `${source.loadedTiles.size} tiles loaded; checking viewport...`,
+    });
+    try {
+      const bbox = projectWgs84BboxToCrs(bboxWgs84, source.crs);
+      const loaded = await fetchCityJsonSeqViewport(
+        source.baseUrl,
+        bbox,
+        new Set(source.loadedTiles.keys())
+      );
+      const loadedTiles = new Map(source.loadedTiles);
+      if (loaded.doc) {
+        const merged = mergeCityJson(doc, loaded.doc);
+        if (!merged.ok) throw new Error(merged.reason);
+        for (const tile of loaded.tiles) loadedTiles.set(tile.catalog.id, tile);
+      }
+      const eviction = evictCleanCityJsonSeqTiles(
+        doc,
+        loadedTiles,
+        new Set(loaded.intersectingTileIds),
+        dirtyIdsRef.current
+      );
+      const next = { ...source, loadedTiles: eviction.tiles };
+      catalogConnectionRef.current = next;
+      setCatalogConnection(next);
+      setFileName(`Hamburg CityJSONSeq catalog (${eviction.tiles.size} tiles)`);
+      if (loaded.doc || eviction.evictedTileIds.length > 0) {
+        setSelection((current) =>
+          current && !doc.CityObjects[current.objectId] ? null : current
+        );
+        setMultiSelection((current) => {
+          const surviving = new Set([...current].filter((id) => doc.CityObjects[id]));
+          return surviving.size === current.size ? current : surviving;
+        });
+        if (eviction.evictedTileIds.length > 0) {
+          undoRef.current.clear();
+          setUndoVersion((version) => version + 1);
+        }
+        setReloadToken((token) => token + 1);
+      }
+      setCatalogStatus({
+        kind: 'ok',
+        message:
+          `${eviction.tiles.size} strict sequence tiles loaded` +
+          (loaded.features > 0 ? `; added ${loaded.features.toLocaleString()} features` : '') +
+          (eviction.evictedTileIds.length > 0
+            ? `; unloaded ${eviction.evictedTileIds.length} clean off-screen tiles`
+            : ''),
+      });
+    } catch (error) {
+      if (error instanceof CatalogWritebackError && error.result.persistedTileIds.length > 0) {
+        const next = { ...source, loadedTiles: error.result.tiles };
+        catalogConnectionRef.current = next;
+        setCatalogConnection(next);
+      }
+      setCatalogStatus({
+        kind: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      catalogLoadingRef.current = false;
+    }
+  }, []);
+
+  const handlePersistCatalog = useCallback(async () => {
+    const source = catalogConnectionRef.current;
+    const doc = cityjsonRef.current;
+    if (!source || !doc || catalogLoadingRef.current || dirtyIdsRef.current.size === 0) return;
+    catalogLoadingRef.current = true;
+    setCatalogStatus({
+      kind: 'loading',
+      message: `Validating and saving ${dirtyIdsRef.current.size} changed objects...`,
+    });
+    let saved = false;
+    try {
+      const result = await persistDirtyCityJsonSeqTiles(
+        source.baseUrl,
+        doc,
+        source.loadedTiles,
+        dirtyIdsRef.current
+      );
+      const next = { ...source, loadedTiles: result.tiles };
+      catalogConnectionRef.current = next;
+      setCatalogConnection(next);
+      const clean = new Set<string>();
+      dirtyIdsRef.current = clean;
+      setDirtyIds(clean);
+      undoRef.current.clear();
+      setUndoVersion((version) => version + 1);
+      setCatalogStatus({
+        kind: 'ok',
+        message: `${result.persistedTileIds.length} sequence tile(s) validated and saved`,
+      });
+      setPrimitiveValidation({
+        kind: 'valid',
+        message: `${result.persistedTileIds.length} changed sequence tile(s) passed structural validation and val3dity during Save seq.`,
+      });
+      saved = true;
+    } catch (error) {
+      setCatalogStatus({
+        kind: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      catalogLoadingRef.current = false;
+    }
+    const bbox = mapBboxRef.current;
+    if (saved && bbox) void loadCatalogViewport(bbox);
+  }, [loadCatalogViewport]);
+
+  const handleViewportChange = useCallback(
+    (bbox: Bbox) => {
+      mapBboxRef.current = bbox;
+      if (!catalogConnectionRef.current) return;
+      if (catalogViewportTimerRef.current !== null) {
+        window.clearTimeout(catalogViewportTimerRef.current);
+      }
+      catalogViewportTimerRef.current = window.setTimeout(() => {
+        catalogViewportTimerRef.current = null;
+        void loadCatalogViewport(bbox);
+      }, 450);
+    },
+    [loadCatalogViewport]
+  );
+
+  useEffect(
+    () => () => {
+      if (catalogViewportTimerRef.current !== null) {
+        window.clearTimeout(catalogViewportTimerRef.current);
+      }
     },
     []
   );
@@ -749,7 +1063,7 @@ export default function App() {
         const ridgeHeight = form.totalHeight;
         const eaveHeight =
           form.roofType === 'flat' ? form.totalHeight : form.totalHeight - form.roofHeight;
-        const result = generateBuilding(cityjson, {
+        const { id, objectIds } = createBuildingFromEditor(cityjson, {
           targetCrs: crs.code,
           footprintWgs84: pendingFootprint,
           storeys: form.storeys,
@@ -766,33 +1080,12 @@ export default function App() {
               : undefined,
           eaveOverhang: form.eaveOverhang,
           rakeOverhang: form.rakeOverhang,
+        }, {
+          mode: form.splitMode,
+          count: form.splitCount,
+          axis: form.splitAxis,
         });
-        const id = insertBuilding(cityjson, result);
-        const newIds = new Set([id]);
-        // Apply the optional split-on-create immediately.
-        if (form.splitMode === 'floors') {
-          try {
-            const { partIds } = splitBuildingByFloor(cityjson, id, form.splitCount);
-            for (const p of partIds) newIds.add(p);
-          } catch (e) {
-            alert(
-              `Building created but split-by-floor failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`
-            );
-          }
-        } else if (form.splitMode === 'sides') {
-          try {
-            const { partIds } = splitBuildingBySide(cityjson, id, form.splitCount, form.splitAxis);
-            for (const p of partIds) newIds.add(p);
-          } catch (e) {
-            alert(
-              `Building created but split-by-side failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`
-            );
-          }
-        }
+        const newIds = new Set(objectIds);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           for (const nid of newIds) next.add(nid);
@@ -800,6 +1093,7 @@ export default function App() {
         });
         setReloadToken((t) => t + 1);
         setSelection({ objectId: id });
+        markGeometryChanged();
       } catch (e) {
         console.error(e);
         alert(`Generation failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -808,7 +1102,7 @@ export default function App() {
         setPendingForm(null);
       }
     },
-    [cityjson, pendingFootprint, pushUndo, zoningEnabled, zones]
+    [cityjson, pendingFootprint, pushUndo, zoningEnabled, zones, markGeometryChanged]
   );
 
   const handleSaveLocal = useCallback(async () => {
@@ -825,9 +1119,69 @@ export default function App() {
     }
   }, [cityjson, fileName]);
 
-  const handleExport = useCallback(() => {
+  const runExternalGeometryValidation = useCallback(async (text: string) => {
+    setPrimitiveValidation({
+      kind: 'checking',
+      message: 'Checking exported CityJSON primitives with the local val3dity service...',
+    });
+    try {
+      const result = await validateExportGeometry(
+        catalogConnectionRef.current?.baseUrl ?? DEFAULT_HAMBURG_CATALOG_URL,
+        text
+      );
+      setPrimitiveValidation({
+        kind: result.ok ? 'valid' : 'invalid',
+        message: result.message,
+      });
+      return result.ok;
+    } catch (error) {
+      setPrimitiveValidation({
+        kind: 'unavailable',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }, []);
+
+  const handleValidateGeometry = useCallback(async () => {
     if (!cityjson) return;
-    const text = JSON.stringify(cityjson);
+    const prepared = prepareValidatedCityJsonExport(cityjson);
+    if (!prepared.ok) {
+      alert(prepared.error);
+      return;
+    }
+    const valid = await runExternalGeometryValidation(prepared.text);
+    if (valid === true) {
+      alert('The current CityJSON passed browser structural validation and local val3dity.');
+    } else if (valid === false) {
+      alert('The current CityJSON failed local val3dity. See the 3D validation status for details.');
+    } else {
+      alert('The local val3dity service is unavailable. Start the Hamburg catalog server to run the 3D check.');
+    }
+  }, [cityjson, runExternalGeometryValidation]);
+
+  const handleExport = useCallback(async () => {
+    if (!cityjson) return;
+    const prepared = prepareValidatedCityJsonExport(cityjson);
+    if (!prepared.ok) {
+      alert(`${prepared.error}\n\nExport stopped so an invalid CityJSON file is not downloaded.`);
+      return;
+    }
+    const geometryValid = await runExternalGeometryValidation(prepared.text);
+    if (geometryValid === false) {
+      alert('Export stopped because val3dity rejected the exact CityJSON bytes prepared for download.');
+      return;
+    }
+    if (
+      geometryValid === null &&
+      !window.confirm(
+        'Browser structural validation passed, but the local val3dity service is unavailable. ' +
+          'Export with 3D primitive validity unchecked?'
+      )
+    ) {
+      return;
+    }
+    const text = prepared.text;
     const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -836,7 +1190,7 @@ export default function App() {
     a.download = `${base}.modified.city.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [cityjson, fileName]);
+  }, [cityjson, fileName, runExternalGeometryValidation]);
 
   const handleExportGltf = useCallback(() => {
     if (!cityjson) return;
@@ -861,9 +1215,25 @@ export default function App() {
 
   const handleReset = useCallback(() => {
     setCityjson(null);
+    cityjsonRef.current = null;
     setFileName('');
     setSelection(null);
-    setDirtyIds(new Set());
+    const clean = new Set<string>();
+    dirtyIdsRef.current = clean;
+    setDirtyIds(clean);
+    setSeqRawText(null);
+    setCatalogConnection(null);
+    catalogConnectionRef.current = null;
+    setCatalogStatus({ kind: 'idle' });
+    setInputIntegrity(null);
+    setPrimitiveValidation({
+      kind: 'unchecked',
+      message: '3D primitive validity has not been checked yet.',
+    });
+    if (catalogViewportTimerRef.current !== null) {
+      window.clearTimeout(catalogViewportTimerRef.current);
+      catalogViewportTimerRef.current = null;
+    }
     originals.clear();
   }, [originals]);
 
@@ -918,22 +1288,26 @@ export default function App() {
       try {
         pushUndo(`Import IFC: ${ifcPending.fileName}`);
         const { convertIfcToCityJsonBuilding } = await import('./lib/ifc-to-cityjson');
-        const result = convertIfcToCityJsonBuilding(
+        const { value: result } = runStructurallyGuardedMutation(
           cityjson,
-          ifcPending.parsed,
-          lngLat,
-          ifcPending.fileName
+          `Importing IFC ${ifcPending.fileName}`,
+          () => {
+            const converted = convertIfcToCityJsonBuilding(
+              cityjson,
+              ifcPending.parsed,
+              lngLat,
+              ifcPending.fileName
+            );
+            if (converted.vertexOffset !== cityjson.vertices.length) {
+              throw new Error(
+                `Vertex offset mismatch: expected ${cityjson.vertices.length}, got ${converted.vertexOffset}`
+              );
+            }
+            cityjson.vertices.push(...converted.newVertices);
+            cityjson.CityObjects[converted.id] = converted.cityObject;
+            return converted;
+          }
         );
-        // Append vertices + insert the CityObject (manual — generator's
-        // insertBuilding asserts vertexOffset === doc.vertices.length, which
-        // matches our converter's contract).
-        if (result.vertexOffset !== cityjson.vertices.length) {
-          throw new Error(
-            `Vertex offset mismatch: expected ${cityjson.vertices.length}, got ${result.vertexOffset}`
-          );
-        }
-        cityjson.vertices.push(...result.newVertices);
-        cityjson.CityObjects[result.id] = result.cityObject;
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(result.id);
@@ -941,6 +1315,7 @@ export default function App() {
         });
         setSelection({ objectId: result.id });
         setReloadToken((t) => t + 1);
+        markGeometryChanged();
       } catch (e) {
         alert(
           `Could not create building from IFC: ${e instanceof Error ? e.message : String(e)}`
@@ -949,7 +1324,7 @@ export default function App() {
         setIfcPending(null);
       }
     },
-    [cityjson, ifcPending, pushUndo]
+    [cityjson, ifcPending, pushUndo, markGeometryChanged]
   );
 
   const handleCancelIfcPlacement = useCallback(() => {
@@ -989,7 +1364,11 @@ export default function App() {
         }
         // Snapshot before mutation so the user can undo a bad merge.
         pushUndo(`Merge ${file.name}`);
-        const r = mergeCityJson(cityjson, parsed.doc);
+        const { value: r } = runStructurallyGuardedMutation(
+          cityjson,
+          `Merging ${file.name}`,
+          () => mergeCityJson(cityjson, parsed.doc)
+        );
         if (!r.ok) {
           // Roll back — merge refused, no doc change.
           undoRef.current.undo({
@@ -1002,6 +1381,7 @@ export default function App() {
           return;
         }
         setReloadToken((t) => t + 1);
+        markGeometryChanged('Merged geometry has not been checked with val3dity yet.');
         const lines = [
           `Merged "${file.name}" successfully.`,
           `Added ${r.added} CityObject${r.added === 1 ? '' : 's'}.`,
@@ -1018,7 +1398,7 @@ export default function App() {
     };
     document.body.appendChild(input);
     input.click();
-  }, [cityjson, pushUndo, dirtyIds, selection]);
+  }, [cityjson, pushUndo, dirtyIds, selection, markGeometryChanged]);
 
   const handleCompactVertices = useCallback(() => {
     if (!cityjson) return;
@@ -1050,7 +1430,15 @@ export default function App() {
   const handleShowIntegrity = useCallback(() => {
     if (!integrity) return;
     if (integrity.issues.length === 0) {
-      alert('No integrity issues found.');
+      alert(
+        `Current browser structure check: valid.\n` +
+          `Input at load: ${
+            inputIntegrity?.ok
+              ? 'valid'
+              : `${inputIntegrity?.counts.error ?? 0} error(s) detected`
+          }.\n\n` +
+          `ISO 19107 primitive status: ${primitiveValidation.message}`
+      );
       return;
     }
     // Group + cap so the alert isn't a wall of text on huge files. First 12
@@ -1062,6 +1450,12 @@ export default function App() {
     lines.push(
       `Scanned ${integrity.summary.cityObjects} CityObjects, ${integrity.summary.vertices} vertices (${integrity.summary.referencedVertices} referenced).`
     );
+    lines.push(
+      `Input at load: ${
+        inputIntegrity?.ok ? 'valid' : `${inputIntegrity?.counts.error ?? 0} error(s) detected`
+      }.`
+    );
+    lines.push(`ISO 19107 primitive status: ${primitiveValidation.message}`);
     lines.push('');
     const max = 12;
     for (const issue of integrity.issues.slice(0, max)) {
@@ -1072,7 +1466,7 @@ export default function App() {
       lines.push(`… + ${integrity.issues.length - max} more`);
     }
     alert(lines.join('\n'));
-  }, [integrity]);
+  }, [integrity, inputIntegrity, primitiveValidation.message]);
 
   // Extract footprints once (memoized on doc identity + reload token) so
   // FilterBar and the dimmed-set computation share the same derived data.
@@ -1184,6 +1578,31 @@ export default function App() {
         onToggleZoning={handleToggleZoning}
         onFilterViewport={handleReloadViewport}
         canFilterViewport={!!seqRawText}
+        catalogState={
+          catalogConnection
+            ? {
+                loadedTiles: catalogConnection.loadedTiles.size,
+                loading: catalogStatus.kind === 'loading',
+                dirty: dirtyIds.size > 0,
+                error: catalogStatus.kind === 'error' ? catalogStatus.message : undefined,
+                message: catalogStatus.message,
+              }
+            : undefined
+        }
+        primitiveValidation={{
+          ...primitiveValidation,
+          onValidate: () => void handleValidateGeometry(),
+        }}
+        onLoadCatalogViewport={
+          catalogConnection
+            ? () => {
+                const bbox = mapBboxRef.current;
+                if (bbox) void loadCatalogViewport(bbox);
+                else alert('Map viewport is not ready yet.');
+              }
+            : undefined
+        }
+        onPersistCatalog={catalogConnection ? handlePersistCatalog : undefined}
       />
       {cityjson && footprintsForFilter.length > 0 && (
         <FilterBar
@@ -1223,9 +1642,7 @@ export default function App() {
               onDrawCanceled={handleCancelDraw}
               filteredIds={filterIsEmpty ? null : filteredIds}
               onPlacementClick={ifcPending ? handleIfcPlacement : undefined}
-              onViewportChange={(bbox) => {
-                mapBboxRef.current = bbox;
-              }}
+              onViewportChange={handleViewportChange}
               dragTransformId={pendingTransform?.id ?? null}
               onDragMove={handleDragMove}
               multiSelectedIds={multiSelection.size > 0 ? multiSelection : null}
@@ -1276,7 +1693,7 @@ export default function App() {
               }
             />
           ) : (
-            <FileLoader onLoaded={handleLoaded} />
+            <FileLoader onLoaded={handleLoaded} onCatalogLoaded={handleCatalogLoaded} />
           )}
           {pendingFootprint && cityjson && (
             <BuildingCreator
@@ -1328,7 +1745,11 @@ export default function App() {
                 onSelect={() => {}}
                 splitPreview={
                   splitPreviewHeights
-                    ? { buildingId: selection.objectId, heights: splitPreviewHeights }
+                    ? {
+                        buildingId: selection.objectId,
+                        heights: splitPreviewHeights,
+                        floorPlans: splitPreviewFloorPlans ?? undefined,
+                      }
                     : null
                 }
                 onAdjustSplit={handleAdjustSplit}
@@ -1343,7 +1764,9 @@ export default function App() {
               onRevert={handleRevert}
               onSplitByFloor={handleSplitByFloor}
               onSplitByFloorHeights={handleSplitByFloorHeights}
+              onSplitByFloorPlans={handleSplitByFloorPlans}
               onCustomHeightsPreview={setSplitPreviewHeights}
+              onFloorPlansPreview={setSplitPreviewFloorPlans}
               onSplitBySide={handleSplitBySide}
               pendingTransform={
                 pendingTransform?.id === selection.objectId ? pendingTransform : null
@@ -1378,7 +1801,13 @@ function AttributePanelInline(props: {
   onRevert: (id: string) => void;
   onSplitByFloor: (id: string, floorCount: number) => void;
   onSplitByFloorHeights: (id: string, heights: number[]) => void;
+  onSplitByFloorPlans: (
+    id: string,
+    heights: number[],
+    floorPlans: FloorPlanDivision[]
+  ) => void;
   onCustomHeightsPreview: (heights: number[] | null) => void;
+  onFloorPlansPreview: (plans: FloorPlanDivision[] | null) => void;
   onSplitBySide: (id: string, partCount: number, axis: SplitAxis) => void;
   pendingTransform: PendingTransform | null;
   onStartTransform: (id: string) => void;
@@ -1414,7 +1843,9 @@ function AttributePanelInline(props: {
       onClose={() => {}}
       onSplitByFloor={props.onSplitByFloor}
       onSplitByFloorHeights={props.onSplitByFloorHeights}
+      onSplitByFloorPlans={props.onSplitByFloorPlans}
       onCustomHeightsPreview={props.onCustomHeightsPreview}
+      onFloorPlansPreview={props.onFloorPlansPreview}
       onSplitBySide={props.onSplitBySide}
       pendingTransform={props.pendingTransform}
       onStartTransform={props.onStartTransform}

@@ -26,10 +26,12 @@ export interface MergeOutcome {
  *  - CityObject id conflicts get a unique suffix (`__merge2`, `__merge3`, …)
  *    and the renames are reported. If a child references a renamed parent,
  *    the parents/children arrays are rewritten to use the new id.
- *  - Coordinate transforms must match exactly. Mismatched scale/translate
- *    means the integer-encoded vertices can't be merged in place; we'd need
- *    to decode-and-re-encode, which loses precision. Refuses with a friendly
- *    reason.
+ *  - Compatible coordinate transforms are normalised into the base
+ *    document's integer grid. Adjacent CityJSONSeq tiles commonly have the
+ *    same CRS and millimetre scale but different local translations. The
+ *    merge decodes and re-encodes those vertices exactly; it refuses if a
+ *    coordinate cannot be represented on the base grid without precision
+ *    loss.
  *
  * Useful for stitching together adjacent Hamburg tiles, or for layering an
  * "edits" file on top of an imported base. The result is a single, editable
@@ -54,34 +56,39 @@ export function mergeCityJson(
     };
   }
 
-  // Transform check — scale + translate must match. If the base has no
-  // transform and incoming does, adopt incoming's. Same for incoming-no-base.
+  // Transform check — if the base has no transform and incoming does, adopt
+  // incoming's. If both have transforms, re-encode the incoming vertices onto
+  // the base grid when needed. A transformed base cannot safely absorb an
+  // untransformed incoming document because the latter's coordinate units are
+  // ambiguous.
+  let incomingVertices = incoming.vertices.map((vertex) => [...vertex] as [number, number, number]);
   if (base.transform && incoming.transform) {
-    const sBase = base.transform.scale;
-    const sInc = incoming.transform.scale;
-    const tBase = base.transform.translate;
-    const tInc = incoming.transform.translate;
-    const sameScale = sBase[0] === sInc[0] && sBase[1] === sInc[1] && sBase[2] === sInc[2];
-    const sameTranslate =
-      tBase[0] === tInc[0] && tBase[1] === tInc[1] && tBase[2] === tInc[2];
-    if (!sameScale || !sameTranslate) {
+    const normalised = reencodeVertices(incomingVertices, incoming.transform, base.transform);
+    if (!normalised.ok) {
       return {
         ok: false,
-        reason:
-          'Transform mismatch — scale/translate differ between docs. ' +
-          'Vertex re-encoding would lose precision; not yet supported.',
+        reason: normalised.reason,
       };
     }
+    incomingVertices = normalised.vertices;
   } else if (!base.transform && incoming.transform) {
     base.transform = incoming.transform;
+  } else if (base.transform && !incoming.transform) {
+    return {
+      ok: false,
+      reason:
+        'Transform mismatch — base is integer-encoded but incoming has no transform. ' +
+        'Cannot infer incoming coordinate units safely.',
+    };
   }
 
   if (!baseCrs && incCrs && base.metadata) base.metadata.referenceSystem = incCrs;
   else if (!base.metadata && incoming.metadata) base.metadata = { ...incoming.metadata };
+  mergeGeographicalExtent(base, incoming);
 
   // ── Vertex merge ────────────────────────────────────────────────────────
   const vertexOffset = base.vertices.length;
-  for (const v of incoming.vertices) base.vertices.push(v);
+  for (const v of incomingVertices) base.vertices.push(v);
 
   // ── Id conflict resolution ──────────────────────────────────────────────
   const renameMap: Record<string, string> = {};
@@ -136,4 +143,69 @@ function shiftIndices(node: unknown, offset: number): unknown {
   if (typeof node === 'number') return node + offset;
   if (Array.isArray(node)) return node.map((c) => shiftIndices(c, offset));
   return node;
+}
+
+function reencodeVertices(
+  vertices: [number, number, number][],
+  incoming: NonNullable<CityJsonDocument['transform']>,
+  base: NonNullable<CityJsonDocument['transform']>
+): { ok: true; vertices: [number, number, number][] } | { ok: false; reason: string } {
+  if (!isUsableTransform(incoming) || !isUsableTransform(base)) {
+    return {
+      ok: false,
+      reason: 'Transform mismatch — scale and translate values must be finite and scale cannot be zero.',
+    };
+  }
+
+  const same =
+    incoming.scale.every((value, index) => value === base.scale[index]) &&
+    incoming.translate.every((value, index) => value === base.translate[index]);
+  if (same) return { ok: true, vertices };
+
+  const encoded: [number, number, number][] = [];
+  for (const vertex of vertices) {
+    const next: [number, number, number] = [0, 0, 0];
+    for (let axis = 0; axis < 3; axis++) {
+      const decoded = vertex[axis] * incoming.scale[axis] + incoming.translate[axis];
+      const raw = (decoded - base.translate[axis]) / base.scale[axis];
+      const rounded = Math.round(raw);
+      if (!Number.isFinite(raw) || Math.abs(raw - rounded) > 1e-5) {
+        return {
+          ok: false,
+          reason:
+            'Transform mismatch — incoming coordinates cannot be represented exactly ' +
+            'on the base document grid without precision loss.',
+        };
+      }
+      next[axis] = rounded;
+    }
+    encoded.push(next);
+  }
+  return { ok: true, vertices: encoded };
+}
+
+function isUsableTransform(transform: NonNullable<CityJsonDocument['transform']>): boolean {
+  return (
+    transform.scale.every((value) => Number.isFinite(value) && value !== 0) &&
+    transform.translate.every(Number.isFinite)
+  );
+}
+
+function mergeGeographicalExtent(base: CityJsonDocument, incoming: CityJsonDocument): void {
+  const left = base.metadata?.geographicalExtent;
+  const right = incoming.metadata?.geographicalExtent;
+  if (!Array.isArray(right) || right.length < 6) return;
+  if (!base.metadata) base.metadata = {};
+  if (!Array.isArray(left) || left.length < 6) {
+    base.metadata.geographicalExtent = right.slice(0, 6);
+    return;
+  }
+  base.metadata.geographicalExtent = [
+    Math.min(left[0], right[0]),
+    Math.min(left[1], right[1]),
+    Math.min(left[2], right[2]),
+    Math.max(left[3], right[3]),
+    Math.max(left[4], right[4]),
+    Math.max(left[5], right[5]),
+  ];
 }

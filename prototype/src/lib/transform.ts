@@ -28,6 +28,7 @@ export function moveBuilding(
   dy: number,
   dz = 0
 ): TransformResult {
+  assertFiniteTransform([dx, dy, dz]);
   return rewriteVertices(doc, buildingId, ([x, y, z]) => [x + dx, y + dy, z + dz]);
 }
 
@@ -42,6 +43,7 @@ export function rotateBuilding(
   buildingId: string,
   angleDegrees: number
 ): TransformResult {
+  assertFiniteTransform([angleDegrees]);
   const centroid = computeBuildingCentroid(doc, buildingId);
   if (!centroid) throw new Error('Could not compute building centroid for rotation');
   const rad = (angleDegrees * Math.PI) / 180;
@@ -73,7 +75,7 @@ function rewriteVertices(
   const obj = doc.CityObjects[buildingId];
   if (!obj) throw new Error(`Building ${buildingId} not found`);
 
-  const objectsToRewrite = [obj, ...collectChildGeometryHolders(doc, obj)];
+  const objectsToRewrite = collectGeometryHolders(doc, obj);
 
   // 1. Collect the unique set of vertex indices referenced by these objects
   const referenced = new Set<number>();
@@ -85,16 +87,19 @@ function rewriteVertices(
 
   // 2. Create new vertex entries at transformed positions, remember the mapping
   const t = doc.transform ?? { scale: [1, 1, 1], translate: [0, 0, 0] };
+  assertUsableTransform(t);
   const decode = (raw: [number, number, number]): [number, number, number] => [
     raw[0] * t.scale[0] + t.translate[0],
     raw[1] * t.scale[1] + t.translate[1],
     raw[2] * t.scale[2] + t.translate[2],
   ];
-  const encode = (real: [number, number, number]): [number, number, number] => [
-    Math.round((real[0] - t.translate[0]) / t.scale[0]),
-    Math.round((real[1] - t.translate[1]) / t.scale[1]),
-    Math.round((real[2] - t.translate[2]) / t.scale[2]),
-  ];
+  const encode = doc.transform
+    ? (real: [number, number, number]): [number, number, number] => [
+        Math.round((real[0] - t.translate[0]) / t.scale[0]),
+        Math.round((real[1] - t.translate[1]) / t.scale[1]),
+        Math.round((real[2] - t.translate[2]) / t.scale[2]),
+      ]
+    : (real: [number, number, number]): [number, number, number] => [...real];
 
   const oldToNew = new Map<number, number>();
   for (const oldIdx of referenced) {
@@ -114,6 +119,7 @@ function rewriteVertices(
     const changed = rewriteObjectBoundaries(o, oldToNew);
     if (changed) objectsUpdated++;
   }
+  refreshStoredExtents(doc, objectsToRewrite);
 
   return {
     buildingId,
@@ -122,18 +128,16 @@ function rewriteVertices(
   };
 }
 
-/** Collect the Building's direct BuildingPart children (not recursive for now). */
-function collectChildGeometryHolders(
+/** Collect the selected object and every descendant geometry holder. */
+function collectGeometryHolders(
   doc: CityJsonDocument,
   obj: CityObject
 ): CityObject[] {
-  const out: CityObject[] = [];
+  const out: CityObject[] = [obj];
   for (const cid of obj.children ?? []) {
     const child = doc.CityObjects[cid];
     if (child) {
-      out.push(child);
-      // Recurse for deeper parts
-      out.push(...collectChildGeometryHolders(doc, child));
+      out.push(...collectGeometryHolders(doc, child));
     }
   }
   return out;
@@ -196,11 +200,7 @@ function computeBuildingCentroid(
   if (!obj) return null;
   const referenced = new Set<number>();
   const visit = (o: CityObject) => visitBoundaries(o, (i) => referenced.add(i));
-  visit(obj);
-  for (const cid of obj.children ?? []) {
-    const child = doc.CityObjects[cid];
-    if (child) visit(child);
-  }
+  for (const holder of collectGeometryHolders(doc, obj)) visit(holder);
   if (referenced.size === 0) return null;
   const t = doc.transform ?? { scale: [1, 1, 1], translate: [0, 0, 0] };
   let minX = Infinity,
@@ -219,4 +219,65 @@ function computeBuildingCentroid(
   }
   if (!isFinite(minX)) return null;
   return [(minX + maxX) / 2, (minY + maxY) / 2];
+}
+
+function assertFiniteTransform(values: number[]): void {
+  if (!values.every(Number.isFinite)) {
+    throw new Error('Transform values must be finite numbers');
+  }
+}
+
+function assertUsableTransform(t: {
+  scale: [number, number, number];
+  translate: [number, number, number];
+}): void {
+  if (
+    !t.scale.every((v) => Number.isFinite(v) && v !== 0) ||
+    !t.translate.every(Number.isFinite)
+  ) {
+    throw new Error('Document transform must contain finite, non-zero scale values');
+  }
+}
+
+/** Keep optional source extents coherent after moving geometry. */
+function refreshStoredExtents(doc: CityJsonDocument, affected: CityObject[]): void {
+  for (const obj of affected) {
+    if (Array.isArray(obj.geographicalExtent)) {
+      const extent = extentForObjects(doc, collectGeometryHolders(doc, obj));
+      if (extent) obj.geographicalExtent = extent;
+    }
+  }
+  if (Array.isArray(doc.metadata?.geographicalExtent)) {
+    const extent = extentForObjects(doc, Object.values(doc.CityObjects));
+    if (extent) doc.metadata!.geographicalExtent = extent;
+  }
+}
+
+function extentForObjects(
+  doc: CityJsonDocument,
+  objects: CityObject[]
+): [number, number, number, number, number, number] | null {
+  const t = doc.transform ?? { scale: [1, 1, 1], translate: [0, 0, 0] };
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const obj of objects) {
+    visitBoundaries(obj, (idx) => {
+      const raw = doc.vertices[idx];
+      if (!raw) return;
+      const x = raw[0] * t.scale[0] + t.translate[0];
+      const y = raw[1] * t.scale[1] + t.translate[1];
+      const z = raw[2] * t.scale[2] + t.translate[2];
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (z < minZ) minZ = z;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      if (z > maxZ) maxZ = z;
+    });
+  }
+  return Number.isFinite(minX) ? [minX, minY, minZ, maxX, maxY, maxZ] : null;
 }

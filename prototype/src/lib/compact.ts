@@ -74,7 +74,13 @@ export function compactVertices(doc: CityJsonDocument): CompactResult {
   // Pass 4: install the compacted array. In-place mutation so external
   // references to doc.vertices keep pointing at the new contents.
   doc.vertices.length = 0;
-  doc.vertices.push(...newVertices);
+  // Avoid one giant spread call: multi-tile CityJSONSeq working sets can
+  // contain hundreds of thousands of vertices, which exceeds JavaScript's
+  // function-argument limit and throws "Maximum call stack size exceeded".
+  const chunkSize = 10_000;
+  for (let start = 0; start < newVertices.length; start += chunkSize) {
+    doc.vertices.push(...newVertices.slice(start, start + chunkSize));
+  }
 
   return {
     before,

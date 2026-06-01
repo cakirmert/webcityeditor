@@ -5,7 +5,9 @@ import {
   canSplitBuilding,
   splitBuildingByFloor,
   splitBuildingByFloorHeights,
+  splitBuildingByFloorPlans,
   splitBuildingBySide,
+  splitFootprintBySide,
   MIN_STOREY_HEIGHT,
   MIN_SIDE_WIDTH,
 } from './subdivision';
@@ -250,5 +252,88 @@ describe('splitBuildingByFloorHeights (custom per-floor heights)', () => {
     for (const pid of partIds) {
       expect(doc.CityObjects[pid].attributes?.measuredHeight).toBeCloseTo(3, 2);
     }
+  });
+});
+
+describe('splitBuildingByFloorPlans', () => {
+  it('creates separately configurable footprint sections on each floor', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+
+    const { partIds, floorPartIds } = splitBuildingByFloorPlans(
+      doc,
+      id,
+      [4, 4, 4],
+      [
+        { partCount: 2, axis: 'longer', cutFractions: [0.4] },
+        { partCount: 1, axis: 'auto' },
+        { partCount: 3, axis: 'longer', cutFractions: [0.3, 0.7] },
+      ]
+    );
+
+    expect(partIds).toHaveLength(6);
+    expect(floorPartIds.map((ids) => ids.length)).toEqual([2, 1, 3]);
+    expect(doc.CityObjects[id].children).toEqual(partIds);
+    for (let floor = 0; floor < floorPartIds.length; floor++) {
+      for (let section = 0; section < floorPartIds[floor].length; section++) {
+        const attrs = doc.CityObjects[floorPartIds[floor][section]].attributes;
+        expect(attrs?._floorIndex).toBe(floor);
+        expect(attrs?._footprintSectionIndex).toBe(section);
+        expect(attrs?._footprintSectionCount).toBe(floorPartIds[floor].length);
+      }
+    }
+  });
+
+  it('keeps a custom floor-plan split structurally valid after JSON round-trip', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    splitBuildingByFloorPlans(
+      doc,
+      id,
+      [4, 4, 4],
+      new Array(3).fill(null).map(() => ({
+        partCount: 2,
+        axis: 'longer' as const,
+        cutFractions: [0.5],
+      }))
+    );
+    const parsed = parseCityJson(JSON.stringify(doc));
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('rejects invalid manual cut positions before mutating the source', () => {
+    const { doc, id } = makeBuilding({ eaveHeight: 12, ridgeHeight: 12 });
+    const before = JSON.stringify(doc);
+
+    expect(() =>
+      splitBuildingByFloorPlans(
+        doc,
+        id,
+        [6, 6],
+        [
+          { partCount: 2, axis: 'longer', cutFractions: [0.05] },
+          { partCount: 1, axis: 'auto' },
+        ]
+      )
+    ).toThrow(/minimum/);
+    expect(JSON.stringify(doc)).toBe(before);
+  });
+});
+
+describe('splitFootprintBySide', () => {
+  it('honours manual cut fractions instead of always splitting equally', () => {
+    const fp: [number, number][] = [
+      [4.3571, 52.0116],
+      [4.35725, 52.0116],
+      [4.35725, 52.01175],
+      [4.3571, 52.01175],
+    ];
+    const sections = splitFootprintBySide(fp, {
+      partCount: 2,
+      axis: 'longer',
+      cutFractions: [0.4],
+    });
+    expect(sections).toHaveLength(2);
+    const firstHeight = sections[0][2][1] - sections[0][1][1];
+    const secondHeight = sections[1][2][1] - sections[1][1][1];
+    expect(firstHeight / secondHeight).toBeCloseTo(2 / 3, 2);
   });
 });

@@ -147,4 +147,30 @@ describe('compactVertices', () => {
     expect(r.reclaimed).toBe(8);
     expect(doc.vertices.length).toBe(0);
   });
+
+  it('compacts multi-tile-scale vertex arrays without overflowing the call stack', () => {
+    const count = 120_000;
+    const vertices = Array.from(
+      { length: count + 1 },
+      (_, index) => [index, 0, 0] as [number, number, number]
+    );
+    const doc = {
+      type: 'CityJSON' as const,
+      version: '2.0',
+      CityObjects: {
+        BigBuilding: {
+          type: 'Building',
+          geometry: [{ type: 'MultiSurface', boundaries: [[[...Array(count).keys()]]] }],
+        },
+      },
+      vertices,
+    };
+    const originalArray = doc.vertices;
+
+    const r = compactVertices(doc);
+
+    expect(r.reclaimed).toBe(1);
+    expect(doc.vertices).toBe(originalArray);
+    expect(doc.vertices).toHaveLength(count);
+  });
 });

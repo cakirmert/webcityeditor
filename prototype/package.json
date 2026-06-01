@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "data:hamburg-center": "node scripts/build-hamburg-center-sample.mjs"
+    "data:hamburg-center": "node scripts/build-hamburg-center-sample.mjs",
+    "data:hamburg-lod2": "node scripts/hamburg-lod2.mjs",
+    "data:hamburg-lod2:serve": "node scripts/hamburg-lod2.mjs serve"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.1",

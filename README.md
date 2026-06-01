@@ -1,6 +1,6 @@
 # City Editor
 
-Browser-based LoD 2 city-model editor. Loads CityJSON 2.0, renders every building on a MapLibre + deck.gl map, and lets you edit, create, transform, subdivide, and export buildings — all client-side.
+Browser-based LoD 2 city-model editor. Prefers tiled CityJSONSeq input, also loads monolithic CityJSON 2.0, renders buildings on a MapLibre + deck.gl map, and lets you edit, create, transform, subdivide, and export buildings. A lightweight optional local server provides strict whole-city Hamburg tile loading and write-back.
 
 Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`prototype/PROTOTYPE_STATUS.md`](prototype/PROTOTYPE_STATUS.md) for the full planned-vs-delivered breakdown and [`prototype/HAMBURG_PIPELINE.md`](prototype/HAMBURG_PIPELINE.md) for the Hamburg CityGML-to-CityJSON pipeline.
 
@@ -12,10 +12,11 @@ Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`pr
 - Snap-to-existing-footprints while drawing (auto-collected from the loaded CityJSON).
 - Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence.
 - Hamburg planning overlay: fetches real XPlan building-use polygons by viewport, with FNP land-use fallback when XPlan has no polygons.
-- Subdivision into BuildingParts: split by floor (stacked) or by side (adjacent). Works on any loaded building, not just ones created in the editor.
+- CityJSONSeq-first Hamburg workflow: connect the local strict catalog once, pan to fetch nearby `.city.jsonl` tiles, use **Save seq** for validated optimistic-concurrency write-back, and let clean off-screen tiles unload automatically.
+- Subdivision into BuildingParts: split by floor, by side, or with per-floor footprint plans. Plans support manual percentage cuts, per-floor overrides, an apply-to-all-floors checkbox, and 2D/3D previews.
 - Live-preview transforms: translate and rotate buildings with a ghost preview on the map, then save or cancel.
 - 10 CRS registered via proj4 (EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514).
-- 349 tests across validation, round-trip, generation, subdivision, transforms, IFC import, planning data, and UI components.
+- 385 tests across validation, round-trip, generation, subdivision, transforms, CityJSONSeq catalog loading and write-back, IFC import, Hamburg data preparation, planning data, and UI components.
 
 ## Setup
 
@@ -31,7 +32,7 @@ npm install
 npm run dev
 ```
 
-The dev server opens at http://localhost:5173. Click **"Use built-in sample cube"** to see it working instantly, or **"Fetch URL"** on the pre-filled 3DBAG tile for a real-world dataset.
+The dev server opens at http://localhost:5173. Click **"Use built-in sample cube"** to see it working instantly. For strict whole-city Hamburg LoD2 data, start the local tile server and use **"Connect catalog"** on the load screen.
 
 ## Scripts
 
@@ -45,10 +46,17 @@ From `prototype/`:
 | `npm run build` | Production bundle + TypeScript type-check |
 | `npm run build:pages` | Production bundle with GitHub Pages asset base |
 | `npm run data:hamburg-center` | Regenerate the small Hamburg center CityJSONSeq demo from official ALKIS footprints |
+| `npm run data:hamburg-lod2 -- latest` | Resolve the newest official complete-city Hamburg LoD2 CityGML release |
+| `npm run data:hamburg-lod2 -- download` | Download the newest official complete-city Hamburg archive into local `Data/` |
+| `npm run data:hamburg-lod2 -- extract` | Extract the downloaded Hamburg CityGML tiles |
+| `npm run data:hamburg-lod2 -- convert --cjval cjval` | Batch-convert and validate Hamburg tiles as editable CityJSONSeq |
+| `npm run data:hamburg-lod2 -- geometry-audit --allow-invalid` | Audit CityJSONSeq solids with `val3dity`, isolating validator crashes per feature |
+| `npm run data:hamburg-lod2 -- geometry-clean` | Build a strict editing catalog and quarantine primitive-invalid source features |
+| `npm run data:hamburg-lod2:serve` | Serve the generated Hamburg tile catalog locally on port `8787` |
 
 ## Hosting
 
-The prototype can be hosted as a static GitHub Pages site; no backend is required for the current client-only feature set. For `cakirmert/webcityeditor`, Pages serves the built static bundle from the `gh-pages` branch so the demo does not depend on backend infrastructure.
+The prototype can be hosted as a static GitHub Pages site for small-file editing and demos. The complete-city Hamburg workflow uses the optional local catalog server for viewport loading and validated sequence-tile write-back. For `cakirmert/webcityeditor`, Pages serves the built static bundle from the `gh-pages` branch so the small hosted demo does not depend on backend infrastructure.
 
 Small demo datasets can also be hosted from GitHub Pages without CORS issues. The repo now includes `prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl`, a small Hamburg-center CityJSONSeq sample generated from official ALKIS building footprints. FileLoader reads `prototype/public/data/manifest.json` and only shows hosted samples whose files exist.
 
@@ -69,7 +77,7 @@ webcityeditor/
 ├── LoD2_Editor_Onay_Dokumani.docx       Supervisor approval document (19 decisions)
 ├── prototype/                            The browser app
 │   ├── PROTOTYPE_STATUS.md              Current state: planned vs delivered, roadmap
-│   ├── HAMBURG_PIPELINE.md              Hamburg CityGML → CityJSON → DB pilot
+│   ├── HAMBURG_PIPELINE.md              Hamburg complete-city CityGML → validated tiled CityJSONSeq
 │   └── src/
 │       ├── components/                   React + shadcn/ui components
 │       └── lib/                          Pure-function libraries (well-tested)
