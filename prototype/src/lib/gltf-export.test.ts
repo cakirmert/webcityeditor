@@ -181,9 +181,8 @@ describe('exportToGltf', () => {
     expect(extras!.objectCount).toBe(1);
   });
 
-  it('handles a building with windows + doors + overhang (LoD 2.2 features) without crashing', () => {
+  it('handles a building with windows + doors (LoD 2.2 features) without crashing', () => {
     const doc = makeBuilding({
-      eaveOverhang: 0.3,
       openings: { windows: true, door: true },
     });
     const glb = exportToGltf(doc);

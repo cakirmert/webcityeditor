@@ -8,7 +8,7 @@ export type PreparedCityJsonExport =
 
 export interface ExternalGeometryValidation {
   ok: boolean;
-  primitiveValidation: 'val3dity';
+  primitiveValidation: 'val3dity --ignore204';
   schemaValidation: 'cjval' | 'structural-only';
   message: string;
 }
@@ -74,7 +74,7 @@ export async function validateExportGeometry(
   }
   return {
     ok: payload.ok === true,
-    primitiveValidation: 'val3dity',
+    primitiveValidation: 'val3dity --ignore204',
     schemaValidation: payload.schemaValidation === 'cjval' ? 'cjval' : 'structural-only',
     message:
       typeof payload.message === 'string'

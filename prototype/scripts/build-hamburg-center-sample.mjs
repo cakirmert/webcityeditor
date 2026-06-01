@@ -130,7 +130,8 @@ function closeRing(ring) {
 }
 
 function featureToCityJsonFeature(id, feature, projectedRing, transform) {
-  const openRing = stripClosingPoint(projectedRing);
+  let openRing = stripClosingPoint(projectedRing);
+  if (signedArea(openRing) < 0) openRing = openRing.reverse();
   const height = heightFromProperties(feature.properties ?? {});
   const vertices = [];
   const bottom = openRing.map(([x, y]) => addVertex(vertices, encodeVertex(x, y, 0, transform)));
@@ -192,6 +193,16 @@ function stripClosingPoint(ring) {
   const first = ring[0];
   if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
   return ring;
+}
+
+function signedArea(ring) {
+  let area = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[(i + 1) % ring.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
 }
 
 function addVertex(vertices, vertex) {

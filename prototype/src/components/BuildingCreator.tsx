@@ -247,6 +247,9 @@ export default function BuildingCreator({
             </Section>
 
             <Section label="Overhang">
+              <div className="mb-1 rounded-md border border-[var(--warn)] bg-[rgba(251,191,36,0.08)] px-2 py-1.5 text-[10px] text-[var(--warn)]">
+                Temporarily disabled: roof overhangs need a validated roof-slab model.
+              </div>
               <Row label="Eave (m)">
                 <div className="flex items-center gap-2">
                   <Input
@@ -255,6 +258,7 @@ export default function BuildingCreator({
                     max={2}
                     step="0.1"
                     value={eaveOverhang}
+                    disabled
                     onChange={(e) =>
                       setEaveOverhang(Math.max(0, Number(e.target.value) || 0))
                     }
@@ -275,6 +279,7 @@ export default function BuildingCreator({
                       max={2}
                       step="0.1"
                       value={rakeOverhang}
+                      disabled
                       onChange={(e) =>
                         setRakeOverhang(Math.max(0, Number(e.target.value) || 0))
                       }

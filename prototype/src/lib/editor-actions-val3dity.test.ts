@@ -28,25 +28,45 @@ const RECTANGLE: [number, number][] = [
 ];
 
 describeWithVal3dity('browser editor actions with val3dity', () => {
-  it('keeps created, moved, and independently subdivided buildings primitive-valid', () => {
-    const doc = emptyHamburgDocument();
-    for (const roofType of ['flat', 'pyramid', 'gable', 'hip'] as const) {
+  it('keeps every creator roof and detail variant primitive-valid', () => {
+    const creatorCases = [
+      { roofType: 'flat' as const, eaveHeight: 9 },
+      { roofType: 'pyramid' as const, eaveHeight: 7 },
+      { roofType: 'gable' as const, eaveHeight: 7 },
+      { roofType: 'hip' as const, eaveHeight: 7 },
+      {
+        roofType: 'flat' as const,
+        eaveHeight: 9,
+        openings: { windows: true, door: true },
+      },
+    ];
+    for (const [index, creator] of creatorCases.entries()) {
+      const doc = emptyHamburgDocument();
       const created = createBuildingFromEditor(doc, {
         targetCrs: 'EPSG:25832',
-        footprintWgs84: offsetFootprint(RECTANGLE, doc.vertices.length / 1_000_000),
+        footprintWgs84: offsetFootprint(
+          index === 1 ? [...RECTANGLE].reverse() : RECTANGLE,
+          index * 0.00035
+        ),
         storeys: 3,
-        eaveHeight: roofType === 'flat' ? 9 : 7,
+        eaveHeight: creator.eaveHeight,
         ridgeHeight: 9,
-        roofType,
+        roofType: creator.roofType,
+        openings: creator.openings,
       });
+      expectVal3dityValid(doc, `${creator.roofType}-${index}-created`);
       commitBuildingTransformFromEditor(doc, {
         id: created.id,
         dx: 1.25,
         dy: -0.75,
         angle: 3,
       });
+      expectVal3dityValid(doc, `${creator.roofType}-${index}-moved`);
     }
+  });
 
+  it('keeps moved and independently subdivided buildings primitive-valid', () => {
+    const doc = emptyHamburgDocument();
     const floorPlanBuilding = createBuildingFromEditor(doc, {
       targetCrs: 'EPSG:25832',
       footprintWgs84: offsetFootprint(RECTANGLE, 0.002),
@@ -69,15 +89,7 @@ describeWithVal3dity('browser editor actions with val3dity', () => {
 
     const prepared = prepareValidatedCityJsonExport(doc);
     expect(prepared.ok).toBe(true);
-    if (!prepared.ok) return;
-    const file = path.join(os.tmpdir(), `webcityeditor-ui-actions-${process.pid}.city.json`);
-    try {
-      writeFileSync(file, prepared.text, 'utf8');
-      const output = execFileSync(executable, [file], { encoding: 'utf8' });
-      expect(output).toContain('VALID :)');
-    } finally {
-      rmSync(file, { force: true });
-    }
+    expectVal3dityValid(doc, 'floor-plans');
   });
 });
 
@@ -97,4 +109,18 @@ function offsetFootprint(
   offset: number
 ): [number, number][] {
   return footprint.map(([lng, lat]) => [lng + offset, lat]);
+}
+
+function expectVal3dityValid(doc: CityJsonDocument, label: string): void {
+  const prepared = prepareValidatedCityJsonExport(doc);
+  expect(prepared.ok).toBe(true);
+  if (!prepared.ok) return;
+  const file = path.join(os.tmpdir(), `webcityeditor-ui-actions-${process.pid}-${label}.city.json`);
+  try {
+    writeFileSync(file, prepared.text, 'utf8');
+    const output = execFileSync(executable, [file, '--ignore204'], { encoding: 'utf8' });
+    expect(output, label).toContain('VALID :)');
+  } finally {
+    rmSync(file, { force: true });
+  }
 }

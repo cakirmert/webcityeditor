@@ -127,6 +127,12 @@ export function generateBuilding(
   let out: BuildOut;
   const eaveOverhang = Math.max(0, params.eaveOverhang ?? 0);
   const rakeOverhang = Math.max(0, params.rakeOverhang ?? 0);
+  if (eaveOverhang > 0 || rakeOverhang > 0) {
+    throw new Error(
+      'Roof overhang geometry is temporarily disabled: the previous zero-thickness ' +
+        'Solid representation fails ISO 19107 validation. Use 0 m until a validated roof-slab model is available.'
+    );
+  }
   if (params.roofType === 'flat') {
     out = buildFlat(projected, baseZ, eaveZAbs, toInt, toGlobal, eaveOverhang);
   } else if (params.roofType === 'pyramid') {
@@ -301,18 +307,18 @@ function buildFlat(
     ]);
   }
 
-  // Soffits: wall-top → roof-edge, horizontal at roofZ. Order
-  // [wallTopI, roofEdgeI, roofEdgeJ, wallTopJ] gives a normal pointing -Z,
-  // which is what we want — the underside is what the user sees from below.
+  // Soffits: wall-top → roof-edge, horizontal at roofZ. Keep the winding
+  // clockwise from above so the outward normal points down at the visible
+  // underside.
   const soffitRings: number[][] = [];
   if (hasOverhang) {
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
       soffitRings.push([
         toGlobal(wallTopStart + i),
-        toGlobal(roofEdgeStart + i),
-        toGlobal(roofEdgeStart + j),
         toGlobal(wallTopStart + j),
+        toGlobal(roofEdgeStart + j),
+        toGlobal(roofEdgeStart + i),
       ]);
     }
   }
@@ -466,9 +472,9 @@ function buildPyramid(
       const j = (i + 1) % n;
       soffitRings.push([
         toGlobal(wallTopStart + i),
-        toGlobal(roofEdgeStart + i),
-        toGlobal(roofEdgeStart + j),
         toGlobal(wallTopStart + j),
+        toGlobal(roofEdgeStart + j),
+        toGlobal(roofEdgeStart + i),
       ]);
     }
   }
@@ -775,8 +781,8 @@ function buildGable(
       if (hasOverhang) {
         // Long-side soffits (wall-top → roof-edge), still needed since the
         // eave overhang perpendicular extension is independent of rake.
-        overhangFaces.push([e0v, re0, re1, e1v]); // soffit under e0 slope
-        overhangFaces.push([e2v, re2, re3, e3v]); // soffit under e2 slope
+        overhangFaces.push([e0v, e1v, re1, re0]); // soffit under e0 slope
+        overhangFaces.push([e2v, e3v, re3, re2]); // soffit under e2 slope
       }
       if (hasRakeOverhang) {
         // Rake gable triangles at each extreme end. At the rA side (x of rA_ext):
@@ -821,8 +827,8 @@ function buildGable(
         [slope3, slope0, slopeRA, slopeRB], // e3 slope
       ];
       if (hasOverhang) {
-        overhangFaces.push([e1v, re1, re2, e2v]); // soffit under e1 slope
-        overhangFaces.push([e3v, re3, re0, e0v]); // soffit under e3 slope
+        overhangFaces.push([e1v, e2v, re2, re1]); // soffit under e1 slope
+        overhangFaces.push([e3v, e0v, re0, re3]); // soffit under e3 slope
       }
       if (hasRakeOverhang) {
         // rA side (between e0 gable and ridge): slope0 → rA_ext → slope1
@@ -1016,10 +1022,10 @@ function buildHip(
   const soffitRings: number[][] = [];
   if (hasOverhang) {
     soffitRings.push(
-      [wt0, re0, re1, wt1],
-      [wt1, re1, re2, wt2],
-      [wt2, re2, re3, wt3],
-      [wt3, re3, re0, wt0]
+      [wt0, wt1, re1, re0],
+      [wt1, wt2, re2, re1],
+      [wt2, wt3, re3, re2],
+      [wt3, wt0, re0, re3]
     );
   }
 

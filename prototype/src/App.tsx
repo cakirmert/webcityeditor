@@ -867,10 +867,15 @@ export default function App() {
       });
       setPrimitiveValidation({
         kind: 'valid',
-        message: `${result.persistedTileIds.length} changed sequence tile(s) passed structural validation and val3dity during Save seq.`,
+        message: `${result.persistedTileIds.length} changed sequence tile(s) passed structural validation and val3dity --ignore204 during Save seq.`,
       });
       saved = true;
     } catch (error) {
+      if (error instanceof CatalogWritebackError && error.result.persistedTileIds.length > 0) {
+        const next = { ...source, loadedTiles: error.result.tiles };
+        catalogConnectionRef.current = next;
+        setCatalogConnection(next);
+      }
       setCatalogStatus({
         kind: 'error',
         message: error instanceof Error ? error.message : String(error),

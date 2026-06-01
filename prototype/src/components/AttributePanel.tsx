@@ -1162,10 +1162,11 @@ function ReshapeSection({
           <Input
             type="number"
             min={0}
-            max={2}
+            max={0}
             step="0.1"
             value={eaveOverhang}
-            onChange={(e) => setEaveOverhang(Math.max(0, Number(e.target.value) || 0))}
+            onChange={() => setEaveOverhang(0)}
+            title="Set to 0 m: overhangs are disabled until a validated roof-slab model is available"
           />
         </label>
         {roofType === 'gable' && (
@@ -1174,13 +1175,17 @@ function ReshapeSection({
             <Input
               type="number"
               min={0}
-              max={2}
+              max={0}
               step="0.1"
               value={rakeOverhang}
-              onChange={(e) => setRakeOverhang(Math.max(0, Number(e.target.value) || 0))}
+              onChange={() => setRakeOverhang(0)}
+              title="Set to 0 m: rake overhangs are disabled until a validated roof-slab model is available"
             />
           </label>
         )}
+      </div>
+      <div className="text-[10px] text-[var(--warn)]">
+        Overhangs are temporarily disabled until the editor emits a validated roof-slab model.
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
         <label className="flex items-center gap-1 cursor-pointer">

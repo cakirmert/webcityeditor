@@ -383,7 +383,7 @@ async function cleanGeometry() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-function auditGeometryTile(validator, file) {
+function auditGeometryTile(validator, file, profile = {}) {
   const lines = readFileSync(file, 'utf8')
     .split(/\r?\n/)
     .filter((line) => line.trim());
@@ -391,7 +391,7 @@ function auditGeometryTile(validator, file) {
   const header = lines[0];
   const featureLines = lines.slice(1);
   const objectToFeature = mapObjectsToFeatures(file, featureLines);
-  const result = runVal3dity(validator, `${lines.join('\n')}\n`);
+  const result = runVal3dity(validator, `${lines.join('\n')}\n`, profile);
   const parsed = parseVal3dityOutput(result.stdout);
   const records = parsed.records.map((record) => ({
     ...record,
@@ -418,13 +418,13 @@ function auditGeometryTile(validator, file) {
         true
       );
     }
-    return auditGeometryTileByFeature(validator, file, header, featureLines);
+    return auditGeometryTileByFeature(validator, file, header, featureLines, profile);
   }
 
   return geometryTileReport(file, featureLines.length, records, [], false);
 }
 
-function auditGeometryTileByFeature(validator, file, header, featureLines) {
+function auditGeometryTileByFeature(validator, file, header, featureLines, profile = {}) {
   const records = [];
   const crashes = [];
   const entries = featureLines.map((line, index) => ({ line, lineNumber: index + 2 }));
@@ -432,7 +432,8 @@ function auditGeometryTileByFeature(validator, file, header, featureLines) {
   function auditEntries(current) {
     const result = runVal3dity(
       validator,
-      `${header}\n${current.map((entry) => entry.line).join('\n')}\n`
+      `${header}\n${current.map((entry) => entry.line).join('\n')}\n`,
+      profile
     );
     const parsed = parseVal3dityOutput(result.stdout);
     if (val3dityCompleted(result, parsed)) {
@@ -492,8 +493,8 @@ function geometryTileReport(file, features, records, crashes, fallback, incomple
   };
 }
 
-function runVal3dity(validator, input) {
-  return spawnSync(validator, ['stdin'], {
+function runVal3dity(validator, input, profile = {}) {
+  return spawnSync(validator, ['stdin', ...(profile.ignore204 ? ['--ignore204'] : [])], {
     input,
     encoding: 'utf8',
     maxBuffer: 100 * 1024 * 1024,
@@ -565,7 +566,7 @@ async function serveTiles() {
           writeback: 'PUT or DELETE /api/hamburg/tiles/:id',
           exportValidation: 'POST /api/hamburg/validate',
           schemaValidation: writebackSchemaValidator ? 'cjval' : 'structural-only',
-          primitiveValidation: writebackValidator ? 'val3dity' : 'disabled',
+          primitiveValidation: writebackValidator ? 'val3dity --ignore204' : 'disabled',
         });
         return;
       }
@@ -697,7 +698,7 @@ async function writeBackTile({
       }
     }
     if (validator) {
-      const report = auditGeometryTile(validator, temporary);
+      const report = auditGeometryTile(validator, temporary, { ignore204: true });
       if (report.invalidFeatures > 0 || report.crashedFeatures > 0 || report.incomplete) {
         throw httpError(
           422,
@@ -772,7 +773,7 @@ async function validateExportRequest({
         sendValidation(response, 422, {
           ok: false,
           schemaValidation: 'cjval',
-          primitiveValidation: 'val3dity',
+          primitiveValidation: 'val3dity --ignore204',
           message: `cjval rejected the exported CityJSON: ${schema.message}`,
         });
         return;
@@ -782,10 +783,10 @@ async function validateExportRequest({
     sendValidation(response, geometry.ok ? 200 : 422, {
       ok: geometry.ok,
       schemaValidation: schemaValidator ? 'cjval' : 'structural-only',
-      primitiveValidation: 'val3dity',
+      primitiveValidation: 'val3dity --ignore204',
       message: geometry.ok
-        ? `Exported CityJSON passed ${schemaValidator ? 'cjval and ' : ''}val3dity`
-        : `val3dity rejected the exported CityJSON: ${geometry.message}`,
+        ? `Exported CityJSON passed ${schemaValidator ? 'cjval and ' : ''}val3dity --ignore204`
+        : `val3dity --ignore204 rejected the exported CityJSON: ${geometry.message}`,
     });
   } finally {
     await rm(temporary, { force: true });
@@ -910,8 +911,9 @@ async function validateMonolithicCityJson(file) {
 
 function runCjvalFile(validator, file) {
   return processResult(
-    spawnSync(validator, [file, '--quiet'], {
+    spawnSync(validator, [], {
       encoding: 'utf8',
+      input: readFileSync(file),
       maxBuffer: 100 * 1024 * 1024,
     })
   );
@@ -919,7 +921,7 @@ function runCjvalFile(validator, file) {
 
 function runCjvalStream(validator, file) {
   return processResult(
-    spawnSync(validator, ['--quiet'], {
+    spawnSync(validator, [], {
       encoding: 'utf8',
       input: readFileSync(file),
       maxBuffer: 100 * 1024 * 1024,
@@ -929,7 +931,7 @@ function runCjvalStream(validator, file) {
 
 function runVal3dityFile(validator, file) {
   return processResult(
-    spawnSync(validator, [file], {
+    spawnSync(validator, [file, '--ignore204'], {
       encoding: 'utf8',
       maxBuffer: 100 * 1024 * 1024,
     })

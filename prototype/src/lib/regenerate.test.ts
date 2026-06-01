@@ -71,9 +71,8 @@ describe('regenerateBuilding', () => {
     expect(a?.notes).toBe('corner shop');
   });
 
-  it('preserves openings + eave overhang choices across regeneration', () => {
+  it('preserves opening choices across regeneration', () => {
     const { doc, id } = makeBuilding({
-      eaveOverhang: 0.4,
       openings: { windows: true, door: true },
     });
     const before = doc.CityObjects[id].geometry as Array<{ lod?: string }>;
@@ -86,12 +85,19 @@ describe('regenerateBuilding', () => {
       lod?: string;
       semantics?: { surfaces?: Array<{ type?: string }> };
     }>;
-    // Still LoD 2.2 with Window/Door/OuterCeilingSurface entries.
+    // Still LoD 2.2 with Window/Door entries.
     expect(after[0].lod).toBe('2.2');
     const types = after[0].semantics?.surfaces?.map((s) => s?.type) ?? [];
     expect(types).toContain('Window');
     expect(types).toContain('Door');
-    expect(types).toContain('OuterCeilingSurface');
+  });
+
+  it('rejects overhang reshape until a validated roof-slab model is available', () => {
+    const { doc, id } = makeBuilding();
+    const res = regenerateBuilding(doc, id, FP_DELFT_B_SHIFTED, { eaveOverhang: 0.4 });
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/temporarily disabled.*ISO 19107/i);
   });
 
   it('rejects regeneration of an imported (non-editor) building with a friendly reason', () => {

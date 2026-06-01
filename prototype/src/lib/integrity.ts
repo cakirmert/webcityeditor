@@ -39,7 +39,7 @@ export interface IntegrityReport {
  * downstream tools (vertex-index bounds, semantics-index bounds, parent/
  * child reference loops, orphaned vertices, missing transforms).
  *
- * For full CityJSON 2.0 spec validation, use `cjio validate` server-side.
+ * For full CityJSON 2.0 schema validation, use official `cjval` server-side.
  * This is the in-browser equivalent that catches what matters for the
  * editor's interactive workflow.
  */

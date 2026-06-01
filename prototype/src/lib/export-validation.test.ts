@@ -21,7 +21,7 @@ describe('CityJSON export validation', () => {
         statusText: 'OK',
         json: async () => ({
           ok: true,
-          primitiveValidation: 'val3dity',
+          primitiveValidation: 'val3dity --ignore204',
           schemaValidation: 'structural-only',
           message: 'passed',
         }),
