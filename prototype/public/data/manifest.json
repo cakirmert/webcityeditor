@@ -2,7 +2,7 @@
   "cityjsonSamples": [
     {
       "label": "Hamburg center - official ALKIS footprints",
-      "description": "Same-origin CityJSONSeq sample from official Hamburg ALKIS building footprints; demo heights are derived from storey count.",
+      "description": "Same-origin CityJSONSeq sample from official Hamburg ALKIS building footprints; demo heights and roofs are derived from storey count and dachform.",
       "url": "data/hamburg/hamburg-center-alkis.city.jsonl",
       "enabled": true,
       "checkAvailability": true,
