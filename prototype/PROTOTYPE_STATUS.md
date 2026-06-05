@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-06-01. **Test suite**: 385 passing across 35 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
+**Last updated**: 2026-06-05. **Test suite**: 395 passing across 40 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -16,6 +16,8 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - Monolithic CityJSON 2.0 (`.json`, `.city.json`) — retained for small models and modified working-set export
 - Drop / file browse / URL fetch / built-in sample cube
 - Hosted Hamburg center sample under `public/data/hamburg/hamburg-center-alkis.city.jsonl`; FileLoader surfaces it from the same origin through `public/data/manifest.json`, so it works on GitHub Pages without CORS.
+- The hosted Hamburg sample is intentionally small (180 buildings). City-scale Hamburg editing uses the local strict CityJSONSeq catalog server and viewport tile loading.
+- Load data is a reopenable modal over the map. The Data toolbar button opens it without discarding the current document; successful loads replace the working document and close the modal.
 - Recent-saves list from IndexedDB
 - Auto-detects CRS, either from `metadata.referenceSystem` OR from the magnitude of `transform.translate` (UTM 32N / 33N / Dutch RD New) as a fallback
 - 10 CRS registered via proj4: EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514
@@ -23,19 +25,20 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 ### Display
 - **MapLibre** basemap (CARTO light raster tiles with OSM attribution; switched away from `tile.openstreetmap.org` after Hamburg tiles returned 404)
 - **deck.gl** context layer — LoD by zoom: outlined footprints below 14.5, extruded blocks above
-- **Hamburg planning overlay** — toolbar fetches real Hamburg XPlan `BP_BaugebietsTeilFlaeche` polygons for the current viewport, falls back to FNP land-use GeoJSON when XPlan has no polygons, and renders the result as a semi-transparent planning layer. This is a planning-data aid, not a legal compliance decision.
+- **Hamburg planning overlay** — toolbar fetches real Hamburg XPlan `BP_BaugebietsTeilFlaeche` polygons for the current viewport, falls back to FNP land-use GeoJSON when XPlan has no polygons, and renders the result as a semi-transparent planning layer. Clicking a planning polygon opens an info card with source, label, mapped compatible building types, and available plan attributes. This is a planning-data aid, not a legal compliance decision.
 - Click a building → side panel with a per-building Three.js scene
 - **Auto-fit on load**: bbox of footprints → `metadata.geographicalExtent` → `transform.translate` as centre — three fallbacks so EVERY file ends up focused.
+- Hamburg data now initializes the map camera from the loaded dataset instead of briefly starting at the Delft fallback.
 - Fullscreen toggle on the side panel for focused editing
 
 ### Create new buildings
 - **＋ New Building** toolbar action activates Terra Draw polygon mode
 - **Snap-to-existing-footprints** within 20 px while drawing
-- Fullscreen creator overlay with dimensions, overhang, attributes, openings, and subdivision sections
+- Fullscreen creator overlay with dimensions, locked overhang controls, attributes, openings, and subdivision sections
 - Visual roof picker for **flat, pyramid, gable, hip** with DIN-inspired storey-height validation
-- **Live 3D preview** while creating — roof shape, **windows, door, eave overhang, rake overhang, and split previews** update as you type
+- **Live 3D preview** while creating — roof shape, **windows, door, and split previews** update as you type
 - **Procedural openings (LoD 2.2)** — Windows / Door checkboxes in the dialog. When enabled, the generator emits per-storey window holes (1.4 × 1.5 m, 0.9 m sill, ~3 m spacing) on every rectangular wall and a single 1.0 × 2.1 m door on the first wall. Each opening is both an inner-ring hole on the parent wall AND a separate co-planar `Window`/`Door` semantic surface. Bumps the geometry's LoD label from `2.0` to `2.2`.
-- **LoD 2.2 eave overhang** — `Eave overhang (m)` input. Adds extending wall-top + roof-edge vertex rings, `OuterCeilingSurface` soffits, and (for gable) rake-corner-cap triangles. **Supports all 4 roof types**: flat, pyramid, hip, gable.
+- **Roof overhang controls are present but disabled** — the earlier zero-thickness overhang Solid failed ISO 19107 primitive validation. Eave/rake values stay at 0 m until a validated roof-slab/soffit model is implemented and covered by val3dity/cjval tests.
 - **Subdivide-on-create**: choose "none / floors / sides" with a count; split applies immediately after insertion
 - **Planning compatibility check**: when the Hamburg planning overlay is loaded, new-building creation checks the footprint against the fetched planning polygon's mapped building-use categories.
 - The parametric generator produces a proper LoD 2 `Solid` with `GroundSurface` / `RoofSurface` / `WallSurface` (+ optional `OuterCeilingSurface` / `Window` / `Door`) semantics. Round-trip through JSON.stringify tested for every roof type and every opening combination.
@@ -46,7 +49,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **Transform mode**: "Start editing position" enters a live-preview mode with dX/dY/angle inputs + quick-step buttons; map renders a ghost of the transformed footprint; Save commits, Cancel discards. Works on ANY building (generated or imported). Commits preserve shared source vertices safely, refresh stored geographical extents, reject non-finite values, and compact orphaned transform vertices before export.
 - **Make editable for imports**: imported CityJSON / Hamburg / IFC-derived buildings can be promoted to parametric form after a confirmation that original mesh detail will be replaced. Promotion now appends replacement vertices correctly and consumes replaced `BuildingPart` descendants, including imports whose geometry lives only on child parts.
 - **Edit footprint mode** (parametric/editor-created/promoted buildings): "Edit footprint corners" loads the building's outline as a TerraDrawSelectMode polygon with draggable vertex handles + midpoint dots that split edges into new corners. Save calls `regenerateBuilding` which re-runs the parametric generator with the new shape and the building's stashed parametric attributes (`_eaveHeight`, `_addWindows`, `_eaveOverhang`, …) intact.
-- **Reshape mode**: editable buildings expose in-place roof type, ridge/eave height, eave/rake overhang, and window/door toggles. Apply regenerates geometry without changing the id, footprint, or parent/child linkage.
+- **Reshape mode**: editable buildings expose in-place roof type, ridge/eave height, locked eave/rake overhang controls, and window/door toggles. Apply regenerates geometry without changing the id, footprint, or parent/child linkage.
 - **Subdivide — visual division editor**: split-by-floor with two modes:
   - **"Split equally"**: the original uniform N-floor split.
   - **"Custom heights…"**: per-floor wall-height input (auto-seeded with 3.5 m ground + equal upper floors — German residential pattern), live Σ display turning red when heights drift, ⚠ badge when any floor falls below MIN_STOREY_HEIGHT, sum-conservation enforced before Apply unlocks.
@@ -74,6 +77,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 
 ### UI
 - Full shadcn/ui — Button, Input, Label, Dialog, Select — across Toolbar, FileLoader, AttributePanel, BuildingCreator
+- Simplified demo toolbar: always-visible map actions are Data, New Building, List, Planning, Save seq when dirty, Export CityJSON, and validation pills; lower-frequency actions live under More.
 - Tailwind utility classes for layout; CSS variables for theme
 - Dark palette; focus rings; consistent hover states; polished scrollbars
 
@@ -171,13 +175,13 @@ Full step-by-step: [`HAMBURG_PIPELINE.md`](HAMBURG_PIPELINE.md).
 
 | Feature | Flat | Pyramid | Gable | Hip |
 |---|---|---|---|---|
-| Eave overhang | ✅ | ✅ | ✅ (long sides only) | ✅ |
+| Eave/rake overhang | ❌ disabled | ❌ disabled | ❌ disabled | ❌ disabled |
 | Procedural windows | ✅ all walls | ✅ all walls | ✅ long walls only | ✅ all walls |
 | Procedural door | ✅ first wall | ✅ first wall | ✅ first long wall | ✅ first wall |
 
-Gable's eave overhang covers the long-side eaves and emits 4 rake-corner-cap triangles to close the geometric gap at each gable corner. Full rake overhang (extending the ridge past the gable wall) is **not** implemented — it changes the ridge length and roof slope angles, and would need a separate roadmap item if a demo demands it.
+The disabled overhang controls are intentional: the previous implementation emitted zero-thickness overhang/soffit faces inside one `Solid`, which fails ISO 19107 primitive validation. Re-enabling this needs a validated roof-slab model, not just a UI toggle. The pure-JS roof generators are still used for flat/pyramid/gable/hip roofs without overhang.
 
-**Why not WASM straight-skeleton?** No ready npm package; CGAL+Emscripten build is 3–7 days. Our pure-JS generators cover the common cases at zero dependency cost. Straight-skeleton remains the "right answer" for concave and multi-ridge roofs — roadmap item for later.
+**Why not WASM straight-skeleton?** No ready npm package; CGAL+Emscripten build is 3–7 days. Our pure-JS generators cover the common flat/rectangle/pyramid cases at zero dependency cost. Straight-skeleton remains the "right answer" for concave and multi-ridge roofs, but it does not by itself solve the overhang roof-slab validity issue.
 
 ---
 
@@ -202,7 +206,9 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - **Browser memory**: a single monolithic CityJSON above ~200 MB starts to strain. The Hamburg catalog fetches sequence tiles by viewport, refuses requests above 25 unseen tiles, and evicts clean off-screen tiles. Unsaved dirty tiles intentionally remain resident until **Save seq** succeeds.
 - **Footprint extraction**: fan-triangulates outer rings, skips holes.
 - **Roofs on non-rectangles**: gable/hip refuse; pyramid can look wrong on concave.
+- **Roof overhangs**: eave/rake controls remain disabled at 0 m until the generator emits a validated roof-slab/soffit topology. This is a geometry-validity problem, not a missing JavaScript slider or a failed WASM load.
 - **Compound floor-plan subdivision**: manual footprint cuts currently split rectangular footprints along one selected axis. If a top floor is divided into multiple footprint sections, those section roofs are flat rather than clipped pieces of the source pitched roof.
+- **Arbitrary division line for BuildingParts**: the current precise controls are percentage cuts along the selected rectangle axis. "Draw any line on any building and split it into two BuildingParts" is a separate geometry task: polygon clipping for arbitrary/concave footprints, hole handling, per-part roof strategy, parent/child semantics, and val3dity/cjval coverage. Treat this as implementation work, not demo-ready.
 - **Three.js side-panel viewer re-parses** on selection change (fast enough for single buildings).
 - **Local write-back is single-machine oriented** — the tile server queues writes, requires SHA-256 `If-Match` revisions, keeps `.history/` backups, and validates changed tiles structurally plus with `val3dity`. Authentication, shared-user history, and incremental published 3D Tiles regeneration belong to the production backend.
 - **Hamburg strict catalog is not yet losslessly complete** — 3,387 official source features are retained under `quarantine/` pending repair; the primitive-valid editing catalog contains 385,342 features.
@@ -211,7 +217,15 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 
 ## 8. What's left — roadmap (priority order)
 
-**Done since the last status update (2026-05-26 → 2026-06-01):**
+**Done since the last status update (2026-06-01 → 2026-06-05):**
+- ✅ **Terrain-aware building move** — transform mode now exposes dX/dY/rotation plus manual dZ, auto terrain snap, and a "snap ground to terrain" action. Mouse drag updates dX/dY and, when auto terrain is enabled, adjusts dZ so the moved building footprint lands on the local terrain sample before "Place" commits.
+- ✅ **Hamburg MultiSurface export regression** — structural validation now uses the declared CityJSON geometry type before checking shell semantics, so valid imported `MultiSurface` face semantics are no longer misreported as `Solid` shell mismatches (`semantics.values has 22 shells, boundaries has 1`).
+- ✅ **Planning click details** — clicking a loaded Hamburg planning polygon now expands the legend with source, label, mapped compatible building types, and available plan attributes instead of relying on color alone.
+- ✅ **Hamburg initial camera + data-scope clarity** — the map now initializes from the loaded dataset bounds instead of the Delft fallback, and the loader distinguishes the small hosted Hamburg demo from the larger local CityJSONSeq catalog path.
+- ✅ **Overhang/split-line status cleanup** — status notes now match the code: overhang controls are disabled pending a validated roof-slab model, and arbitrary drawn split lines are documented as a separate geometry-clipping task.
+- ✅ **Loader modal + simplified toolbar** — Data opens the load modal over the current map instead of clearing state, advanced loader choices are collapsed, and secondary map actions moved under More for a cleaner demo surface.
+
+**Done since the previous status update (2026-05-26 → 2026-06-01):**
 - ✅ **Existing-geometry integrity repair** — fixed imported-building promotion so generated replacement vertices are appended before geometry is installed; moves now reject non-finite values, preserve unquantized decimal coordinates, refresh stored extents, and compact orphaned transform vertices on commit.
 - ✅ **Real Hamburg move smoke pass** — locally loaded one hierarchy from `Data/hamburg-565-5936.city.jsonl`, moved it, compacted it, serialized it, parsed it again, and passed the structural integrity checker after reopen.
 - ✅ **Per-floor footprint planner** — added combined floor + footprint subdivision with independently editable floor plans, manual percentage cuts, an apply-to-all-floors checkbox, per-floor 2D previews, and matching 3D divider overlays.
@@ -231,23 +245,23 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - ✅ **Visual split previews** — side-subdivision now shows dashed plan-view cut lines in both create and edit flows; floor subdivision always shows 3D split rings, including equal-height mode.
 - ✅ **Selectable side-split axis** — split-by-side accepts auto / longer / shorter axis choice, with preview and MIN_SIDE_WIDTH tests.
 - ✅ **Make imported buildings editable** — imported CityJSON / Hamburg / IFC-derived objects can be converted into parametric geometry, preserving ids and user attributes.
-- ✅ **In-place reshape** — editable buildings can switch roof type, raise/lower ridge/eave, toggle openings, and change eave/rake overhangs without changing selection identity or hierarchy.
+- ✅ **In-place reshape** — editable buildings can switch roof type, raise/lower ridge/eave, and toggle openings without changing selection identity or hierarchy; overhang inputs remain locked by the current validity gate.
 - ✅ **Reproducible loader setup** — removed the manual local loader clone requirement; `cityjson-threejs-loader` is now pinned to upstream commit `cf8db910`, and `regenerator-runtime` is tracked as an app runtime dependency.
 
 **Done in the previous status window (2026-05-07 → 2026-05-13):**
 - ✅ **Drag-to-move buildings on the map** — when a building's transform is pending, mouse drag on the map translates the ghost preview; WGS84 deltas are projected to the data's CRS so the numeric dX/dY fields stay in sync.
-- ✅ **Floating 3D preview panel during creation** — Three.js viewer in the top-right corner of the map while drawing a new building; shows the actual generated roof shape (incl. windows/doors/overhang) in real time.
+- ✅ **Floating 3D preview panel during creation** — Three.js viewer in the top-right corner of the map while drawing a new building; shows the actual generated roof shape, including windows/doors, in real time.
 - ✅ **Multi-select + copy/paste** — Ctrl+click adds buildings to a secondary selection set (highlighted warm orange); Ctrl+C copies, Ctrl+V pastes with a 5m CRS offset and rewired parent/child relationships.
 - ✅ **Delete buildings** — Delete/Backspace or toolbar button removes the primary + multi-selection; cascades into BuildingParts and cleans up surviving parents' `children` arrays.
 - ✅ **Door / window detail editing** — `extractOpenings` finds Window/Door semantic surfaces; AttributePanel lists each with dimensions + elevation and exposes directional move buttons (±0.5m lateral, ±0.3m vertical).
 - ✅ **Hamburg planning overlay** — replaced the synthetic zoning demo with live Hamburg planning data: XPlan `BP_BaugebietsTeilFlaeche` by viewport, FNP land-use fallback, same client-side legend, and lightweight building-function compatibility checks for new buildings.
 - ✅ **Viewport-filtered CityJSONSeq streaming** — `parseCityJsonSeq` (and `parseCityJsonAuto`) accept an optional `viewportBbox` in the data's CRS; features whose decoded XY extent doesn't intersect are skipped before merging.
 - ✅ **Drag-on-3D split-line handles** — split-preview rings in the side-panel viewer are now grab-and-drag; mousedown raycasts onto the ring (1m line threshold), vertical-plane raycasts follow the cursor, height transfers between adjacent floors with sum conservation and MIN_STOREY_HEIGHT clamping.
-- ✅ **Gable rake overhang** — new `rakeOverhang` param (separate from `eaveOverhang`) extends the ridge past each gable wall along the ridge axis; rake-corner-caps are replaced with planar "rake gable" triangles at the extreme ends. Walls keep the original ridge endpoints as their apex. Round-trip preserved via `_rakeOverhang` private attr.
+- ✅ **Gable rake overhang prototype (historical, now disabled)** — `rakeOverhang` geometry was prototyped, but the current generator rejects non-zero overhangs until a validated roof-slab model is available.
 - ✅ **IFC import correctness** — fixed Y-up→Z-up rotation, refined IfcSlab classification, and triangle-winding correction for IFCs whose `flatTransformation` contains a reflection (negative-determinant 3×3 sub-matrix) — fixes "half the walls invisible" symptom on some IFC sources.
 
 **Done in the previous status update (2026-04-23 → 2026-05-07):**
-- ✅ **LoD 2.2 eave overhang** — all 4 roof types, with `OuterCeilingSurface` soffits and (for gable) rake-corner-cap triangles.
+- ✅ **LoD 2.2 eave overhang prototype (historical, now disabled)** — all 4 roof types had soffit/cap geometry prototyped, but non-zero overhangs are currently blocked by the validation gate.
 - ✅ **Procedural doors + windows** — full LoD 2.2 with per-storey window placement, hole-cut walls + standalone semantic Window/Door faces, narrow-wall + lintel-clearance skip logic.
 - ✅ **Per-object / per-surface colouring mode** in the side-panel viewer — top-right toggle, warm architectural palette.
 - ✅ **Visual division editor MVP** — custom per-floor heights with auto-distribute + sum-conservation validation + live 3D split-line preview rings.
@@ -335,7 +349,7 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (385 tests across 35 files)
+## 10. Test suite (395 tests across 40 files)
 
 | File | Tests | Coverage |
 |---|---|---|
@@ -350,30 +364,35 @@ webcityeditor/
 | `lib/footprint-tint.test.ts` | 7 | roofType mapping: human strings <-> CityGML/3DBAG integer codes; alpha pass-through; fallback for unknown |
 | `lib/filter.test.ts` | 22 | Building filter: text/roof/year/height matching, AND combinations, range helpers, isFilterEmpty, matchingIds |
 | `lib/generator.test.ts` | 18 | Flat/pyramid/gable/hip generation, input validation, insertBuilding, round-trip for every roof type, storey-height validator |
+| `lib/editor-actions.test.ts` | 4 | Browser action route for create/move/export, vertical terrain placement commit, guarded rollback, invalid export refusal |
+| `lib/editor-actions-val3dity.test.ts` | 2 | Generated creator/detail variants and moved/subdivided buildings stay primitive-valid under val3dity |
+| `lib/export-validation.test.ts` | 2 | Export preparation refuses structurally invalid documents and round-trips exact download bytes |
 | `lib/openings.test.ts` | 11 | LoD 2.2 procedural windows + door; ring orientation; gable-end skip; round-trip survival; narrow-wall / lintel-clearance skip |
-| `lib/eave-overhang.test.ts` | 18 | LoD 2.2 eave/rake overhang for all 4 roof types; soffit topology; combine-with-openings without index collision |
+| `lib/eave-overhang.test.ts` | 6 | Overhang validity gate: zero-overhang topology remains valid; eave/rake overhang values are rejected until a validated roof-slab model exists |
 | `lib/preview-mesh.test.ts` | 8 | Live preview mesh: window/door overlay vertex counts, gable-end skip, narrow-wall skip, additive (never replaces) |
 | `lib/3dbag-smoke.test.ts` | 8 | Synthetic 3DBAG fixture: EPSG:7415, multi-LoD geometry, `b3_*` attributes, vertex-index rewriting, roofType int<->str |
 | `lib/hamburg-pipeline.test.ts` | 1 | Whole-city CLI validates the committed Hamburg CityJSONSeq sample |
+| `lib/hamburg-sample.test.ts` | 3 | Hosted Hamburg ALKIS sample roof mesh, map mesh, and create-plus-export regression |
 | `lib/hamburg-writeback-server.test.ts` | 1 | Disposable HTTP server: atomic structural write, SHA-256 revision, blind/stale-write rejection, history backup, malformed-body rejection, sparse-tile deletion |
-| `lib/regenerate.test.ts` | 13 | regenerateBuilding: footprint swap, attr preservation, reshape overrides, opening toggles, non-rectangular gable rejection, JSON round-trip |
+| `lib/regenerate.test.ts` | 14 | regenerateBuilding: footprint swap, attr preservation, reshape overrides, opening toggles, non-rectangular gable rejection, JSON round-trip |
 | `lib/parametrise.test.ts` | 18 | Infer/import parametric attrs, normalise roofType, promote imported buildings and delegated BuildingPart hierarchies to valid editable generated geometry |
 | `lib/compact.test.ts` | 9 | compactVertices: no-op on clean docs, reclaims orphans from regenerate, footprint shape preserved, idempotent, multi-tile-scale chunked append |
-| `lib/integrity.test.ts` | 13 | Vertex-index bounds, dangling parent/child, asymmetric links, orphaned vertices, semantics shell/face mismatch, NaN vertices |
-| `lib/gltf-export.test.ts` | 13 | glb header validity, accessor counts/types, bufferView alignment, extras.cityjson metadata, refuses empty geometry |
+| `lib/integrity.test.ts` | 14 | Vertex-index bounds, dangling parent/child, asymmetric links, orphaned vertices, semantics shell/face mismatch, MultiSurface face semantics, NaN vertices |
+| `lib/gltf-export.test.ts` | 14 | glb header validity, MultiSurface semantics, accessor counts/types, bufferView alignment, extras.cityjson metadata, refuses empty geometry |
 | `lib/undo.test.ts` | 11 | UndoStore: push, undo, redo, redo-invalidation on new push, maxDepth cap, peek labels, deep-clone integrity, selection + dirty restoration |
 | `lib/subdivision.test.ts` | 26 | canSplit, splitByFloor, splitByFloorHeights, per-floor footprint plans, manual cut fractions, selectable side-split axis, min-size enforcement |
-| `lib/transform.test.ts` | 9 | move preserves originals; hierarchy integrity; extent refresh; decimal preservation without transform; non-finite rejection; rotation |
+| `lib/transform.test.ts` | 10 | move preserves originals; hierarchy integrity; vertical placement, extent refresh; decimal preservation without transform; non-finite rejection; rotation |
+| `lib/terrain.test.ts` | 3 | Terrain snap estimation and auto/manual dZ transform behavior |
 | `lib/ifc-to-cityjson.test.ts` | 14 | IFC mesh classification and CityJSON conversion helpers |
 | `lib/ifc-import.test.ts` | 9 | web-ifc import orchestration and error handling boundaries |
 | `lib/opening-edit.test.ts` | 9 | Opening extraction and directional window/door move operations |
 | `lib/merge.test.ts` | 12 | Merge/import id conflicts, parent/child rewiring, exact transform normalization, precision-loss refusal |
 | `lib/clipboard.test.ts` | 8 | Multi-select copy/paste cloning, offsets, and hierarchy rewiring |
 | `lib/delete.test.ts` | 6 | Cascading deletion and surviving parent child-list cleanup |
-| `lib/zoning.test.ts` | 17 | Hamburg XPlan/FNP URL builders, GeoJSON-to-planning-zone mapping, fetch fallback, point-in-polygon checks, and allow-list validation |
-| `components/Toolbar.test.tsx` | 8 | Title, stats, dirty counter, catalog tile counter, sequence persistence, wiring |
+| `lib/zoning.test.ts` | 19 | Hamburg XPlan/FNP URL builders, GeoJSON-to-planning-zone mapping, fetch fallback, point-in-polygon and nearest-zone checks, and allow-list validation |
+| `components/Toolbar.test.tsx` | 9 | Title, stats, dirty counter, catalog tile counter, sequence persistence, wiring |
 | `components/FileLoader.test.tsx` | 6 | Sample button, fetch errors, non-CityJSON rejection, strict local catalog connection, malformed sequence-line reporting |
-| `components/AttributePanel.test.tsx` | 12 | Attribute rendering, priority sort, numeric/string/boolean coercion, revert gating, shared and independent floor-plan controls |
+| `components/AttributePanel.test.tsx` | 13 | Attribute rendering, priority sort, numeric/string/boolean coercion, revert gating, terrain move controls, shared and independent floor-plan controls |
 
 ---
 
