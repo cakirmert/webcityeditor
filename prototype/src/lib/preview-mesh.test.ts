@@ -18,6 +18,34 @@ function colorTriples(mesh: NonNullable<ReturnType<typeof buildPreviewMesh>>): s
   return out;
 }
 
+describe('buildPreviewMesh flat overhang', () => {
+  it('adds visible flat roof overhang slab geometry', () => {
+    const baseline = buildPreviewMesh({
+      footprintWgs84: RECT_DELFT,
+      targetCrs: 'EPSG:28992',
+      eaveHeight: 9,
+      ridgeHeight: 9,
+      roofType: 'flat',
+      storeys: 3,
+    });
+    const overhang = buildPreviewMesh({
+      footprintWgs84: RECT_DELFT,
+      targetCrs: 'EPSG:28992',
+      eaveHeight: 9,
+      ridgeHeight: 9,
+      roofType: 'flat',
+      storeys: 3,
+      eaveOverhang: 0.4,
+    });
+
+    expect(baseline).not.toBeNull();
+    expect(overhang).not.toBeNull();
+    expect(overhang!.positions.length).toBeGreaterThan(baseline!.positions.length);
+    expect(overhang!.anchorLngLat[0]).toBeCloseTo(baseline!.anchorLngLat[0], 6);
+    expect(overhang!.anchorLngLat[1]).toBeCloseTo(baseline!.anchorLngLat[1], 6);
+  });
+});
+
 describe('buildPreviewMesh — openings overlay', () => {
   it('omits window/door colours when openings are not requested', () => {
     const mesh = buildPreviewMesh({

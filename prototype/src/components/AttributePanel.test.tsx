@@ -183,4 +183,43 @@ describe('<AttributePanel />', () => {
     expect(screen.getAllByText('Floor 2').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('Cut 1 percent')).toHaveLength(2);
   });
+
+  it('applies flat eave overhang from reshape controls', async () => {
+    const cityjson = buildSampleCube();
+    cityjson.CityObjects.Building_A.attributes = {
+      ...cityjson.CityObjects.Building_A.attributes,
+      _createdBy: 'city-editor-prototype',
+      roofType: 'flat',
+      _eaveHeight: 10,
+      _ridgeHeight: 10,
+      _eaveOverhang: 0,
+      _rakeOverhang: 0,
+    };
+    const onReshapeBuilding = vi.fn();
+    const { container } = render(
+      <AttributePanel
+        buildingId="Building_A"
+        cityjson={cityjson}
+        isDirty={false}
+        onAttributeChange={vi.fn()}
+        onRevert={vi.fn()}
+        onClose={vi.fn()}
+        onReshapeBuilding={onReshapeBuilding}
+      />
+    );
+
+    const eaveInput = container.querySelector(
+      'input[title="Flat roof eave overhang in metres"]'
+    ) as HTMLInputElement | null;
+    expect(eaveInput).not.toBeNull();
+    expect(eaveInput!.disabled).toBe(false);
+
+    fireEvent.change(eaveInput!, { target: { value: '0.4' } });
+    await userEvent.click(screen.getByText('Apply reshape'));
+
+    expect(onReshapeBuilding).toHaveBeenCalledWith(
+      'Building_A',
+      expect.objectContaining({ eaveOverhang: 0.4, rakeOverhang: 0 })
+    );
+  });
 });

@@ -31,12 +31,14 @@ describeWithVal3dity('browser editor actions with val3dity', () => {
   it('keeps every creator roof and detail variant primitive-valid', () => {
     const creatorCases = [
       { roofType: 'flat' as const, eaveHeight: 9 },
+      { roofType: 'flat' as const, eaveHeight: 9, eaveOverhang: 0.4 },
       { roofType: 'pyramid' as const, eaveHeight: 7 },
       { roofType: 'gable' as const, eaveHeight: 7 },
       { roofType: 'hip' as const, eaveHeight: 7 },
       {
         roofType: 'flat' as const,
         eaveHeight: 9,
+        eaveOverhang: 0.4,
         openings: { windows: true, door: true },
       },
     ];
@@ -53,6 +55,7 @@ describeWithVal3dity('browser editor actions with val3dity', () => {
         ridgeHeight: 9,
         roofType: creator.roofType,
         openings: creator.openings,
+        eaveOverhang: creator.eaveOverhang,
       });
       expectVal3dityValid(doc, `${creator.roofType}-${index}-created`);
       commitBuildingTransformFromEditor(doc, {

@@ -1178,8 +1178,8 @@ function ReshapeSection({
       roofType,
       eaveHeight: roofType === 'flat' ? ridge : eave,
       ridgeHeight: ridge,
-      eaveOverhang,
-      rakeOverhang: roofType === 'gable' ? rakeOverhang : 0,
+      eaveOverhang: roofType === 'flat' ? eaveOverhang : 0,
+      rakeOverhang: 0,
       addWindows,
       addDoor,
     });
@@ -1249,11 +1249,16 @@ function ReshapeSection({
           <Input
             type="number"
             min={0}
-            max={0}
+            max={2}
             step="0.1"
             value={eaveOverhang}
-            onChange={() => setEaveOverhang(0)}
-            title="Set to 0 m: overhangs are disabled until a validated roof-slab model is available"
+            disabled={roofType !== 'flat'}
+            onChange={(e) => setEaveOverhang(Math.max(0, Number(e.target.value) || 0))}
+            title={
+              roofType === 'flat'
+                ? 'Flat roof eave overhang in metres'
+                : 'Pitched roof overhangs are disabled until a validated slab model is available'
+            }
           />
         </label>
         {roofType === 'gable' && (
@@ -1265,14 +1270,15 @@ function ReshapeSection({
               max={0}
               step="0.1"
               value={rakeOverhang}
+              disabled
               onChange={() => setRakeOverhang(0)}
-              title="Set to 0 m: rake overhangs are disabled until a validated roof-slab model is available"
+              title="Rake overhangs are disabled until a validated pitched roof-slab model is available"
             />
           </label>
         )}
       </div>
       <div className="text-[10px] text-[var(--warn)]">
-        Overhangs are temporarily disabled until the editor emits a validated roof-slab model.
+        Flat eave overhangs use a validated 0.25 m roof slab. Pitched and rake overhangs remain disabled.
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
         <label className="flex items-center gap-1 cursor-pointer">

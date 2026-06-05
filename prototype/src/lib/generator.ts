@@ -32,10 +32,9 @@ export interface NewBuildingParams {
   /** Optional procedural openings (windows + door). Bumps the geometry's LoD
    *  label from `2.0` to `2.2` when any opening is requested. */
   openings?: OpeningOptions;
-  /** LoD 2.2 eave overhang in metres (default 0 = no overhang). When > 0, flat
-   *  roofs extend outward by this distance and the underside is emitted as
-   *  `OuterCeilingSurface` (soffit) faces. Only flat roofs support overhang
-   *  in this version; pitched roofs ignore the value. */
+  /** LoD 2.2 eave overhang in metres (default 0 = no overhang). Flat roofs
+   *  support a validated finite roof slab; pitched roof overhangs remain
+   *  disabled until they have their own validated slab topology. */
   eaveOverhang?: number;
   /** LoD 2.2 gable rake overhang in metres (default 0 = no overhang). Only
    *  applies to `roofType: 'gable'`; ignored otherwise. When > 0, the ridge
@@ -44,6 +43,8 @@ export interface NewBuildingParams {
    *  walls themselves are unchanged. */
   rakeOverhang?: number;
 }
+
+const FLAT_ROOF_SLAB_THICKNESS = 0.25;
 
 export interface GenerateResult {
   /** New building's assigned id. */
@@ -127,10 +128,19 @@ export function generateBuilding(
   let out: BuildOut;
   const eaveOverhang = Math.max(0, params.eaveOverhang ?? 0);
   const rakeOverhang = Math.max(0, params.rakeOverhang ?? 0);
-  if (eaveOverhang > 0 || rakeOverhang > 0) {
+  if (rakeOverhang > 0) {
     throw new Error(
-      'Roof overhang geometry is temporarily disabled: the previous zero-thickness ' +
-        'Solid representation fails ISO 19107 validation. Use 0 m until a validated roof-slab model is available.'
+      'Rake overhang geometry is temporarily disabled until a validated pitched roof-slab model is available.'
+    );
+  }
+  if (eaveOverhang > 0 && params.roofType !== 'flat') {
+    throw new Error(
+      'Pitched roof eave overhang geometry is temporarily disabled until a validated roof-slab model is available. Flat roofs support eave overhangs.'
+    );
+  }
+  if (params.roofType === 'flat' && eaveOverhang > 0 && params.eaveHeight <= FLAT_ROOF_SLAB_THICKNESS) {
+    throw new Error(
+      `Flat roof overhang requires eaveHeight > ${FLAT_ROOF_SLAB_THICKNESS} m so the roof slab has finite thickness.`
     );
   }
   if (params.roofType === 'flat') {
@@ -165,14 +175,9 @@ export function generateBuilding(
   ];
   let lodLabel = '2.0';
 
-  // LoD 2.2 eave overhang adds OuterCeilingSurface (soffit + rake-corner-cap)
-  // faces. The builder marks them with semantics index 3 when it emits them;
-  // the surface entry must match that index, so push it BEFORE the openings
-  // pass which assigns its own indices on top. All 4 roof types now honour
-  // overhang. Gable produces 2 long-side soffits + 4 rake-corner-cap
-  // triangles (only the long sides physically overhang; the rake-corner caps
-  // close the geometric gap at each gable-end corner).
-  const hasSoffits = eaveOverhang > 0 || (params.roofType === 'gable' && rakeOverhang > 0);
+  // Flat eave overhang adds a finite 0.25m slab with soffit faces tagged as
+  // OuterCeilingSurface. Pitched/rake overhangs stay blocked above.
+  const hasSoffits = params.roofType === 'flat' && eaveOverhang > 0;
   if (hasSoffits) {
     surfaces.push({ type: 'OuterCeilingSurface' });
     lodLabel = '2.2';
@@ -188,7 +193,7 @@ export function generateBuilding(
         door: params.openings.door,
         storeys: params.storeys,
         baseZ,
-        eaveZ: eaveZAbs,
+        eaveZ: hasSoffits ? eaveZAbs - FLAT_ROOF_SLAB_THICKNESS : eaveZAbs,
         baseSurfaceCount: surfaces.length,
       },
       out.newVertices,
@@ -262,6 +267,9 @@ function buildFlat(
 ): BuildOut {
   const n = projected.length;
   const hasOverhang = eaveOverhang > 0;
+  if (hasOverhang) {
+    return buildFlatWithRoofSlab(projected, baseZ, roofZ, toInt, toGlobal, eaveOverhang);
+  }
 
   // Layout:
   //   0 .. n-1     ground vertices       (proj[i], baseZ)
@@ -363,6 +371,205 @@ function buildFlat(
     });
   }
   return { newVertices, shell, semanticsValues, walls };
+}
+
+function buildFlatWithRoofSlab(
+  projected: [number, number][],
+  baseZ: number,
+  roofZ: number,
+  toInt: (x: number, y: number, z: number) => [number, number, number],
+  toGlobal: (local: number) => number,
+  eaveOverhang: number
+): BuildOut {
+  const n = projected.length;
+  const slabBottomZ = roofZ - FLAT_ROOF_SLAB_THICKNESS;
+  const outer = offsetRing(projected, eaveOverhang);
+  validateOffsetRing(projected, outer);
+
+  const newVertices: [number, number, number][] = [];
+  for (let i = 0; i < n; i++) newVertices.push(toInt(projected[i][0], projected[i][1], baseZ));
+  for (let i = 0; i < n; i++) {
+    newVertices.push(toInt(projected[i][0], projected[i][1], slabBottomZ));
+  }
+  for (let i = 0; i < n; i++) newVertices.push(toInt(outer[i][0], outer[i][1], slabBottomZ));
+  for (let i = 0; i < n; i++) newVertices.push(toInt(outer[i][0], outer[i][1], roofZ));
+
+  const groundStart = 0;
+  const wallTopStart = n;
+  const outerBottomStart = 2 * n;
+  const outerTopStart = 3 * n;
+
+  const groundRing: number[] = [];
+  for (let i = 0; i < n; i++) groundRing.push(toGlobal(groundStart + i));
+  groundRing.reverse();
+
+  const roofRing: number[] = [];
+  for (let i = 0; i < n; i++) roofRing.push(toGlobal(outerTopStart + i));
+
+  const bodyWallRings: number[][] = [];
+  const fasciaRings: number[][] = [];
+  const soffitRings: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    bodyWallRings.push([
+      toGlobal(groundStart + i),
+      toGlobal(groundStart + j),
+      toGlobal(wallTopStart + j),
+      toGlobal(wallTopStart + i),
+    ]);
+    fasciaRings.push([
+      toGlobal(outerBottomStart + i),
+      toGlobal(outerBottomStart + j),
+      toGlobal(outerTopStart + j),
+      toGlobal(outerTopStart + i),
+    ]);
+    soffitRings.push([
+      toGlobal(wallTopStart + i),
+      toGlobal(wallTopStart + j),
+      toGlobal(outerBottomStart + j),
+      toGlobal(outerBottomStart + i),
+    ]);
+  }
+
+  const shell: number[][][] = [
+    [groundRing],
+    [roofRing],
+    ...bodyWallRings.map((w) => [w]),
+    ...fasciaRings.map((w) => [w]),
+    ...soffitRings.map((s) => [s]),
+  ];
+  const semanticsValues: number[] = [
+    0,
+    1,
+    ...new Array(bodyWallRings.length + fasciaRings.length).fill(2),
+    ...new Array(soffitRings.length).fill(3),
+  ];
+
+  const walls: RectangularWall[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    walls.push({
+      shellIndex: 2 + i,
+      globalCorners: [
+        toGlobal(groundStart + i),
+        toGlobal(groundStart + j),
+        toGlobal(wallTopStart + j),
+        toGlobal(wallTopStart + i),
+      ],
+      corners3D: [
+        [projected[i][0], projected[i][1], baseZ],
+        [projected[j][0], projected[j][1], baseZ],
+        [projected[j][0], projected[j][1], slabBottomZ],
+        [projected[i][0], projected[i][1], slabBottomZ],
+      ],
+    });
+  }
+
+  return { newVertices, shell, semanticsValues, walls };
+}
+
+function offsetRing(ring: [number, number][], distance: number): [number, number][] {
+  const n = ring.length;
+  const result: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = ring[(i - 1 + n) % n];
+    const curr = ring[i];
+    const next = ring[(i + 1) % n];
+    const prevDir: [number, number] = [curr[0] - prev[0], curr[1] - prev[1]];
+    const nextDir: [number, number] = [next[0] - curr[0], next[1] - curr[1]];
+    const prevLen = Math.hypot(prevDir[0], prevDir[1]);
+    const nextLen = Math.hypot(nextDir[0], nextDir[1]);
+    if (prevLen < 1e-9 || nextLen < 1e-9) {
+      throw new Error('Flat roof overhang requires a non-degenerate footprint.');
+    }
+
+    const prevNormal: [number, number] = [prevDir[1] / prevLen, -prevDir[0] / prevLen];
+    const nextNormal: [number, number] = [nextDir[1] / nextLen, -nextDir[0] / nextLen];
+    const p1: [number, number] = [
+      prev[0] + prevNormal[0] * distance,
+      prev[1] + prevNormal[1] * distance,
+    ];
+    const p2: [number, number] = [
+      curr[0] + nextNormal[0] * distance,
+      curr[1] + nextNormal[1] * distance,
+    ];
+    const intersect = intersectLines(p1, prevDir, p2, nextDir);
+    if (intersect) {
+      result.push(intersect);
+    } else {
+      const fallback = vertexOutwardDir(ring, i);
+      result.push([curr[0] + fallback[0] * distance, curr[1] + fallback[1] * distance]);
+    }
+  }
+  return result;
+}
+
+function intersectLines(
+  p: [number, number],
+  r: [number, number],
+  q: [number, number],
+  s: [number, number]
+): [number, number] | null {
+  const denom = cross2(r, s);
+  if (Math.abs(denom) < 1e-9) return null;
+  const qp: [number, number] = [q[0] - p[0], q[1] - p[1]];
+  const t = cross2(qp, s) / denom;
+  return [p[0] + t * r[0], p[1] + t * r[1]];
+}
+
+function validateOffsetRing(original: [number, number][], outer: [number, number][]): void {
+  if (outer.length !== original.length || outer.length < 3) {
+    throw new Error('Flat roof overhang produced an invalid offset footprint.');
+  }
+  for (const [x, y] of outer) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error('Flat roof overhang produced non-finite offset coordinates.');
+    }
+  }
+  if (signedArea(outer) <= signedArea(original)) {
+    throw new Error('Flat roof overhang produced an invalid offset footprint.');
+  }
+  if (hasSelfIntersection(outer)) {
+    throw new Error('Flat roof overhang produced a self-intersecting offset footprint.');
+  }
+}
+
+function hasSelfIntersection(ring: [number, number][]): boolean {
+  for (let i = 0; i < ring.length; i++) {
+    const a1 = ring[i];
+    const a2 = ring[(i + 1) % ring.length];
+    for (let j = i + 1; j < ring.length; j++) {
+      if (Math.abs(i - j) <= 1) continue;
+      if (i === 0 && j === ring.length - 1) continue;
+      const b1 = ring[j];
+      const b2 = ring[(j + 1) % ring.length];
+      if (segmentsIntersect(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
+function segmentsIntersect(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number],
+  d: [number, number]
+): boolean {
+  const ab: [number, number] = [b[0] - a[0], b[1] - a[1]];
+  const ac: [number, number] = [c[0] - a[0], c[1] - a[1]];
+  const ad: [number, number] = [d[0] - a[0], d[1] - a[1]];
+  const cd: [number, number] = [d[0] - c[0], d[1] - c[1]];
+  const ca: [number, number] = [a[0] - c[0], a[1] - c[1]];
+  const cb: [number, number] = [b[0] - c[0], b[1] - c[1]];
+  const o1 = cross2(ab, ac);
+  const o2 = cross2(ab, ad);
+  const o3 = cross2(cd, ca);
+  const o4 = cross2(cd, cb);
+  return o1 * o2 < -1e-9 && o3 * o4 < -1e-9;
+}
+
+function cross2(a: [number, number], b: [number, number]): number {
+  return a[0] * b[1] - a[1] * b[0];
 }
 
 /**

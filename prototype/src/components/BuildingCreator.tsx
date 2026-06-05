@@ -113,8 +113,8 @@ export default function BuildingCreator({
       splitAxis,
       addWindows,
       addDoor,
-      eaveOverhang,
-      rakeOverhang: roofType === 'gable' ? rakeOverhang : 0,
+      eaveOverhang: roofType === 'flat' ? eaveOverhang : 0,
+      rakeOverhang: 0,
     }),
     [
       totalHeight,
@@ -247,8 +247,8 @@ export default function BuildingCreator({
             </Section>
 
             <Section label="Overhang">
-              <div className="mb-1 rounded-md border border-[var(--warn)] bg-[rgba(251,191,36,0.08)] px-2 py-1.5 text-[10px] text-[var(--warn)]">
-                Temporarily disabled: roof overhangs need a validated roof-slab model.
+              <div className="mb-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[10px] text-[var(--text-dim)]">
+                Flat eave overhangs use a validated 0.25 m roof slab. Pitched and rake overhangs are still disabled pending a validated slab model.
               </div>
               <Row label="Eave (m)">
                 <div className="flex items-center gap-2">
@@ -258,7 +258,12 @@ export default function BuildingCreator({
                     max={2}
                     step="0.1"
                     value={eaveOverhang}
-                    disabled
+                    disabled={roofType !== 'flat'}
+                    title={
+                      roofType === 'flat'
+                        ? 'Flat roof eave overhang in metres'
+                        : 'Pitched roof overhangs are disabled until a validated slab model is available'
+                    }
                     onChange={(e) =>
                       setEaveOverhang(Math.max(0, Number(e.target.value) || 0))
                     }
@@ -280,9 +285,8 @@ export default function BuildingCreator({
                       step="0.1"
                       value={rakeOverhang}
                       disabled
-                      onChange={(e) =>
-                        setRakeOverhang(Math.max(0, Number(e.target.value) || 0))
-                      }
+                      title="Rake overhangs are disabled until a validated pitched roof-slab model is available"
+                      onChange={() => setRakeOverhang(0)}
                     />
                     {rakeOverhang > 0 && (
                       <span className="text-[10px] text-[var(--text-faint)]">

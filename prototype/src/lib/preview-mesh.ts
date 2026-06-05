@@ -24,6 +24,8 @@ export interface PreviewMeshParams {
     windows: boolean;
     door: boolean;
   };
+  /** Flat roof eave overhang in metres. Pitched preview overhangs are disabled. */
+  eaveOverhang?: number;
 }
 
 export interface PreviewMesh {
@@ -35,6 +37,88 @@ export interface PreviewMesh {
   anchorLngLat: [number, number];
   /** RGB 0-255 per vertex, matched to positions. GroundSurface=brown, RoofSurface=amber, WallSurface=grey, Window=blue, Door=brown. */
   colors: Uint8Array;
+}
+
+function offsetPreviewRing(
+  ring: [number, number][],
+  distance: number
+): [number, number][] | null {
+  const result: [number, number][] = [];
+  for (let i = 0; i < ring.length; i++) {
+    const prev = ring[(i - 1 + ring.length) % ring.length];
+    const curr = ring[i];
+    const next = ring[(i + 1) % ring.length];
+    const prevDir: [number, number] = [curr[0] - prev[0], curr[1] - prev[1]];
+    const nextDir: [number, number] = [next[0] - curr[0], next[1] - curr[1]];
+    const prevLen = Math.hypot(prevDir[0], prevDir[1]);
+    const nextLen = Math.hypot(nextDir[0], nextDir[1]);
+    if (prevLen < 1e-9 || nextLen < 1e-9) return null;
+    const prevNormal: [number, number] = [prevDir[1] / prevLen, -prevDir[0] / prevLen];
+    const nextNormal: [number, number] = [nextDir[1] / nextLen, -nextDir[0] / nextLen];
+    const p1: [number, number] = [
+      prev[0] + prevNormal[0] * distance,
+      prev[1] + prevNormal[1] * distance,
+    ];
+    const p2: [number, number] = [
+      curr[0] + nextNormal[0] * distance,
+      curr[1] + nextNormal[1] * distance,
+    ];
+    const intersection = intersectPreviewLines(p1, prevDir, p2, nextDir);
+    if (!intersection) return null;
+    result.push(intersection);
+  }
+  return result;
+}
+
+function intersectPreviewLines(
+  p: [number, number],
+  r: [number, number],
+  q: [number, number],
+  s: [number, number]
+): [number, number] | null {
+  const denom = crossPreview(r, s);
+  if (Math.abs(denom) < 1e-9) return null;
+  const qp: [number, number] = [q[0] - p[0], q[1] - p[1]];
+  const t = crossPreview(qp, s) / denom;
+  const out: [number, number] = [p[0] + t * r[0], p[1] + t * r[1]];
+  return Number.isFinite(out[0]) && Number.isFinite(out[1]) ? out : null;
+}
+
+function hasPreviewSelfIntersection(ring: [number, number][]): boolean {
+  for (let i = 0; i < ring.length; i++) {
+    const a1 = ring[i];
+    const a2 = ring[(i + 1) % ring.length];
+    for (let j = i + 1; j < ring.length; j++) {
+      if (Math.abs(i - j) <= 1) continue;
+      if (i === 0 && j === ring.length - 1) continue;
+      const b1 = ring[j];
+      const b2 = ring[(j + 1) % ring.length];
+      if (previewSegmentsIntersect(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
+function previewSegmentsIntersect(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number],
+  d: [number, number]
+): boolean {
+  const ab: [number, number] = [b[0] - a[0], b[1] - a[1]];
+  const ac: [number, number] = [c[0] - a[0], c[1] - a[1]];
+  const ad: [number, number] = [d[0] - a[0], d[1] - a[1]];
+  const cd: [number, number] = [d[0] - c[0], d[1] - c[1]];
+  const ca: [number, number] = [a[0] - c[0], a[1] - c[1]];
+  const cb: [number, number] = [b[0] - c[0], b[1] - c[1]];
+  return (
+    crossPreview(ab, ac) * crossPreview(ab, ad) < -1e-9 &&
+    crossPreview(cd, ca) * crossPreview(cd, cb) < -1e-9
+  );
+}
+
+function crossPreview(a: [number, number], b: [number, number]): number {
+  return a[0] * b[1] - a[1] * b[0];
 }
 
 // Window / door geometry constants — must match openings.ts exactly so the
@@ -94,6 +178,8 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
 
   const roofZ = params.ridgeHeight;
   const eaveZ = params.eaveHeight;
+  const eaveOverhang = params.roofType === 'flat' ? Math.max(0, params.eaveOverhang ?? 0) : 0;
+  const wallTopZ = eaveOverhang > 0 ? eaveZ - 0.25 : eaveZ;
 
   // Per-surface colours (RGB, 0-255). Matching what extractFootprints / the
   // loader use, so the preview visually corresponds to the final building.
@@ -149,8 +235,8 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
       [
         [local[i][0], local[i][1], 0],
         [local[j][0], local[j][1], 0],
-        [local[j][0], local[j][1], eaveZ],
-        [local[i][0], local[i][1], eaveZ],
+        [local[j][0], local[j][1], wallTopZ],
+        [local[i][0], local[i][1], wallTopZ],
       ],
       WALL
     );
@@ -158,8 +244,33 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
 
   // Roof, by type
   if (params.roofType === 'flat') {
-    const roof: [number, number, number][] = local.map(([x, y]) => [x, y, roofZ]);
+    const outer = eaveOverhang > 0 ? offsetPreviewRing(local, eaveOverhang) : local;
+    if (!outer || hasPreviewSelfIntersection(outer)) return null;
+    const roof: [number, number, number][] = outer.map(([x, y]) => [x, y, roofZ]);
     faceFan(roof, ROOF);
+    if (eaveOverhang > 0) {
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        faceFan(
+          [
+            [outer[i][0], outer[i][1], wallTopZ],
+            [outer[j][0], outer[j][1], wallTopZ],
+            [outer[j][0], outer[j][1], roofZ],
+            [outer[i][0], outer[i][1], roofZ],
+          ],
+          WALL
+        );
+        faceFan(
+          [
+            [local[i][0], local[i][1], wallTopZ],
+            [local[j][0], local[j][1], wallTopZ],
+            [outer[j][0], outer[j][1], wallTopZ],
+            [outer[i][0], outer[i][1], wallTopZ],
+          ],
+          ROOF
+        );
+      }
+    }
   } else if (params.roofType === 'pyramid') {
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
@@ -362,7 +473,7 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
   // produces the real LoD 2.2 semantic surfaces on Create.
   if (params.openings && (params.openings.windows || params.openings.door)) {
     const storeys = Math.max(1, params.storeys ?? 1);
-    const storeyHeight = params.eaveHeight / storeys;
+    const storeyHeight = wallTopZ / storeys;
 
     // Identify gable-end walls (pentagonal in the actual generator) so we
     // don't decorate them with windows. Same logic as buildGable.
@@ -420,7 +531,7 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
           const floorZ = storey * storeyHeight;
           const sillZ = floorZ + WINDOW_SILL;
           const topZ = sillZ + WINDOW_H;
-          if (topZ > params.eaveHeight - 0.3) continue;
+          if (topZ > wallTopZ - 0.3) continue;
           for (let w = 0; w < targetCount; w++) {
             const centreU = ((w + 0.5) / targetCount) * wallLen;
             const leftU = centreU - WINDOW_W / 2;
@@ -443,7 +554,7 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
       }
 
       if (params.openings.door && !doorPlaced && wallLen >= DOOR_W + 0.6) {
-        const doorTopZ = Math.min(DOOR_H, params.eaveHeight - 0.3);
+        const doorTopZ = Math.min(DOOR_H, wallTopZ - 0.3);
         if (doorTopZ >= 1.8) {
           const centreU = wallLen / 2;
           const leftU = centreU - DOOR_W / 2;

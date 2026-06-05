@@ -1691,6 +1691,7 @@ export default function App() {
                           ridgeHeight: pendingForm.totalHeight,
                           roofType: pendingForm.roofType,
                           storeys: pendingForm.storeys,
+                          eaveOverhang: pendingForm.eaveOverhang,
                           openings:
                             pendingForm.addWindows || pendingForm.addDoor
                               ? {

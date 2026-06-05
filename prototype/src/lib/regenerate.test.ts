@@ -3,6 +3,7 @@ import { buildSampleCube, parseCityJson } from './cityjson';
 import { generateBuilding, insertBuilding, type NewBuildingParams } from './generator';
 import { regenerateBuilding } from './regenerate';
 import { extractFootprints } from './footprints';
+import { prepareValidatedCityJsonExport } from './export-validation';
 import './projection'; // side-effect: register EPSG defs
 
 const FP_DELFT_A: [number, number][] = [
@@ -92,12 +93,23 @@ describe('regenerateBuilding', () => {
     expect(types).toContain('Door');
   });
 
-  it('rejects overhang reshape until a validated roof-slab model is available', () => {
+  it('preserves validated flat eave overhangs across regeneration', () => {
     const { doc, id } = makeBuilding();
     const res = regenerateBuilding(doc, id, FP_DELFT_B_SHIFTED, { eaveOverhang: 0.4 });
 
-    expect(res.ok).toBe(false);
-    expect(res.reason).toMatch(/temporarily disabled.*ISO 19107/i);
+    expect(res.ok).toBe(true);
+    expect(doc.CityObjects[id].attributes?._eaveOverhang).toBe(0.4);
+    const geometry = doc.CityObjects[id].geometry?.[0] as {
+      lod?: string;
+      semantics?: { surfaces?: Array<{ type?: string }> };
+    };
+    expect(geometry.lod).toBe('2.2');
+    expect(geometry.semantics?.surfaces?.map((surface) => surface.type)).toContain(
+      'OuterCeilingSurface'
+    );
+    const prepared = prepareValidatedCityJsonExport(doc);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error(prepared.error);
   });
 
   it('rejects regeneration of an imported (non-editor) building with a friendly reason', () => {
