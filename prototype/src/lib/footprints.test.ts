@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from './cityjson';
 import { extractFootprints, filterToBuilding } from './footprints';
+import { prepareValidatedCityJsonExport } from './export-validation';
 import type { CityJsonDocument } from '../types';
 
 describe('extractFootprints', () => {
@@ -65,8 +66,31 @@ describe('filterToBuilding', () => {
   it('preserves vertices and metadata', () => {
     const doc = buildSampleCube();
     const filtered = filterToBuilding(doc, 'Building_A');
-    expect(filtered.vertices).toBe(doc.vertices);
+    expect(filtered.vertices).toEqual(doc.vertices);
+    expect(filtered.vertices).not.toBe(doc.vertices);
     expect(filtered.version).toBe(doc.version);
-    expect(filtered.transform).toBe(doc.transform);
+    expect(filtered.transform).toEqual(doc.transform);
+    expect(filtered.transform).not.toBe(doc.transform);
+    expect(filtered.metadata).toEqual(doc.metadata);
+    expect(filtered.metadata).not.toBe(doc.metadata);
+  });
+
+  it('isolates the filtered detail document from loader-style mutations', () => {
+    const doc = buildSampleCube();
+    const filtered = filterToBuilding(doc, 'Building_A');
+    const originalGeometry = doc.CityObjects.Building_A.geometry?.[0] as {
+      semantics?: { values?: unknown };
+    };
+    const filteredGeometry = filtered.CityObjects.Building_A.geometry?.[0] as {
+      semantics?: { values?: unknown };
+    };
+
+    expect(filtered.CityObjects.Building_A).not.toBe(doc.CityObjects.Building_A);
+    expect(filteredGeometry).not.toBe(originalGeometry);
+    filteredGeometry.semantics!.values = (filteredGeometry.semantics!.values as number[][])[0];
+
+    expect(originalGeometry.semantics?.values).toEqual([[0, 1, 2, 2, 2, 2]]);
+    const prepared = prepareValidatedCityJsonExport(doc);
+    expect(prepared.ok).toBe(true);
   });
 });

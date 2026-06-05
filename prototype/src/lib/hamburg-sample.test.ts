@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseCityJsonAuto } from './cityjson';
 import { buildCityJsonMapMesh } from './cityjson-map-mesh';
-import { createBuildingFromEditor } from './editor-actions';
+import { commitBuildingTransformFromEditor, createBuildingFromEditor } from './editor-actions';
 import { prepareValidatedCityJsonExport } from './export-validation';
-import { extractFootprints } from './footprints';
+import { extractFootprints, filterToBuilding } from './footprints';
 import { detectCrs } from './projection';
 
 const HAMBURG_SAMPLE_PATH = 'public/data/hamburg/hamburg-center-alkis.city.jsonl';
@@ -116,6 +116,54 @@ describe('Hamburg hosted ALKIS sample', () => {
     const prepared = prepareValidatedCityJsonExport(doc);
 
     expect(created.id).toBeTruthy();
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error(prepared.error);
+  });
+
+  it('can move the reported Hamburg building without flattening Solid semantics', () => {
+    const parsed = parseCityJsonAuto(readFileSync(HAMBURG_SAMPLE_PATH, 'utf8'));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const doc = parsed.doc;
+    const id = 'hamburg-alkis-219845';
+    const building = doc.CityObjects[id];
+    expect(building).toBeDefined();
+
+    const geometry = building.geometry?.[0] as {
+      type?: string;
+      boundaries?: number[][][][];
+      semantics?: { values?: unknown };
+    };
+    expect(geometry.type).toBe('Solid');
+    expect(Array.isArray(geometry.semantics?.values)).toBe(true);
+    expect((geometry.semantics?.values as unknown[]).length).toBe(1);
+
+    const filtered = filterToBuilding(doc, id);
+    const filteredGeometry = filtered.CityObjects[id].geometry?.[0] as {
+      semantics?: { values?: unknown };
+    };
+    filteredGeometry.semantics!.values = (filteredGeometry.semantics!.values as number[][])[0];
+    expect((geometry.semantics?.values as unknown[]).length).toBe(1);
+
+    const moved = commitBuildingTransformFromEditor(doc, {
+      id,
+      dx: 4.5,
+      dy: -2.25,
+      dz: 0,
+      angle: 0,
+    });
+    const movedGeometry = doc.CityObjects[id].geometry?.[0] as {
+      boundaries?: number[][][][];
+      semantics?: { values?: unknown };
+    };
+    const prepared = prepareValidatedCityJsonExport(doc);
+
+    expect(moved.changed).toBe(true);
+    expect((movedGeometry.semantics?.values as unknown[]).length).toBe(1);
+    expect((movedGeometry.semantics?.values as number[][])[0]).toHaveLength(
+      movedGeometry.boundaries?.[0]?.length ?? 0
+    );
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) throw new Error(prepared.error);
   });

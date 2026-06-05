@@ -267,8 +267,12 @@ export function filterToBuilding(
     const o = doc.CityObjects[id];
     if (o) filteredObjects[id] = o;
   }
-  return {
+  const filtered = {
     ...doc,
     CityObjects: filteredObjects,
   };
+  // cityjson-threejs-loader mutates parts of its input while preparing meshes.
+  // Keep this detail-view document isolated so preview rendering cannot corrupt
+  // the live editor document used for validation and export.
+  return JSON.parse(JSON.stringify(filtered)) as CityJsonDocument;
 }
