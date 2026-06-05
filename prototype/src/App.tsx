@@ -99,7 +99,7 @@ export default function App() {
   const [drawMode, setDrawMode] = useState<'none' | 'polygon'>('none');
   const [pendingFootprint, setPendingFootprint] = useState<[number, number][] | null>(null);
   const [pendingForm, setPendingForm] = useState<NewBuildingForm | null>(null);
-  const [sidePanelFullscreen, setSidePanelFullscreen] = useState(false);
+  const [sidePanelWide, setSidePanelWide] = useState(false);
   /** Live-preview state for translating/rotating a building before committing. */
   const [pendingTransform, setPendingTransform] = useState<PendingTransform | null>(null);
   /** Live-preview state for the visual division editor — set when the user is
@@ -1734,7 +1734,7 @@ export default function App() {
         </div>
 
         {cityjson && selection && filteredForSelected && (
-          <aside className={`side-panel ${sidePanelFullscreen ? 'fullscreen' : ''}`}>
+          <aside className={`side-panel ${sidePanelWide ? 'wide' : ''}`}>
             <div className="panel-header">
               <h3>
                 {dirtyIds.has(selection.objectId) && (
@@ -1744,17 +1744,17 @@ export default function App() {
               </h3>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
-                  onClick={() => setSidePanelFullscreen((f) => !f)}
-                  aria-label={sidePanelFullscreen ? 'Collapse' : 'Fullscreen'}
-                  title={sidePanelFullscreen ? 'Collapse side panel' : 'Fullscreen side panel'}
+                  onClick={() => setSidePanelWide((wide) => !wide)}
+                  aria-label={sidePanelWide ? 'Use normal inspector width' : 'Use wide inspector'}
+                  title={sidePanelWide ? 'Use normal inspector width' : 'Use wide inspector'}
                   style={{ padding: '2px 8px' }}
                 >
-                  {sidePanelFullscreen ? '⇲' : '⇱'}
+                  {sidePanelWide ? 'Normal' : 'Wide'}
                 </button>
                 <button
                   onClick={() => {
                     setSelection(null);
-                    setSidePanelFullscreen(false);
+                    setSidePanelWide(false);
                   }}
                   aria-label="Close"
                   style={{ padding: '2px 8px' }}

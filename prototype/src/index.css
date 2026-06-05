@@ -81,9 +81,7 @@ kbd {
   height: 100% !important;
 }
 
-/* Side panel — default wider so the Three.js editor gets real estate and the
-   attribute/transform controls have room. Can still collapse by closing the
-   panel (×) or expand to fullscreen (⇱). */
+/* Side panel: default inspector plus a wider right-docked demo mode. */
 .side-panel {
   width: 480px;
   background: var(--surface);
@@ -104,19 +102,39 @@ kbd {
   overflow: hidden;
 }
 
-.side-panel.fullscreen {
+.side-panel.wide {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  left: 0;
-  width: 100%;
-  border-left: 0;
+  width: clamp(640px, 42vw, 860px);
+  max-width: calc(100vw - 48px);
+  border-left: 1px solid var(--border);
   z-index: 15;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
 }
-.side-panel.fullscreen .building-viewer-host {
-  height: calc(100% - 260px);
+
+.side-panel.wide .building-viewer-host {
+  height: min(46vh, 520px);
+  min-height: 360px;
+}
+
+@media (max-width: 900px) {
+  .side-panel {
+    width: min(480px, 100vw);
+  }
+
+  .side-panel.wide {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-height: 720px) {
+  .side-panel.wide .building-viewer-host {
+    height: 42vh;
+    min-height: 280px;
+  }
 }
 
 /* Panel header (inside App.tsx's aside) */
