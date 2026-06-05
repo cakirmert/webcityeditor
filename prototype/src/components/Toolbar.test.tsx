@@ -21,7 +21,7 @@ describe('<Toolbar />', () => {
         hasData={false}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
       />
     );
     expect(screen.getByText('City Editor')).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
       />
     );
     expect(screen.getByText('9-284-556.city.json')).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
       />
     );
     expect(screen.getByText(/3 unsaved/)).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe('<Toolbar />', () => {
         hasData={false}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
       />
     );
     expect(screen.queryByText(/Export CityJSON/)).not.toBeInTheDocument();
@@ -87,16 +87,16 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={onExport}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
       />
     );
     await userEvent.click(screen.getByText(/Export CityJSON/));
     expect(onExport).toHaveBeenCalledTimes(1);
   });
 
-  it('fires onReloadView and onNewFile appropriately', async () => {
+  it('fires onReloadView from More and opens the data loader', async () => {
     const onReloadView = vi.fn();
-    const onNewFile = vi.fn();
+    const onOpenLoader = vi.fn();
     render(
       <Toolbar
         fileName="x"
@@ -105,13 +105,14 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={() => {}}
         onReloadView={onReloadView}
-        onNewFile={onNewFile}
+        onOpenLoader={onOpenLoader}
       />
     );
+    await userEvent.click(screen.getByText('Data'));
+    expect(onOpenLoader).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByText('More'));
     await userEvent.click(screen.getByText(/Reload view/));
     expect(onReloadView).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByText(/Load another/));
-    expect(onNewFile).toHaveBeenCalledTimes(1);
   });
 
   it('shows the connected CityJSONSeq tile count and reloads the viewport on request', async () => {
@@ -124,11 +125,12 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
         catalogState={{ loadedTiles: 9, loading: false }}
         onLoadCatalogViewport={onLoadCatalogViewport}
       />
     );
+    await userEvent.click(screen.getByText('More'));
     await userEvent.click(screen.getByText(/Seq tiles 9/));
     expect(onLoadCatalogViewport).toHaveBeenCalledTimes(1);
   });
@@ -143,7 +145,7 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
         catalogState={{ loadedTiles: 9, loading: false, dirty: true }}
         onPersistCatalog={onPersistCatalog}
       />
@@ -163,7 +165,7 @@ describe('<Toolbar />', () => {
         hasData={true}
         onExport={() => {}}
         onReloadView={() => {}}
-        onNewFile={() => {}}
+        onOpenLoader={() => {}}
         integrity={{ errorCount: 0, warningCount: 0, onShow }}
         primitiveValidation={{
           kind: 'unchecked',

@@ -3,6 +3,7 @@ import {
   buildHamburgFnpNutzungUrl,
   buildHamburgXPlanBaugebietUrl,
   fetchHamburgPlanningZones,
+  findNearestZoneForPoint,
   findZoneForPoint,
   getZoneCenter,
   isBboxNearHamburg,
@@ -254,6 +255,18 @@ describe('findZoneForPoint', () => {
 
   it('returns null when no zone contains the point', () => {
     const z = findZoneForPoint([makeZone(['residential'])], [10, 10]);
+    expect(z).toBeNull();
+  });
+});
+
+describe('findNearestZoneForPoint', () => {
+  it('returns a nearby zone when the point is just outside the polygon', () => {
+    const z = findNearestZoneForPoint([makeZone(['residential'])], [1.0005, 0.5], 100);
+    expect(z).not.toBeNull();
+  });
+
+  it('returns null when the nearest zone is beyond the distance tolerance', () => {
+    const z = findNearestZoneForPoint([makeZone(['residential'])], [1.01, 0.5], 100);
     expect(z).toBeNull();
   });
 });

@@ -196,6 +196,35 @@ describe('exportToGltf', () => {
     }
   });
 
+  it('exports MultiSurface geometry using face-level semantic values', () => {
+    const doc = buildSampleCube();
+    doc.CityObjects.Building_A.geometry = [
+      {
+        type: 'MultiSurface',
+        lod: '2.0',
+        boundaries: [
+          [[0, 3, 2, 1]],
+          [[4, 5, 6, 7]],
+          [[0, 1, 5, 4]],
+          [[1, 2, 6, 5]],
+          [[2, 3, 7, 6]],
+          [[3, 0, 4, 7]],
+        ],
+        semantics: {
+          surfaces: [{ type: 'GroundSurface' }, { type: 'RoofSurface' }, { type: 'WallSurface' }],
+          values: [0, 1, 2, 2, 2, 2],
+        },
+      },
+    ];
+
+    const glb = exportToGltf(doc);
+    const { json } = parseGlb(glb);
+    const prim = json.meshes[0].primitives[0];
+
+    expect(json.meshes).toHaveLength(1);
+    expect(json.accessors[prim.attributes.POSITION].count).toBeGreaterThan(0);
+  });
+
   it('refuses to export a doc with no triangulatable geometry', () => {
     const doc = buildSampleCube();
     // Strip the geometry so nothing is triangulatable.

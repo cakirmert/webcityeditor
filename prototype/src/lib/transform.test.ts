@@ -82,6 +82,16 @@ describe('moveBuilding', () => {
     expect(parsed.CityObjects[id]).toBeDefined();
   });
 
+  it('translates the building vertically by dz in metres', () => {
+    const { doc, id } = makeBuilding();
+
+    moveBuilding(doc, id, 0, 0, 3.25);
+
+    const fp = extractFootprints(doc).find((item) => item.id === id);
+    expect(fp).toBeDefined();
+    expect(fp!.baseElevation).toBeCloseTo(3.25);
+  });
+
   it('keeps hierarchical imported geometry valid and refreshes stored extents', () => {
     const doc = buildSampleCube();
     const root = doc.CityObjects.Building_A;

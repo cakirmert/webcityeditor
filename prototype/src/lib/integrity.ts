@@ -273,14 +273,11 @@ function validateGeometry(
     }
   };
 
-  // For Solid: shells[shell[face[ring[idx]]]] (4-deep). For MultiSurface:
-  // faces[ring[idx]] (3-deep). The depth doesn't matter for index validation,
-  // but we'll track face count for semantics validation below.
-  const isSolid =
-    Array.isArray(g.boundaries) &&
-    Array.isArray((g.boundaries as unknown[])[0]) &&
-    Array.isArray(((g.boundaries as unknown[][])[0] as unknown[])[0]) &&
-    Array.isArray((((g.boundaries as unknown[][])[0] as unknown[][])[0] as unknown[])[0]);
+  // CityJSON MultiSurface and Solid boundaries can both start with four nested
+  // arrays depending on the first face/ring shape. Use the declared geometry
+  // type for shell-level semantics validation; shape inference misclassifies
+  // valid imported LoD2 MultiSurfaces as one-shell Solids.
+  const isSolid = g.type === 'Solid';
 
   walk(g.boundaries, 0);
 

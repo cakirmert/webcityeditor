@@ -114,6 +114,42 @@ describe('<AttributePanel />', () => {
     expect(onRevert).toHaveBeenCalledWith('Building_A');
   });
 
+  it('shows terrain-aware dZ controls while editing position', async () => {
+    const onUpdateTransform = vi.fn();
+    setup({
+      pendingTransform: {
+        id: 'Building_A',
+        dx: 0,
+        dy: 0,
+        dz: 0,
+        angle: 0,
+        autoTerrain: true,
+      },
+      onUpdateTransform,
+      onCancelTransform: vi.fn(),
+      onSaveTransform: vi.fn(),
+      terrainSnap: {
+        sourceBaseElevation: 0,
+        terrainElevation: 3.5,
+        requiredDz: 3.5,
+        currentGroundElevation: 0,
+        difference: 3.5,
+        terrainSource: 'nearest-building-ground',
+        matchedBuildingId: 'terrain-proxy',
+        distanceMeters: 7,
+      },
+    });
+
+    expect(screen.getByLabelText('dZ')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('dZ terrain offset slider'), {
+      target: { value: '1.5' },
+    });
+    expect(onUpdateTransform).toHaveBeenLastCalledWith({ dz: 1.5 });
+
+    await userEvent.click(screen.getByText('Snap ground to terrain'));
+    expect(onUpdateTransform).toHaveBeenLastCalledWith({ dz: 3.5, autoTerrain: true });
+  });
+
   it('applies one manually adjusted footprint plan to every floor', async () => {
     const onSplitByFloorPlans = vi.fn();
     setup({ onSplitByFloorPlans });

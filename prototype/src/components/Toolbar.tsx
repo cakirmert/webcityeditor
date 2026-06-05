@@ -1,4 +1,5 @@
 import { Button } from './ui/button';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 interface Stats {
   version: string;
@@ -14,30 +15,22 @@ interface Props {
   dirtyCount: number;
   hasData: boolean;
   onExport: () => void;
-  /** Optional secondary export — emit a binary glTF (.glb) so the user can
-   *  open the city in Blender / Sketchfab / any glTF viewer. */
+  /** Optional secondary export. Emits binary glTF (.glb). */
   onExportGltf?: () => void;
-  /** Optional integrity-check action. Shows a small pill in the toolbar
-   *  when there are warnings/errors and opens a details modal on click. */
+  /** Browser-side structural integrity check. */
   integrity?: {
     errorCount: number;
     warningCount: number;
     onShow: () => void;
   };
-  /** ISO 19107 primitive validation is separate from browser structure checks.
-   *  The local catalog server runs val3dity for this status. */
+  /** ISO 19107 primitive validation, usually backed by val3dity. */
   primitiveValidation?: {
     kind: 'unchecked' | 'checking' | 'valid' | 'invalid' | 'unavailable';
     message: string;
     onValidate: () => void;
   };
-  /** Optional vertex-compaction action. Shows a small "Compact" button in
-   *  the toolbar when the doc has orphaned vertices (typical after
-   *  footprint-edit regenerations). */
   orphanedVertexCount?: number;
   onCompactVertices?: () => void;
-  /** Optional undo/redo. Buttons render disabled when stacks are empty.
-   *  Tooltips include the next action's label ("Undo: Move building"). */
   undoState?: {
     canUndo: boolean;
     canRedo: boolean;
@@ -46,20 +39,13 @@ interface Props {
     onUndo: () => void;
     onRedo: () => void;
   };
-  /** Toggle for the building list sidebar. */
   showList?: boolean;
   onToggleList?: () => void;
-  /** Optional merge action — opens a file picker, parses the picked file,
-   *  and merges its CityObjects into the current doc. Useful for stitching
-   *  adjacent Hamburg tiles together. */
   onMergeFile?: () => void;
-  /** Optional IFC import. Click to open a file picker; subsequent flow
-   *  (placement, etc.) is owned by the parent. */
   onImportIfc?: () => void;
-  /** Disabled the IFC button while a parse is in flight. */
   ifcParsing?: boolean;
   onReloadView: () => void;
-  onNewFile: () => void;
+  onOpenLoader: () => void;
   onSaveLocal?: () => void;
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
   drawMode?: 'none' | 'polygon';
@@ -74,13 +60,8 @@ interface Props {
   zoningEnabled?: boolean;
   zoningLoading?: boolean;
   onToggleZoning?: () => void;
-  /** Re-parse the loaded CityJSONSeq file with the current map viewport as a
-   *  bbox filter. Only meaningful for jsonl inputs — the button hides when
-   *  the loaded file isn't a CityJSONSeq. */
   onFilterViewport?: () => void;
   canFilterViewport?: boolean;
-  /** Active bbox-queryable CityJSONSeq catalog. The button manually retries
-   *  the current viewport; nearby tiles also load automatically on map move. */
   catalogState?: {
     loadedTiles: number;
     loading: boolean;
@@ -89,9 +70,10 @@ interface Props {
     message?: string;
   };
   onLoadCatalogViewport?: () => void;
-  /** Persist edited catalog features back into their source CityJSONSeq tiles. */
   onPersistCatalog?: () => void;
 }
+
+type PrimitiveValidationKind = NonNullable<Props['primitiveValidation']>['kind'];
 
 export default function Toolbar({
   fileName,
@@ -111,7 +93,7 @@ export default function Toolbar({
   onImportIfc,
   ifcParsing = false,
   onReloadView,
-  onNewFile,
+  onOpenLoader,
   onSaveLocal,
   saveStatus = 'idle',
   drawMode = 'none',
@@ -132,12 +114,31 @@ export default function Toolbar({
   onLoadCatalogViewport,
   onPersistCatalog,
 }: Props) {
+  const showDirtyCatalogSave = Boolean(catalogState?.dirty && onPersistCatalog);
+  const hasMoreActions =
+    Boolean(undoState) ||
+    Boolean(onCopy) ||
+    Boolean(onPaste) ||
+    Boolean(onDelete) ||
+    Boolean(onFilterViewport && canFilterViewport) ||
+    Boolean(catalogState && onLoadCatalogViewport) ||
+    Boolean(onReloadView) ||
+    Boolean(onCompactVertices && orphanedVertexCount > 50) ||
+    Boolean(onSaveLocal) ||
+    Boolean(onExportGltf) ||
+    Boolean(onImportIfc) ||
+    Boolean(onMergeFile);
+
   return (
-    <header className="flex h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
+    <header className="flex h-10 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-4 text-xs">
       <span className="font-semibold text-[13px]">City Editor</span>
 
+      <Button size="sm" variant="ghost" onClick={onOpenLoader} title="Open data loader">
+        Data
+      </Button>
+
       {fileName && (
-        <div className="flex items-center gap-2 text-[var(--text-dim)]">
+        <div className="flex min-w-0 items-center gap-2 text-[var(--text-dim)]">
           {dirtyCount > 0 && (
             <span className="inline-block h-2 w-2 rounded-full bg-[var(--warn)]" />
           )}
@@ -145,7 +146,9 @@ export default function Toolbar({
             {fileName}
           </span>
           {dirtyCount > 0 && (
-            <span className="text-[var(--warn)]">· {dirtyCount} unsaved</span>
+            <span className="whitespace-nowrap text-[var(--warn)]">
+              / {dirtyCount} unsaved
+            </span>
           )}
         </div>
       )}
@@ -153,14 +156,14 @@ export default function Toolbar({
       <div className="flex-1" />
 
       {stats && (
-        <span className="text-[11px] text-[var(--text-dim)] tabular-nums">
+        <span className="hidden text-[11px] text-[var(--text-dim)] tabular-nums lg:inline">
           CityJSON <b className="text-[var(--text)]">{stats.version}</b>{' '}
-          · <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
-          · <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
+          / <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
+          / <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
           vertices
           {stats.crs && (
             <>
-              {' '}· CRS{' '}
+              {' '} / CRS{' '}
               <b className="font-mono text-[var(--text)]">{shortCrs(stats.crs)}</b>
             </>
           )}
@@ -170,19 +173,13 @@ export default function Toolbar({
       {integrity && (
         <button
           onClick={integrity.onShow}
-          title="Browser structure check: click for vertex-index bounds, parent/child links, orphaned vertices, and input status"
-          className={
-            integrity.errorCount > 0
-              ? 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer'
-              : integrity.warningCount > 0
-              ? 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer'
-              : 'rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)] hover:bg-[rgba(34,197,94,0.12)] cursor-pointer'
-          }
+          title="Browser structure check"
+          className={integrityClassName(integrity.errorCount, integrity.warningCount)}
         >
           {integrity.errorCount > 0
-            ? `Structure: ${integrity.errorCount} error${integrity.errorCount === 1 ? '' : 's'}`
+            ? `Structure: ${integrity.errorCount}`
             : integrity.warningCount > 0
-            ? `Structure: ${integrity.warningCount} warning${integrity.warningCount === 1 ? '' : 's'}`
+            ? `Structure: ${integrity.warningCount} warn`
             : 'Structure: valid'}
         </button>
       )}
@@ -192,16 +189,10 @@ export default function Toolbar({
           onClick={primitiveValidation.onValidate}
           disabled={primitiveValidation.kind === 'checking'}
           title={primitiveValidation.message}
-          className={
-            primitiveValidation.kind === 'valid'
-              ? 'rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)] hover:bg-[rgba(34,197,94,0.12)] cursor-pointer'
-              : primitiveValidation.kind === 'invalid'
-              ? 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer'
-              : 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer disabled:cursor-wait'
-          }
+          className={primitiveClassName(primitiveValidation.kind)}
         >
           {primitiveValidation.kind === 'checking'
-            ? '3D: checking...'
+            ? '3D: checking'
             : primitiveValidation.kind === 'valid'
             ? '3D: valid'
             : primitiveValidation.kind === 'invalid'
@@ -216,7 +207,7 @@ export default function Toolbar({
         <>
           {drawMode === 'polygon' ? (
             <Button variant="warn" onClick={onCancelDraw} title="Cancel drawing (Esc)">
-              ✕ Cancel drawing
+              Cancel drawing
             </Button>
           ) : (
             onStartDraw && (
@@ -225,7 +216,7 @@ export default function Toolbar({
                 onClick={onStartDraw}
                 title="Draw a 2D footprint to create a new LoD2 building"
               >
-                ＋ New Building
+                New Building
               </Button>
             )
           )}
@@ -237,72 +228,7 @@ export default function Toolbar({
               onClick={onToggleList}
               title={showList ? 'Hide building list' : 'Show building list'}
             >
-              {showList ? '▣ List' : '☰ List'}
-            </Button>
-          )}
-
-          {undoState && (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!undoState.canUndo}
-                onClick={undoState.onUndo}
-                title={
-                  undoState.undoLabel
-                    ? `Undo: ${undoState.undoLabel} (Ctrl+Z)`
-                    : 'Nothing to undo'
-                }
-              >
-                ↶ Undo
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!undoState.canRedo}
-                onClick={undoState.onRedo}
-                title={
-                  undoState.redoLabel
-                    ? `Redo: ${undoState.redoLabel} (Ctrl+Shift+Z)`
-                    : 'Nothing to redo'
-                }
-              >
-                ↷ Redo
-              </Button>
-            </>
-          )}
-
-          {onCopy && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canCopy}
-              onClick={onCopy}
-              title="Copy selected buildings (Ctrl+C)"
-            >
-              ⧉ Copy
-            </Button>
-          )}
-          {onPaste && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canPaste}
-              onClick={onPaste}
-              title="Paste copied buildings (Ctrl+V)"
-            >
-              ⎘ Paste
-            </Button>
-          )}
-          {onDelete && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canDelete}
-              onClick={onDelete}
-              title="Delete selected buildings (Delete)"
-            >
-              ✕ Delete
+              {showList ? 'Hide List' : 'List'}
             </Button>
           )}
 
@@ -318,126 +244,215 @@ export default function Toolbar({
                   : 'Load Hamburg planning overlay for the current map view'
               }
             >
-              {zoningLoading
-                ? '▦ Planning...'
-                : zoningEnabled
-                ? '▦ Planning ON'
-                : '▦ Planning'}
+              {zoningLoading ? 'Planning...' : zoningEnabled ? 'Planning ON' : 'Planning'}
             </Button>
           )}
 
-          {onFilterViewport && canFilterViewport && (
+          {showDirtyCatalogSave && (
             <Button
               size="sm"
-              variant="ghost"
-              onClick={onFilterViewport}
-              title="Re-parse the loaded CityJSONSeq file dropping every feature outside the current map view"
-            >
-              ▢ Filter to viewport
-            </Button>
-          )}
-
-          {catalogState && onLoadCatalogViewport && (
-            <Button
-              size="sm"
-              variant={catalogState.error ? 'warn' : 'ghost'}
-              onClick={onLoadCatalogViewport}
-              disabled={catalogState.loading}
-              title={
-                catalogState.error ??
-                catalogState.message ??
-                'Load unseen CityJSONSeq tiles intersecting the current viewport'
-              }
-            >
-              {catalogState.loading
-                ? '▦ Seq tiles...'
-                : `▦ Seq tiles ${catalogState.loadedTiles}`}
-            </Button>
-          )}
-
-          {catalogState && onPersistCatalog && (
-            <Button
-              size="sm"
-              variant={catalogState.dirty ? 'primary' : 'ghost'}
+              variant="primary"
               onClick={onPersistCatalog}
-              disabled={catalogState.loading || !catalogState.dirty}
+              disabled={catalogState?.loading}
               title="Validate edited features and persist them into their source CityJSONSeq tiles"
             >
-              {catalogState.loading && catalogState.dirty ? 'Saving seq...' : 'Save seq'}
-            </Button>
-          )}
-
-          <Button onClick={onReloadView} title="Re-parse modified data and refresh map + 3D view">
-            ↻ Reload view
-          </Button>
-
-          {onCompactVertices && orphanedVertexCount > 50 && (
-            <Button
-              onClick={onCompactVertices}
-              variant="ghost"
-              title={`Reclaim ${orphanedVertexCount} orphaned vertices left over from footprint regenerations`}
-            >
-              ◇ Compact ({orphanedVertexCount.toLocaleString()})
-            </Button>
-          )}
-
-          {onSaveLocal && (
-            <Button
-              onClick={onSaveLocal}
-              disabled={saveStatus === 'saving'}
-              title="Persist current in-memory doc to browser IndexedDB"
-            >
-              {saveStatus === 'saving'
-                ? 'Saving…'
-                : saveStatus === 'saved'
-                ? '✓ Saved'
-                : saveStatus === 'error'
-                ? '⚠ Save failed'
-                : '💾 Save local'}
+              {catalogState?.loading ? 'Saving seq...' : 'Save seq'}
             </Button>
           )}
 
           <Button variant="primary" onClick={onExport} disabled={!hasData}>
-            ⬇ Export CityJSON
+            Export CityJSON
           </Button>
 
-          {onExportGltf && (
-            <Button
-              onClick={onExportGltf}
-              title="Export to binary glTF (.glb) — opens in Blender / Sketchfab / any 3D viewer"
-            >
-              ⬇ glTF
-            </Button>
-          )}
+          {hasMoreActions && (
+            <details className="relative">
+              <summary className="h-7 cursor-pointer list-none rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--text)] hover:bg-[#2c3140] [&::-webkit-details-marker]:hidden">
+                More
+              </summary>
+              <div className="absolute right-0 top-full z-40 mt-2 flex min-w-[230px] flex-col gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 shadow-2xl">
+                {undoState && (
+                  <div className="grid grid-cols-2 gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!undoState.canUndo}
+                      onClick={undoState.onUndo}
+                      title={
+                        undoState.undoLabel
+                          ? `Undo: ${undoState.undoLabel} (Ctrl+Z)`
+                          : 'Nothing to undo'
+                      }
+                    >
+                      Undo
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!undoState.canRedo}
+                      onClick={undoState.onRedo}
+                      title={
+                        undoState.redoLabel
+                          ? `Redo: ${undoState.redoLabel} (Ctrl+Shift+Z)`
+                          : 'Nothing to redo'
+                      }
+                    >
+                      Redo
+                    </Button>
+                  </div>
+                )}
 
-          {onImportIfc && (
-            <Button
-              variant="ghost"
-              onClick={onImportIfc}
-              disabled={ifcParsing}
-              title="Import an IFC building model — parses with web-ifc and drops a placeable LoD2 box"
-            >
-              {ifcParsing ? 'Parsing IFC…' : '⌂ Import IFC…'}
-            </Button>
-          )}
+                {(onCopy || onPaste || onDelete) && (
+                  <div className="grid grid-cols-3 gap-1">
+                    {onCopy && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!canCopy}
+                        onClick={onCopy}
+                        title="Copy selected buildings (Ctrl+C)"
+                      >
+                        Copy
+                      </Button>
+                    )}
+                    {onPaste && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!canPaste}
+                        onClick={onPaste}
+                        title="Paste copied buildings (Ctrl+V)"
+                      >
+                        Paste
+                      </Button>
+                    )}
+                    {onDelete && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!canDelete}
+                        onClick={onDelete}
+                        title="Delete selected buildings (Delete)"
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                )}
 
-          {onMergeFile && (
-            <Button
-              variant="ghost"
-              onClick={onMergeFile}
-              title="Merge another CityJSON file into the current doc — useful for stitching adjacent tiles"
-            >
-              ＋ Merge file…
-            </Button>
-          )}
+                {onFilterViewport && canFilterViewport && (
+                  <MenuAction onClick={onFilterViewport}>
+                    Filter to viewport
+                  </MenuAction>
+                )}
 
-          <Button onClick={onNewFile} variant="ghost" title="Load a different file">
-            Load another…
-          </Button>
+                {catalogState && onLoadCatalogViewport && (
+                  <MenuAction
+                    onClick={onLoadCatalogViewport}
+                    disabled={catalogState.loading}
+                    title={
+                      catalogState.error ??
+                      catalogState.message ??
+                      'Load unseen CityJSONSeq tiles intersecting the current viewport'
+                    }
+                  >
+                    {catalogState.loading
+                      ? 'Seq tiles...'
+                      : `Seq tiles ${catalogState.loadedTiles}`}
+                  </MenuAction>
+                )}
+
+                <MenuAction onClick={onReloadView}>Reload view</MenuAction>
+
+                {onCompactVertices && orphanedVertexCount > 50 && (
+                  <MenuAction
+                    onClick={onCompactVertices}
+                    title={`Reclaim ${orphanedVertexCount} orphaned vertices left over from footprint regenerations`}
+                  >
+                    Compact ({orphanedVertexCount.toLocaleString()})
+                  </MenuAction>
+                )}
+
+                {onSaveLocal && (
+                  <MenuAction
+                    onClick={onSaveLocal}
+                    disabled={saveStatus === 'saving'}
+                    title="Persist current in-memory doc to browser IndexedDB"
+                  >
+                    {saveStatus === 'saving'
+                      ? 'Saving...'
+                      : saveStatus === 'saved'
+                      ? 'Saved'
+                      : saveStatus === 'error'
+                      ? 'Save failed'
+                      : 'Save local'}
+                  </MenuAction>
+                )}
+
+                {onExportGltf && (
+                  <MenuAction
+                    onClick={onExportGltf}
+                    title="Export to binary glTF (.glb)"
+                  >
+                    Export glTF
+                  </MenuAction>
+                )}
+
+                {onImportIfc && (
+                  <MenuAction
+                    onClick={onImportIfc}
+                    disabled={ifcParsing}
+                    title="Import an IFC building model"
+                  >
+                    {ifcParsing ? 'Parsing IFC...' : 'Import IFC'}
+                  </MenuAction>
+                )}
+
+                {onMergeFile && (
+                  <MenuAction
+                    onClick={onMergeFile}
+                    title="Merge another CityJSON file into the current document"
+                  >
+                    Merge file
+                  </MenuAction>
+                )}
+              </div>
+            </details>
+          )}
         </>
       )}
     </header>
   );
+}
+
+function MenuAction({
+  children,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) {
+  return (
+    <Button size="sm" variant="ghost" className="w-full justify-start" {...props}>
+      {children}
+    </Button>
+  );
+}
+
+function integrityClassName(errorCount: number, warningCount: number): string {
+  if (errorCount > 0) {
+    return 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer';
+  }
+  if (warningCount > 0) {
+    return 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer';
+  }
+  return 'rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)] hover:bg-[rgba(34,197,94,0.12)] cursor-pointer';
+}
+
+function primitiveClassName(kind: PrimitiveValidationKind): string {
+  if (kind === 'valid') {
+    return 'rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)] hover:bg-[rgba(34,197,94,0.12)] cursor-pointer';
+  }
+  if (kind === 'invalid') {
+    return 'rounded border border-[var(--err,#cb4b4b)] px-2 py-0.5 text-[10px] font-semibold text-[var(--err,#ff7b7b)] hover:bg-[rgba(203,75,75,0.15)] cursor-pointer';
+  }
+  return 'rounded border border-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warn)] hover:bg-[rgba(251,191,36,0.12)] cursor-pointer disabled:cursor-wait';
 }
 
 function shortCrs(crs: string): string {

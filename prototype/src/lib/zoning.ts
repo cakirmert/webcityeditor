@@ -143,6 +143,25 @@ export function findZoneForPoint(
   return null;
 }
 
+export function findNearestZoneForPoint(
+  zones: ParcelZone[],
+  point: [number, number],
+  maxDistanceMeters: number
+): ParcelZone | null {
+  let bestZone: ParcelZone | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const zone of zones) {
+    const distance = distanceToPolygonMeters(point, zone.polygon);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestZone = zone;
+    }
+  }
+
+  return bestZone && bestDistance <= maxDistanceMeters ? bestZone : null;
+}
+
 export function validateBuildingType(
   zone: ParcelZone | null,
   buildingFunction: string
@@ -339,6 +358,45 @@ function pointInPolygon(point: [number, number], polygon: [number, number][]): b
     }
   }
   return inside;
+}
+
+function distanceToPolygonMeters(point: [number, number], polygon: [number, number][]): number {
+  if (polygon.length === 0) return Number.POSITIVE_INFINITY;
+  const p = toLocalMeters(point, point[1]);
+  let best = Number.POSITIVE_INFINITY;
+
+  for (let i = 0; i < polygon.length; i++) {
+    const aRaw = polygon[i];
+    const bRaw = polygon[(i + 1) % polygon.length];
+    if (!aRaw || !bRaw) continue;
+    const a = toLocalMeters(aRaw, point[1]);
+    const b = toLocalMeters(bRaw, point[1]);
+    best = Math.min(best, distancePointToSegmentMeters(p, a, b));
+  }
+
+  return best;
+}
+
+function toLocalMeters(point: [number, number], latRef: number): [number, number] {
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos((latRef * Math.PI) / 180);
+  return [point[0] * mPerDegLng, point[1] * mPerDegLat];
+}
+
+function distancePointToSegmentMeters(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number]
+): number {
+  const vx = b[0] - a[0];
+  const vy = b[1] - a[1];
+  const wx = p[0] - a[0];
+  const wy = p[1] - a[1];
+  const len2 = vx * vx + vy * vy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2)) : 0;
+  const x = a[0] + t * vx;
+  const y = a[1] + t * vy;
+  return Math.hypot(p[0] - x, p[1] - y);
 }
 
 export function getZoneCenter(zones: ParcelZone[]): [number, number] | null {

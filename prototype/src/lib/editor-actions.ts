@@ -101,11 +101,12 @@ export function commitBuildingTransformFromEditor(
   transform: PendingTransform
 ): EditorTransformResult {
   return runStructurallyGuardedMutation(doc, `Moving ${transform.id}`, () => {
-    const changed = transform.angle !== 0 || transform.dx !== 0 || transform.dy !== 0;
+    const dz = transform.dz ?? 0;
+    const changed = transform.angle !== 0 || transform.dx !== 0 || transform.dy !== 0 || dz !== 0;
     if (!changed) return { changed: false, compactedVertices: 0 };
     if (transform.angle !== 0) rotateBuilding(doc, transform.id, transform.angle);
-    if (transform.dx !== 0 || transform.dy !== 0) {
-      moveBuilding(doc, transform.id, transform.dx, transform.dy, 0);
+    if (transform.dx !== 0 || transform.dy !== 0 || dz !== 0) {
+      moveBuilding(doc, transform.id, transform.dx, transform.dy, dz);
     }
     const compacted = compactVertices(doc);
     return { changed: true, compactedVertices: compacted.reclaimed };

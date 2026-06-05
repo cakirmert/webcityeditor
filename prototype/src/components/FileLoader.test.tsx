@@ -37,6 +37,7 @@ describe('<FileLoader />', () => {
 
     render(<FileLoader onLoaded={onLoaded} />);
 
+    await userEvent.click(screen.getByText(/Advanced loading options/));
     const urlInput = screen.getByPlaceholderText(/\.city\.json/);
     await userEvent.clear(urlInput);
     await userEvent.type(urlInput, 'https://example.com/broken.city.json');
@@ -60,6 +61,7 @@ describe('<FileLoader />', () => {
     } as unknown as Response);
 
     render(<FileLoader onLoaded={onLoaded} />);
+    await userEvent.click(screen.getByText(/Advanced loading options/));
     const urlInput = screen.getByPlaceholderText(/\.city\.json/);
     await userEvent.clear(urlInput);
     await userEvent.type(urlInput, 'https://example.com/wrong-format.json');
@@ -164,6 +166,7 @@ describe('<FileLoader />', () => {
     } as unknown as Response);
 
     render(<FileLoader onLoaded={onLoaded} />);
+    await userEvent.click(screen.getByText(/Advanced loading options/));
     const urlInput = screen.getByPlaceholderText(/\.city\.jsonl/);
     await userEvent.clear(urlInput);
     await userEvent.type(urlInput, 'https://example.com/broken.city.jsonl');

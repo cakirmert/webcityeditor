@@ -7,6 +7,7 @@ import {
   runStructurallyGuardedMutation,
 } from './editor-actions';
 import { prepareValidatedCityJsonExport } from './export-validation';
+import { extractFootprints } from './footprints';
 import { checkIntegrity } from './integrity';
 
 const FOOTPRINT: [number, number][] = [
@@ -57,6 +58,23 @@ describe('browser editor actions', () => {
       })
     ).toThrow(EditorMutationValidationError);
     expect(JSON.stringify(doc)).toBe(before);
+  });
+
+  it('commits vertical terrain placement through the browser action route', () => {
+    const doc = buildSampleCube();
+
+    const transformed = commitBuildingTransformFromEditor(doc, {
+      id: 'Building_A',
+      dx: 0,
+      dy: 0,
+      dz: 2.75,
+      angle: 0,
+    });
+
+    const fp = extractFootprints(doc).find((item) => item.id === 'Building_A');
+    expect(transformed.changed).toBe(true);
+    expect(fp?.baseElevation).toBeCloseTo(2.75);
+    expect(checkIntegrity(doc).ok).toBe(true);
   });
 
   it('refuses to prepare structurally invalid bytes for export', () => {

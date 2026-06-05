@@ -23,6 +23,9 @@ interface Props {
   /** Connect a bbox-queryable CityJSONSeq tile catalog. The initial centre
    *  viewport is loaded here; subsequent viewport expansion is owned by App. */
   onCatalogLoaded?: (loaded: CityJsonSeqViewportLoad, catalogUrl: string) => void;
+  /** Enabled when the loader is opened over an already-loaded map. */
+  canClose?: boolean;
+  onClose?: () => void;
 }
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
@@ -72,7 +75,7 @@ interface HostedCityJsonSample {
   checkAvailability?: boolean;
 }
 
-export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
+export default function FileLoader({ onLoaded, onCatalogLoaded, canClose = false, onClose }: Props) {
   const [url, setUrl] = useState(() => publicAssetUrl(DEFAULT_HAMBURG_SAMPLE));
   const [catalogUrl, setCatalogUrl] = useState(DEFAULT_HAMBURG_CATALOG_URL);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -164,8 +167,9 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
       // Hold on to the raw text only for CityJSONSeq — it's used by the
       // toolbar's "Filter to viewport" action to re-parse with a bbox.
       onLoaded(data, name, isSeq ? text : null);
+      onClose?.();
     },
-    [onLoaded]
+    [onLoaded, onClose]
   );
 
   const handleFile = useCallback(
@@ -213,6 +217,7 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
         throw new Error('The Hamburg centre viewport returned no CityJSONSeq tiles');
       }
       onCatalogLoaded(loaded, catalogUrl);
+      onClose?.();
       setStatus({
         kind: 'ok',
         msg:
@@ -225,7 +230,7 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
         msg: `Catalog connection failed: ${e instanceof Error ? e.message : String(e)}`,
       });
     }
-  }, [catalogUrl, onCatalogLoaded]);
+  }, [catalogUrl, onCatalogLoaded, onClose]);
 
   const handleQuickSample = useCallback(
     (sample: QuickSample) => {
@@ -320,6 +325,7 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
         const stored = await loadDocument(name);
         if (!stored) throw new Error('Not found');
         onLoaded(stored.doc, stored.name, null);
+        onClose?.();
       } catch (e) {
         setStatus({
           kind: 'err',
@@ -327,7 +333,7 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
         });
       }
     },
-    [onLoaded]
+    [onLoaded, onClose]
   );
 
   const handleDeleteLocal = useCallback(async (name: string) => {
@@ -352,15 +358,28 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
   };
 
   return (
-    <div className="absolute inset-0 z-[5] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="w-[460px] max-w-[92%] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
-        <h2 className="mb-1 text-[15px] font-semibold">Load CityJSON</h2>
-        <p className="mb-4 text-xs text-[var(--text-dim)]">
-          Prefer <code className="rounded bg-[var(--bg)] px-1">.city.jsonl</code>{' '}
-          CityJSONSeq input for editable city tiles. Monolithic{' '}
-          <code className="rounded bg-[var(--bg)] px-1">.city.json</code> files remain
-          supported for smaller models.
-        </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-md">
+      <div className="max-h-[calc(100vh-2rem)] w-[560px] max-w-[96vw] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="mb-1 text-[15px] font-semibold">Load data</h2>
+            <p className="text-xs text-[var(--text-dim)]">
+              Use the hosted Hamburg demo for presentation, connect the local Hamburg
+              catalog for larger data, or drop a CityJSON file.
+            </p>
+          </div>
+          {canClose && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onClose}
+              aria-label="Close loader"
+              title="Close data loader"
+            >
+              Close
+            </Button>
+          )}
+        </div>
 
         <div
           className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-4 text-center text-xs transition-colors ${
@@ -386,20 +405,19 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
           />
         </div>
 
-        <div className="mb-2 flex gap-2">
-          <Input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://... .city.jsonl or .city.json"
-            className="flex-1"
-          />
-          <Button onClick={handleUrl}>Fetch URL</Button>
-        </div>
         {onCatalogLoaded && (
           <div className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)]">
-              Hamburg whole-city CityJSONSeq
+              Hamburg larger dataset
+            </div>
+            <div className="mb-2 text-[10px] text-[var(--text-faint)]">
+              For more than the hosted 180-building demo, start the local strict
+              CityJSONSeq server with{' '}
+              <code className="rounded bg-[var(--surface)] px-1">
+                npm run data:hamburg-lod2:serve
+              </code>
+              , then connect here. The app loads only the current viewport and
+              fetches nearby tiles as you pan.
             </div>
             <div className="flex gap-2">
               <Input
@@ -414,7 +432,8 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
               </Button>
             </div>
             <div className="mt-1 text-[10px] text-[var(--text-faint)]">
-              Loads primitive-valid sequence tiles by viewport from the local Hamburg server.
+              This is the path for the prepared city-scale Hamburg data; the hosted
+              button below is intentionally small for browser-safe demos.
             </div>
           </div>
         )}
@@ -445,6 +464,21 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
           </div>
         )}
 
+        <details className="mt-4 rounded-md border border-[var(--border)] bg-[var(--bg)] p-3">
+          <summary className="cursor-pointer list-none text-[11px] font-semibold text-[var(--text)] [&::-webkit-details-marker]:hidden">
+            Advanced loading options
+          </summary>
+          <div className="mt-3">
+            <div className="flex gap-2">
+              <Input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://... .city.jsonl or .city.json"
+                className="flex-1"
+              />
+              <Button onClick={handleUrl}>Fetch URL</Button>
+            </div>
         <Section label="Quick samples">
           {quickSamples.map((s) => (
             <button
@@ -518,6 +552,8 @@ export default function FileLoader({ onLoaded, onCatalogLoaded }: Props) {
             ))}
           </Section>
         )}
+          </div>
+        </details>
       </div>
     </div>
   );

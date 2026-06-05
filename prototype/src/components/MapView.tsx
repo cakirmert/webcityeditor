@@ -12,7 +12,8 @@ import type { CityJsonDocument, SelectionInfo } from '../types';
 import { detectCrs } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType } from '../lib/footprint-tint';
-import type { ParcelZone } from '../lib/zoning';
+import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
+import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -90,6 +91,8 @@ interface Props {
   multiSelectedIds?: Set<string> | null;
   /** Planning overlay polygons. */
   zones?: ParcelZone[];
+  /** Called when a planning polygon is clicked. */
+  onZoneSelect?: (zone: ParcelZone) => void;
 }
 
 /**
@@ -127,6 +130,7 @@ export default function MapView({
   onDragMove,
   multiSelectedIds = null,
   zones = [],
+  onZoneSelect,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -140,6 +144,12 @@ export default function MapView({
     () => extractFootprints(cityjson),
     // reloadToken is intentionally a dep so "Reload view" after an edit
     // (e.g. changed measuredHeight) rebuilds the deck.gl data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cityjson, reloadToken]
+  );
+  const detailMesh = useMemo(
+    () => buildCityJsonMapMesh(cityjson),
+    // reloadToken catches in-place geometry edits on the same document object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cityjson, reloadToken]
   );
@@ -166,6 +176,10 @@ export default function MapView({
     const container = containerRef.current;
     if (!container) return;
 
+    const initialBbox = computeFootprintBounds(footprints) ?? computeMetadataBounds(cityjson);
+    const initialCenter =
+      boundsCenter(initialBbox) ?? computeTranslateCentre(cityjson) ?? [4.3571, 52.0116];
+
     const map = new maplibregl.Map({
       container,
       style: {
@@ -181,7 +195,7 @@ export default function MapView({
         },
         layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
       },
-      center: [4.3571, 52.0116], // Delft fallback
+      center: initialCenter,
       zoom: 16,
       pitch: 55,
       bearing: 20,
@@ -189,7 +203,10 @@ export default function MapView({
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
-    const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+    // The prototype uses a raster-only basemap, so keep deck.gl on its own
+    // canvas above MapLibre. Interleaving can place the building context
+    // behind the raster layer, which makes the editable city look empty.
+    const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     map.addControl(overlay as unknown as maplibregl.IControl);
 
     const zoomHandler = () => setZoom(map.getZoom());
@@ -227,14 +244,6 @@ export default function MapView({
       const footprintBbox = computeFootprintBounds(footprints);
       const metaBbox = computeMetadataBounds(cityjson);
       const centre = computeTranslateCentre(cityjson);
-      // eslint-disable-next-line no-console
-      console.log('[MapView auto-fit]', {
-        footprints: footprints.length,
-        footprintBbox,
-        metaBbox,
-        centre,
-        styleLoaded: map.isStyleLoaded(),
-      });
 
       const bbox = footprintBbox ?? metaBbox;
       const doFit = () => {
@@ -244,7 +253,7 @@ export default function MapView({
             maxZoom: 18,
             pitch: 55,
             bearing: map.getBearing(),
-            duration: 700,
+            duration: 0,
           });
         } else if (centre && Number.isFinite(centre[0]) && Number.isFinite(centre[1])) {
           map.flyTo({
@@ -252,7 +261,7 @@ export default function MapView({
             zoom: 16,
             pitch: 55,
             bearing: map.getBearing(),
-            duration: 700,
+            duration: 0,
           });
         } else {
           // eslint-disable-next-line no-console
@@ -262,13 +271,17 @@ export default function MapView({
         }
       };
 
-      if (map.isStyleLoaded()) {
-        doFit();
-      } else {
-        // Defer until the map is ready, else the initial center/zoom from the
-        // Map constructor wins. Use `once` so we don't leak a listener.
-        map.once('load', doFit);
-      }
+      // Wait one frame so the map container has its final layout before
+      // fitting. Repeat after the initial style load when needed because
+      // MapLibre may settle the constructor's fallback camera after mount.
+      const fitWhenLaidOut = () => {
+        requestAnimationFrame(() => {
+          map.resize();
+          doFit();
+        });
+      };
+      fitWhenLaidOut();
+      if (!map.isStyleLoaded()) map.once('load', fitWhenLaidOut);
     }
 
     // deck.gl's Layer base type is the lowest common denominator; listing the
@@ -324,8 +337,9 @@ export default function MapView({
       })
     );
 
-    // LoD1 — extruded flat-roof blocks. Only render at mid/high zoom to avoid
-    // overdraw and fill rate cost at city-wide scales.
+    // LoD1 context on the map. Renders extruded flat-roof blocks (LoD1) which are fully
+    // pickable and select-compatible. Max detail is shown when a building is clicked
+    // and loaded into the Three.js viewer in the side panel.
     if (zoom > LOD_OUTLINE_MAX && zoom <= LOD_EXTRUDE_MAX) {
       layers.push(
         new SolidPolygonLayer<Footprint>({
@@ -428,7 +442,7 @@ export default function MapView({
           parameters: { depthTest: false } as unknown as never,
           onClick: (info: PickingInfo<ParcelZone>) => {
             if (info.object) {
-              // No action needed, just tooltip-like feedback
+              onZoneSelect?.(info.object);
             }
           },
         })
@@ -436,7 +450,18 @@ export default function MapView({
     }
 
     overlay.setProps({ layers });
-  }, [footprints, selectedId, onSelect, zoom, preview, multiSelectedIds, filteredIds, zones]);
+  }, [
+    footprints,
+    detailMesh,
+    selectedId,
+    onSelect,
+    zoom,
+    preview,
+    multiSelectedIds,
+    filteredIds,
+    zones,
+    onZoneSelect,
+  ]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
   useEffect(() => {
@@ -549,6 +574,25 @@ export default function MapView({
       map.getCanvas().style.cursor = prevCursor;
     };
   }, [onPlacementClick]);
+
+  // Planning click fallback: deck.gl picking handles normal zone clicks, but
+  // MapLibre's click lng/lat makes the info card reliable for very translucent
+  // planning polygons that do not always win the canvas pick.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || zones.length === 0 || !onZoneSelect || onPlacementClick) return;
+
+    const handler = (e: maplibregl.MapMouseEvent) => {
+      const point: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+      const zone = findZoneForPoint(zones, point) ?? findNearestZoneForPoint(zones, point, 150);
+      if (zone) onZoneSelect(zone);
+    };
+
+    map.on('click', handler);
+    return () => {
+      map.off('click', handler);
+    };
+  }, [zones, onZoneSelect, onPlacementClick]);
 
   // ── Viewport-change broadcast ─────────────────────────────────────────────
   // Fire onViewportChange after every pan/zoom settles so the parent can
@@ -821,6 +865,12 @@ function computeMetadataBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLi
   const ext = doc.metadata?.geographicalExtent;
   if (!Array.isArray(ext) || ext.length < 4) return null;
   const [minX, minY, , maxX, maxY] = ext as number[];
+  if (looksLikeWgs84Extent(minX, minY, maxX, maxY)) {
+    return [
+      [minX, minY],
+      [maxX, maxY],
+    ];
+  }
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
   try {
@@ -837,6 +887,30 @@ function computeMetadataBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLi
  * to WGS84 and use it as a centre. Gives a useful view even when no bbox and
  * no footprints can be determined.
  */
+function looksLikeWgs84Extent(minX: number, minY: number, maxX: number, maxY: number): boolean {
+  return (
+    minX >= -180 &&
+    minX <= 180 &&
+    maxX >= -180 &&
+    maxX <= 180 &&
+    minY >= -90 &&
+    minY <= 90 &&
+    maxY >= -90 &&
+    maxY <= 90 &&
+    minX <= maxX &&
+    minY <= maxY
+  );
+}
+
+function boundsCenter(bounds: maplibregl.LngLatBoundsLike | null): [number, number] | null {
+  if (!bounds || !Array.isArray(bounds) || bounds.length < 2 || !isFiniteBbox(bounds)) {
+    return null;
+  }
+  const sw = bounds[0] as [number, number];
+  const ne = bounds[1] as [number, number];
+  return [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2];
+}
+
 function computeTranslateCentre(doc: CityJsonDocument): [number, number] | null {
   const t = doc.transform?.translate;
   if (!t || !Number.isFinite(t[0]) || !Number.isFinite(t[1])) return null;

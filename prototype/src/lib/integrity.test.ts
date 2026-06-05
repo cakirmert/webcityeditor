@@ -131,6 +131,48 @@ describe('checkIntegrity', () => {
     expect(codes).toContain('semantics-index-out-of-range');
   });
 
+  it('does not treat valid MultiSurface face semantics as Solid shell semantics', () => {
+    const doc: CityJsonDocument = {
+      type: 'CityJSON',
+      version: '2.0',
+      metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/7415' },
+      CityObjects: {
+        multisurface_building: {
+          type: 'Building',
+          geometry: [
+            {
+              type: 'MultiSurface',
+              lod: '2.0',
+              boundaries: [
+                [[0, 1, 2, 3]],
+                [[4, 7, 6, 5]],
+              ],
+              semantics: {
+                surfaces: [{ type: 'GroundSurface' }, { type: 'RoofSurface' }],
+                values: [0, 1],
+              },
+            },
+          ],
+        },
+      },
+      vertices: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 0, 1],
+        [1, 1, 1],
+        [0, 1, 1],
+      ],
+    };
+
+    const r = checkIntegrity(doc);
+    expect(r.ok).toBe(true);
+    expect(r.counts.error).toBe(0);
+    expect(r.issues.map((i) => i.code)).not.toContain('semantics-shell-mismatch');
+  });
+
   it('warns when transform is missing', () => {
     const doc = buildSampleCube();
     delete doc.transform;

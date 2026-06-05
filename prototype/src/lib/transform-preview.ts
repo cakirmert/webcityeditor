@@ -7,7 +7,9 @@ export interface PendingTransform {
   id: string;
   dx: number; // CRS metres
   dy: number;
+  dz?: number; // CRS metres, vertical offset
   angle: number; // degrees, CCW
+  autoTerrain?: boolean;
 }
 
 /**

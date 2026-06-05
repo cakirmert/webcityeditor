@@ -10,6 +10,7 @@ import {
 import { extractOpenings, type OpeningInfo } from '../lib/opening-edit';
 import { extractFootprints } from '../lib/footprints';
 import type { PendingTransform } from '../lib/transform-preview';
+import { isTerrainMatched, type TerrainSnap } from '../lib/terrain';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -39,6 +40,7 @@ interface Props {
   onFloorPlansPreview?: (plans: FloorPlanDivision[] | null) => void;
   onSplitBySide?: (id: string, partCount: number, axis: SplitAxis) => void;
   pendingTransform?: PendingTransform | null;
+  terrainSnap?: TerrainSnap | null;
   onStartTransform?: (id: string) => void;
   onUpdateTransform?: (patch: Partial<Omit<PendingTransform, 'id'>>) => void;
   onCancelTransform?: () => void;
@@ -89,6 +91,7 @@ export default function AttributePanel({
   onFloorPlansPreview,
   onSplitBySide,
   pendingTransform,
+  terrainSnap,
   onStartTransform,
   onUpdateTransform,
   onCancelTransform,
@@ -122,6 +125,12 @@ export default function AttributePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildingId]);
   const inTransformMode = !!pendingTransform;
+  const transformDz = pendingTransform?.dz ?? 0;
+  const autoTerrain = pendingTransform?.autoTerrain ?? true;
+  const terrainMatched = isTerrainMatched(terrainSnap ?? null);
+  const terrainRangeAnchor = terrainSnap?.requiredDz ?? transformDz;
+  const terrainSliderMin = Math.min(-20, Math.floor(terrainRangeAnchor - 5), Math.floor(transformDz - 1));
+  const terrainSliderMax = Math.max(20, Math.ceil(terrainRangeAnchor + 5), Math.ceil(transformDz + 1));
   const openings = useMemo(
     () => extractOpenings(cityjson, buildingId),
     [cityjson, buildingId]
@@ -246,12 +255,14 @@ export default function AttributePanel({
           ) : (
             <>
               <div className="text-[10px] text-[var(--text-dim)]">
-                Live preview on the map. Changes aren't written until you click Save.
+                Drag on the map to move the building. Auto terrain keeps its ground elevation
+                aligned while you move; manual dZ overrides it.
               </div>
-              <div className="mt-2 grid grid-cols-[30px_1fr] items-center gap-1.5">
+              <div className="mt-2 grid grid-cols-[36px_1fr] items-center gap-1.5">
                 <Label>dX</Label>
                 <Input
                   type="number"
+                  aria-label="dX"
                   step="0.5"
                   value={pendingTransform!.dx}
                   onChange={(e) =>
@@ -261,21 +272,93 @@ export default function AttributePanel({
                 <Label>dY</Label>
                 <Input
                   type="number"
+                  aria-label="dY"
                   step="0.5"
                   value={pendingTransform!.dy}
                   onChange={(e) =>
                     onUpdateTransform?.({ dy: Number(e.target.value) || 0 })
                   }
                 />
+                <Label>dZ</Label>
+                <Input
+                  type="number"
+                  aria-label="dZ"
+                  step="0.1"
+                  value={transformDz}
+                  onChange={(e) =>
+                    onUpdateTransform?.({ dz: Number(e.target.value) || 0 })
+                  }
+                />
                 <Label>°</Label>
                 <Input
                   type="number"
+                  aria-label="angle"
                   step="5"
                   value={pendingTransform!.angle}
                   onChange={(e) =>
                     onUpdateTransform?.({ angle: Number(e.target.value) || 0 })
                   }
                 />
+              </div>
+
+              <div className="mt-2 rounded border border-[var(--border)] bg-[rgba(0,0,0,0.18)] p-2">
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="text-[var(--text-dim)]">Manual height offset</span>
+                  <span className="font-mono text-[var(--text)]">{transformDz.toFixed(2)} m</span>
+                </div>
+                <input
+                  type="range"
+                  aria-label="dZ terrain offset slider"
+                  min={terrainSliderMin}
+                  max={terrainSliderMax}
+                  step="0.1"
+                  value={transformDz}
+                  onChange={(e) => onUpdateTransform?.({ dz: Number(e.target.value) || 0 })}
+                  className="mt-1 w-full accent-[var(--accent)]"
+                />
+                {terrainSnap ? (
+                  <div className="mt-1 text-[10px] text-[var(--text-dim)]">
+                    Terrain {terrainSnap.terrainElevation.toFixed(2)} m · ground{' '}
+                    {terrainSnap.currentGroundElevation.toFixed(2)} m ·{' '}
+                    {terrainMatched ? (
+                      <span className="text-[var(--ok)]">ground matches terrain</span>
+                    ) : (
+                      <span className="text-[var(--warn)]">
+                        {terrainSnap.difference > 0 ? 'raise' : 'lower'}{' '}
+                        {Math.abs(terrainSnap.difference).toFixed(2)} m
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-[10px] text-[var(--text-faint)]">
+                    No terrain estimate is available for this document.
+                  </div>
+                )}
+                {terrainSnap && (
+                  <div className="mt-1 text-[10px] text-[var(--text-faint)]">
+                    Source: {terrainSnap.matchedBuildingId} ·{' '}
+                    {terrainSnap.terrainSource.replaceAll('-', ' ')}
+                  </div>
+                )}
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <Button
+                    size="sm"
+                    variant={autoTerrain ? 'primary' : 'outline'}
+                    onClick={() => onUpdateTransform?.({ autoTerrain: !autoTerrain })}
+                  >
+                    Auto terrain {autoTerrain ? 'on' : 'off'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!terrainSnap}
+                    onClick={() =>
+                      terrainSnap &&
+                      onUpdateTransform?.({ dz: terrainSnap.requiredDz, autoTerrain: true })
+                    }
+                  >
+                    Snap ground to terrain
+                  </Button>
+                </div>
               </div>
 
               <div className="mt-2 flex flex-wrap gap-1">
@@ -320,7 +403,9 @@ export default function AttributePanel({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => onUpdateTransform?.({ dx: 0, dy: 0, angle: 0 })}
+                  onClick={() =>
+                    onUpdateTransform?.({ dx: 0, dy: 0, dz: 0, angle: 0, autoTerrain: true })
+                  }
                 >
                   ⟲ Reset
                 </Button>
@@ -332,12 +417,14 @@ export default function AttributePanel({
                   onClick={onSaveTransform}
                   className="flex-1"
                   disabled={
-                    pendingTransform!.dx === 0 &&
-                    pendingTransform!.dy === 0 &&
-                    pendingTransform!.angle === 0
+                    (pendingTransform!.dx === 0 &&
+                      pendingTransform!.dy === 0 &&
+                      transformDz === 0 &&
+                      pendingTransform!.angle === 0) ||
+                    (!!terrainSnap && !terrainMatched)
                   }
                 >
-                  ✓ Save
+                  ✓ Place
                 </Button>
                 <Button onClick={onCancelTransform} className="flex-1">
                   ✕ Cancel

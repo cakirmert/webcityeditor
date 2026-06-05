@@ -351,17 +351,7 @@ function triangulateObject(
     if (!geomRaw.boundaries) continue;
     const surfaces = geomRaw.semantics?.surfaces ?? [];
     const semValuesRaw = geomRaw.semantics?.values;
-    // For Solid: boundaries is shells[shell[face[ring]]] (4-deep);
-    // semantics.values is shells[shell[face]] (3-deep).
-    // For MultiSurface: boundaries is faces[ring] (3-deep);
-    // semantics.values is faces (1-deep).
-    const isSolid =
-      Array.isArray(geomRaw.boundaries) &&
-      Array.isArray((geomRaw.boundaries as unknown[])[0]) &&
-      Array.isArray(((geomRaw.boundaries as unknown[][])[0] as unknown[])[0]) &&
-      Array.isArray((((geomRaw.boundaries as unknown[][])[0] as unknown[][])[0] as unknown[])[0]);
-
-    if (isSolid) {
+    if (geomRaw.type === 'Solid') {
       const shells = geomRaw.boundaries as number[][][][];
       const semShells = (semValuesRaw as number[][]) ?? [];
       for (let s = 0; s < shells.length; s++) {
@@ -371,6 +361,22 @@ function triangulateObject(
           const face = shell[f];
           const surfaceType = surfaces[semFaces[f]]?.type ?? null;
           triangulateFace(face, surfaceType, decode, out);
+        }
+      }
+    } else if (geomRaw.type === 'MultiSolid' || geomRaw.type === 'CompositeSolid') {
+      const solids = geomRaw.boundaries as number[][][][][];
+      const semSolids = (semValuesRaw as number[][][]) ?? [];
+      for (let solidIdx = 0; solidIdx < solids.length; solidIdx++) {
+        const solid = solids[solidIdx];
+        const semSolid = semSolids[solidIdx] ?? [];
+        for (let s = 0; s < solid.length; s++) {
+          const shell = solid[s];
+          const semFaces = semSolid[s] ?? [];
+          for (let f = 0; f < shell.length; f++) {
+            const face = shell[f];
+            const surfaceType = surfaces[semFaces[f]]?.type ?? null;
+            triangulateFace(face, surfaceType, decode, out);
+          }
         }
       }
     } else {

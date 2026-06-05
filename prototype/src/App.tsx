@@ -59,6 +59,7 @@ import {
   computeTransformedFootprint,
   type PendingTransform,
 } from './lib/transform-preview';
+import { estimateTerrainSnap, snapTransformToTerrain } from './lib/terrain';
 import { buildPreviewMesh } from './lib/preview-mesh';
 import { cloneBuildings } from './lib/clipboard';
 import { deleteBuildings } from './lib/delete';
@@ -86,6 +87,7 @@ type PrimitiveValidationState = {
 
 export default function App() {
   const [cityjson, setCityjson] = useState<CityJsonDocument | null>(null);
+  const [loadModalOpen, setLoadModalOpen] = useState(true);
   const [fileName, setFileName] = useState<string>('');
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
@@ -144,6 +146,7 @@ export default function App() {
 
   // ── Planning layer ───────────────────────────────────────────────────────
   const [zones, setZones] = useState<ParcelZone[]>([]);
+  const [selectedZone, setSelectedZone] = useState<ParcelZone | null>(null);
   const [zoningEnabled, setZoningEnabled] = useState(false);
   const [zoningLoading, setZoningLoading] = useState(false);
 
@@ -200,6 +203,7 @@ export default function App() {
       setDirtyIds(clean);
       setFilter({}); // reset filters when loading a new doc
       setZones([]);
+      setSelectedZone(null);
       setZoningEnabled(false);
       setZoningLoading(false);
       mapBboxRef.current = null;
@@ -211,6 +215,7 @@ export default function App() {
         kind: 'unchecked',
         message: 'Loaded input has not been checked for ISO 19107 primitive validity in this session.',
       });
+      setLoadModalOpen(false);
     },
     [originals]
   );
@@ -636,15 +641,29 @@ export default function App() {
   // Enter "edit position" mode for a building. While active, dX/dY/angle are
   // held in pendingTransform and the map renders a ghost preview. Nothing is
   // written to the CityJSON until the user clicks Save.
-  const handleStartTransform = useCallback((id: string) => {
-    setPendingTransform({ id, dx: 0, dy: 0, angle: 0 });
-  }, []);
+  const handleStartTransform = useCallback(
+    (id: string) => {
+      const initial: PendingTransform = { id, dx: 0, dy: 0, dz: 0, angle: 0, autoTerrain: true };
+      setPendingTransform(cityjson ? snapTransformToTerrain(cityjson, initial) : initial);
+    },
+    [cityjson]
+  );
 
   const handleUpdateTransform = useCallback(
     (patch: Partial<Omit<PendingTransform, 'id'>>) => {
-      setPendingTransform((cur) => (cur ? { ...cur, ...patch } : cur));
+      setPendingTransform((cur) => {
+        if (!cur) return cur;
+        let next: PendingTransform = { ...cur, ...patch };
+        if ('dz' in patch && !('autoTerrain' in patch)) {
+          next = { ...next, autoTerrain: false };
+        }
+        if (cityjson && next.autoTerrain) {
+          next = snapTransformToTerrain(cityjson, next);
+        }
+        return next;
+      });
     },
-    []
+    [cityjson]
   );
 
   const handleCancelTransform = useCallback(() => {
@@ -654,10 +673,11 @@ export default function App() {
   const handleSaveTransform = useCallback(() => {
     if (!cityjson || !pendingTransform) return;
     const { id, dx, dy, angle } = pendingTransform;
+    const dz = pendingTransform.dz ?? 0;
     try {
       // Snapshot only when there's actually a change to commit — pure
       // close/cancel shouldn't pollute the undo stack.
-      if (angle !== 0 || dx !== 0 || dy !== 0) {
+      if (angle !== 0 || dx !== 0 || dy !== 0 || dz !== 0) {
         pushUndo(`Move ${id}`);
       }
       const result = commitBuildingTransformFromEditor(cityjson, pendingTransform);
@@ -963,17 +983,16 @@ export default function App() {
   const dragBaseRef = useRef<{ dx: number; dy: number } | null>(null);
   const handleDragMove = useCallback(
     (dx: number, dy: number) => {
-      if (!pendingTransform) return;
-      if (!dragBaseRef.current) {
-        dragBaseRef.current = { dx: pendingTransform.dx, dy: pendingTransform.dy };
-      }
-      setPendingTransform((cur) =>
-        cur
-          ? { ...cur, dx: dragBaseRef.current!.dx + dx, dy: dragBaseRef.current!.dy + dy }
-          : cur
-      );
+      setPendingTransform((cur) => {
+        if (!cur) return cur;
+        if (!dragBaseRef.current) {
+          dragBaseRef.current = { dx: cur.dx, dy: cur.dy };
+        }
+        const next = { ...cur, dx: dragBaseRef.current.dx + dx, dy: dragBaseRef.current.dy + dy };
+        return cityjson && next.autoTerrain ? snapTransformToTerrain(cityjson, next) : next;
+      });
     },
-    [pendingTransform]
+    [cityjson]
   );
   useEffect(() => {
     if (!pendingTransform) dragBaseRef.current = null;
@@ -985,6 +1004,7 @@ export default function App() {
     if (zoningEnabled) {
       setZoningEnabled(false);
       setZones([]);
+      setSelectedZone(null);
       return;
     }
 
@@ -1016,6 +1036,7 @@ export default function App() {
         return;
       }
       setZones(nextZones);
+      setSelectedZone(null);
       setZoningEnabled(true);
     } catch (e) {
       console.error(e);
@@ -1024,6 +1045,10 @@ export default function App() {
       setZoningLoading(false);
     }
   }, [cityjson, zoningEnabled, zoningLoading]);
+
+  const handleZoneSelect = useCallback((zone: ParcelZone) => {
+    setSelectedZone(zone);
+  }, []);
 
   const handleStartDraw = useCallback(() => {
     setSelection(null);
@@ -1218,29 +1243,9 @@ export default function App() {
     }
   }, [cityjson, fileName]);
 
-  const handleReset = useCallback(() => {
-    setCityjson(null);
-    cityjsonRef.current = null;
-    setFileName('');
-    setSelection(null);
-    const clean = new Set<string>();
-    dirtyIdsRef.current = clean;
-    setDirtyIds(clean);
-    setSeqRawText(null);
-    setCatalogConnection(null);
-    catalogConnectionRef.current = null;
-    setCatalogStatus({ kind: 'idle' });
-    setInputIntegrity(null);
-    setPrimitiveValidation({
-      kind: 'unchecked',
-      message: '3D primitive validity has not been checked yet.',
-    });
-    if (catalogViewportTimerRef.current !== null) {
-      window.clearTimeout(catalogViewportTimerRef.current);
-      catalogViewportTimerRef.current = null;
-    }
-    originals.clear();
-  }, [originals]);
+  const handleOpenLoader = useCallback(() => {
+    setLoadModalOpen(true);
+  }, []);
 
   // Cheap integrity check — re-runs only when the doc identity / reload-token
   // changes, NOT on every render. The walk is O(vertices+faces), <100 ms even
@@ -1566,7 +1571,7 @@ export default function App() {
         onImportIfc={handleImportIfc}
         ifcParsing={ifcParsing}
         onReloadView={handleReloadView}
-        onNewFile={handleReset}
+        onOpenLoader={handleOpenLoader}
         onSaveLocal={handleSaveLocal}
         saveStatus={saveStatus}
         drawMode={drawMode}
@@ -1635,7 +1640,14 @@ export default function App() {
               onCancel={handleCancelIfcPlacement}
             />
           )}
-          {zoningEnabled && zones.length > 0 && <ZoneLegend zones={zones} />}
+          {zoningEnabled && zones.length > 0 && (
+            <ZoneLegend
+              zones={zones}
+              selectedZone={selectedZone}
+              onSelectZone={setSelectedZone}
+              onClearSelected={() => setSelectedZone(null)}
+            />
+          )}
           {cityjson ? (
             <MapView
               cityjson={cityjson}
@@ -1652,6 +1664,7 @@ export default function App() {
               onDragMove={handleDragMove}
               multiSelectedIds={multiSelection.size > 0 ? multiSelection : null}
               zones={zoningEnabled ? zones : []}
+              onZoneSelect={handleZoneSelect}
               footprintEdit={
                 footprintEdit
                   ? {
@@ -1698,7 +1711,15 @@ export default function App() {
               }
             />
           ) : (
-            <FileLoader onLoaded={handleLoaded} onCatalogLoaded={handleCatalogLoaded} />
+            <EmptyMapBackdrop />
+          )}
+          {(!cityjson || loadModalOpen) && (
+            <FileLoader
+              onLoaded={handleLoaded}
+              onCatalogLoaded={handleCatalogLoaded}
+              canClose={!!cityjson}
+              onClose={() => setLoadModalOpen(false)}
+            />
           )}
           {pendingFootprint && cityjson && (
             <BuildingCreator
@@ -1776,6 +1797,11 @@ export default function App() {
               pendingTransform={
                 pendingTransform?.id === selection.objectId ? pendingTransform : null
               }
+              terrainSnap={
+                pendingTransform?.id === selection.objectId
+                  ? estimateTerrainSnap(cityjson, pendingTransform)
+                  : null
+              }
               onStartTransform={handleStartTransform}
               onUpdateTransform={handleUpdateTransform}
               onCancelTransform={handleCancelTransform}
@@ -1815,6 +1841,7 @@ function AttributePanelInline(props: {
   onFloorPlansPreview: (plans: FloorPlanDivision[] | null) => void;
   onSplitBySide: (id: string, partCount: number, axis: SplitAxis) => void;
   pendingTransform: PendingTransform | null;
+  terrainSnap: ReturnType<typeof estimateTerrainSnap> | null;
   onStartTransform: (id: string) => void;
   onUpdateTransform: (patch: Partial<Omit<PendingTransform, 'id'>>) => void;
   onCancelTransform: () => void;
@@ -1853,6 +1880,7 @@ function AttributePanelInline(props: {
       onFloorPlansPreview={props.onFloorPlansPreview}
       onSplitBySide={props.onSplitBySide}
       pendingTransform={props.pendingTransform}
+      terrainSnap={props.terrainSnap}
       onStartTransform={props.onStartTransform}
       onUpdateTransform={props.onUpdateTransform}
       onCancelTransform={props.onCancelTransform}
@@ -1905,7 +1933,17 @@ function expandBbox(
  * mode. Surfaces the parsed IFC's headline numbers + a Cancel button (Esc
  * also works). Click anywhere on the map to drop the building.
  */
-function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
+function ZoneLegend({
+  zones,
+  selectedZone,
+  onSelectZone,
+  onClearSelected,
+}: {
+  zones: ParcelZone[];
+  selectedZone: ParcelZone | null;
+  onSelectZone: (zone: ParcelZone) => void;
+  onClearSelected: () => void;
+}) {
   const visibleZones = uniqueZonesByLabel(zones).slice(0, 6);
   return (
     <div
@@ -1942,7 +1980,22 @@ function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
       {visibleZones.map((z) => (
         <div
           key={z.id}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelectZone(z)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onSelectZone(z);
+            }
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '2px 0',
+            cursor: 'pointer',
+          }}
           title={
             z.details
               ? `${z.details} | Compatible: ${
@@ -1970,6 +2023,94 @@ function ZoneLegend({ zones }: { zones: ParcelZone[] }) {
           +{zones.length - visibleZones.length} more
         </div>
       )}
+      {selectedZone && (
+        <div
+          style={{
+            marginTop: 8,
+            paddingTop: 8,
+            borderTop: '1px solid rgba(255,255,255,0.12)',
+            maxWidth: 300,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 4,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: 'rgba(255,255,255,0.55)',
+              }}
+            >
+              Selected Area
+            </div>
+            <button
+              type="button"
+              onClick={onClearSelected}
+              style={{
+                border: 0,
+                borderRadius: 4,
+                background: 'rgba(255,255,255,0.12)',
+                color: 'rgba(255,255,255,0.82)',
+                padding: '1px 6px',
+                fontSize: 10,
+                cursor: 'pointer',
+              }}
+            >
+              Clear
+            </button>
+          </div>
+          <div style={{ fontWeight: 600, marginBottom: 3 }}>{selectedZone.label}</div>
+          <div style={{ color: 'rgba(255,255,255,0.72)', marginBottom: 2 }}>
+            Source: {planningSourceLabel(selectedZone.source)}
+          </div>
+          <div style={{ color: 'rgba(255,255,255,0.72)', marginBottom: 4 }}>
+            Compatible:{' '}
+            {selectedZone.allowedTypes.length > 0
+              ? selectedZone.allowedTypes.join(', ')
+              : 'no mapped building types'}
+          </div>
+          {selectedZone.details && (
+            <div
+              style={{
+                color: 'rgba(255,255,255,0.62)',
+                lineHeight: 1.35,
+                wordBreak: 'break-word',
+              }}
+            >
+              {selectedZone.details}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function planningSourceLabel(source?: string): string {
+  if (source === 'hamburg-xplan-baugebiet') return 'Hamburg XPlan baugebiet';
+  if (source === 'hamburg-fnp-nutzung') return 'Hamburg FNP land use';
+  return source ?? 'Unknown';
+}
+
+function EmptyMapBackdrop() {
+  return (
+    <div className="absolute inset-0 overflow-hidden bg-[#101722]">
+      <div className="absolute inset-0 opacity-40">
+        <div className="absolute left-[-12%] top-[-18%] h-[55%] w-[55%] rounded-full bg-[var(--accent)]/30 blur-3xl" />
+        <div className="absolute bottom-[-20%] right-[-10%] h-[60%] w-[60%] rounded-full bg-emerald-500/20 blur-3xl" />
+      </div>
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:48px_48px]" />
+      <div className="absolute bottom-4 left-4 rounded-md border border-[var(--border)] bg-black/25 px-3 py-2 text-xs text-[var(--text-dim)] backdrop-blur-sm">
+        Map workspace is ready. Load a CityJSON or Hamburg catalog to begin.
+      </div>
     </div>
   );
 }
