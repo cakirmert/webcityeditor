@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildHamburgFnpNutzungUrl,
   buildHamburgXPlanBaugebietUrl,
+  fetchPlanningZones,
   fetchHamburgPlanningZones,
   findNearestZoneForPoint,
   findZoneForPoint,
+  getPlanningProviderForBbox,
   getZoneCenter,
+  isPlanningBboxSupported,
   isBboxNearHamburg,
+  planningCoverageSummary,
+  planningSourceLabel,
   validateBuildingType,
   zonesFromPlanningGeoJson,
   type ParcelZone,
@@ -37,6 +42,15 @@ describe('Hamburg planning URL builders', () => {
   it('detects whether a query bbox intersects Hamburg', () => {
     expect(isBboxNearHamburg(HAMBURG_BBOX)).toBe(true);
     expect(isBboxNearHamburg([4.3, 52.0, 4.4, 52.1])).toBe(false);
+  });
+
+  it('exposes the current planning coverage through a generic provider API', () => {
+    expect(isPlanningBboxSupported(HAMBURG_BBOX)).toBe(true);
+    expect(isPlanningBboxSupported([4.3, 52.0, 4.4, 52.1])).toBe(false);
+    expect(getPlanningProviderForBbox(HAMBURG_BBOX)?.id).toBe('hamburg');
+    expect(planningCoverageSummary()).toBe('Hamburg');
+    expect(planningSourceLabel('hamburg-xplan-baugebiet')).toBe('XPlan land-use layer');
+    expect(planningSourceLabel('hamburg-fnp-nutzung')).toBe('FNP land-use layer');
   });
 });
 
@@ -244,6 +258,52 @@ describe('fetchHamburgPlanningZones', () => {
     expect(zones).toHaveLength(1);
     expect(zones[0].source).toBe('hamburg-fnp-nutzung');
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('fetchPlanningZones', () => {
+  it('delegates supported bboxes to the matching provider', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [10, 53.5],
+                  [10.01, 53.5],
+                  [10.01, 53.51],
+                  [10, 53.51],
+                  [10, 53.5],
+                ],
+              ],
+            },
+            properties: { besondereArtDerBaulNutzungWert: 'Gewerbegebiet' },
+          },
+        ],
+      }),
+    } as Response);
+
+    const zones = await fetchPlanningZones(HAMBURG_BBOX, fetchImpl);
+
+    expect(zones).toHaveLength(1);
+    expect(zones[0].source).toBe('hamburg-xplan-baugebiet');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unsupported bboxes before issuing a network request', async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(fetchPlanningZones([4.3, 52.0, 4.4, 52.1], fetchImpl)).rejects.toThrow(
+      'No planning provider'
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

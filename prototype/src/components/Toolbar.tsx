@@ -255,8 +255,8 @@ export default function Toolbar({
               disabled={zoningLoading}
               title={
                 zoningEnabled
-                  ? 'Disable Hamburg planning overlay'
-                  : 'Load Hamburg planning overlay for the current map view'
+                  ? 'Disable planning overlay'
+                  : 'Load planning overlay for the current map view'
               }
             >
               {zoningLoading ? 'Planning...' : zoningEnabled ? 'Planning ON' : 'Planning'}

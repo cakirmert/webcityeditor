@@ -14,7 +14,7 @@ import {
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
-import { detectCrs } from '../lib/projection';
+import { applyVertexTransform, detectCrs, projectToWgs84 } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
@@ -31,6 +31,8 @@ import type { OsmRoadFeature, RoadArea } from '../lib/transportation';
  */
 const LOD_OUTLINE_MAX = 14.5;
 const LOD_EXTRUDE_MAX = 99; // always extrude at z > 14.5 for now
+const DATA_FIT_PADDING = 20;
+const DATA_FIT_MAX_ZOOM = 19;
 
 interface Props {
   cityjson: CityJsonDocument;
@@ -227,7 +229,10 @@ export default function MapView({
     const container = containerRef.current;
     if (!container) return;
 
-    const initialBbox = computeFootprintBounds(footprints) ?? computeMetadataBounds(cityjson);
+    const initialBbox =
+      computeFootprintBounds(footprints) ??
+      computeVertexBounds(cityjson) ??
+      computeMetadataBounds(cityjson);
     const initialCenter =
       boundsCenter(initialBbox) ?? computeTranslateCentre(cityjson) ?? [4.3571, 52.0116];
 
@@ -326,15 +331,16 @@ export default function MapView({
     if (flownForDocRef.current !== cityjson) {
       flownForDocRef.current = cityjson;
       const footprintBbox = computeFootprintBounds(footprints);
+      const vertexBbox = computeVertexBounds(cityjson);
       const metaBbox = computeMetadataBounds(cityjson);
       const centre = computeTranslateCentre(cityjson);
 
-      const bbox = footprintBbox ?? metaBbox;
+      const bbox = footprintBbox ?? vertexBbox ?? metaBbox;
       const doFit = () => {
         if (bbox && isFiniteBbox(bbox)) {
           map.fitBounds(bbox, {
-            padding: 60,
-            maxZoom: 18,
+            padding: DATA_FIT_PADDING,
+            maxZoom: DATA_FIT_MAX_ZOOM,
             pitch: 55,
             bearing: map.getBearing(),
             duration: 0,
@@ -1236,7 +1242,69 @@ function computeFootprintBounds(
 }
 
 /**
- * Fallback #2: read `metadata.geographicalExtent` (a 6-element bbox in the
+ * Fallback #2: fit to the CityJSON vertices themselves. This is tighter than
+ * metadata extents and still works for imports that do not expose footprint
+ * semantics.
+ */
+function computeVertexBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLike | null {
+  if (doc.vertices.length === 0) return null;
+
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  let anyProjected = false;
+  for (const vertex of doc.vertices) {
+    const c = applyVertexTransform(vertex, doc);
+    if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
+    if (c.x < minX) minX = c.x;
+    if (c.y < minY) minY = c.y;
+    if (c.x > maxX) maxX = c.x;
+    if (c.y > maxY) maxY = c.y;
+    anyProjected = true;
+  }
+  if (!anyProjected) return null;
+
+  if (looksLikeWgs84Extent(minX, minY, maxX, maxY)) {
+    return [
+      [minX, minY],
+      [maxX, maxY],
+    ];
+  }
+
+  const crs = detectCrs(doc);
+  if (!crs.supported) return null;
+
+  let minLng = Infinity,
+    minLat = Infinity,
+    maxLng = -Infinity,
+    maxLat = -Infinity;
+  let anyLngLat = false;
+  try {
+    for (const vertex of doc.vertices) {
+      const c = applyVertexTransform(vertex, doc);
+      const [lng, lat] = projectToWgs84(crs.code, c);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+      if (lng < minLng) minLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lng > maxLng) maxLng = lng;
+      if (lat > maxLat) maxLat = lat;
+      anyLngLat = true;
+    }
+  } catch {
+    return null;
+  }
+
+  return anyLngLat
+    ? [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ]
+    : null;
+}
+
+/**
+ * Fallback #3: read `metadata.geographicalExtent` (a 6-element bbox in the
  * dataset's own CRS: [minX, minY, minZ, maxX, maxY, maxZ]) and reproject the
  * 2D corners to WGS84. Works for files where extractFootprints returned
  * nothing (for instance, because CityObjects lack GroundSurfaces we can
@@ -1264,7 +1332,7 @@ function computeMetadataBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLi
 }
 
 /**
- * Fallback #3: project `transform.translate` — the document's local origin —
+ * Fallback #4: project `transform.translate` — the document's local origin —
  * to WGS84 and use it as a centre. Gives a useful view even when no bbox and
  * no footprints can be determined.
  */

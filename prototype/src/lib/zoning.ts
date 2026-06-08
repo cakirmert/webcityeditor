@@ -8,7 +8,20 @@ export interface ParcelZone {
   details?: string;
 }
 
-export type HamburgPlanningSource = 'hamburg-xplan-baugebiet' | 'hamburg-fnp-nutzung';
+export type PlanningSource = 'hamburg-xplan-baugebiet' | 'hamburg-fnp-nutzung';
+export type HamburgPlanningSource = PlanningSource;
+export type PlanningProviderId = 'hamburg';
+
+export interface PlanningProvider {
+  id: PlanningProviderId;
+  label: string;
+  coverageLabel: string;
+  supportsBbox: (bbox: [number, number, number, number]) => boolean;
+  fetchZones: (
+    bbox: [number, number, number, number],
+    fetchImpl?: typeof fetch
+  ) => Promise<ParcelZone[]>;
+}
 
 export const HAMBURG_XPLAN_BAUGEBIET_URL =
   'https://api.hamburg.de/datasets/v1/xplan/collections/bp_baugebietsteilflaeche/items';
@@ -74,6 +87,47 @@ export function isBboxNearHamburg(bbox: [number, number, number, number]): boole
   const [w, s, e, n] = bbox;
   const [hw, hs, he, hn] = HAMBURG_WGS84_BBOX;
   return w <= he && e >= hw && s <= hn && n >= hs;
+}
+
+export const PLANNING_PROVIDERS: readonly PlanningProvider[] = [
+  {
+    id: 'hamburg',
+    label: 'Hamburg planning services',
+    coverageLabel: 'Hamburg',
+    supportsBbox: isBboxNearHamburg,
+    fetchZones: fetchHamburgPlanningZones,
+  },
+];
+
+export function getPlanningProviderForBbox(
+  bbox: [number, number, number, number]
+): PlanningProvider | null {
+  return PLANNING_PROVIDERS.find((provider) => provider.supportsBbox(bbox)) ?? null;
+}
+
+export function isPlanningBboxSupported(bbox: [number, number, number, number]): boolean {
+  return getPlanningProviderForBbox(bbox) !== null;
+}
+
+export function planningCoverageSummary(): string {
+  return PLANNING_PROVIDERS.map((provider) => provider.coverageLabel).join(', ');
+}
+
+export function planningSourceLabel(source?: string): string {
+  if (source === 'hamburg-xplan-baugebiet') return 'XPlan land-use layer';
+  if (source === 'hamburg-fnp-nutzung') return 'FNP land-use layer';
+  return source ?? 'Unknown';
+}
+
+export async function fetchPlanningZones(
+  bbox: [number, number, number, number],
+  fetchImpl: typeof fetch = fetch
+): Promise<ParcelZone[]> {
+  const provider = getPlanningProviderForBbox(bbox);
+  if (!provider) {
+    throw new Error('No planning provider is available for this area.');
+  }
+  return provider.fetchZones(bbox, fetchImpl);
 }
 
 export async function fetchHamburgPlanningZones(
@@ -199,10 +253,10 @@ function zoneFromFeature(
 
 function labelFromProperties(
   props: Record<string, unknown>,
-  source: HamburgPlanningSource
+  source: PlanningSource
 ): string {
   if (source === 'hamburg-fnp-nutzung') {
-    return getStringProp(props, ['nutzungstext', 'nutzung', 'prae']) ?? 'Hamburg FNP area';
+    return getStringProp(props, ['nutzungstext', 'nutzung', 'prae']) ?? 'FNP planning area';
   }
 
   return (
@@ -210,18 +264,18 @@ function labelFromProperties(
       'besondereArtDerBaulNutzungWert',
       'allgArtDerBaulNutzungWert',
       'xpPlanName',
-    ]) ?? 'Hamburg XPlan area'
+    ]) ?? 'XPlan planning area'
   );
 }
 
 function detailsFromProperties(
   props: Record<string, unknown>,
-  source: HamburgPlanningSource
+  source: PlanningSource
 ): string {
   const parts: string[] = [
     source === 'hamburg-fnp-nutzung'
-      ? 'Hamburg FNP land-use layer'
-      : 'Hamburg XPlan BP_BaugebietsTeilFlaeche',
+      ? 'FNP land-use layer'
+      : 'XPlan BP_BaugebietsTeilFlaeche',
   ];
 
   for (const key of ['xpPlanName', 'xpPlanDate', 'rechtsstandWert', 'GRZ', 'GFZ', 'Z']) {

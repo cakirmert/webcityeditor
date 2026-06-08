@@ -25,8 +25,10 @@ import { buildPreviewMesh } from './lib/preview-mesh';
 import { computeTransformedFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
 import {
-  isBboxNearHamburg,
-  fetchHamburgPlanningZones,
+  fetchPlanningZones,
+  getPlanningProviderForBbox,
+  planningCoverageSummary,
+  planningSourceLabel,
   type ParcelZone,
 } from './lib/zoning';
 
@@ -61,29 +63,33 @@ export default function App() {
 
     const footprintBbox = computeFootprintBbox(extractFootprints(coreState.cityjson));
     const viewportBbox = coreState.mapBboxRef.current;
-    const bbox =
-      viewportBbox && isBboxNearHamburg(expandBbox(viewportBbox))
-        ? viewportBbox
-        : footprintBbox && isBboxNearHamburg(expandBbox(footprintBbox))
-        ? footprintBbox
-        : viewportBbox ?? footprintBbox;
-    if (!bbox) {
+    const viewportQueryBbox = viewportBbox ? expandBbox(viewportBbox) : null;
+    const footprintQueryBbox = footprintBbox ? expandBbox(footprintBbox) : null;
+    const queryBbox =
+      viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)
+        ? viewportQueryBbox
+        : footprintQueryBbox && getPlanningProviderForBbox(footprintQueryBbox)
+        ? footprintQueryBbox
+        : viewportQueryBbox ?? footprintQueryBbox;
+    if (!queryBbox) {
       alert('Could not derive a map bbox for the planning query.');
       return;
     }
-    const queryBbox = expandBbox(bbox);
-    if (!isBboxNearHamburg(queryBbox)) {
+    if (!getPlanningProviderForBbox(queryBbox)) {
+      const coverage = planningCoverageSummary();
       alert(
-        'Hamburg planning data is only available for Hamburg. Load a Hamburg tile or pan the map to Hamburg first.'
+        `No planning overlay provider is available for this area yet${
+          coverage ? `. Current coverage: ${coverage}.` : '.'
+        }`
       );
       return;
     }
 
     setZoningLoading(true);
     try {
-      const nextZones = await fetchHamburgPlanningZones(queryBbox);
+      const nextZones = await fetchPlanningZones(queryBbox);
       if (nextZones.length === 0) {
-        alert('No Hamburg planning polygons returned for this viewport.');
+        alert('No planning polygons returned for this viewport.');
         return;
       }
       setZones(nextZones);
@@ -697,7 +703,7 @@ function EmptyMapBackdrop() {
       </div>
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:48px_48px]" />
       <div className="absolute bottom-4 left-4 rounded-md border border-[var(--border)] bg-black/25 px-3 py-2 text-xs text-[var(--text-dim)] backdrop-blur-sm">
-        Map workspace is ready. Load a CityJSON or Hamburg catalog to begin.
+        Map workspace is ready. Load a CityJSON file or catalog to begin.
       </div>
     </div>
   );
@@ -712,12 +718,6 @@ function uniqueZonesByLabel(zones: ParcelZone[]): ParcelZone[] {
     unique.push(zone);
   }
   return unique;
-}
-
-function planningSourceLabel(source?: string): string {
-  if (source === 'hamburg-xplan-baugebiet') return 'Hamburg XPlan baugebiet';
-  if (source === 'hamburg-fnp-nutzung') return 'Hamburg FNP land use';
-  return source ?? 'Unknown';
 }
 
 function ZoneLegend({
