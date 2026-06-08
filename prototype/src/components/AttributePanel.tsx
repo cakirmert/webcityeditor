@@ -9,6 +9,7 @@ import {
 } from '../lib/subdivision';
 import { extractOpenings, type OpeningInfo } from '../lib/opening-edit';
 import { extractFootprints } from '../lib/footprints';
+import { USAGE_OPTIONS } from '../lib/footprint-tint';
 import type { PendingTransform } from '../lib/transform-preview';
 import { isTerrainMatched, type TerrainSnap } from '../lib/terrain';
 import { Button } from './ui/button';
@@ -1135,6 +1136,22 @@ function AttributeRow({ attrKey, value, onChange }: RowProps) {
         >
           <option value="true">true</option>
           <option value="false">false</option>
+        </select>
+      ) : attrKey === 'function' ? (
+        <select
+          id={inputId}
+          value={value == null ? '' : String(value)}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)] font-sans"
+        >
+          {USAGE_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+          {value != null && !USAGE_OPTIONS.some((option) => option === String(value)) && (
+            <option value={String(value)}>{String(value)}</option>
+          )}
         </select>
       ) : (
         <Input

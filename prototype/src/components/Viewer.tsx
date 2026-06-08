@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CityJSONLoader, CityJSONParser } from 'cityjson-threejs-loader';
 import type { CityJsonDocument, SelectionInfo } from '../types';
 import type { FloorPlanDivision } from '../lib/subdivision';
+import { normalizeUsage, USAGE_OBJECT_COLORS } from '../lib/footprint-tint';
 
 /**
  * Warm architectural surface palette. Replaces the loader's default Window=
@@ -34,7 +35,7 @@ const OBJECT_COLORS_DISTINCT = {
   WaterBody: 0x4a8fbf,
 };
 
-type ColorMode = 'surface' | 'object';
+type ColorMode = 'surface' | 'object' | 'usage';
 
 /** Live-preview info from the visual division editor. When set, the viewer
  *  draws horizontal accent rings at each cumulative split height around the
@@ -202,13 +203,28 @@ export default function Viewer({
     // Re-apply custom palette & color mode each load — resetMaterial() builds
     // fresh material instances and they default to objectColors-by-type unless
     // we explicitly pin showSemantics.
-    setParserPalette(state.parser);
+    let docToLoad = cityjson;
+    let objectColors: Record<string, number> = OBJECT_COLORS_DISTINCT;
+    if (colorMode === 'usage') {
+      const cloned = JSON.parse(JSON.stringify(cityjson)) as CityJsonDocument;
+      for (const id of Object.keys(cloned.CityObjects)) {
+        const obj = cloned.CityObjects[id];
+        obj.type = normalizeUsage(obj.attributes?.function) ?? 'unknown';
+      }
+      docToLoad = cloned;
+      objectColors = {
+        ...OBJECT_COLORS_DISTINCT,
+        ...USAGE_OBJECT_COLORS,
+      };
+    }
+
+    setParserPalette(state.parser, objectColors);
     state.parser.resetMaterial();
     applyColorMode(state.parser, colorMode);
 
     const loader = new CityJSONLoader(state.parser);
     state.loader = loader;
-    loader.load(cityjson);
+    loader.load(docToLoad);
     state.modelGroup.add(loader.scene);
 
     // Fit camera to the actually-rendered meshes (not loader.boundingBox,
@@ -419,7 +435,7 @@ export default function Viewer({
           fontSize: 11,
           userSelect: 'none',
         }}
-        title="Switch between coloring by CityObject type (Building/Bridge/…) and by semantic surface (Wall/Roof/Window/Door)"
+        title="Switch between coloring by CityObject type, semantic surface, or usage"
       >
         <ColorModeButton
           active={colorMode === 'surface'}
@@ -430,6 +446,11 @@ export default function Viewer({
           active={colorMode === 'object'}
           onClick={() => setColorMode('object')}
           label="By object"
+        />
+        <ColorModeButton
+          active={colorMode === 'usage'}
+          onClick={() => setColorMode('usage')}
+          label="By usage"
         />
       </div>
     </div>
@@ -473,13 +494,16 @@ function applyColorMode(parser: CityJSONParser, mode: ColorMode) {
 /** Pin our two custom palettes onto the parser. The loader's .d.ts doesn't
  *  expose these runtime fields, so we cast through unknown — see
  *  cityjson-threejs-loader/src/parsers/CityJSONParser.js. */
-function setParserPalette(parser: CityJSONParser) {
+function setParserPalette(
+  parser: CityJSONParser,
+  objectColors: Record<string, number> = OBJECT_COLORS_DISTINCT
+) {
   const p = parser as unknown as {
     surfaceColors: Record<string, number>;
     objectColors: Record<string, number>;
   };
   p.surfaceColors = SURFACE_COLORS_ARCH;
-  p.objectColors = OBJECT_COLORS_DISTINCT;
+  p.objectColors = objectColors;
 }
 
 /**

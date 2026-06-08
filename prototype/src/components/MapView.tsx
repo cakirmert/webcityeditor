@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
@@ -16,7 +16,7 @@ import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
 import { detectCrs } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
-import { tintByRoofType } from '../lib/footprint-tint';
+import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type { OsmRoadFeature, RoadArea } from '../lib/transportation';
@@ -171,6 +171,7 @@ export default function MapView({
   const flownForDocRef = useRef<CityJsonDocument | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(16);
+  const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -386,7 +387,7 @@ export default function MapView({
           if (isMultiSelected) return [255, 180, 80, 120];
           const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
           if (!matched) return [120, 120, 130, 35]; // dimmed
-          return tintByRoofType(d, 120);
+          return mapColorMode === 'usage' ? tintByUsage(d, 120) : tintByRoofType(d, 120);
         },
         getLineColor: (d) => {
           const isSelected = d.id === selectedId || (d.parentId && d.parentId === selectedId);
@@ -404,7 +405,7 @@ export default function MapView({
         extruded: false,
         pickable: true,
         updateTriggers: {
-          getFillColor: [selectedId, filteredIds, multiSelectedIds],
+          getFillColor: [selectedId, filteredIds, multiSelectedIds, mapColorMode],
           getLineColor: [selectedId, filteredIds, multiSelectedIds],
         },
         onClick: (info: PickingInfo<Footprint>, event: unknown) => {
@@ -435,7 +436,7 @@ export default function MapView({
             if (isMultiSelected) return [255, 180, 80, 200];
             const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
             if (!matched) return [120, 120, 130, 60]; // dimmed
-            return tintByRoofType(d, 230);
+            return mapColorMode === 'usage' ? tintByUsage(d, 230) : tintByRoofType(d, 230);
           },
           extruded: true,
           wireframe: false,
@@ -447,7 +448,7 @@ export default function MapView({
             specularColor: [60, 64, 70],
           },
           updateTriggers: {
-            getFillColor: [selectedId, filteredIds, multiSelectedIds],
+            getFillColor: [selectedId, filteredIds, multiSelectedIds, mapColorMode],
           },
           onClick: (info: PickingInfo<Footprint>, event: unknown) => {
             const src = (event as { srcEvent?: { ctrlKey?: boolean; metaKey?: boolean } })?.srcEvent;
@@ -735,6 +736,7 @@ export default function MapView({
     onOsmRoadSelect,
     osm2streetsResult,
     osm2streetsBbox,
+    mapColorMode,
   ]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
@@ -1132,7 +1134,66 @@ export default function MapView({
           {warning}
         </div>
       )}
+      <div
+        style={{
+          position: 'absolute',
+          top: warning ? 50 : 10,
+          left: 10,
+          zIndex: 10,
+          display: 'flex',
+          gap: 4,
+          background: 'rgba(28,33,48,0.85)',
+          backdropFilter: 'blur(4px)',
+          border: '1px solid var(--border)',
+          padding: 4,
+          borderRadius: 6,
+        }}
+      >
+        <MapColorModeButton
+          active={mapColorMode === 'roof'}
+          onClick={() => setMapColorMode('roof')}
+        >
+          Roof
+        </MapColorModeButton>
+        <MapColorModeButton
+          active={mapColorMode === 'usage'}
+          onClick={() => setMapColorMode('usage')}
+        >
+          Usage
+        </MapColorModeButton>
+      </div>
     </>
+  );
+}
+
+function MapColorModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: 'none',
+        borderRadius: 4,
+        cursor: 'pointer',
+        background: active ? 'var(--primary)' : 'transparent',
+        color: active ? '#fff' : 'var(--text-dim)',
+        fontFamily: 'inherit',
+        fontSize: 11,
+        fontWeight: 600,
+        lineHeight: 1,
+        padding: '6px 8px',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

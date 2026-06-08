@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Footprint } from './footprints';
-import { tintByRoofType } from './footprint-tint';
+import {
+  normalizeUsage,
+  tintByRoofType,
+  tintByUsage,
+  USAGE_OBJECT_COLORS,
+} from './footprint-tint';
 
 function fp(roofType: string | number | null | undefined): Footprint {
   return {
@@ -10,6 +15,17 @@ function fp(roofType: string | number | null | undefined): Footprint {
     height: 5,
     baseElevation: 0,
     attributes: roofType === undefined ? {} : { roofType },
+  };
+}
+
+function usageFp(value: string | null | undefined): Footprint {
+  return {
+    id: 'test',
+    type: 'Building',
+    polygon: [[0, 0, 0]],
+    height: 5,
+    baseElevation: 0,
+    attributes: value === undefined ? {} : { function: value },
   };
 }
 
@@ -66,5 +82,35 @@ describe('tintByRoofType', () => {
   it('handles strings that match the integer-code spelling (so "1000" → flat)', () => {
     expect(tintByRoofType(fp('1000'), 255)).toEqual(tintByRoofType(fp('flat'), 255));
     expect(tintByRoofType(fp('3100'), 255)).toEqual(tintByRoofType(fp('gable'), 255));
+  });
+});
+
+describe('tintByUsage', () => {
+  it('passes alpha through unchanged', () => {
+    expect(tintByUsage(usageFp('residential'), 77)[3]).toBe(77);
+    expect(tintByUsage(usageFp('office'), 210)[3]).toBe(210);
+  });
+
+  it('maps supported usage values and aliases to distinct colors', () => {
+    expect(tintByUsage(usageFp('residential'), 255)).toEqual([240, 220, 60, 255]);
+    expect(tintByUsage(usageFp('commercial'), 255)).toEqual([60, 120, 240, 255]);
+    expect(tintByUsage(usageFp('shops'), 255)).toEqual(tintByUsage(usageFp('commercial'), 255));
+    expect(tintByUsage(usageFp('office'), 255)).toEqual([60, 180, 100, 255]);
+    expect(tintByUsage(usageFp('business'), 255)).toEqual(tintByUsage(usageFp('office'), 255));
+    expect(tintByUsage(usageFp('industrial'), 255)).toEqual([160, 80, 240, 255]);
+    expect(tintByUsage(usageFp('public'), 255)).toEqual([220, 60, 60, 255]);
+  });
+
+  it('normalizes case and whitespace', () => {
+    expect(normalizeUsage(' Office ')).toBe('office');
+    expect(normalizeUsage('SHOPS')).toBe('commercial');
+  });
+
+  it('falls back to neutral grey for missing or unknown usage', () => {
+    const fallback: [number, number, number, number] = [200, 200, 210, 230];
+    expect(tintByUsage(usageFp(undefined), 230)).toEqual(fallback);
+    expect(tintByUsage(usageFp(null), 230)).toEqual(fallback);
+    expect(tintByUsage(usageFp('museum'), 230)).toEqual(fallback);
+    expect(USAGE_OBJECT_COLORS.unknown).toBe(0xc8c8d2);
   });
 });

@@ -1,5 +1,54 @@
 import type { Footprint } from './footprints';
 
+export type UsageKey = 'residential' | 'commercial' | 'office' | 'industrial' | 'public';
+type UsageColorKey = UsageKey | 'unknown';
+
+export const USAGE_OPTIONS: UsageKey[] = [
+  'residential',
+  'commercial',
+  'office',
+  'industrial',
+  'public',
+];
+
+const USAGE_RGB: Record<UsageColorKey, [number, number, number]> = {
+  residential: [240, 220, 60],
+  commercial: [60, 120, 240],
+  office: [60, 180, 100],
+  industrial: [160, 80, 240],
+  public: [220, 60, 60],
+  unknown: [200, 200, 210],
+};
+
+export const USAGE_OBJECT_COLORS: Record<UsageColorKey, number> = {
+  residential: 0xf0dc3c,
+  commercial: 0x3c78f0,
+  office: 0x3cb464,
+  industrial: 0xa050f0,
+  public: 0xdc3c3c,
+  unknown: 0xc8c8d2,
+};
+
+export function normalizeUsage(value: unknown): UsageKey | null {
+  const key = typeof value === 'string' ? value.trim().toLowerCase() : null;
+  switch (key) {
+    case 'residential':
+      return 'residential';
+    case 'commercial':
+    case 'shops':
+      return 'commercial';
+    case 'office':
+    case 'business':
+      return 'office';
+    case 'industrial':
+      return 'industrial';
+    case 'public':
+      return 'public';
+    default:
+      return null;
+  }
+}
+
 /**
  * Pick an RGB-A colour for a footprint based on its `roofType` attribute.
  *
@@ -53,4 +102,25 @@ export function tintByRoofType(
     default:
       return [200, 200, 210, alpha]; // neutral fallback
   }
+}
+
+/**
+ * Pick an RGB-A colour for a footprint based on its `function` attribute.
+ *
+ * Mappings:
+ *   residential        = yellow  ([240, 220, 60, alpha])
+ *   commercial / shops = blue    ([60, 120, 240, alpha])
+ *   office / business  = green   ([60, 180, 100, alpha])
+ *   industrial         = purple  ([160, 80, 240, alpha])
+ *   public             = red     ([220, 60, 60, alpha])
+ *
+ * Unknown or missing falls back to a neutral grey.
+ */
+export function tintByUsage(
+  d: Footprint,
+  alpha: number
+): [number, number, number, number] {
+  const key = normalizeUsage(d.attributes?.function) ?? 'unknown';
+  const [r, g, b] = USAGE_RGB[key];
+  return [r, g, b, alpha];
 }

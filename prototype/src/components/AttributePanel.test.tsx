@@ -73,9 +73,10 @@ describe('<AttributePanel />', () => {
     expect(lastCall[2]).toBe(42);
   });
 
-  it('calls onAttributeChange with string value when a text input is edited', () => {
+  it('renders function as a select and calls onAttributeChange with string value', () => {
     const { onAttributeChange } = setup();
-    const input = screen.getByLabelText('function') as HTMLInputElement;
+    const input = screen.getByLabelText('function') as HTMLSelectElement;
+    expect(input.tagName).toBe('SELECT');
     fireEvent.change(input, { target: { value: 'office' } });
     const lastCall =
       onAttributeChange.mock.calls[onAttributeChange.mock.calls.length - 1];
