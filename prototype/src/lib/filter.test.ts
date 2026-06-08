@@ -14,7 +14,7 @@ function fp(id: string, attrs: Record<string, unknown> = {}): Footprint {
   return {
     id,
     type: 'Building',
-    polygon: [[0, 0]],
+    polygon: [[0, 0, 0]],
     height: typeof attrs.measuredHeight === 'number' ? attrs.measuredHeight : 5,
     baseElevation: 0,
     attributes: attrs,

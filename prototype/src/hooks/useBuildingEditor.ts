@@ -11,7 +11,7 @@ import {
   MIN_STOREY_HEIGHT,
 } from '../lib/subdivision';
 import { regenerateBuilding } from '../lib/regenerate';
-import { extractFootprints } from '../lib/footprints';
+import { extractFootprints, footprintPolygonToWgs84 } from '../lib/footprints';
 import {
   commitBuildingTransformFromEditor,
   createBuildingFromEditor,
@@ -103,9 +103,10 @@ export function useBuildingEditor(
         alert(`Cannot reshape ${id}: no extractable footprint.`);
         return;
       }
+      const footprintWgs84 = footprintPolygonToWgs84(fp.polygon);
       pushUndo(`Reshape ${id}`);
       const { value: r } = runStructurallyGuardedMutation(cityjson, `Reshaping ${id}`, () =>
-        regenerateBuilding(cityjson, id, fp.polygon, overrides)
+        regenerateBuilding(cityjson, id, footprintWgs84, overrides)
       );
       if (!r.ok) {
         alert(`Reshape failed: ${r.reason}`);
@@ -367,7 +368,7 @@ export function useBuildingEditor(
         alert(`Could not extract footprint for building ${id}`);
         return;
       }
-      const open = fp.polygon.slice();
+      const open = footprintPolygonToWgs84(fp.polygon);
       const [first, last] = [open[0], open[open.length - 1]];
       if (first[0] === last[0] && first[1] === last[1]) open.pop();
       setFootprintEdit({ buildingId: id, initialFootprint: open, pendingRing: null });

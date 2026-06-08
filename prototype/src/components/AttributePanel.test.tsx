@@ -222,4 +222,39 @@ describe('<AttributePanel />', () => {
       expect.objectContaining({ eaveOverhang: 0.4, rakeOverhang: 0 })
     );
   });
+
+  it('lists BuildingPart children and selects a clicked child', async () => {
+    const cityjson = buildSampleCube();
+    cityjson.CityObjects.Building_A.children = ['Building_A_part_1', 'Building_A_part_2'];
+    cityjson.CityObjects.Building_A_part_1 = {
+      type: 'BuildingPart',
+      parents: ['Building_A'],
+      attributes: { function: 'commercial' },
+    };
+    cityjson.CityObjects.Building_A_part_2 = {
+      type: 'BuildingPart',
+      parents: ['Building_A'],
+      attributes: { function: 'office' },
+    };
+    const onSelectBuilding = vi.fn();
+    setup({ cityjson, onSelectBuilding });
+
+    await userEvent.click(screen.getByText('Floor 1'));
+    expect(onSelectBuilding).toHaveBeenCalledWith('Building_A_part_1');
+  });
+
+  it('shows a back-to-parent button for child BuildingParts', async () => {
+    const cityjson = buildSampleCube();
+    cityjson.CityObjects.Building_A.children = ['Building_A_part_1'];
+    cityjson.CityObjects.Building_A_part_1 = {
+      type: 'BuildingPart',
+      parents: ['Building_A'],
+      attributes: { function: 'office' },
+    };
+    const onSelectBuilding = vi.fn();
+    setup({ buildingId: 'Building_A_part_1', cityjson, onSelectBuilding });
+
+    await userEvent.click(screen.getByText('← Back to Parent Building'));
+    expect(onSelectBuilding).toHaveBeenCalledWith('Building_A');
+  });
 });

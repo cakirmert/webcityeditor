@@ -1,8 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from './cityjson';
-import { extractFootprints, filterToBuilding } from './footprints';
+import { extractFootprintForId, extractFootprints, filterToBuilding } from './footprints';
 import { prepareValidatedCityJsonExport } from './export-validation';
 import type { CityJsonDocument } from '../types';
+import { generateBuilding, insertBuilding, type NewBuildingParams } from './generator';
+import { splitBuildingByFloor } from './subdivision';
+
+function makeEditableBuilding(overrides: Partial<NewBuildingParams> = {}) {
+  const doc = buildSampleCube();
+  const params: NewBuildingParams = {
+    targetCrs: 'EPSG:28992',
+    footprintWgs84: [
+      [4.3571, 52.0116],
+      [4.35725, 52.0116],
+      [4.35725, 52.01175],
+      [4.3571, 52.01175],
+    ],
+    storeys: 4,
+    eaveHeight: 12,
+    ridgeHeight: 12,
+    roofType: 'flat',
+    ...overrides,
+  };
+  const result = generateBuilding(doc, params);
+  const id = insertBuilding(doc, result);
+  return { doc, id };
+}
 
 describe('extractFootprints', () => {
   it('extracts one footprint from the sample cube', () => {
@@ -37,6 +60,38 @@ describe('extractFootprints', () => {
     doc.transform = { scale: [1, 1, 1], translate: [1e9, 1e9, 0] };
     const fps = extractFootprints(doc);
     expect(fps).toEqual([]);
+  });
+
+  it('extracts split BuildingParts as stacked 3D footprints', () => {
+    const { doc, id } = makeEditableBuilding();
+    const { partIds } = splitBuildingByFloor(doc, id, 4);
+
+    const parts = extractFootprints(doc).filter((fp) => fp.parentId === id);
+    expect(parts.map((fp) => fp.id)).toEqual(partIds);
+    expect(parts).toHaveLength(4);
+
+    for (const fp of parts) {
+      expect(fp.type).toBe('BuildingPart');
+      expect(fp.polygon.length).toBeGreaterThanOrEqual(4);
+      expect(fp.polygon[0]).toHaveLength(3);
+      expect(fp.polygon[fp.polygon.length - 1]).toEqual(fp.polygon[0]);
+      expect(fp.polygon.every((point) => point[2] === fp.baseElevation)).toBe(true);
+    }
+
+    expect(parts[0].baseElevation).toBeLessThan(parts[1].baseElevation);
+    expect(parts[1].baseElevation).toBeLessThan(parts[2].baseElevation);
+    expect(parts[2].baseElevation).toBeLessThan(parts[3].baseElevation);
+  });
+
+  it('keeps a combined parent footprint available for parametrisation', () => {
+    const { doc, id } = makeEditableBuilding();
+    splitBuildingByFloor(doc, id, 3);
+
+    const fp = extractFootprintForId(doc, id);
+    expect(fp?.id).toBe(id);
+    expect(fp?.parentId).toBeUndefined();
+    expect(fp?.polygon[0]).toHaveLength(3);
+    expect(fp?.height).toBeGreaterThan(9);
   });
 });
 

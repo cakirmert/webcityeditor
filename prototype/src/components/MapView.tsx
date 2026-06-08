@@ -380,16 +380,20 @@ export default function MapView({
         data: footprints,
         getPolygon: (d) => d.polygon,
         getFillColor: (d) => {
-          if (d.id === selectedId) return [255, 150, 40, 140];
-          if (multiSelectedIds?.has(d.id)) return [255, 180, 80, 120];
-          const matched = !filteredIds || filteredIds.has(d.id);
+          const isSelected = d.id === selectedId || (d.parentId && d.parentId === selectedId);
+          if (isSelected) return [255, 150, 40, 140];
+          const isMultiSelected = multiSelectedIds?.has(d.id) || (d.parentId && multiSelectedIds?.has(d.parentId));
+          if (isMultiSelected) return [255, 180, 80, 120];
+          const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
           if (!matched) return [120, 120, 130, 35]; // dimmed
           return tintByRoofType(d, 120);
         },
         getLineColor: (d) => {
-          if (d.id === selectedId) return [255, 120, 10, 255];
-          if (multiSelectedIds?.has(d.id)) return [255, 150, 40, 200];
-          const matched = !filteredIds || filteredIds.has(d.id);
+          const isSelected = d.id === selectedId || (d.parentId && d.parentId === selectedId);
+          if (isSelected) return [255, 120, 10, 255];
+          const isMultiSelected = multiSelectedIds?.has(d.id) || (d.parentId && multiSelectedIds?.has(d.parentId));
+          if (isMultiSelected) return [255, 150, 40, 200];
+          const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
           if (!matched) return [80, 80, 90, 60]; // dimmed
           return [60, 70, 85, 220];
         },
@@ -425,9 +429,11 @@ export default function MapView({
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
           getFillColor: (d) => {
-            if (d.id === selectedId) return [255, 150, 40, 240];
-            if (multiSelectedIds?.has(d.id)) return [255, 180, 80, 200];
-            const matched = !filteredIds || filteredIds.has(d.id);
+            const isSelected = d.id === selectedId || (d.parentId && d.parentId === selectedId);
+            if (isSelected) return [255, 150, 40, 240];
+            const isMultiSelected = multiSelectedIds?.has(d.id) || (d.parentId && multiSelectedIds?.has(d.parentId));
+            if (isMultiSelected) return [255, 180, 80, 200];
+            const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
             if (!matched) return [120, 120, 130, 60]; // dimmed
             return tintByRoofType(d, 230);
           },
@@ -745,7 +751,7 @@ export default function MapView({
       const SNAP_PX = 20;
       const allVertices: [number, number][] = [];
       for (const fp of footprints) {
-        for (const v of fp.polygon) allVertices.push(v);
+        for (const [lng, lat] of fp.polygon) allVertices.push([lng, lat]);
       }
 
       const start = () => {

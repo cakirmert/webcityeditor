@@ -543,6 +543,7 @@ export default function App() {
               isDirty={coreState.dirtyIds.has(coreState.selection.objectId)}
               onAttributeChange={handleAttributeChange}
               onRevert={handleRevert}
+              onSelectBuilding={(id) => coreState.setSelection(id ? { objectId: id } : null)}
               onSplitByFloor={buildingEditor.handleSplitByFloor}
               onSplitByFloorHeights={buildingEditor.handleSplitByFloorHeights}
               onSplitByFloorPlans={buildingEditor.handleSplitByFloorPlans}
@@ -581,7 +582,7 @@ export default function App() {
 // ─── Auxiliary helper functions ───────────────────────────────────────────
 
 function computeFootprintBbox(
-  footprints: { polygon: [number, number][] }[]
+  footprints: { polygon: [number, number, number][] }[]
 ): [number, number, number, number] | null {
   let west = Infinity,
     south = Infinity,
@@ -652,6 +653,7 @@ function AttributePanelInline(props: {
       addDoor?: boolean;
     }
   ) => void;
+  onSelectBuilding?: (id: string | null) => void;
 }) {
   return (
     <AttributePanel
@@ -680,6 +682,7 @@ function AttributePanelInline(props: {
       onMoveOpening={props.onMoveOpening}
       onMakeEditable={props.onMakeEditable}
       onReshapeBuilding={props.onReshapeBuilding}
+      onSelectBuilding={props.onSelectBuilding}
       hideHeader
     />
   );

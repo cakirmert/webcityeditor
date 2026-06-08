@@ -1,5 +1,5 @@
 import type { CityJsonDocument, CityObject } from '../types';
-import { extractFootprints } from './footprints';
+import { extractFootprintForId, footprintPolygonToWgs84 } from './footprints';
 import { detectCrs } from './projection';
 import { generateBuilding, insertBuilding, type RoofType } from './generator';
 
@@ -45,8 +45,7 @@ export function inferParametricAttrs(
   const obj = doc.CityObjects[buildingId];
   if (!obj) return { ok: false, reason: `Object "${buildingId}" not found` };
 
-  const fps = extractFootprints(doc);
-  const fp = fps.find((f) => f.id === buildingId);
+  const fp = extractFootprintForId(doc, buildingId);
   if (!fp || fp.polygon.length < 3) {
     return {
       ok: false,
@@ -141,7 +140,7 @@ export function inferParametricAttrs(
       eaveHeight: eaveHeight - baseZ, // generator expects heights RELATIVE to baseElevation
       ridgeHeight: ridgeHeight - baseZ,
       storeys,
-      footprintWgs84: fp.polygon,
+      footprintWgs84: footprintPolygonToWgs84(fp.polygon),
     },
   };
 }

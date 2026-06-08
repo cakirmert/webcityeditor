@@ -17,7 +17,7 @@ import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 
 function computeFootprintBbox(
-  footprints: { polygon: [number, number][] }[]
+  footprints: { polygon: [number, number, number][] }[]
 ): [number, number, number, number] | null {
   let west = Infinity,
     south = Infinity,

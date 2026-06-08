@@ -74,6 +74,7 @@ interface Props {
       addDoor?: boolean;
     }
   ) => void;
+  onSelectBuilding?: (id: string | null) => void;
   hideHeader?: boolean;
 }
 
@@ -103,6 +104,7 @@ export default function AttributePanel({
   onMoveOpening,
   onMakeEditable,
   onReshapeBuilding,
+  onSelectBuilding,
   hideHeader = false,
 }: Props) {
   const [floorCount, setFloorCount] = useState(2);
@@ -160,6 +162,8 @@ export default function AttributePanel({
   const obj = cityjson.CityObjects[buildingId];
   const attrs = obj?.attributes ?? {};
   const childCount = obj?.children?.length ?? 0;
+  const parentId = obj?.parents?.[0];
+  const hasParent = parentId && cityjson.CityObjects[parentId];
 
   const sortedKeys = useMemo(
     () =>
@@ -187,6 +191,18 @@ export default function AttributePanel({
 
   const content = (
     <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      {hasParent && (
+        <div className="mb-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onSelectBuilding?.(parentId)}
+            className="w-full text-xs flex items-center justify-center gap-1.5"
+          >
+            ← Back to Parent Building
+          </Button>
+        </div>
+      )}
       <Section label="ID">
         <div className="break-all font-mono text-[11px] text-[var(--text)]">
           {buildingId}
@@ -195,7 +211,24 @@ export default function AttributePanel({
 
       {childCount > 0 && (
         <Section label="Parts (BuildingParts)">
-          <div className="text-xs">{childCount}</div>
+          <div className="space-y-1">
+            {obj.children?.map((childId, idx) => {
+              const childObj = cityjson.CityObjects[childId];
+              if (!childObj) return null;
+              const childFunction = String(childObj.attributes?.function ?? 'unknown');
+              return (
+                <button
+                  key={childId}
+                  type="button"
+                  onClick={() => onSelectBuilding?.(childId)}
+                  className="w-full text-left flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  <span className="font-medium">Floor {idx + 1}</span>
+                  <span className="text-[var(--text-dim)] uppercase text-[10px]">{childFunction}</span>
+                </button>
+              );
+            })}
+          </div>
         </Section>
       )}
 

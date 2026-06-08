@@ -6,7 +6,7 @@ function fp(roofType: string | number | null | undefined): Footprint {
   return {
     id: 'test',
     type: 'Building',
-    polygon: [[0, 0]],
+    polygon: [[0, 0, 0]],
     height: 5,
     baseElevation: 0,
     attributes: roofType === undefined ? {} : { roofType },

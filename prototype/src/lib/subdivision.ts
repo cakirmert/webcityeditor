@@ -1,5 +1,5 @@
 import type { CityJsonDocument, CityObject } from '../types';
-import { extractFootprints } from './footprints';
+import { extractFootprints, footprintPolygonToWgs84 } from './footprints';
 import {
   generateBuilding,
   insertBuilding,
@@ -397,7 +397,7 @@ function readFootprintWgs84(
 ): [number, number][] | null {
   const fps = extractFootprints(doc);
   const found = fps.find((f) => f.id === id);
-  return found ? found.polygon : null;
+  return found ? footprintPolygonToWgs84(found.polygon) : null;
 }
 
 /** Walk a building's vertex range to figure out base Z, eave Z, and max Z in CRS meters. */

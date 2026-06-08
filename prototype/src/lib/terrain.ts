@@ -1,6 +1,6 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument } from '../types';
-import { extractFootprints, type Footprint } from './footprints';
+import { extractFootprints, footprintPolygonToWgs84, type Footprint } from './footprints';
 import { detectCrs } from './projection';
 import { computeTransformedFootprint, type PendingTransform } from './transform-preview';
 
@@ -136,7 +136,7 @@ export function estimateTerrainElevationAtPoint(
 }
 
 function projectFootprint(fp: Footprint, crsCode: string): ProjectedFootprint | null {
-  const polygon = projectRing(fp.polygon, crsCode);
+  const polygon = projectRing(footprintPolygonToWgs84(fp.polygon), crsCode);
   if (!polygon || polygon.length < 3) return null;
   return {
     id: fp.id,

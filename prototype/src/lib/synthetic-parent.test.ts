@@ -84,7 +84,7 @@ describe('CityJSONSeq: synthesized Building parent', () => {
     if (!result.ok) throw new Error(result.error);
     const fps = extractFootprints(result.doc);
     expect(fps).toHaveLength(1);
-    expect(fps[0].id).toBe('DEHH_implicit_parent_A');
+    expect(fps[0].id).toBe('DEHH_part_1');
     // Coords in Hamburg (near 10°E, 53.6°N)
     const [lng, lat] = fps[0].polygon[0];
     expect(lng).toBeGreaterThan(9);

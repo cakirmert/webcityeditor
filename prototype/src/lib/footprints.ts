@@ -5,13 +5,17 @@ import {
   projectToWgs84,
 } from './projection';
 
+export type FootprintPolygon = [number, number, number][];
+
 export interface Footprint {
   /** Stable CityObject id */
   id: string;
+  /** Parent ID if this is a child BuildingPart */
+  parentId?: string;
   /** Display type ("Building", "Bridge", …) */
   type: string;
-  /** Polygon ring as [lng, lat] pairs, closed (first = last) */
-  polygon: [number, number][];
+  /** Polygon ring as [lng, lat, elevation] triples, closed (first = last) */
+  polygon: FootprintPolygon;
   /** Height in meters (from attributes.measuredHeight, else computed) */
   height: number;
   /** Ground elevation in meters (min Z of building vertices) */
@@ -20,15 +24,18 @@ export interface Footprint {
   attributes: Record<string, unknown>;
 }
 
+export function footprintPolygonToWgs84(polygon: FootprintPolygon): [number, number][] {
+  return polygon.map(([lng, lat]) => [lng, lat]);
+}
+
 /**
  * Extract footprints + heights for every top-level building in a CityJSON doc,
  * projecting vertices to WGS84 lng/lat so deck.gl can render them directly.
  *
  * For each building:
- *  - Include BuildingPart children when looking for a GroundSurface.
- *  - Prefer the polygon whose semantic type is GroundSurface.
- *  - Fall back to the lowest polygon in the highest-LoD Solid.
- *  - Height: attributes.measuredHeight if set, else (maxZ - minZ).
+ *  - If it has child BuildingParts, extract separate footprints for each part
+ *    and record the parent ID.
+ *  - Otherwise, extract a single footprint for the root building.
  *
  * Returns an empty array if the CRS is not projectable (caller should surface a warning).
  */
@@ -54,29 +61,39 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
   });
 
   for (const rootId of rootIds) {
-    const fp = buildFootprint(doc, rootId, toLngLat);
-    if (fp) result.push(fp);
+    const root = doc.CityObjects[rootId];
+    const partIds =
+      root?.children?.filter((childId) => doc.CityObjects[childId]?.type === 'BuildingPart') ??
+      [];
+    if (partIds.length > 0) {
+      for (const childId of partIds) {
+        const fp = buildFootprintForObject(doc, childId, toLngLat, {
+          parentId: rootId,
+        });
+        if (fp) {
+          result.push(fp);
+        }
+      }
+    } else {
+      const fp = buildFootprintForObject(doc, rootId, toLngLat);
+      if (fp) result.push(fp);
+    }
   }
   return result;
 }
 
-function buildFootprint(
+function buildFootprintForObject(
   doc: CityJsonDocument,
-  rootId: string,
-  toLngLat: (x: number, y: number, z?: number) => [number, number]
+  id: string,
+  toLngLat: (x: number, y: number, z?: number) => [number, number],
+  options: { parentId?: string; includeBuildingPartChildren?: boolean } = {}
 ): Footprint | null {
-  const root = doc.CityObjects[rootId];
-  if (!root) return null;
+  const obj = doc.CityObjects[id];
+  if (!obj) return null;
 
-  // Collect this building + its children
-  const all: CityObject[] = [root];
-  for (const childId of root.children ?? []) {
-    const child = doc.CityObjects[childId];
-    if (child) all.push(child);
-  }
+  const all = collectFootprintObjects(doc, id, options.includeBuildingPartChildren ?? false);
 
   // Walk geometries, pick the best ground polygon among all.
-  // Explicit type so closure assignments don't get narrowed to `never`.
   let bestGroundRing: number[] | null = null as number[] | null;
   let minZ = Infinity;
   let maxZ = -Infinity;
@@ -100,10 +117,9 @@ function buildFootprint(
   // Candidate collector with preference for semantic GroundSurface
   let hasSemanticGround = false;
 
-  for (const obj of all) {
-    if (!obj.geometry) continue;
-    // Prefer LoD 2, then LoD 1
-    const geometries = obj.geometry as Array<{
+  for (const o of all) {
+    if (!o.geometry) continue;
+    const geometries = o.geometry as Array<{
       type: string;
       lod?: string | number;
       boundaries?: unknown;
@@ -135,32 +151,67 @@ function buildFootprint(
 
   if (!bestGroundRing) return null;
 
-  const polygon: [number, number][] = [];
+  const baseElevation = isFinite(minZ) ? minZ : 0;
+  const polygon: FootprintPolygon = [];
   for (const idx of bestGroundRing) {
     const c = vertexCrs(idx);
     if (!c) continue;
-    polygon.push(toLngLat(c.x, c.y, c.z));
+    const [lng, lat] = toLngLat(c.x, c.y, c.z);
+    polygon.push([lng, lat, baseElevation]);
   }
   if (polygon.length < 3) return null;
-  // Close the ring if not already closed
-  const [firstLng, firstLat] = polygon[0];
-  const [lastLng, lastLat] = polygon[polygon.length - 1];
-  if (firstLng !== lastLng || firstLat !== lastLat) polygon.push([firstLng, firstLat]);
 
-  const attrs = (root.attributes ?? {}) as Record<string, unknown>;
+  // Close the ring if not already closed
+  const [firstLng, firstLat, firstZ] = polygon[0];
+  const [lastLng, lastLat, lastZ] = polygon[polygon.length - 1];
+  if (firstLng !== lastLng || firstLat !== lastLat || firstZ !== lastZ) {
+    polygon.push([firstLng, firstLat, firstZ]);
+  }
+
+  const attrs = (obj.attributes ?? {}) as Record<string, unknown>;
   const attrHeight =
     typeof attrs.measuredHeight === 'number' ? attrs.measuredHeight : null;
   const computedHeight = isFinite(minZ) && isFinite(maxZ) ? maxZ - minZ : 10;
   const height = attrHeight ?? computedHeight;
 
   return {
-    id: rootId,
-    type: root.type,
+    id,
+    parentId: options.parentId,
+    type: obj.type,
     polygon,
     height,
-    baseElevation: isFinite(minZ) ? minZ : 0,
+    baseElevation,
     attributes: attrs,
   };
+}
+
+function collectFootprintObjects(
+  doc: CityJsonDocument,
+  id: string,
+  includeBuildingPartChildren: boolean
+): CityObject[] {
+  const out: CityObject[] = [];
+  const queue = [id];
+  const seen = new Set<string>();
+
+  while (queue.length > 0) {
+    const nextId = queue.shift()!;
+    if (seen.has(nextId)) continue;
+    seen.add(nextId);
+    const obj = doc.CityObjects[nextId];
+    if (!obj) continue;
+
+    if (obj.type === 'BuildingPart' && nextId !== id && !includeBuildingPartChildren) {
+      continue;
+    }
+
+    out.push(obj);
+    for (const childId of obj.children ?? []) {
+      queue.push(childId);
+    }
+  }
+
+  return out;
 }
 
 function avgRingZ(
@@ -275,4 +326,21 @@ export function filterToBuilding(
   // Keep this detail-view document isolated so preview rendering cannot corrupt
   // the live editor document used for validation and export.
   return JSON.parse(JSON.stringify(filtered)) as CityJsonDocument;
+}
+
+/**
+ * Extract a single combined footprint for a specific building/object ID,
+ * collecting the object + all its children (meaning the old behavior of buildFootprint).
+ * Used by parametriseBuilding to find the ground footprint of a building before it is editable.
+ */
+export function extractFootprintForId(doc: CityJsonDocument, id: string): Footprint | null {
+  const crs = detectCrs(doc);
+  if (!crs.supported) return null;
+
+  const toLngLat = (x: number, y: number, z = 0): [number, number] =>
+    projectToWgs84(crs.code, { x, y, z });
+
+  return buildFootprintForObject(doc, id, toLngLat, {
+    includeBuildingPartChildren: true,
+  });
 }
