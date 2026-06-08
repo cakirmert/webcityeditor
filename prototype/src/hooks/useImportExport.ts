@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import type { CityJsonDocument, SelectionInfo, CatalogConnection } from '../types';
+import type { CityJsonDocument, CatalogConnection } from '../types';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
 import type { CatalogState } from './useCatalog';

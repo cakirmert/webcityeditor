@@ -1130,20 +1130,7 @@ export default function MapView({
   );
 }
 
-function averageCenter(footprints: Footprint[]): [number, number] | null {
-  if (footprints.length === 0) return null;
-  let sx = 0,
-    sy = 0,
-    n = 0;
-  for (const fp of footprints) {
-    for (const [lng, lat] of fp.polygon) {
-      sx += lng;
-      sy += lat;
-      n++;
-    }
-  }
-  return n === 0 ? null : [sx / n, sy / n];
-}
+
 
 function isFiniteBbox(bbox: maplibregl.LngLatBoundsLike): boolean {
   if (!Array.isArray(bbox) || bbox.length !== 2) return false;

@@ -31,8 +31,6 @@ interface Props {
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
 
 const DEFAULT_HAMBURG_SAMPLE = 'data/hamburg/hamburg-center-alkis.city.jsonl';
-const DEFAULT_3DBAG =
-  'https://3d.bk.tudelft.nl/opendata/cityjson/3dcities/v2.0/9-284-556.city.json';
 
 interface QuickSample {
   label: string;

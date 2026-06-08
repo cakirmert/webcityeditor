@@ -27,8 +27,6 @@ import { detectCrs } from './lib/projection';
 import {
   isBboxNearHamburg,
   fetchHamburgPlanningZones,
-  findZoneForPoint,
-  validateBuildingType,
   type ParcelZone,
 } from './lib/zoning';
 

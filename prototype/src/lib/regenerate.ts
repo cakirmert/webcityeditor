@@ -1,7 +1,6 @@
 import type { CityJsonDocument } from '../types';
 import {
   generateBuilding,
-  insertBuilding,
   type NewBuildingParams,
   type RoofType,
 } from './generator';

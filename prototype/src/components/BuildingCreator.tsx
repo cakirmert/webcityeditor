@@ -622,9 +622,9 @@ function SplitPreview({
   splitCount: number;
   splitAxis?: SplitAxis;
 }) {
-  const { svgPath, splitLines, viewBox } = useMemo(() => {
+  const { svgPath, splitLines } = useMemo(() => {
     if (footprint.length < 3) {
-      return { svgPath: '', splitLines: [], viewBox: '0 0 100 60' };
+      return { svgPath: '', splitLines: [] };
     }
     // Normalize to 0..1 then scale to 100×60 viewBox
     let minX = Infinity,
@@ -674,7 +674,7 @@ function SplitPreview({
         }
       }
     }
-    return { svgPath: path, splitLines: lines, viewBox: '0 0 100 60' };
+    return { svgPath: path, splitLines: lines };
   }, [footprint, splitMode, splitCount, splitAxis]);
 
   if (splitMode === 'none' || splitCount < 2 || !svgPath) return null;

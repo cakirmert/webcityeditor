@@ -3,9 +3,7 @@ import type { CatalogConnection } from '../types';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
 import {
-  DEFAULT_HAMBURG_CATALOG_URL,
   fetchCityJsonSeqViewport,
-  normalizeCatalogBaseUrl,
   projectWgs84BboxToCrs,
   type Bbox,
 } from '../lib/cityjsonseq-catalog';
@@ -18,8 +16,6 @@ import { mergeCityJson } from '../lib/merge';
 
 export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
   const {
-    cityjson,
-    setCityjson,
     cityjsonRef,
     dirtyIdsRef,
     setDirtyIds,

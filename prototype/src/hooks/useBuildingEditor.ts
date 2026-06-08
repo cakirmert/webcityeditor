@@ -20,7 +20,6 @@ import {
 import { detectCrs } from '../lib/projection';
 import type { IfcImportResult } from '../lib/ifc-import';
 import {
-  computeTransformedFootprint,
   type PendingTransform,
 } from '../lib/transform-preview';
 import { snapTransformToTerrain } from '../lib/terrain';
@@ -37,15 +36,12 @@ export function useBuildingEditor(
 ) {
   const {
     cityjson,
-    setCityjson,
     selection,
     setSelection,
     dirtyIds,
     setDirtyIds,
     setReloadToken,
-    setDrawMode,
     markGeometryChanged,
-    originals,
   } = coreState;
 
   const { pushUndo, undoRef, setUndoVersion } = undoRedo;

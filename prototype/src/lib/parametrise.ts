@@ -59,7 +59,6 @@ export function inferParametricAttrs(
     return { ok: false, reason: `Unsupported CRS: ${crs.code}` };
   }
 
-  const attrs = obj.attributes ?? {};
   const holders = collectGeometryHolders(doc, obj);
   const inheritedAttr = (key: string): unknown => {
     for (const holder of holders) {
