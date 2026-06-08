@@ -16,9 +16,22 @@ import { processOsmXml } from '../lib/osm2streets';
 import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 
+type Wgs84Bbox = [number, number, number, number];
+
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
+];
+
+const ROAD_QUERY_MAX_WIDTH_METERS = 1_600;
+const ROAD_QUERY_MAX_HEIGHT_METERS = 1_600;
+const ROAD_QUERY_TIMEOUT_MS = 25_000;
+
 function computeFootprintBbox(
   footprints: { polygon: [number, number, number][] }[]
-): [number, number, number, number] | null {
+): Wgs84Bbox | null {
   let west = Infinity,
     south = Infinity,
     east = -Infinity,
@@ -37,14 +50,72 @@ function computeFootprintBbox(
 }
 
 function expandBbox(
-  bbox: [number, number, number, number],
+  bbox: Wgs84Bbox,
   ratio = 0.15,
   minPad = 0.002
-): [number, number, number, number] {
+): Wgs84Bbox {
   const [west, south, east, north] = bbox;
   const lngPad = Math.max((east - west) * ratio, minPad);
   const latPad = Math.max((north - south) * ratio, minPad);
   return [west - lngPad, south - latPad, east + lngPad, north + latPad];
+}
+
+function limitRoadQueryBbox(bbox: Wgs84Bbox): { bbox: Wgs84Bbox; wasLimited: boolean } {
+  const [west, south, east, north] = bbox;
+  const centerLng = (west + east) / 2;
+  const centerLat = (south + north) / 2;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLng = Math.max(
+    1,
+    metersPerDegreeLat * Math.cos((centerLat * Math.PI) / 180)
+  );
+  const halfWidthDeg = ROAD_QUERY_MAX_WIDTH_METERS / 2 / metersPerDegreeLng;
+  const halfHeightDeg = ROAD_QUERY_MAX_HEIGHT_METERS / 2 / metersPerDegreeLat;
+  const limited: Wgs84Bbox = [
+    Math.max(west, centerLng - halfWidthDeg),
+    Math.max(south, centerLat - halfHeightDeg),
+    Math.min(east, centerLng + halfWidthDeg),
+    Math.min(north, centerLat + halfHeightDeg),
+  ];
+  return {
+    bbox: limited,
+    wasLimited:
+      limited[0] !== west || limited[1] !== south || limited[2] !== east || limited[3] !== north,
+  };
+}
+
+async function fetchOsmRoadXml(queryBbox: Wgs84Bbox): Promise<{ xmlText: string; endpoint: string }> {
+  const body = new URLSearchParams({ data: buildOverpassRoadQuery(queryBbox, 'xml') });
+  const errors: string[] = [];
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), ROAD_QUERY_TIMEOUT_MS);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+      return { xmlText: await response.text(), endpoint };
+    } catch (error) {
+      const message =
+        error instanceof Error && error.name === 'AbortError'
+          ? `timed out after ${ROAD_QUERY_TIMEOUT_MS / 1000}s`
+          : error instanceof Error
+          ? error.message
+          : String(error);
+      errors.push(`${endpoint}: ${message}`);
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  throw new Error(errors.join(' | '));
 }
 
 function cloneRoadDraft(draft: RoadDraft): RoadDraft {
@@ -90,29 +161,28 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
 
   const handleFetchOsmRoads = useCallback(async () => {
     if (!cityjson) return;
+    setShowRoadEditor(true);
     const viewportBbox = coreState.mapBboxRef.current;
     const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
     const bbox = viewportBbox ?? footprintBbox;
     if (!bbox) {
-      alert('Could not derive a map bbox for the OSM road query.');
+      setRoadStatus('Could not derive a map bbox. Draw a road manually, or move the map and try again.');
       return;
     }
-    const queryBbox = expandBbox(bbox, 0.15);
-    setRoadStatus('Fetching OSM XML data for the current viewport...');
+    const expandedBbox = expandBbox(bbox, 0.08);
+    const { bbox: queryBbox, wasLimited } = limitRoadQueryBbox(expandedBbox);
+    setRoadStatus(
+      wasLimited
+        ? 'Fetching OSM roads for the centre of this viewport. The query was limited to avoid public Overpass timeouts.'
+        : 'Fetching OSM roads for the current viewport...'
+    );
     try {
-      const body = new URLSearchParams({ data: buildOverpassRoadQuery(queryBbox, 'xml') });
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-        body,
-      });
-      if (!response.ok) {
-        throw new Error(`Overpass HTTP ${response.status} ${response.statusText}`);
-      }
-      const xmlText = await response.text();
+      // Public Overpass instances occasionally return 504 for perfectly valid
+      // queries. Rotate through known public instances and keep the editor open
+      // so manual drawing remains available when the network path is unhappy.
+      const { xmlText, endpoint } = await fetchOsmRoadXml(queryBbox);
       const roads = parseOsmRoadsFromXml(xmlText);
       setOsmRoads(roads);
-      setShowRoadEditor(true);
 
       setRoadStatus('Computing detailed lane-level 2D visualization (osm2streets)...');
       try {
@@ -121,7 +191,7 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
         setOsm2streetsBbox(queryBbox);
         setRoadStatus(
           roads.length > 0
-            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} and computed 2D lane layout. Click a road on the map to edit.`
+            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout. Click a road on the map to edit.`
             : 'No OSM roads returned for this viewport.'
         );
       } catch (wasmError) {
@@ -132,8 +202,11 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
       }
     } catch (error) {
       console.error(error);
-      setRoadStatus(error instanceof Error ? error.message : String(error));
-      alert(`OSM road fetch failed: ${error instanceof Error ? error.message : String(error)}`);
+      setRoadStatus(
+        `OSM road fetch failed from public Overpass services. Zoom in or pan to a smaller area, then try again. You can still use Draw / redraw road. ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }, [cityjson, coreState.mapBboxRef]);
 
@@ -324,3 +397,11 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
   };
 }
 export type RoadEditorState = ReturnType<typeof useRoadEditor>;
+
+function shortEndpointName(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname;
+  } catch {
+    return endpoint;
+  }
+}

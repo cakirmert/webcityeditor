@@ -77,6 +77,28 @@ describe('browser editor actions', () => {
     expect(checkIntegrity(doc).ok).toBe(true);
   });
 
+  it('creates flat buildings with openings and floor parts through the browser action route', () => {
+    const doc = buildSampleCube();
+
+    const created = createBuildingFromEditor(
+      doc,
+      {
+        targetCrs: 'EPSG:28992',
+        footprintWgs84: FOOTPRINT,
+        storeys: 3,
+        eaveHeight: 9,
+        ridgeHeight: 9,
+        roofType: 'flat',
+        openings: { windows: true, door: true },
+      },
+      { mode: 'floors', count: 3 }
+    );
+
+    expect(created.objectIds).toHaveLength(4);
+    expect(doc.CityObjects[created.id]?.children).toHaveLength(3);
+    expect(checkIntegrity(doc).ok).toBe(true);
+  });
+
   it('refuses to prepare structurally invalid bytes for export', () => {
     const doc = buildSampleCube();
     const geometry = doc.CityObjects.Building_A.geometry as Array<{

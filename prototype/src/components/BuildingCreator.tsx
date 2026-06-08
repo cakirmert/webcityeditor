@@ -48,6 +48,7 @@ interface Props {
   /** The host doc — borrows its `transform` + CRS so the preview lives in the
    *  same coordinate system as the eventual insertion. */
   cityjson: CityJsonDocument;
+  error?: string | null;
   onFormChange?: (form: NewBuildingForm) => void;
   onCreate: (form: NewBuildingForm) => void;
   onCancel: () => void;
@@ -64,6 +65,7 @@ export default function BuildingCreator({
   vertexCount,
   footprint,
   cityjson,
+  error,
   onFormChange,
   onCreate,
   onCancel,
@@ -146,6 +148,10 @@ export default function BuildingCreator({
     [footprint, form, cityjson]
   );
   const previewToken = useMemo(() => hashForm(form), [form]);
+  const massingMetrics = useMemo(
+    () => estimateMassingMetrics(footprint, form),
+    [footprint, form]
+  );
 
   // ESC cancels — matches the legacy dialog's behaviour.
   useEffect(() => {
@@ -244,6 +250,14 @@ export default function BuildingCreator({
                   ))}
                 </div>
               )}
+            </Section>
+
+            <Section label="Massing study">
+              <div className="grid grid-cols-3 gap-1.5">
+                <Metric label="Footprint" value={`${formatMetric(massingMetrics.footprintAreaM2)} m2`} />
+                <Metric label="GFA" value={`${formatMetric(massingMetrics.grossFloorAreaM2)} m2`} />
+                <Metric label="Volume" value={`${formatMetric(massingMetrics.volumeM3)} m3`} />
+              </div>
             </Section>
 
             <Section label="Overhang">
@@ -427,6 +441,11 @@ export default function BuildingCreator({
           </div>
 
           <footer className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+            {error && (
+              <div className="mr-auto max-w-[250px] rounded-md border border-[var(--err,#cb4b4b)] bg-[rgba(203,75,75,0.12)] px-2 py-1 text-[11px] text-[var(--err,#ff7b7b)]">
+                {error}
+              </div>
+            )}
             <Button onClick={onCancel}>Cancel</Button>
             <Button variant="primary" onClick={() => onCreate(form)}>
               Create Building
@@ -489,6 +508,15 @@ function Row({
     <div className="grid grid-cols-[42%_1fr] items-center gap-2">
       <Label className="text-[11px]">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5">
+      <div className="text-[9px] uppercase text-[var(--text-faint)]">{label}</div>
+      <div className="text-[12px] font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
@@ -774,4 +802,40 @@ function buildPreviewDoc(
   } catch {
     return null;
   }
+}
+
+function estimateMassingMetrics(footprint: [number, number][], form: NewBuildingForm) {
+  const footprintAreaM2 = estimateWgs84PolygonAreaM2(footprint);
+  return {
+    footprintAreaM2,
+    grossFloorAreaM2: footprintAreaM2 * form.storeys,
+    volumeM3: footprintAreaM2 * form.totalHeight,
+  };
+}
+
+function formatMetric(value: number): string {
+  if (!Number.isFinite(value)) return '-';
+  return Math.round(value).toLocaleString();
+}
+
+function estimateWgs84PolygonAreaM2(ring: [number, number][]): number {
+  if (ring.length < 3) return 0;
+  const latRef = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLng = metersPerDegreeLat * Math.cos((latRef * Math.PI) / 180);
+
+  // Project the tiny drawn footprint to a local metre grid, then use the
+  // shoelace formula. This is accurate enough for a create-time massing hint
+  // and avoids coupling the UI to a specific national CRS.
+  let twiceArea = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [lngA, latA] = ring[i];
+    const [lngB, latB] = ring[(i + 1) % ring.length];
+    const ax = lngA * metersPerDegreeLng;
+    const ay = latA * metersPerDegreeLat;
+    const bx = lngB * metersPerDegreeLng;
+    const by = latB * metersPerDegreeLat;
+    twiceArea += ax * by - bx * ay;
+  }
+  return Math.abs(twiceArea) / 2;
 }

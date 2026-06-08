@@ -105,6 +105,34 @@ export default function App() {
   const roadEditor = useRoadEditor(coreState, undoRedo);
   const buildingEditor = useBuildingEditor(coreState, undoRedo, { zones, zoningEnabled });
 
+  const handleMapViewportChange = useCallback(
+    (bbox: Wgs84Bbox) => {
+      // Several tools need the live WGS84 viewport: catalog streaming, planning
+      // overlays, and OSM road fetches. Keep the shared core ref current, then
+      // let the catalog hook decide whether it needs to load more sequence tiles.
+      coreState.mapBboxRef.current = bbox;
+      catalog.handleViewportChange(bbox);
+    },
+    [catalog, coreState.mapBboxRef]
+  );
+
+  const handleToggleRoadEditor = useCallback(() => {
+    roadEditor.setShowRoadEditor((isOpen) => {
+      const nextOpen = !isOpen;
+      if (nextOpen) {
+        // The data loader is a full-screen modal. Close it before opening the
+        // road editor so the toolbar action always produces a visible panel.
+        importExport.setLoadModalOpen(false);
+        roadEditor.setRoadStatus(
+          (current) => current ?? 'Road editor ready. Fetch OSM roads or draw a road manually.'
+        );
+      } else if (coreState.drawMode === 'road-line') {
+        coreState.setDrawMode('none');
+      }
+      return nextOpen;
+    });
+  }, [coreState, importExport, roadEditor]);
+
   // Keyboard shortcuts: Ctrl+Z / Cmd+Z, Ctrl+C / Ctrl+V, Delete, Backspace.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -275,15 +303,17 @@ export default function App() {
         onStartDraw={() => {
           coreState.setSelection(null);
           roadEditor.setRoadStatus(null);
+          buildingEditor.setCreationError(null);
           coreState.setDrawMode('polygon');
         }}
         onCancelDraw={() => {
           coreState.setDrawMode('none');
           buildingEditor.setPendingFootprint(null);
           buildingEditor.setPendingForm(null);
+          buildingEditor.setCreationError(null);
         }}
         roadEditorOpen={roadEditor.showRoadEditor}
-        onToggleRoadEditor={() => roadEditor.setShowRoadEditor((value) => !value)}
+        onToggleRoadEditor={handleToggleRoadEditor}
         onCopy={buildingEditor.handleCopy}
         onPaste={buildingEditor.handlePaste}
         canCopy={!!coreState.selection || buildingEditor.multiSelection.size > 0}
@@ -374,6 +404,7 @@ export default function App() {
                 coreState.setDrawMode('none');
                 buildingEditor.setPendingFootprint(null);
                 buildingEditor.setPendingForm(null);
+                buildingEditor.setCreationError(null);
               }}
               onDraftChange={roadEditor.handleRoadDraftChange}
               onSplitDraft={roadEditor.handleSplitRoadDraft}
@@ -397,10 +428,11 @@ export default function App() {
                 coreState.setDrawMode('none');
                 buildingEditor.setPendingFootprint(null);
                 buildingEditor.setPendingForm(null);
+                buildingEditor.setCreationError(null);
               }}
               filteredIds={filterIsEmpty ? null : filteredIds}
               onPlacementClick={buildingEditor.ifcPending ? buildingEditor.handleIfcPlacement : undefined}
-              onViewportChange={catalog.handleViewportChange}
+              onViewportChange={handleMapViewportChange}
               dragTransformId={buildingEditor.pendingTransform?.id ?? null}
               onDragMove={buildingEditor.handleDragMove}
               multiSelectedIds={buildingEditor.multiSelection.size > 0 ? buildingEditor.multiSelection : null}
@@ -478,12 +510,17 @@ export default function App() {
               vertexCount={buildingEditor.pendingFootprint.length}
               footprint={buildingEditor.pendingFootprint}
               cityjson={coreState.cityjson}
-              onFormChange={buildingEditor.setPendingForm}
+              error={buildingEditor.creationError}
+              onFormChange={(form) => {
+                buildingEditor.setPendingForm(form);
+                buildingEditor.setCreationError(null);
+              }}
               onCreate={buildingEditor.handleCreateBuilding}
               onCancel={() => {
                 coreState.setDrawMode('none');
                 buildingEditor.setPendingFootprint(null);
                 buildingEditor.setPendingForm(null);
+                buildingEditor.setCreationError(null);
               }}
             />
           )}

@@ -49,6 +49,7 @@ export function useBuildingEditor(
 
   const [pendingFootprint, setPendingFootprint] = useState<[number, number][] | null>(null);
   const [pendingForm, setPendingForm] = useState<NewBuildingForm | null>(null);
+  const [creationError, setCreationError] = useState<string | null>(null);
   const [pendingTransform, setPendingTransform] = useState<PendingTransform | null>(null);
   const [splitPreviewHeights, setSplitPreviewHeights] = useState<number[] | null>(null);
   const [splitPreviewFloorPlans, setSplitPreviewFloorPlans] = useState<FloorPlanDivision[] | null>(null);
@@ -435,21 +436,20 @@ export function useBuildingEditor(
   const handleCreateBuilding = useCallback(
     (form: NewBuildingForm) => {
       if (!cityjson || !pendingFootprint) return;
+      setCreationError(null);
       if (zoningEnabled && zones.length > 0) {
         const cx = pendingFootprint.reduce((a, v) => a + v[0], 0) / pendingFootprint.length;
         const cy = pendingFootprint.reduce((a, v) => a + v[1], 0) / pendingFootprint.length;
         const zone = findZoneForPoint(zones, [cx, cy]);
         const check = validateBuildingType(zone, form.function);
         if (!check.allowed) {
-          alert(`Planning layer conflict: ${check.reason}`);
+          setCreationError(`Planning layer conflict: ${check.reason}`);
           return;
         }
       }
       const crs = detectCrs(cityjson);
       if (!crs.supported) {
-        alert(`Can't generate: CRS ${crs.code} isn't supported. Add a proj4 def.`);
-        setPendingFootprint(null);
-        setPendingForm(null);
+        setCreationError(`Can't generate: CRS ${crs.code} isn't supported. Add a proj4 definition first.`);
         return;
       }
       try {
@@ -488,12 +488,11 @@ export function useBuildingEditor(
         setReloadToken((t) => t + 1);
         setSelection({ objectId: id });
         markGeometryChanged();
-      } catch (e) {
-        console.error(e);
-        alert(`Generation failed: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
         setPendingFootprint(null);
         setPendingForm(null);
+      } catch (e) {
+        console.error(e);
+        setCreationError(`Generation failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
     [cityjson, pendingFootprint, pushUndo, zoningEnabled, zones, setDirtyIds, setReloadToken, setSelection, markGeometryChanged]
@@ -609,6 +608,8 @@ export function useBuildingEditor(
     setPendingFootprint,
     pendingForm,
     setPendingForm,
+    creationError,
+    setCreationError,
     footprintEdit,
     setFootprintEdit,
     pendingTransform,
