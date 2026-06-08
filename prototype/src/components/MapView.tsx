@@ -1249,6 +1249,8 @@ function computeFootprintBounds(
 function computeVertexBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLike | null {
   if (doc.vertices.length === 0) return null;
 
+  // First inspect the transformed source coordinates. Some CityJSON files are
+  // already stored directly in WGS84, in which case no CRS lookup is needed.
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
@@ -1265,6 +1267,7 @@ function computeVertexBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLike
   }
   if (!anyProjected) return null;
 
+  // If the numbers already look like longitude/latitude, use them directly.
   if (looksLikeWgs84Extent(minX, minY, maxX, maxY)) {
     return [
       [minX, minY],
@@ -1275,6 +1278,9 @@ function computeVertexBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLike
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
 
+  // Reproject every vertex rather than only the source bbox corners. That keeps
+  // the fitted map tight even when a projected CRS bends or skews the WGS84
+  // envelope slightly.
   let minLng = Infinity,
     minLat = Infinity,
     maxLng = -Infinity,
@@ -1331,11 +1337,6 @@ function computeMetadataBounds(doc: CityJsonDocument): maplibregl.LngLatBoundsLi
   }
 }
 
-/**
- * Fallback #4: project `transform.translate` — the document's local origin —
- * to WGS84 and use it as a centre. Gives a useful view even when no bbox and
- * no footprints can be determined.
- */
 function looksLikeWgs84Extent(minX: number, minY: number, maxX: number, maxY: number): boolean {
   return (
     minX >= -180 &&
@@ -1360,6 +1361,11 @@ function boundsCenter(bounds: maplibregl.LngLatBoundsLike | null): [number, numb
   return [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2];
 }
 
+/**
+ * Fallback #4: project `transform.translate` — the document's local origin —
+ * to WGS84 and use it as a centre. Gives a useful view even when no bbox and
+ * no footprints can be determined.
+ */
 function computeTranslateCentre(doc: CityJsonDocument): [number, number] | null {
   const t = doc.transform?.translate;
   if (!t || !Number.isFinite(t[0]) || !Number.isFinite(t[1])) return null;

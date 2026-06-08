@@ -30,6 +30,7 @@ import {
   planningCoverageSummary,
   planningSourceLabel,
   type ParcelZone,
+  type Wgs84Bbox,
 } from './lib/zoning';
 
 // Types
@@ -61,16 +62,10 @@ export default function App() {
       return;
     }
 
-    const footprintBbox = computeFootprintBbox(extractFootprints(coreState.cityjson));
-    const viewportBbox = coreState.mapBboxRef.current;
-    const viewportQueryBbox = viewportBbox ? expandBbox(viewportBbox) : null;
-    const footprintQueryBbox = footprintBbox ? expandBbox(footprintBbox) : null;
-    const queryBbox =
-      viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)
-        ? viewportQueryBbox
-        : footprintQueryBbox && getPlanningProviderForBbox(footprintQueryBbox)
-        ? footprintQueryBbox
-        : viewportQueryBbox ?? footprintQueryBbox;
+    const queryBbox = choosePlanningQueryBbox({
+      viewportBbox: coreState.mapBboxRef.current,
+      footprintBbox: computeFootprintBbox(extractFootprints(coreState.cityjson)),
+    });
     if (!queryBbox) {
       alert('Could not derive a map bbox for the planning query.');
       return;
@@ -589,7 +584,7 @@ export default function App() {
 
 function computeFootprintBbox(
   footprints: { polygon: [number, number, number][] }[]
-): [number, number, number, number] | null {
+): Wgs84Bbox | null {
   let west = Infinity,
     south = Infinity,
     east = -Infinity,
@@ -607,11 +602,36 @@ function computeFootprintBbox(
   return any ? [west, south, east, north] : null;
 }
 
-function expandBbox(
-  bbox: [number, number, number, number],
-  ratio = 0.15,
-  minPad = 0.002
-): [number, number, number, number] {
+/**
+ * Decide which bbox to use for the planning request.
+ *
+ * Prefer the current viewport when it is covered by a provider because the user
+ * usually expects the toolbar action to apply to what they are looking at. If
+ * the viewport is outside known coverage but the loaded CityJSON is inside
+ * coverage, use the data bbox instead. Returning an unsupported bbox is
+ * intentional: the caller can then show a helpful "coverage unavailable"
+ * message rather than silently doing nothing.
+ */
+function choosePlanningQueryBbox({
+  viewportBbox,
+  footprintBbox,
+}: {
+  viewportBbox: Wgs84Bbox | null;
+  footprintBbox: Wgs84Bbox | null;
+}): Wgs84Bbox | null {
+  const viewportQueryBbox = viewportBbox ? expandBbox(viewportBbox) : null;
+  const footprintQueryBbox = footprintBbox ? expandBbox(footprintBbox) : null;
+
+  if (viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)) {
+    return viewportQueryBbox;
+  }
+  if (footprintQueryBbox && getPlanningProviderForBbox(footprintQueryBbox)) {
+    return footprintQueryBbox;
+  }
+  return viewportQueryBbox ?? footprintQueryBbox;
+}
+
+function expandBbox(bbox: Wgs84Bbox, ratio = 0.15, minPad = 0.002): Wgs84Bbox {
   const [west, south, east, north] = bbox;
   const lngPad = Math.max((east - west) * ratio, minPad);
   const latPad = Math.max((north - south) * ratio, minPad);

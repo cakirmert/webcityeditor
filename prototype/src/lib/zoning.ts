@@ -8,6 +8,9 @@ export interface ParcelZone {
   details?: string;
 }
 
+/** WGS84 bbox as [west, south, east, north]. All planning providers use this shape. */
+export type Wgs84Bbox = [number, number, number, number];
+
 export type PlanningSource = 'hamburg-xplan-baugebiet' | 'hamburg-fnp-nutzung';
 export type HamburgPlanningSource = PlanningSource;
 export type PlanningProviderId = 'hamburg';
@@ -16,11 +19,8 @@ export interface PlanningProvider {
   id: PlanningProviderId;
   label: string;
   coverageLabel: string;
-  supportsBbox: (bbox: [number, number, number, number]) => boolean;
-  fetchZones: (
-    bbox: [number, number, number, number],
-    fetchImpl?: typeof fetch
-  ) => Promise<ParcelZone[]>;
+  supportsBbox: (bbox: Wgs84Bbox) => boolean;
+  fetchZones: (bbox: Wgs84Bbox, fetchImpl?: typeof fetch) => Promise<ParcelZone[]>;
 }
 
 export const HAMBURG_XPLAN_BAUGEBIET_URL =
@@ -28,7 +28,7 @@ export const HAMBURG_XPLAN_BAUGEBIET_URL =
 
 export const HAMBURG_FNP_WFS_URL = 'https://geodienste.hamburg.de/HH_WFS_FNP';
 
-const HAMBURG_WGS84_BBOX: [number, number, number, number] = [8.1, 53.35, 10.4, 54.05];
+const HAMBURG_WGS84_BBOX: Wgs84Bbox = [8.1, 53.35, 10.4, 54.05];
 
 const ALL_BUILDING_TYPES = ['residential', 'commercial', 'industrial', 'mixed', 'public'];
 
@@ -55,7 +55,7 @@ type GeoJsonGeometry =
     };
 
 export function buildHamburgXPlanBaugebietUrl(
-  bbox: [number, number, number, number],
+  bbox: Wgs84Bbox,
   limit = 250
 ): string {
   const params = new URLSearchParams({
@@ -67,7 +67,7 @@ export function buildHamburgXPlanBaugebietUrl(
 }
 
 export function buildHamburgFnpNutzungUrl(
-  bbox: [number, number, number, number],
+  bbox: Wgs84Bbox,
   count = 250
 ): string {
   const params = new URLSearchParams({
@@ -83,12 +83,20 @@ export function buildHamburgFnpNutzungUrl(
   return `${HAMBURG_FNP_WFS_URL}?${params.toString()}`;
 }
 
-export function isBboxNearHamburg(bbox: [number, number, number, number]): boolean {
+export function isBboxNearHamburg(bbox: Wgs84Bbox): boolean {
   const [w, s, e, n] = bbox;
   const [hw, hs, he, hn] = HAMBURG_WGS84_BBOX;
   return w <= he && e >= hw && s <= hn && n >= hs;
 }
 
+/**
+ * Provider registry for planning overlays.
+ *
+ * XPlanung is a Germany-wide standard, but the actual public WFS/OGC API
+ * endpoints are usually published by municipalities or states. Keeping a
+ * provider list here lets the app stay generic while we add more regions one
+ * at a time.
+ */
 export const PLANNING_PROVIDERS: readonly PlanningProvider[] = [
   {
     id: 'hamburg',
@@ -99,13 +107,11 @@ export const PLANNING_PROVIDERS: readonly PlanningProvider[] = [
   },
 ];
 
-export function getPlanningProviderForBbox(
-  bbox: [number, number, number, number]
-): PlanningProvider | null {
+export function getPlanningProviderForBbox(bbox: Wgs84Bbox): PlanningProvider | null {
   return PLANNING_PROVIDERS.find((provider) => provider.supportsBbox(bbox)) ?? null;
 }
 
-export function isPlanningBboxSupported(bbox: [number, number, number, number]): boolean {
+export function isPlanningBboxSupported(bbox: Wgs84Bbox): boolean {
   return getPlanningProviderForBbox(bbox) !== null;
 }
 
@@ -120,7 +126,7 @@ export function planningSourceLabel(source?: string): string {
 }
 
 export async function fetchPlanningZones(
-  bbox: [number, number, number, number],
+  bbox: Wgs84Bbox,
   fetchImpl: typeof fetch = fetch
 ): Promise<ParcelZone[]> {
   const provider = getPlanningProviderForBbox(bbox);
@@ -131,10 +137,13 @@ export async function fetchPlanningZones(
 }
 
 export async function fetchHamburgPlanningZones(
-  bbox: [number, number, number, number],
+  bbox: Wgs84Bbox,
   fetchImpl: typeof fetch = fetch
 ): Promise<ParcelZone[]> {
   let firstError: unknown;
+
+  // Ask the detailed XPlan layer first. It has the most specific zoning
+  // features when a viewport intersects a published plan.
   try {
     const zones = await fetchPlanningSource(
       buildHamburgXPlanBaugebietUrl(bbox),
@@ -146,6 +155,8 @@ export async function fetchHamburgPlanningZones(
     firstError = e;
   }
 
+  // Fall back to the broader FNP land-use layer so the overlay still gives
+  // useful guidance in areas without an XPlan feature.
   try {
     return await fetchPlanningSource(
       buildHamburgFnpNutzungUrl(bbox),
@@ -289,6 +300,9 @@ function detailsFromProperties(
 }
 
 function allowedTypesFromProperties(props: Record<string, unknown>): string[] {
+  // The source services expose German planning terms, not CityJSON functions.
+  // Keep this mapping conservative: unknown built-up uses allow all building
+  // types, while parks/water/transport map to an empty allow-list.
   const text =
     getStringProp(props, [
       'besondereArtDerBaulNutzungWert',
