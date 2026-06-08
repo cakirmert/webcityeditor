@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { PolygonLayer, SolidPolygonLayer } from '@deck.gl/layers';
+import { PathLayer, PolygonLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
-import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw';
+import {
+  TerraDraw,
+  TerraDrawLineStringMode,
+  TerraDrawPolygonMode,
+  TerraDrawSelectMode,
+} from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
@@ -14,6 +19,7 @@ import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType } from '../lib/footprint-tint';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
+import type { OsmRoadFeature, RoadArea } from '../lib/transportation';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -32,10 +38,14 @@ interface Props {
   onSelect: (info: SelectionInfo | null) => void;
   /** Bump to force layer rebuild with current in-memory edits */
   reloadToken: number;
-  /** When 'polygon', Terra Draw is active and the user can draw a footprint. */
-  drawMode: 'none' | 'polygon';
+  /** Terra Draw mode for buildings or road centerlines. */
+  drawMode: 'none' | 'polygon' | 'road-line';
   /** Called once the user double-clicks to finish a polygon, with outer ring in WGS84. */
   onFootprintDrawn: (ringWgs84: [number, number][]) => void;
+  /** Called when the user finishes a road centerline, with points in WGS84. */
+  onRoadLineDrawn?: (lineWgs84: [number, number][]) => void;
+  /** Incremented by the parent when the road panel's Finish button is clicked. */
+  finishRoadDrawToken?: number;
   /** Called if the user cancels drawing (e.g. ESC). */
   onDrawCanceled?: () => void;
   /**
@@ -93,6 +103,14 @@ interface Props {
   zones?: ParcelZone[];
   /** Called when a planning polygon is clicked. */
   onZoneSelect?: (zone: ParcelZone) => void;
+  basemap?: 'map' | 'satellite';
+  roadAreas?: RoadArea[];
+  roadPreviewAreas?: RoadArea[];
+  selectedRoadAreaId?: string | null;
+  onRoadAreaSelect?: (area: RoadArea) => void;
+  osmRoads?: OsmRoadFeature[];
+  selectedOsmRoadId?: string | null;
+  onOsmRoadSelect?: (road: OsmRoadFeature) => void;
 }
 
 /**
@@ -119,6 +137,8 @@ export default function MapView({
   reloadToken,
   drawMode,
   onFootprintDrawn,
+  onRoadLineDrawn,
+  finishRoadDrawToken = 0,
   onDrawCanceled,
   preview,
   footprintEdit,
@@ -131,6 +151,14 @@ export default function MapView({
   multiSelectedIds = null,
   zones = [],
   onZoneSelect,
+  basemap = 'map',
+  roadAreas = [],
+  roadPreviewAreas = [],
+  selectedRoadAreaId = null,
+  onRoadAreaSelect,
+  osmRoads = [],
+  selectedOsmRoadId = null,
+  onOsmRoadSelect,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -139,6 +167,24 @@ export default function MapView({
   const flownForDocRef = useRef<CityJsonDocument | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(16);
+
+  const finishCurrentRoadDraw = useCallback(() => {
+    const draw = drawRef.current;
+    if (!draw) return false;
+    const snapshot = draw.getSnapshot();
+    const feature = snapshot.find(
+      (f) =>
+        f.geometry.type === 'LineString' &&
+        Array.isArray(f.geometry.coordinates) &&
+        f.geometry.coordinates.length >= 2
+    );
+    if (!feature || feature.geometry.type !== 'LineString') return false;
+    onRoadLineDrawn?.(feature.geometry.coordinates as [number, number][]);
+    draw.clear();
+    draw.stop();
+    drawRef.current = null;
+    return true;
+  }, [onRoadLineDrawn]);
 
   const footprints = useMemo(
     () => extractFootprints(cityjson),
@@ -192,8 +238,25 @@ export default function MapView({
             attribution: '© OpenStreetMap contributors © CARTO',
             maxzoom: 19,
           },
+          satellite: {
+            type: 'raster',
+            tiles: [
+              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            ],
+            tileSize: 256,
+            attribution: 'Tiles © Esri',
+            maxzoom: 19,
+          },
         },
-        layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+        layers: [
+          { id: 'osm', type: 'raster', source: 'osm' },
+          {
+            id: 'satellite',
+            type: 'raster',
+            source: 'satellite',
+            layout: { visibility: 'none' },
+          },
+        ],
       },
       center: initialCenter,
       zoom: 16,
@@ -225,6 +288,22 @@ export default function MapView({
       overlayRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      if (!map.getLayer('osm') || !map.getLayer('satellite')) return;
+      map.setLayoutProperty('osm', 'visibility', basemap === 'map' ? 'visible' : 'none');
+      map.setLayoutProperty(
+        'satellite',
+        'visibility',
+        basemap === 'satellite' ? 'visible' : 'none'
+      );
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [basemap]);
 
   // Fly to data + rebuild deck.gl layer when data or selection changes
   useEffect(() => {
@@ -291,6 +370,8 @@ export default function MapView({
       | SolidPolygonLayer<Footprint>
       | PolygonLayer<Footprint>
       | PolygonLayer<ParcelZone>
+      | PolygonLayer<RoadArea>
+      | PathLayer<OsmRoadFeature>
       | SolidPolygonLayer<{ polygon: [number, number][]; height: number }>
       | SimpleMeshLayer<{ position: [number, number] }>
     > = [];
@@ -373,6 +454,88 @@ export default function MapView({
             } else {
               onSelect(null);
             }
+          },
+        })
+      );
+    }
+
+    if (roadAreas.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadArea>({
+          id: 'cityjson-road-areas',
+          data: roadAreas,
+          getPolygon: (d) => d.polygon,
+          getFillColor: (d) => {
+            if (d.id === selectedRoadAreaId) return [255, 180, 60, 190];
+            if (d.function === 'bike_lane') return [60, 190, 120, 145];
+            if (d.function === 'sidewalk') return [120, 150, 180, 125];
+            if (d.surfaceType === 'AuxiliaryTrafficArea') return [90, 160, 80, 120];
+            return [70, 120, 210, 135];
+          },
+          getLineColor: (d) =>
+            d.id === selectedRoadAreaId ? [255, 210, 90, 255] : [45, 95, 170, 220],
+          getLineWidth: 1,
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          pickable: true,
+          extruded: false,
+          parameters: { depthTest: false } as unknown as never,
+          updateTriggers: {
+            getFillColor: [selectedRoadAreaId],
+            getLineColor: [selectedRoadAreaId],
+          },
+          onClick: (info: PickingInfo<RoadArea>) => {
+            if (info.object) onRoadAreaSelect?.(info.object);
+          },
+        })
+      );
+    }
+
+    if (roadPreviewAreas.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadArea>({
+          id: 'road-draft-preview',
+          data: roadPreviewAreas,
+          getPolygon: (d) => d.polygon,
+          getFillColor: (d) =>
+            d.function === 'bike_lane'
+              ? [60, 230, 140, 120]
+              : d.function === 'sidewalk'
+              ? [200, 220, 255, 85]
+              : [255, 180, 60, 100],
+          getLineColor: [255, 190, 70, 240],
+          getLineWidth: 1,
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          pickable: false,
+          extruded: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osmRoads.length > 0) {
+      layers.push(
+        new PathLayer<OsmRoadFeature>({
+          id: 'osm-road-reference',
+          data: osmRoads,
+          getPath: (d) => d.path,
+          getColor: (d) =>
+            d.id === selectedOsmRoadId ? [255, 170, 40, 255] : [250, 210, 80, 220],
+          getWidth: (d) => (d.id === selectedOsmRoadId ? 6 : 3),
+          widthUnits: 'pixels',
+          widthMinPixels: 2,
+          rounded: true,
+          pickable: true,
+          parameters: { depthTest: false } as unknown as never,
+          updateTriggers: {
+            getColor: [selectedOsmRoadId],
+            getWidth: [selectedOsmRoadId],
+          },
+          onClick: (info: PickingInfo<OsmRoadFeature>) => {
+            if (info.object) onOsmRoadSelect?.(info.object);
           },
         })
       );
@@ -461,13 +624,20 @@ export default function MapView({
     filteredIds,
     zones,
     onZoneSelect,
+    roadAreas,
+    roadPreviewAreas,
+    selectedRoadAreaId,
+    onRoadAreaSelect,
+    osmRoads,
+    selectedOsmRoadId,
+    onOsmRoadSelect,
   ]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (drawMode === 'polygon') {
+    if (drawMode === 'polygon' || drawMode === 'road-line') {
       if (drawRef.current) return; // already active
 
       // Flatten every existing footprint's vertices into one array, so the
@@ -483,44 +653,61 @@ export default function MapView({
       const start = () => {
         const draw = new TerraDraw({
           adapter: new TerraDrawMapLibreGLAdapter({ map }),
-          modes: [
-            new TerraDrawPolygonMode({
-              pointerDistance: 30,
-              snapping: {
-                // Snap to the in-progress polygon (close-to-self + prior vertices)
-                toCoordinate: true,
-                toLine: true,
-                // Snap to any existing building footprint vertex within SNAP_PX pixels
-                toCustom: (event, { project }) => {
-                  const { x: mx, y: my } = project(event.lng, event.lat);
-                  let bestDist = SNAP_PX;
-                  let best: [number, number] | undefined;
-                  for (const [vlng, vlat] of allVertices) {
-                    const { x, y } = project(vlng, vlat);
-                    const d = Math.hypot(x - mx, y - my);
-                    if (d < bestDist) {
-                      bestDist = d;
-                      best = [vlng, vlat];
-                    }
-                  }
-                  return best;
-                },
-              },
-            }),
-          ],
+          modes:
+            drawMode === 'polygon'
+              ? [
+                  new TerraDrawPolygonMode({
+                    pointerDistance: 30,
+                    snapping: {
+                      // Snap to the in-progress polygon (close-to-self + prior vertices)
+                      toCoordinate: true,
+                      toLine: true,
+                      // Snap to any existing building footprint vertex within SNAP_PX pixels
+                      toCustom: (event, { project }) => {
+                        const { x: mx, y: my } = project(event.lng, event.lat);
+                        let bestDist = SNAP_PX;
+                        let best: [number, number] | undefined;
+                        for (const [vlng, vlat] of allVertices) {
+                          const { x, y } = project(vlng, vlat);
+                          const d = Math.hypot(x - mx, y - my);
+                          if (d < bestDist) {
+                            bestDist = d;
+                            best = [vlng, vlat];
+                          }
+                        }
+                        return best;
+                      },
+                    },
+                  }),
+                ]
+              : [
+                  new TerraDrawLineStringMode({
+                    pointerDistance: 24,
+                    keyEvents: { cancel: 'Escape', finish: 'Enter' },
+                    showCoordinatePoints: true,
+                  }),
+                ],
         });
         draw.start();
-        draw.setMode('polygon');
+        draw.setMode(drawMode === 'polygon' ? 'polygon' : 'linestring');
         draw.on('finish', (id) => {
           const snapshot = draw.getSnapshot();
           const feature = snapshot.find((f) => String(f.id) === String(id));
           if (
+            drawMode === 'polygon' &&
             feature &&
             feature.geometry.type === 'Polygon' &&
             Array.isArray(feature.geometry.coordinates?.[0])
           ) {
             const ring = feature.geometry.coordinates[0] as [number, number][];
             onFootprintDrawn(ring);
+          } else if (
+            drawMode === 'road-line' &&
+            feature &&
+            feature.geometry.type === 'LineString' &&
+            Array.isArray(feature.geometry.coordinates)
+          ) {
+            onRoadLineDrawn?.(feature.geometry.coordinates as [number, number][]);
           }
           draw.clear();
           draw.stop();
@@ -537,6 +724,12 @@ export default function MapView({
     }
     // Escape key cancels drawing
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && drawMode === 'road-line' && drawRef.current) {
+        if (finishCurrentRoadDraw()) {
+          e.preventDefault();
+        }
+        return;
+      }
       if (e.key === 'Escape' && drawRef.current) {
         drawRef.current.stop();
         drawRef.current = null;
@@ -545,7 +738,16 @@ export default function MapView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [drawMode, onFootprintDrawn, onDrawCanceled, footprints]);
+  }, [drawMode, onFootprintDrawn, onRoadLineDrawn, onDrawCanceled, footprints, finishCurrentRoadDraw]);
+
+  useEffect(() => {
+    if (finishRoadDrawToken <= 0 || drawMode !== 'road-line') return;
+    const ok = finishCurrentRoadDraw();
+    if (!ok) {
+      setWarning('Road centerline needs at least two points before it can be finished.');
+      window.setTimeout(() => setWarning(null), 2500);
+    }
+  }, [finishRoadDrawToken, drawMode, finishCurrentRoadDraw]);
 
   // ── One-click placement mode (used by IFC import) ────────────────────────
   // When `onPlacementClick` is set, we attach a one-shot map click listener
@@ -774,6 +976,33 @@ export default function MapView({
           }}
         >
           <b>Drawing mode</b> — click to place vertices · double-click to finish ·{' '}
+          <kbd style={{ background: '#fff', color: '#333', padding: '1px 5px', borderRadius: 3 }}>
+            Esc
+          </kbd>{' '}
+          to cancel
+        </div>
+      )}
+      {drawMode === 'road-line' && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 10,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(46,64,87,0.95)',
+            color: '#fff',
+            padding: '8px 14px',
+            borderRadius: 4,
+            fontSize: 12,
+            zIndex: 10,
+            boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+          }}
+        >
+          <b>Road drawing</b> - click centerline points, press{' '}
+          <kbd style={{ background: '#fff', color: '#333', padding: '1px 5px', borderRadius: 3 }}>
+            Enter
+          </kbd>{' '}
+          to finish,{' '}
           <kbd style={{ background: '#fff', color: '#333', padding: '1px 5px', borderRadius: 3 }}>
             Esc
           </kbd>{' '}

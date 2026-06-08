@@ -48,9 +48,11 @@ interface Props {
   onOpenLoader: () => void;
   onSaveLocal?: () => void;
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
-  drawMode?: 'none' | 'polygon';
+  drawMode?: 'none' | 'polygon' | 'road-line';
   onStartDraw?: () => void;
   onCancelDraw?: () => void;
+  roadEditorOpen?: boolean;
+  onToggleRoadEditor?: () => void;
   onCopy?: () => void;
   onPaste?: () => void;
   canCopy?: boolean;
@@ -99,6 +101,8 @@ export default function Toolbar({
   drawMode = 'none',
   onStartDraw,
   onCancelDraw,
+  roadEditorOpen = false,
+  onToggleRoadEditor,
   onCopy,
   onPaste,
   canCopy = false,
@@ -205,7 +209,18 @@ export default function Toolbar({
 
       {hasData && (
         <>
-          {drawMode === 'polygon' ? (
+          {onToggleRoadEditor && (
+            <Button
+              size="sm"
+              variant={roadEditorOpen ? 'primary' : 'ghost'}
+              onClick={onToggleRoadEditor}
+              title="Open road editing: OSM reference, satellite check, lanes, CityJSON Transportation export"
+            >
+              Roads
+            </Button>
+          )}
+
+          {drawMode !== 'none' ? (
             <Button variant="warn" onClick={onCancelDraw} title="Cancel drawing (Esc)">
               Cancel drawing
             </Button>

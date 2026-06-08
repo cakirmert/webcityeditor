@@ -5,7 +5,9 @@ export interface CityJsonTransform {
   translate: [number, number, number];
 }
 
-export type AttributeValue = string | number | boolean | null | undefined;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type AttributeValue = JsonValue | undefined;
 
 export interface CityObject {
   type: string;

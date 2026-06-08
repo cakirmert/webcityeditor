@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-06-05. **Test suite**: 395 passing across 40 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
+**Last updated**: 2026-06-08. **Test suite**: 409 passing across 42 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -26,6 +26,8 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **MapLibre** basemap (CARTO light raster tiles with OSM attribution; switched away from `tile.openstreetmap.org` after Hamburg tiles returned 404)
 - **deck.gl** context layer — LoD by zoom: outlined footprints below 14.5, extruded blocks above
 - **Hamburg planning overlay** — toolbar fetches real Hamburg XPlan `BP_BaugebietsTeilFlaeche` polygons for the current viewport, falls back to FNP land-use GeoJSON when XPlan has no polygons, and renders the result as a semi-transparent planning layer. Clicking a planning polygon opens an info card with source, label, mapped compatible building types, and available plan attributes. This is a planning-data aid, not a legal compliance decision.
+- **Road editor overlay** — toolbar `Roads` opens OSM reference roads, satellite basemap checking, manual road redraw, lane/speed controls, and CityJSON Transportation insertion without expanding the main toolbar.
+- **Satellite basemap** — road mode can switch the MapLibre raster source from CARTO/OSM to Esri World Imagery so OSM lane assumptions can be checked against aerial imagery.
 - Click a building → side panel with a per-building Three.js scene
 - **Auto-fit on load**: bbox of footprints → `metadata.geographicalExtent` → `transform.translate` as centre — three fallbacks so EVERY file ends up focused.
 - Hamburg data now initializes the map camera from the loaded dataset instead of briefly starting at the Delft fallback.
@@ -42,6 +44,17 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **Subdivide-on-create**: choose "none / floors / sides" with a count; split applies immediately after insertion
 - **Planning compatibility check**: when the Hamburg planning overlay is loaded, new-building creation checks the footprint against the fetched planning polygon's mapped building-use categories.
 - The parametric generator produces a proper LoD 2 `Solid` with `GroundSurface` / `RoofSurface` / `WallSurface` (+ optional `OuterCeilingSurface` / `Window` / `Door`) semantics. Round-trip through JSON.stringify tested for every roof type and every opening combination.
+
+### Transportation / road editing
+- **Source-of-truth decision for v1**: edited roads are stored as CityJSON 2.0 Transportation `Road` objects. OSM is used only as a reference/seed layer; the editor does not write back to OSM.
+- **OSM reference fetch**: Road editor fetches `highway=*` ways from Overpass for the current viewport, renders them as selectable yellow deck.gl paths, and infers lane count, one-way/two-way direction, sidewalks, cycle lanes, and speed limit from OSM tags.
+- **User verification step**: clicking an OSM road prompts the user to confirm whether the inferred layout matches reality. Accept uses the OSM-derived draft; cancel keeps it as an editable seed for redraw/manual correction.
+- **Manual correction scene**: Terra Draw LineString mode lets the user draw or redraw the road centerline over the basemap/satellite image. The current draft previews as transportation surface polygons before insertion.
+- **Lane/band editor**: per-section bands are editable left-to-right as car lane, bike lane, sidewalk, parking, median, or green verge with width, direction, and speed-limit controls.
+- **Precise road segment split**: the active road section can be split at an explicit percentage along the centerline; both child sections preserve the lane/band layout for later per-section edits.
+- **CityJSON output**: insertion creates one `Road` `MultiSurface` with aligned `TrafficArea` / `AuxiliaryTrafficArea` semantics and private `_roadLayout` metadata for round-trip editing.
+- **Backend-ready payload**: the same draft can be exported or POSTed as `webcityeditor-road-edit-v1` JSON. This is the hand-off shape for future routing/simulation services.
+- **OpenDRIVE boundary**: Hamburg OpenDRIVE / Road2CityGML-style import is not implemented in-browser yet. The intended path is a converter that maps OpenDRIVE lanes/roads into the same `RoadDraft` model, then reuses the existing CityJSON Transportation generator and preview.
 
 ### Edit existing buildings
 - Attribute editor with priority-sorted rows, type coercion (number/string/boolean)
@@ -83,7 +96,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 
 ---
 
-## 2. Planned vs delivered (approval doc, S1–S19)
+## 2. Planned vs delivered (approval doc, S1–S20)
 
 | # | Decision | Status | Notes |
 |---|---|---|---|
@@ -106,6 +119,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 | S17 | Incremental tile regeneration | ❌ deferred | Backend phase |
 | S18 | Custom picking in Tile3DLayer | 🟢 different | deck.gl picking on SolidPolygonLayer is built-in; when we adopt Tile3DLayer, the workaround plan applies |
 | S19 | 3DBAG as primary test data; Hamburg via CityGML | ✅ / partial | 3DBAG quick-sample; ALKIS demo; official 2026 whole-city LoD2 batch converted and audited; strict editing catalog emitted with primitive-invalid originals quarantined |
+| S20 | Transportation / roads | 🟡 v1 | CityJSON Transportation Road authoring, OSM reference, satellite check, manual redraw, lane/speed edit, percentage split, payload export; backend routing/OpenDRIVE importer deferred |
 
 ---
 
@@ -212,12 +226,16 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - **Three.js side-panel viewer re-parses** on selection change (fast enough for single buildings).
 - **Local write-back is single-machine oriented** — the tile server queues writes, requires SHA-256 `If-Match` revisions, keeps `.history/` backups, and validates changed tiles structurally plus with `val3dity`. Authentication, shared-user history, and incremental published 3D Tiles regeneration belong to the production backend.
 - **Hamburg strict catalog is not yet losslessly complete** — 3,387 official source features are retained under `quarantine/` pending repair; the primitive-valid editing catalog contains 385,342 features.
+- **Road terrain/profile**: v1 road surfaces are generated as flat CityJSON Transportation surfaces at the document base elevation. Terrain draping, road longitudinal profile, kerbs, and superelevation belong to the transportation/backend phase.
+- **OSM write-back**: intentionally not implemented. The editor treats OSM as reference data and emits CityJSON/backend payloads.
+- **OpenDRIVE import**: not implemented without a real Hamburg `.xodr` sample and lane semantics mapping pass. The internal `RoadDraft` model is the integration point.
 
 ---
 
 ## 8. What's left — roadmap (priority order)
 
-**Done since the last status update (2026-06-01 → 2026-06-05):**
+**Done since the last status update (2026-06-01 → 2026-06-08):**
+- ✅ **Transportation road-editing v1** — added Road editor overlay, OSM Overpass road fetch, satellite basemap toggle, OSM lane/speed inference and user confirmation, manual road centerline redraw, lane/band width and direction controls, percentage section split, CityJSON Transportation `Road` insertion, map preview/picking, and backend-ready JSON export/POST.
 - ✅ **Terrain-aware building move** — transform mode now exposes dX/dY/rotation plus manual dZ, auto terrain snap, and a "snap ground to terrain" action. Mouse drag updates dX/dY and, when auto terrain is enabled, adjusts dZ so the moved building footprint lands on the local terrain sample before "Place" commits.
 - ✅ **Hamburg MultiSurface export regression** — structural validation now uses the declared CityJSON geometry type before checking shell semantics, so valid imported `MultiSurface` face semantics are no longer misreported as `Solid` shell mismatches (`semantics.values has 22 shells, boundaries has 1`).
 - ✅ **Planning click details** — clicking a loaded Hamburg planning polygon now expands the legend with source, label, mapped compatible building types, and available plan attributes instead of relying on color alone.

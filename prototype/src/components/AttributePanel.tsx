@@ -1076,6 +1076,8 @@ function cloneFloorPlan(plan: FloorPlanDivision): FloorPlanDivision {
 function AttributeRow({ attrKey, value, onChange }: RowProps) {
   const isNumber = typeof value === 'number';
   const isBoolean = typeof value === 'boolean';
+  const isStructured =
+    value !== null && value !== undefined && typeof value === 'object';
   const inputId = `attr-${attrKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
   return (
@@ -1083,7 +1085,15 @@ function AttributeRow({ attrKey, value, onChange }: RowProps) {
       <Label htmlFor={inputId} title={attrKey} className="truncate">
         {attrKey}
       </Label>
-      {isBoolean ? (
+      {isStructured ? (
+        <textarea
+          id={inputId}
+          value={JSON.stringify(value, null, 2)}
+          readOnly
+          title="Structured editor metadata is shown read-only."
+          className="min-h-16 resize-y rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 font-mono text-[10px] text-[var(--text-dim)]"
+        />
+      ) : isBoolean ? (
         <select
           id={inputId}
           value={String(value)}
