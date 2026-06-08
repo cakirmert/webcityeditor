@@ -48,20 +48,23 @@ export async function processOsmXml(
     });
   }
 
-  const primaryOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: true });
+  /*
+   * The bundled osm2streets-js 0.1.4 WASM ships an older osm2lanes that does
+   * not support common sidewalk tag combinations (sidewalk:left=no +
+   * sidewalk:right=separate, sidewalk:both=separate, etc.). This produces a
+   * flood of console errors for real-world OSM data.
+   *
+   * Use the classic osm2streets parser by default — it handles all tag
+   * combinations without errors. If the classic parser ever fails on a
+   * specific dataset, fall back to osm2lanes as a last resort.
+   */
+  const primaryOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: false });
   try {
-    return readOsm2StreetsResult(osmXml, clipPtsGeojson, primaryOptions, 'osm2lanes');
+    return readOsm2StreetsResult(osmXml, clipPtsGeojson, primaryOptions, 'classic');
   } catch (error) {
-    /*
-     * osm2lanes is the preferred parser because it understands modern lane
-     * tagging better than the old osm2streets parser. Some real OSM ways still
-     * contain tag combinations that this older bundled WASM cannot digest, so
-     * fall back to the classic parser to keep the road editor usable instead
-     * of dropping all lane geometry.
-     */
-    console.warn('osm2lanes generation failed; retrying with classic osm2streets parser.', error);
-    const fallbackOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: false });
-    return readOsm2StreetsResult(osmXml, clipPtsGeojson, fallbackOptions, 'classic');
+    console.warn('Classic osm2streets parser failed; retrying with osm2lanes.', error);
+    const fallbackOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: true });
+    return readOsm2StreetsResult(osmXml, clipPtsGeojson, fallbackOptions, 'osm2lanes');
   }
 }
 
