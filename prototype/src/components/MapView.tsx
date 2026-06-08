@@ -33,6 +33,7 @@ const LOD_OUTLINE_MAX = 14.5;
 const LOD_EXTRUDE_MAX = 99; // always extrude at z > 14.5 for now
 const DATA_FIT_PADDING = 20;
 const DATA_FIT_MAX_ZOOM = 19;
+const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 
 interface Props {
   cityjson: CityJsonDocument;
@@ -525,31 +526,6 @@ export default function MapView({
       );
     }
 
-    if (osmRoads.length > 0) {
-      layers.push(
-        new PathLayer<OsmRoadFeature>({
-          id: 'osm-road-reference',
-          data: osmRoads,
-          getPath: (d) => d.path,
-          getColor: (d) =>
-            d.id === selectedOsmRoadId ? [255, 170, 40, 255] : [250, 210, 80, 220],
-          getWidth: (d) => (d.id === selectedOsmRoadId ? 6 : 3),
-          widthUnits: 'pixels',
-          widthMinPixels: 2,
-          rounded: true,
-          pickable: true,
-          parameters: { depthTest: false } as unknown as never,
-          updateTriggers: {
-            getColor: [selectedOsmRoadId],
-            getWidth: [selectedOsmRoadId],
-          },
-          onClick: (info: PickingInfo<OsmRoadFeature>) => {
-            if (info.object) onOsmRoadSelect?.(info.object);
-          },
-        })
-      );
-    }
-
     if (osm2streetsResult?.lanes) {
       layers.push(
         new GeoJsonLayer({
@@ -646,6 +622,55 @@ export default function MapView({
           widthMinPixels: 2,
           pickable: false,
           parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osmRoads.length > 0) {
+      const handleOsmRoadClick = (info: PickingInfo<OsmRoadFeature>) => {
+        if (info.object) onOsmRoadSelect?.(info.object);
+      };
+
+      layers.push(
+        new PathLayer<OsmRoadFeature>({
+          id: 'osm-road-reference',
+          data: osmRoads,
+          getPath: (d) => d.path,
+          getColor: (d) =>
+            d.id === selectedOsmRoadId ? [255, 170, 40, 255] : [250, 210, 80, 220],
+          getWidth: (d) => (d.id === selectedOsmRoadId ? 6 : 3),
+          widthUnits: 'pixels',
+          widthMinPixels: 2,
+          jointRounded: true,
+          capRounded: true,
+          pickable: false,
+          parameters: { depthTest: false } as unknown as never,
+          updateTriggers: {
+            getColor: [selectedOsmRoadId],
+            getWidth: [selectedOsmRoadId],
+          },
+        }),
+        new PathLayer<OsmRoadFeature>({
+          id: 'osm-road-reference-hit-area',
+          data: osmRoads,
+          getPath: (d) => d.path,
+          /*
+           * The displayed OSM centerline is intentionally thin, but a thin
+           * deck.gl path is frustrating to pick. This transparent companion
+           * layer renders after the lane polygons and gives every road a
+           * generous click target without changing the visible map style.
+           */
+          getColor: [255, 255, 255, 1],
+          getWidth: OSM_ROAD_HIT_WIDTH_PIXELS,
+          widthUnits: 'pixels',
+          widthMinPixels: OSM_ROAD_HIT_WIDTH_PIXELS,
+          jointRounded: true,
+          capRounded: true,
+          pickable: true,
+          autoHighlight: true,
+          highlightColor: [255, 170, 40, 70],
+          parameters: { depthTest: false } as unknown as never,
+          onClick: handleOsmRoadClick,
         })
       );
     }
@@ -796,6 +821,10 @@ export default function MapView({
                   new TerraDrawLineStringMode({
                     pointerDistance: 24,
                     keyEvents: { cancel: 'Escape', finish: 'Enter' },
+                    // showCoordinatePoints draws the handles; editable makes
+                    // those handles draggable/selectable while the centerline
+                    // is still being drawn.
+                    editable: true,
                     showCoordinatePoints: true,
                   }),
                 ],
