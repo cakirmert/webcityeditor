@@ -29,64 +29,26 @@ import {
   IFCWINDOWSTANDARDCASE,
   IFCDOOR,
   IFCDOORSTANDARDCASE,
-  IFCSTAIR,
-  IFCSTAIRFLIGHT,
-  IFCRAMP,
-  IFCRAMPFLIGHT,
-  IFCCOLUMN,
-  IFCCOLUMNSTANDARDCASE,
-  IFCBEAM,
-  IFCBEAMSTANDARDCASE,
-  IFCRAILING,
-  IFCMEMBER,
-  IFCMEMBERSTANDARDCASE,
-  IFCPLATE,
-  IFCPLATESTANDARDCASE,
-  IFCFOOTING,
-  IFCBUILDINGELEMENTPROXY,
-  IFCCOVERING,
-  IFCCHIMNEY,
+  IFCGEOGRAPHICELEMENT,
+  IFCSPACE,
+  IFCOPENINGELEMENT,
+  IFCGRID,
 } from 'web-ifc';
 import wasmUrl from 'web-ifc/web-ifc.wasm?url';
 
 /**
- * IFC entity-type IDs that contribute geometry we want to keep. We
- * deliberately EXCLUDE site terrain (IfcSite, IfcGeographicElement),
- * vegetation, and furniture — they bloat the building bbox and aren't part
- * of the building shell we care about. Any future "include site terrain"
- * mode would expand this list.
+ * Stream every IFC mesh, then drop only non-building context classes that
+ * should not inflate the imported building envelope. Everything else,
+ * including structural members, proxies, assemblies, and equipment, is kept
+ * as generic geometry so the import does not silently lose visible parts.
  */
-const BUILDING_ELEMENT_TYPES = [
-  IFCWALL,
-  IFCWALLSTANDARDCASE,
-  IFCWALLELEMENTEDCASE,
-  IFCCURTAINWALL,
-  IFCSLAB,
-  IFCSLABSTANDARDCASE,
-  IFCSLABELEMENTEDCASE,
-  IFCROOF,
-  IFCWINDOW,
-  IFCWINDOWSTANDARDCASE,
-  IFCDOOR,
-  IFCDOORSTANDARDCASE,
-  IFCSTAIR,
-  IFCSTAIRFLIGHT,
-  IFCRAMP,
-  IFCRAMPFLIGHT,
-  IFCCOLUMN,
-  IFCCOLUMNSTANDARDCASE,
-  IFCBEAM,
-  IFCBEAMSTANDARDCASE,
-  IFCRAILING,
-  IFCMEMBER,
-  IFCMEMBERSTANDARDCASE,
-  IFCPLATE,
-  IFCPLATESTANDARDCASE,
-  IFCFOOTING,
-  IFCCOVERING,
-  IFCCHIMNEY,
-  IFCBUILDINGELEMENTPROXY,
-];
+const EXCLUDED_TYPES = new Set([
+  IFCSITE,
+  IFCGEOGRAPHICELEMENT,
+  IFCSPACE,
+  IFCOPENINGELEMENT,
+  IFCGRID,
+]);
 
 /**
  * Map IFC entity-type IDs to a coarse class string we use downstream for
@@ -298,8 +260,11 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
       maxY = -Infinity,
       maxZ = -Infinity;
 
-    api.StreamAllMeshesWithTypes(modelID, BUILDING_ELEMENT_TYPES, (flatMesh) => {
+    api.StreamAllMeshes(modelID, (flatMesh) => {
       const ifcType = api.GetLineType(modelID, flatMesh.expressID);
+      if (EXCLUDED_TYPES.has(ifcType)) {
+        return;
+      }
       let sourceClass = classFromIfcType(ifcType);
       // IfcSlab covers roofs, foundations, and intermediate floors —
       // refine via PredefinedType so a `.ROOF.` slab tags as `roof`,

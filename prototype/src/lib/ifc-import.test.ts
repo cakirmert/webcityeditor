@@ -114,5 +114,8 @@ describe('parseIfc with real FZK-Haus', () => {
     expect(parsed.height).toBeGreaterThan(5);
     expect(parsed.vertices.length).toBeGreaterThan(0);
     expect(parsed.indices.length).toBeGreaterThan(0);
+    expect(parsed.vertices.length / 3).toBeGreaterThan(30_000);
+    expect(parsed.indices.length / 3).toBeGreaterThan(20_000);
+    expect(parsed.triangleSourceClass).toHaveLength(parsed.indices.length / 3);
   });
 });
