@@ -660,7 +660,13 @@ function readIfcDmsToDecimal(v: unknown): number | null {
   });
   if (parts.some((p) => !Number.isFinite(p))) return null;
   const [deg, min, sec, microSec = 0] = parts;
-  const sign = deg < 0 ? -1 : 1;
+  let sign = 1;
+  for (const p of parts) {
+    if (p !== 0) {
+      sign = p < 0 ? -1 : 1;
+      break;
+    }
+  }
   const abs =
     Math.abs(deg) + Math.abs(min) / 60 + Math.abs(sec) / 3600 + Math.abs(microSec) / 3_600_000_000;
   return sign * abs;

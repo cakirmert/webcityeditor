@@ -6,6 +6,7 @@ import {
   type IfcImportResult,
 } from './ifc-import';
 import { detectCrs } from './projection';
+import { estimateTerrainElevationAtPoint } from './terrain';
 
 export interface IfcConversionResult {
   /** Stable id assigned to the new CityObject. */
@@ -35,7 +36,7 @@ export interface IfcConversionResult {
  *   - We project the user's clicked WGS84 → the doc's CRS to get a metric
  *     anchor point in the same space the doc's vertices live in.
  *   - We add the IFC's local (centred) X/Y to that anchor; Z is shifted so
- *     the IFC's `minZ` lands at z = 0 (sitting on the ground).
+ *     the IFC's `minZ` lands at the estimated terrain ground elevation.
  *   - Finally each (X, Y, Z) is integer-encoded via doc.transform so the
  *     existing renderer pipeline picks it up unchanged.
  */
@@ -52,8 +53,11 @@ export function convertIfcToCityJsonBuilding(
   const t = doc.transform ?? { scale: [1, 1, 1], translate: [0, 0, 0] };
   // Project the placement point → projected metric coords (matches doc's vertices).
   const [anchorX, anchorY] = proj4('EPSG:4326', crs.code, placementWgs84) as [number, number];
-  // Shift Z so the IFC's lowest vertex sits at z=0 in the doc's frame.
-  const zShift = -ifc.bbox.minZ;
+  
+  // Estimate local terrain elevation so the IFC sits on the actual ground
+  const terrainZ = estimateTerrainElevationAtPoint(doc, placementWgs84);
+  // Shift Z so the IFC's lowest vertex sits at terrainZ in the doc's frame.
+  const zShift = terrainZ - ifc.bbox.minZ;
 
   const toInt = (x: number, y: number, z: number): [number, number, number] => [
     Math.round((x - t.translate[0]) / t.scale[0]),
@@ -65,16 +69,16 @@ export function convertIfcToCityJsonBuilding(
   const vertexOffset = doc.vertices.length;
 
   // ── 1. Footprint rectangle (LoD 1, GroundSurface) ─────────────────────
-  // 4 corners CCW from above at z=0. extractFootprints picks the FIRST
+  // 4 corners CCW from above at terrainZ. extractFootprints picks the FIRST
   // GroundSurface it finds; emitting the rectangle as geometry[0] makes it
   // win over the per-triangle GroundSurfaces in the LoD 3 mesh below.
   const halfW = ifc.width / 2;
   const halfD = ifc.depth / 2;
   const fpCorners: [number, number, number][] = [
-    [anchorX - halfW, anchorY - halfD, 0],
-    [anchorX + halfW, anchorY - halfD, 0],
-    [anchorX + halfW, anchorY + halfD, 0],
-    [anchorX - halfW, anchorY + halfD, 0],
+    [anchorX - halfW, anchorY - halfD, terrainZ],
+    [anchorX + halfW, anchorY - halfD, terrainZ],
+    [anchorX + halfW, anchorY + halfD, terrainZ],
+    [anchorX - halfW, anchorY + halfD, terrainZ],
   ];
   const fpStart = newVertices.length;
   for (const [x, y, z] of fpCorners) newVertices.push(toInt(x, y, z));
@@ -116,12 +120,12 @@ export function convertIfcToCityJsonBuilding(
     Door: 4,
   };
 
-  // Mesh-frame Z extrema (post-zShift): floor sits at z=0 by construction,
-  // ridge / parapet at z = ifc.height. Pass these to the classifier so a
+  // Mesh-frame Z extrema (post-zShift): floor sits at terrainZ by construction,
+  // ridge / parapet at z = terrainZ + ifc.height. Pass these to the classifier so a
   // generic IfcSlab whose PredefinedType we couldn't recover still ends up
   // tagged correctly when it sits at one of the building's vertical limits.
-  const meshBottomZ = 0;
-  const meshTopZ = ifc.height;
+  const meshBottomZ = terrainZ;
+  const meshTopZ = terrainZ + ifc.height;
 
   for (let t2 = 0; t2 < triCount; t2++) {
     const i0 = ifc.indices[t2 * 3];

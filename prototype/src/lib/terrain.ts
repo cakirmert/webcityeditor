@@ -102,6 +102,39 @@ export function isTerrainMatched(snap: TerrainSnap | null): boolean {
   return !!snap && Math.abs(snap.difference) <= TERRAIN_MATCH_TOLERANCE_METERS;
 }
 
+/**
+ * Estimate the terrain ground elevation at a given WGS84 point.
+ * Used to snap newly imported IFC or created buildings to the local terrain level.
+ */
+export function estimateTerrainElevationAtPoint(
+  doc: CityJsonDocument,
+  lngLat: [number, number]
+): number {
+  const crs = detectCrs(doc);
+  if (!crs.supported) return 0;
+
+  const footprints = extractFootprints(doc);
+  if (footprints.length === 0) return 0;
+
+  try {
+    const pointProjected = proj4('EPSG:4326', crs.code, lngLat) as [number, number];
+    const samples = footprints
+      .map((fp) => projectFootprint(fp, crs.code))
+      .filter((fp): fp is ProjectedFootprint => fp !== null);
+
+    if (samples.length === 0) return 0;
+
+    const containing = nearestByDistance(
+      samples.filter((sample) => pointInPolygon(pointProjected, sample.polygon)),
+      pointProjected
+    );
+    const nearest = containing ?? nearestByDistance(samples, pointProjected);
+    return nearest ? nearest.baseElevation : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function projectFootprint(fp: Footprint, crsCode: string): ProjectedFootprint | null {
   const polygon = projectRing(fp.polygon, crsCode);
   if (!polygon || polygon.length < 3) return null;

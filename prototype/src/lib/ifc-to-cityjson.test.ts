@@ -309,3 +309,26 @@ describe('convertIfcToCityJsonBuilding', () => {
     expect(counts[2]).toBe(10);
   });
 });
+
+import { parseIfc } from './ifc-import';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+describe('convertIfcToCityJsonBuilding with real FZK-Haus', () => {
+  it('converts and inserts fzk-haus.ifc successfully, passing integrity check', async () => {
+    const doc = buildSampleCube();
+    const filePath = resolve(__dirname, '../../public/fzk-haus.ifc');
+    const buffer = readFileSync(filePath);
+    const file = new File([buffer], 'fzk-haus.ifc');
+    file.arrayBuffer = async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+
+    const ifc = await parseIfc(file);
+    const result = convertIfcToCityJsonBuilding(doc, ifc, [4.3571, 52.0116], 'fzk-haus.ifc');
+    doc.vertices.push(...result.newVertices);
+    doc.CityObjects[result.id] = result.cityObject;
+
+    const integ = checkIntegrity(doc);
+    expect(integ.ok).toBe(true);
+    expect(integ.counts.error).toBe(0);
+  });
+});
