@@ -1,1042 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import FileLoader from './components/FileLoader';
 import MapView from './components/MapView';
 import Viewer from './components/Viewer';
 import AttributePanel from './components/AttributePanel';
-import BuildingCreator, { type NewBuildingForm } from './components/BuildingCreator';
+import BuildingCreator from './components/BuildingCreator';
 import RoadEditorPanel from './components/RoadEditorPanel';
-// `NewBuildingForm` shape is re-used by App to carry the live-updating dialog state.
-import { filterToBuilding } from './lib/footprints';
-import { saveDocument } from './lib/storage';
-import { detectCrs } from './lib/projection';
-import {
-  splitBuildingByFloor,
-  splitBuildingByFloorHeights,
-  splitBuildingByFloorPlans,
-  splitBuildingBySide,
-  MIN_STOREY_HEIGHT,
-  type FloorPlanDivision,
-  type SplitAxis,
-} from './lib/subdivision';
-import { regenerateBuilding } from './lib/regenerate';
-import { extractFootprints } from './lib/footprints';
-import { exportToGltf } from './lib/gltf-export';
-import { checkIntegrity } from './lib/integrity';
-import { compactVertices } from './lib/compact';
-import { matchingIds, isFilterEmpty, type BuildingFilter } from './lib/filter';
-import { mergeCityJson } from './lib/merge';
-import { parseCityJsonAuto } from './lib/cityjson';
-import {
-  DEFAULT_HAMBURG_CATALOG_URL,
-  fetchCityJsonSeqViewport,
-  normalizeCatalogBaseUrl,
-  projectWgs84BboxToCrs,
-  type Bbox,
-  type CityJsonSeqLoadedTile,
-  type CityJsonSeqViewportLoad,
-} from './lib/cityjsonseq-catalog';
-import {
-  CatalogWritebackError,
-  evictCleanCityJsonSeqTiles,
-  persistDirtyCityJsonSeqTiles,
-} from './lib/cityjsonseq-writeback';
-import {
-  commitBuildingTransformFromEditor,
-  createBuildingFromEditor,
-  runStructurallyGuardedMutation,
-} from './lib/editor-actions';
-import {
-  prepareValidatedCityJsonExport,
-  validateExportGeometry,
-} from './lib/export-validation';
-import proj4 from 'proj4';
-import type { IfcImportResult } from './lib/ifc-import';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
-import { applyFilter } from './lib/filter';
-import { UndoStore } from './lib/undo';
-import {
-  computeTransformedFootprint,
-  type PendingTransform,
-} from './lib/transform-preview';
-import { estimateTerrainSnap, snapTransformToTerrain } from './lib/terrain';
+
+// Hooks
+import { useCoreState } from './hooks/useCoreState';
+import { useUndoRedo } from './hooks/useUndoRedo';
+import { useCatalog } from './hooks/useCatalog';
+import { useImportExport } from './hooks/useImportExport';
+import { useRoadEditor } from './hooks/useRoadEditor';
+import { useBuildingEditor } from './hooks/useBuildingEditor';
+
+// Libs
+import { extractFootprints, filterToBuilding } from './lib/footprints';
+import { matchingIds, isFilterEmpty, applyFilter } from './lib/filter';
+import { estimateTerrainSnap } from './lib/terrain';
 import { buildPreviewMesh } from './lib/preview-mesh';
-import { cloneBuildings } from './lib/clipboard';
-import { deleteBuildings } from './lib/delete';
-import { extractOpenings, moveOpening, type OpeningInfo } from './lib/opening-edit';
-import { parametriseBuilding } from './lib/parametrise';
+import { computeTransformedFootprint } from './lib/transform-preview';
+import { detectCrs } from './lib/projection';
 import {
+  isBboxNearHamburg,
   fetchHamburgPlanningZones,
   findZoneForPoint,
-  isBboxNearHamburg,
   validateBuildingType,
   type ParcelZone,
 } from './lib/zoning';
-import {
-  buildOverpassRoadQuery,
-  buildRoadEditPayload,
-  createManualRoadDraft,
-  extractTransportationAreas,
-  insertRoadIntoCityJson,
-  parseOsmRoadsFromOverpass,
-  splitRoadSectionAtFraction,
-  summarizeRoadDraft,
-  type OsmRoadFeature,
-  type RoadArea,
-  type RoadDraft,
-} from './lib/transportation';
+
+// Types
 import type { AttributeValue, CityJsonDocument, SelectionInfo } from './types';
-
-interface CatalogConnection {
-  baseUrl: string;
-  crs: string;
-  loadedTiles: Map<string, CityJsonSeqLoadedTile>;
-}
-
-type PrimitiveValidationState = {
-  kind: 'unchecked' | 'checking' | 'valid' | 'invalid' | 'unavailable';
-  message: string;
-};
+import type { FloorPlanDivision, SplitAxis } from './lib/subdivision';
+import type { IfcImportResult } from './lib/ifc-import';
+import type { PendingTransform } from './lib/transform-preview';
 
 export default function App() {
-  const [cityjson, setCityjson] = useState<CityJsonDocument | null>(null);
-  const [loadModalOpen, setLoadModalOpen] = useState(true);
-  const [fileName, setFileName] = useState<string>('');
-  const [selection, setSelection] = useState<SelectionInfo | null>(null);
-  const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
-  const dirtyIdsRef = useRef<Set<string>>(new Set());
-  const [reloadToken, setReloadToken] = useState(0);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(
-    'idle'
-  );
-  const [drawMode, setDrawMode] = useState<'none' | 'polygon' | 'road-line'>('none');
-  const [pendingFootprint, setPendingFootprint] = useState<[number, number][] | null>(null);
-  const [pendingForm, setPendingForm] = useState<NewBuildingForm | null>(null);
+  const coreState = useCoreState();
+  const undoRedo = useUndoRedo(coreState);
+  const catalog = useCatalog(coreState, undoRedo);
+  const importExport = useImportExport(coreState, undoRedo, catalog);
+
   const [sidePanelWide, setSidePanelWide] = useState(false);
-  /** Live-preview state for translating/rotating a building before committing. */
-  const [pendingTransform, setPendingTransform] = useState<PendingTransform | null>(null);
-  /** Live-preview state for the visual division editor — set when the user is
-   *  in custom-heights mode for the selected building. The 3D viewer reads
-   *  this to draw horizontal split-line rings at each cumulative height. */
-  const [splitPreviewHeights, setSplitPreviewHeights] = useState<number[] | null>(null);
-  /** Optional per-floor footprint plans shown as vertical dividers in Viewer. */
-  const [splitPreviewFloorPlans, setSplitPreviewFloorPlans] = useState<
-    FloorPlanDivision[] | null
-  >(null);
-  /** Live-edit state for footprint editing. The map shows the building's
-   *  outline as draggable Terra Draw polygon; pending updates flow through
-   *  `pendingRing` until the user clicks Save (regenerate) or Cancel. */
-  const [footprintEdit, setFootprintEdit] = useState<{
-    buildingId: string;
-    initialFootprint: [number, number][];
-    pendingRing: [number, number][] | null;
-  } | null>(null);
-  /** Building filter — text + roof type + year/height ranges. Pure UI state;
-   *  doesn't mutate the doc, just dims non-matching footprints on the map. */
-  const [filter, setFilter] = useState<BuildingFilter>({});
-  /** Persistent undo/redo store. Lives in a ref so it survives re-renders
-   *  without triggering them; we mirror canUndo/canRedo into state for the
-   *  toolbar buttons. */
-  const undoRef = useRef<UndoStore>(new UndoStore());
-  const [undoVersion, setUndoVersion] = useState(0); // bumped to re-render toolbar
-  /** Building list sidebar visibility. Off by default to keep first-time
-   *  load minimal; toggled via the Toolbar's "☰ List" button. */
-  const [showList, setShowList] = useState(false);
-  /** IFC-import "awaiting placement click" state. When set, the map shows a
-   *  banner + crosshair cursor; the next click drops the IFC's full
-   *  triangulated mesh at that lng/lat as an LoD 3 MultiSurface. */
-  const [ifcPending, setIfcPending] = useState<{
-    parsed: IfcImportResult;
-    fileName: string;
-  } | null>(null);
-  /** True while the WASM is loading and parsing — disables the toolbar
-   *  button so a slow IFC parse doesn't get re-triggered. */
-  const [ifcParsing, setIfcParsing] = useState(false);
 
-  // ── Multi-selection + Copy/Paste ──────────────────────────────────────────
-  const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
-  const [clipboardIds, setClipboardIds] = useState<Set<string> | null>(null);
-
-  // ── Planning layer ───────────────────────────────────────────────────────
+  // ── Planning layer (zones) ────────────────────────────────────────────────
   const [zones, setZones] = useState<ParcelZone[]>([]);
   const [selectedZone, setSelectedZone] = useState<ParcelZone | null>(null);
   const [zoningEnabled, setZoningEnabled] = useState(false);
   const [zoningLoading, setZoningLoading] = useState(false);
 
-  // ── Raw CityJSONSeq cache for viewport re-parse ───────────────────────────
-  // Held only for CityJSONSeq inputs. The "Filter to viewport" toolbar action
-  // re-parses this with parseCityJsonSeq(text, undefined, bboxInCrs) to drop
-  // features outside the current map view — useful on city-scale jsonl files.
-  const [seqRawText, setSeqRawText] = useState<string | null>(null);
-  const mapBboxRef = useRef<[number, number, number, number] | null>(null);
-  const cityjsonRef = useRef<CityJsonDocument | null>(null);
-  const [catalogConnection, setCatalogConnection] = useState<CatalogConnection | null>(null);
-  const catalogConnectionRef = useRef<CatalogConnection | null>(null);
-  const catalogLoadingRef = useRef(false);
-  const catalogViewportTimerRef = useRef<number | null>(null);
-  const [catalogStatus, setCatalogStatus] = useState<{
-    kind: 'idle' | 'loading' | 'ok' | 'error';
-    message?: string;
-  }>({ kind: 'idle' });
-  const [inputIntegrity, setInputIntegrity] = useState<ReturnType<typeof checkIntegrity> | null>(
-    null
-  );
-  const [primitiveValidation, setPrimitiveValidation] = useState<PrimitiveValidationState>({
-    kind: 'unchecked',
-    message: '3D primitive validity has not been checked yet.',
-  });
-
-  // Transportation / road-editing v1. OSM is a reference layer; the edited
-  // result is stored as CityJSON Transportation plus an optional backend JSON payload.
-  const [showRoadEditor, setShowRoadEditor] = useState(false);
-  const [basemap, setBasemap] = useState<'map' | 'satellite'>('map');
-  const [osmRoads, setOsmRoads] = useState<OsmRoadFeature[]>([]);
-  const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
-  const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
-  const [roadStatus, setRoadStatus] = useState<string | null>(null);
-  const [selectedRoadArea, setSelectedRoadArea] = useState<RoadArea | null>(null);
-  const [lastInsertedRoadId, setLastInsertedRoadId] = useState<string | null>(null);
-  const [roadBackendUrl, setRoadBackendUrl] = useState('http://127.0.0.1:8787/api/roads');
-  const [finishRoadDrawToken, setFinishRoadDrawToken] = useState(0);
-
-  const markGeometryChanged = useCallback((message = 'Geometry changed; run Check 3D or Save seq.') => {
-    setPrimitiveValidation({ kind: 'unchecked', message });
-  }, []);
-
-  useEffect(() => {
-    cityjsonRef.current = cityjson;
-  }, [cityjson]);
-
-  useEffect(() => {
-    dirtyIdsRef.current = dirtyIds;
-  }, [dirtyIds]);
-
-  // Snapshot of original attributes per-building, for revert.
-  const [originals] = useState<Map<string, Record<string, AttributeValue>>>(new Map());
-
-  const handleLoaded = useCallback(
-    (doc: CityJsonDocument, name: string, rawText: string | null = null) => {
-      setCityjson(doc);
-      cityjsonRef.current = doc;
-      setFileName(name);
-      setSeqRawText(rawText);
-      setCatalogConnection(null);
-      catalogConnectionRef.current = null;
-      setCatalogStatus({ kind: 'idle' });
-      setSelection(null);
-      const clean = new Set<string>();
-      dirtyIdsRef.current = clean;
-      setDirtyIds(clean);
-      setFilter({}); // reset filters when loading a new doc
-      setZones([]);
-      setSelectedZone(null);
-      setZoningEnabled(false);
-      setZoningLoading(false);
-      setShowRoadEditor(false);
-      setBasemap('map');
-      setOsmRoads([]);
-      setSelectedOsmRoadId(null);
-      setRoadDraft(null);
-      setRoadStatus(null);
-      setSelectedRoadArea(null);
-      setLastInsertedRoadId(null);
-      setFinishRoadDrawToken(0);
-      mapBboxRef.current = null;
-      undoRef.current.clear();
-      setUndoVersion((v) => v + 1);
-      originals.clear();
-      setInputIntegrity(checkIntegrity(doc));
-      setPrimitiveValidation({
-        kind: 'unchecked',
-        message: 'Loaded input has not been checked for ISO 19107 primitive validity in this session.',
-      });
-      setLoadModalOpen(false);
-    },
-    [originals]
-  );
-
-  const handleCatalogLoaded = useCallback(
-    (loaded: CityJsonSeqViewportLoad, catalogUrl: string) => {
-      if (!loaded.doc) return;
-      handleLoaded(loaded.doc, `Hamburg CityJSONSeq catalog (${loaded.tileIds.length} tiles)`);
-      const connection = {
-        baseUrl: normalizeCatalogBaseUrl(catalogUrl).toString(),
-        crs: loaded.crs,
-        loadedTiles: new Map(loaded.tiles.map((tile) => [tile.catalog.id, tile])),
-      };
-      catalogConnectionRef.current = connection;
-      setCatalogConnection(connection);
-      setCatalogStatus({
-        kind: 'ok',
-        message: `${loaded.tileIds.length} strict CityJSONSeq tiles loaded`,
-      });
-      setPrimitiveValidation({
-        kind: 'valid',
-        message: 'Loaded strict Hamburg catalog tiles passed the prepared val3dity audit.',
-      });
-    },
-    [handleLoaded]
-  );
-
-  /**
-   * Capture an undo snapshot of the current doc + selection + dirty state.
-   * Call this BEFORE applying a mutation so undo restores the pre-mutation
-   * state. Bumps undoVersion to refresh the toolbar's enabled/disabled UI.
-   */
-  const pushUndo = useCallback(
-    (label: string) => {
-      if (!cityjson) return;
-      undoRef.current.push({
-        doc: cityjson,
-        label,
-        dirtyIds: new Set(dirtyIds),
-        selectionId: selection?.objectId ?? null,
-      });
-      setUndoVersion((v) => v + 1);
-    },
-    [cityjson, dirtyIds, selection]
-  );
-
-  const handleUndo = useCallback(() => {
-    if (!cityjson) return;
-    const popped = undoRef.current.undo({
-      doc: cityjson,
-      dirtyIds: new Set(dirtyIds),
-      selectionId: selection?.objectId ?? null,
-    });
-    if (!popped) return;
-    setCityjson(popped.doc);
-    setDirtyIds(new Set(popped.dirtyIds ?? []));
-    setSelection(popped.selectionId ? { objectId: popped.selectionId } : null);
-    setReloadToken((t) => t + 1);
-    setUndoVersion((v) => v + 1);
-    markGeometryChanged('Undo changed the working geometry; run Check 3D before export.');
-  }, [cityjson, dirtyIds, selection, markGeometryChanged]);
-
-  const handleRedo = useCallback(() => {
-    if (!cityjson) return;
-    const popped = undoRef.current.redo({
-      doc: cityjson,
-      dirtyIds: new Set(dirtyIds),
-      selectionId: selection?.objectId ?? null,
-    });
-    if (!popped) return;
-    setCityjson(popped.doc);
-    setDirtyIds(new Set(popped.dirtyIds ?? []));
-    setSelection(popped.selectionId ? { objectId: popped.selectionId } : null);
-    setReloadToken((t) => t + 1);
-    setUndoVersion((v) => v + 1);
-    markGeometryChanged('Redo changed the working geometry; run Check 3D before export.');
-  }, [cityjson, dirtyIds, selection, markGeometryChanged]);
-
-  // ── Opening move ─────────────────────────────────────────────────────────
-  const handleMoveOpening = useCallback(
-    (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => {
-      if (!cityjson) return;
-      pushUndo(`Move ${opening.type} on ${buildingId}`);
-      runStructurallyGuardedMutation(cityjson, `Moving ${opening.type} on ${buildingId}`, () =>
-        moveOpening(cityjson, buildingId, opening, dx, dy, dz)
-      );
-      setDirtyIds((prev) => {
-        const next = new Set(prev);
-        next.add(buildingId);
-        return next;
-      });
-      setReloadToken((t) => t + 1);
-      markGeometryChanged();
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  // ── Reshape (regenerate parametric building with new roof/heights) ──────
-  const handleReshapeBuilding = useCallback(
-    (
-      id: string,
-      overrides: {
-        roofType?: 'flat' | 'pyramid' | 'gable' | 'hip';
-        eaveHeight?: number;
-        ridgeHeight?: number;
-        eaveOverhang?: number;
-        rakeOverhang?: number;
-        addWindows?: boolean;
-        addDoor?: boolean;
-      }
-    ) => {
-      if (!cityjson) return;
-      const fp = extractFootprints(cityjson).find((f) => f.id === id);
-      if (!fp) {
-        alert(`Cannot reshape ${id}: no extractable footprint.`);
-        return;
-      }
-      pushUndo(`Reshape ${id}`);
-      const { value: r } = runStructurallyGuardedMutation(cityjson, `Reshaping ${id}`, () =>
-        regenerateBuilding(cityjson, id, fp.polygon, overrides)
-      );
-      if (!r.ok) {
-        alert(`Reshape failed: ${r.reason}`);
-        return;
-      }
-      setDirtyIds((prev) => {
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
-      setReloadToken((t) => t + 1);
-      markGeometryChanged();
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  // ── Make-editable (parametrise imported building) ────────────────────────
-  const handleMakeEditable = useCallback(
-    (buildingId: string) => {
-      if (!cityjson) return;
-      const ok = window.confirm(
-        'Replace this imported building with a parametric regeneration inferred ' +
-          'from its attributes?\n\n' +
-          'Original geometry detail will be lost. After conversion you can edit ' +
-          'its footprint, roof type, openings, and overhangs.'
-      );
-      if (!ok) return;
-      pushUndo(`Make ${buildingId} editable`);
-      const { value: r } = runStructurallyGuardedMutation(
-        cityjson,
-        `Making ${buildingId} editable`,
-        () => parametriseBuilding(cityjson, buildingId)
-      );
-      if (!r.ok) {
-        alert(`Couldn't make this building editable: ${r.reason}`);
-        return;
-      }
-      setDirtyIds((prev) => {
-        const next = new Set(prev);
-        next.add(buildingId);
-        return next;
-      });
-      setReloadToken((t) => t + 1);
-      markGeometryChanged();
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  // ── Copy / Paste ─────────────────────────────────────────────────────────
-  const handleCopy = useCallback(() => {
-    const ids = new Set(multiSelection);
-    if (selection) ids.add(selection.objectId);
-    if (ids.size === 0) return;
-    setClipboardIds(ids);
-  }, [selection, multiSelection]);
-
-  const handlePaste = useCallback(() => {
-    if (!cityjson || !clipboardIds || clipboardIds.size === 0) return;
-    pushUndo('Paste buildings');
-    const { value: { clonedIds } } = runStructurallyGuardedMutation(
-      cityjson,
-      'Pasting buildings',
-      () => cloneBuildings(cityjson, clipboardIds, 5, 5)
-    );
-    setDirtyIds((prev) => {
-      const next = new Set(prev);
-      for (const id of clonedIds) next.add(id);
-      return next;
-    });
-    setReloadToken((t) => t + 1);
-    if (clonedIds.length === 1) setSelection({ objectId: clonedIds[0] });
-    setMultiSelection(new Set(clonedIds));
-    markGeometryChanged();
-  }, [cityjson, clipboardIds, pushUndo, markGeometryChanged]);
-
-  // ── Delete ────────────────────────────────────────────────────────────────
-  const handleDelete = useCallback(() => {
-    if (!cityjson) return;
-    const ids = new Set(multiSelection);
-    if (selection) ids.add(selection.objectId);
-    if (ids.size === 0) return;
-    const label =
-      ids.size === 1 ? `Delete ${[...ids][0]}` : `Delete ${ids.size} buildings`;
-    pushUndo(label);
-    const { value: { deletedIds } } = runStructurallyGuardedMutation(
-      cityjson,
-      label,
-      () => deleteBuildings(cityjson, ids)
-    );
-    setDirtyIds((prev) => {
-      const next = new Set(prev);
-      // Keep tombstones dirty so CityJSONSeq write-back can remove deleted
-      // source features instead of forgetting that they ever existed.
-      for (const id of deletedIds) next.add(id);
-      return next;
-    });
-    setSelection(null);
-    setMultiSelection(new Set());
-    setReloadToken((t) => t + 1);
-    markGeometryChanged();
-  }, [cityjson, selection, multiSelection, pushUndo, markGeometryChanged]);
-
-  // Keyboard shortcuts: Ctrl+Z / Cmd+Z for undo, Ctrl+Shift+Z / Cmd+Shift+Z
-  // for redo. Ctrl+C / Ctrl+V for copy/paste. Delete / Backspace removes the
-  // selected building(s). Skip when focus is in an input/textarea so editing
-  // fields can still use their native shortcuts.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault();
-        handleDelete();
-        return;
-      }
-      const meta = e.ctrlKey || e.metaKey;
-      if (!meta) return;
-      if (e.key === 'z' || e.key === 'Z') {
-        e.preventDefault();
-        if (e.shiftKey) handleRedo();
-        else handleUndo();
-      } else if (e.key === 'y') {
-        e.preventDefault();
-        handleRedo();
-      } else if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault();
-        handleCopy();
-      } else if (e.key === 'v' || e.key === 'V') {
-        e.preventDefault();
-        handlePaste();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [handleUndo, handleRedo, handleCopy, handlePaste, handleDelete]);
-
-  const handleSelect = useCallback(
-    (info: SelectionInfo | null) => {
-      if (info?.ctrlKey) {
-        setMultiSelection((prev) => {
-          const next = new Set(prev);
-          if (next.has(info.objectId)) next.delete(info.objectId);
-          else next.add(info.objectId);
-          return next;
-        });
-        if (!selection) setSelection(info);
-        return;
-      }
-      setSelection(info);
-      if (!info?.ctrlKey) setMultiSelection(new Set());
-      if (info && cityjson && !originals.has(info.objectId)) {
-        const obj = cityjson.CityObjects[info.objectId];
-        originals.set(info.objectId, { ...(obj?.attributes ?? {}) });
-      }
-    },
-    [cityjson, originals, selection]
-  );
-
-  const handleAttributeChange = useCallback(
-    (id: string, key: string, value: AttributeValue) => {
-      if (!cityjson) return;
-      const obj = cityjson.CityObjects[id];
-      if (!obj) return;
-      // Only push undo when the value actually changes; otherwise typing in
-      // an input that hasn't moved would burn snapshots.
-      const prev = obj.attributes?.[key];
-      if (prev === value) return;
-      pushUndo(`Edit ${id}.${key}`);
-      if (!obj.attributes) obj.attributes = {};
-      obj.attributes[key] = value;
-      setDirtyIds((prev) => {
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
-    },
-    [cityjson, pushUndo]
-  );
-
-  const handleRevert = useCallback(
-    (id: string) => {
-      if (!cityjson) return;
-      const snap = originals.get(id);
-      if (!snap) return;
-      cityjson.CityObjects[id].attributes = { ...snap };
-      setDirtyIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      setSelection((s) => (s ? { ...s } : s));
-    },
-    [cityjson, originals]
-  );
-
-  const handleReloadView = useCallback(() => {
-    setReloadToken((t) => t + 1);
-  }, []);
-
-  const handleSplitByFloor = useCallback(
-    (id: string, floorCount: number) => {
-      if (!cityjson) return;
-      try {
-        pushUndo(`Split ${id} into ${floorCount} floors`);
-        const { value: { partIds } } = runStructurallyGuardedMutation(
-          cityjson,
-          `Splitting ${id} into floors`,
-          () => splitBuildingByFloor(cityjson, id, floorCount)
-        );
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          for (const p of partIds) next.add(p);
-          return next;
-        });
-        setReloadToken((t) => t + 1);
-        markGeometryChanged();
-      } catch (e) {
-        alert(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  const handleSplitByFloorHeights = useCallback(
-    (id: string, heights: number[]) => {
-      if (!cityjson) return;
-      try {
-        pushUndo(`Split ${id} with custom heights`);
-        const { value: { partIds } } = runStructurallyGuardedMutation(
-          cityjson,
-          `Splitting ${id} with custom floor heights`,
-          () => splitBuildingByFloorHeights(cityjson, id, heights)
-        );
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          for (const p of partIds) next.add(p);
-          return next;
-        });
-        setReloadToken((t) => t + 1);
-        markGeometryChanged();
-      } catch (e) {
-        alert(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  const handleSplitByFloorPlans = useCallback(
-    (id: string, heights: number[], floorPlans: FloorPlanDivision[]) => {
-      if (!cityjson) return;
-      try {
-        pushUndo(`Split ${id} into floor-plan sections`);
-        const { value: { partIds } } = runStructurallyGuardedMutation(
-          cityjson,
-          `Splitting ${id} into floor-plan sections`,
-          () => splitBuildingByFloorPlans(cityjson, id, heights, floorPlans)
-        );
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          for (const p of partIds) next.add(p);
-          return next;
-        });
-        setSplitPreviewFloorPlans(null);
-        setReloadToken((t) => t + 1);
-        markGeometryChanged();
-      } catch (e) {
-        alert(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  const handleSplitBySide = useCallback(
-    (id: string, partCount: number, axis: SplitAxis = 'auto') => {
-      if (!cityjson) return;
-      try {
-        pushUndo(`Split ${id} into ${partCount} side parts`);
-        const { value: { partIds } } = runStructurallyGuardedMutation(
-          cityjson,
-          `Splitting ${id} into side parts`,
-          () => splitBuildingBySide(cityjson, id, partCount, axis)
-        );
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          for (const p of partIds) next.add(p);
-          return next;
-        });
-        setReloadToken((t) => t + 1);
-        markGeometryChanged();
-      } catch (e) {
-        alert(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [cityjson, pushUndo, markGeometryChanged]
-  );
-
-  // Enter "edit position" mode for a building. While active, dX/dY/angle are
-  // held in pendingTransform and the map renders a ghost preview. Nothing is
-  // written to the CityJSON until the user clicks Save.
-  const handleStartTransform = useCallback(
-    (id: string) => {
-      const initial: PendingTransform = { id, dx: 0, dy: 0, dz: 0, angle: 0, autoTerrain: true };
-      setPendingTransform(cityjson ? snapTransformToTerrain(cityjson, initial) : initial);
-    },
-    [cityjson]
-  );
-
-  const handleUpdateTransform = useCallback(
-    (patch: Partial<Omit<PendingTransform, 'id'>>) => {
-      setPendingTransform((cur) => {
-        if (!cur) return cur;
-        let next: PendingTransform = { ...cur, ...patch };
-        if ('dz' in patch && !('autoTerrain' in patch)) {
-          next = { ...next, autoTerrain: false };
-        }
-        if (cityjson && next.autoTerrain) {
-          next = snapTransformToTerrain(cityjson, next);
-        }
-        return next;
-      });
-    },
-    [cityjson]
-  );
-
-  const handleCancelTransform = useCallback(() => {
-    setPendingTransform(null);
-  }, []);
-
-  const handleSaveTransform = useCallback(() => {
-    if (!cityjson || !pendingTransform) return;
-    const { id, dx, dy, angle } = pendingTransform;
-    const dz = pendingTransform.dz ?? 0;
-    try {
-      // Snapshot only when there's actually a change to commit — pure
-      // close/cancel shouldn't pollute the undo stack.
-      if (angle !== 0 || dx !== 0 || dy !== 0 || dz !== 0) {
-        pushUndo(`Move ${id}`);
-      }
-      const result = commitBuildingTransformFromEditor(cityjson, pendingTransform);
-      if (result.changed) {
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          return next;
-        });
-        setReloadToken((t) => t + 1);
-        markGeometryChanged();
-      }
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPendingTransform(null);
-    }
-  }, [cityjson, pendingTransform, pushUndo, markGeometryChanged]);
-
-  // ── Footprint editing (drag building polygon corners) ─────────────────────
-  const handleStartFootprintEdit = useCallback(
-    (id: string) => {
-      if (!cityjson) return;
-      const fps = extractFootprints(cityjson);
-      const fp = fps.find((f) => f.id === id);
-      if (!fp) {
-        alert(`Could not extract footprint for building ${id}`);
-        return;
-      }
-      // The footprint polygon comes back closed (first === last); strip the
-      // closing vertex so MapView can re-close it for Terra Draw.
-      const open = fp.polygon.slice();
-      const [first, last] = [open[0], open[open.length - 1]];
-      if (first[0] === last[0] && first[1] === last[1]) open.pop();
-      setFootprintEdit({ buildingId: id, initialFootprint: open, pendingRing: null });
-    },
-    [cityjson]
-  );
-
-  const handleFootprintChange = useCallback((newRing: [number, number][]) => {
-    setFootprintEdit((prev) => (prev ? { ...prev, pendingRing: newRing } : prev));
-  }, []);
-
-  const handleCancelFootprintEdit = useCallback(() => {
-    setFootprintEdit(null);
-  }, []);
-
-  const handleSaveFootprintEdit = useCallback(() => {
-    if (!cityjson || !footprintEdit) return;
-    const ring = footprintEdit.pendingRing ?? footprintEdit.initialFootprint;
-    pushUndo(`Edit footprint of ${footprintEdit.buildingId}`);
-    const { value: res } = runStructurallyGuardedMutation(
-      cityjson,
-      `Editing footprint of ${footprintEdit.buildingId}`,
-      () => regenerateBuilding(cityjson, footprintEdit.buildingId, ring)
-    );
-    if (!res.ok) {
-      // Roll back the snapshot we just pushed so the user doesn't have to
-      // burn it.
-      undoRef.current.undo({
-        doc: cityjson,
-        dirtyIds: new Set(dirtyIds),
-        selectionId: selection?.objectId ?? null,
-      });
-      setUndoVersion((v) => v + 1);
-      alert(res.reason ?? 'Could not regenerate building');
-      return;
-    }
-    setDirtyIds((prev) => {
-      const next = new Set(prev);
-      next.add(footprintEdit.buildingId);
-      return next;
-    });
-    setReloadToken((t) => t + 1);
-    setFootprintEdit(null);
-    markGeometryChanged();
-  }, [cityjson, footprintEdit, pushUndo, dirtyIds, selection, markGeometryChanged]);
-
-  // ── Drag a split-line ring in the 3D viewer ─────────────────────────────
-  // The Viewer raycasts the user's mouse onto the ring and reports dZ each
-  // mousemove. We translate that into a transfer between heights[ringIndex]
-  // (the floor below) and heights[ringIndex+1] (the floor above), clamping
-  // both to MIN_STOREY_HEIGHT so the user can't crush a floor flat.
-  const handleAdjustSplit = useCallback(
-    (ringIndex: number, deltaZ: number) => {
-      setSplitPreviewHeights((prev) => {
-        if (!prev || ringIndex < 0 || ringIndex >= prev.length - 1) return prev;
-        const lower = prev[ringIndex];
-        const upper = prev[ringIndex + 1];
-        // Clamp to keep BOTH adjacent floors >= MIN_STOREY_HEIGHT.
-        const minDelta = MIN_STOREY_HEIGHT - lower;
-        const maxDelta = upper - MIN_STOREY_HEIGHT;
-        const d = Math.max(minDelta, Math.min(maxDelta, deltaZ));
-        if (Math.abs(d) < 1e-4) return prev;
-        const next = prev.slice();
-        next[ringIndex] = lower + d;
-        next[ringIndex + 1] = upper - d;
-        return next;
-      });
-    },
-    []
-  );
-
-  // ── CityJSONSeq catalog viewport loading ───────────────────────────────
-  // Catalog tiles stay independent on the server. Newly encountered sequence
-  // features merge into one renderable working set. Clean tiles outside the
-  // current map view are compacted away; dirty tiles remain until checkpointed.
-  const loadCatalogViewport = useCallback(async (bboxWgs84: Bbox) => {
-    const source = catalogConnectionRef.current;
-    const doc = cityjsonRef.current;
-    if (!source || !doc || catalogLoadingRef.current) return;
-
-    catalogLoadingRef.current = true;
-    setCatalogStatus({
-      kind: 'loading',
-      message: `${source.loadedTiles.size} tiles loaded; checking viewport...`,
-    });
-    try {
-      const bbox = projectWgs84BboxToCrs(bboxWgs84, source.crs);
-      const loaded = await fetchCityJsonSeqViewport(
-        source.baseUrl,
-        bbox,
-        new Set(source.loadedTiles.keys())
-      );
-      const loadedTiles = new Map(source.loadedTiles);
-      if (loaded.doc) {
-        const merged = mergeCityJson(doc, loaded.doc);
-        if (!merged.ok) throw new Error(merged.reason);
-        for (const tile of loaded.tiles) loadedTiles.set(tile.catalog.id, tile);
-      }
-      const eviction = evictCleanCityJsonSeqTiles(
-        doc,
-        loadedTiles,
-        new Set(loaded.intersectingTileIds),
-        dirtyIdsRef.current
-      );
-      const next = { ...source, loadedTiles: eviction.tiles };
-      catalogConnectionRef.current = next;
-      setCatalogConnection(next);
-      setFileName(`Hamburg CityJSONSeq catalog (${eviction.tiles.size} tiles)`);
-      if (loaded.doc || eviction.evictedTileIds.length > 0) {
-        setSelection((current) =>
-          current && !doc.CityObjects[current.objectId] ? null : current
-        );
-        setMultiSelection((current) => {
-          const surviving = new Set([...current].filter((id) => doc.CityObjects[id]));
-          return surviving.size === current.size ? current : surviving;
-        });
-        if (eviction.evictedTileIds.length > 0) {
-          undoRef.current.clear();
-          setUndoVersion((version) => version + 1);
-        }
-        setReloadToken((token) => token + 1);
-      }
-      setCatalogStatus({
-        kind: 'ok',
-        message:
-          `${eviction.tiles.size} strict sequence tiles loaded` +
-          (loaded.features > 0 ? `; added ${loaded.features.toLocaleString()} features` : '') +
-          (eviction.evictedTileIds.length > 0
-            ? `; unloaded ${eviction.evictedTileIds.length} clean off-screen tiles`
-            : ''),
-      });
-    } catch (error) {
-      if (error instanceof CatalogWritebackError && error.result.persistedTileIds.length > 0) {
-        const next = { ...source, loadedTiles: error.result.tiles };
-        catalogConnectionRef.current = next;
-        setCatalogConnection(next);
-      }
-      setCatalogStatus({
-        kind: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      catalogLoadingRef.current = false;
-    }
-  }, []);
-
-  const handlePersistCatalog = useCallback(async () => {
-    const source = catalogConnectionRef.current;
-    const doc = cityjsonRef.current;
-    if (!source || !doc || catalogLoadingRef.current || dirtyIdsRef.current.size === 0) return;
-    catalogLoadingRef.current = true;
-    setCatalogStatus({
-      kind: 'loading',
-      message: `Validating and saving ${dirtyIdsRef.current.size} changed objects...`,
-    });
-    let saved = false;
-    try {
-      const result = await persistDirtyCityJsonSeqTiles(
-        source.baseUrl,
-        doc,
-        source.loadedTiles,
-        dirtyIdsRef.current
-      );
-      const next = { ...source, loadedTiles: result.tiles };
-      catalogConnectionRef.current = next;
-      setCatalogConnection(next);
-      const clean = new Set<string>();
-      dirtyIdsRef.current = clean;
-      setDirtyIds(clean);
-      undoRef.current.clear();
-      setUndoVersion((version) => version + 1);
-      setCatalogStatus({
-        kind: 'ok',
-        message: `${result.persistedTileIds.length} sequence tile(s) validated and saved`,
-      });
-      setPrimitiveValidation({
-        kind: 'valid',
-        message: `${result.persistedTileIds.length} changed sequence tile(s) passed structural validation and val3dity --ignore204 during Save seq.`,
-      });
-      saved = true;
-    } catch (error) {
-      if (error instanceof CatalogWritebackError && error.result.persistedTileIds.length > 0) {
-        const next = { ...source, loadedTiles: error.result.tiles };
-        catalogConnectionRef.current = next;
-        setCatalogConnection(next);
-      }
-      setCatalogStatus({
-        kind: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      catalogLoadingRef.current = false;
-    }
-    const bbox = mapBboxRef.current;
-    if (saved && bbox) void loadCatalogViewport(bbox);
-  }, [loadCatalogViewport]);
-
-  const handleViewportChange = useCallback(
-    (bbox: Bbox) => {
-      mapBboxRef.current = bbox;
-      if (!catalogConnectionRef.current) return;
-      if (catalogViewportTimerRef.current !== null) {
-        window.clearTimeout(catalogViewportTimerRef.current);
-      }
-      catalogViewportTimerRef.current = window.setTimeout(() => {
-        catalogViewportTimerRef.current = null;
-        void loadCatalogViewport(bbox);
-      }, 450);
-    },
-    [loadCatalogViewport]
-  );
-
-  useEffect(
-    () => () => {
-      if (catalogViewportTimerRef.current !== null) {
-        window.clearTimeout(catalogViewportTimerRef.current);
-      }
-    },
-    []
-  );
-
-  // ── Viewport-filter re-parse ───────────────────────────────────────────
-  // Re-parses the cached CityJSONSeq text with parseCityJsonAuto's bbox
-  // filter using the map's current viewport. Re-projects the WGS84 bounds
-  // to the data's CRS (taking the AABB of the four reprojected corners so
-  // the filter covers any rotation the projection introduces).
-  const handleReloadViewport = useCallback(() => {
-    if (!seqRawText || !cityjson) return;
-    const bboxWgs = mapBboxRef.current;
-    if (!bboxWgs) {
-      alert('Map viewport not ready yet. Move the map once, then try again.');
-      return;
-    }
-    const crs = detectCrs(cityjson);
-    if (!crs.supported) {
-      alert(`Can't reload: CRS ${crs.code} isn't supported by proj4.`);
-      return;
-    }
-    const [w, s, e, n] = bboxWgs;
-    const corners: [number, number][] = [
-      [w, s],
-      [e, s],
-      [e, n],
-      [w, n],
-    ];
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-    for (const c of corners) {
-      const p = proj4('EPSG:4326', crs.code, c) as [number, number];
-      if (p[0] < minX) minX = p[0];
-      if (p[1] < minY) minY = p[1];
-      if (p[0] > maxX) maxX = p[0];
-      if (p[1] > maxY) maxY = p[1];
-    }
-    const result = parseCityJsonAuto(seqRawText, undefined, [minX, minY, maxX, maxY]);
-    if (!result.ok) {
-      alert(`Reload failed: ${result.error}`);
-      return;
-    }
-    pushUndo('Filter to viewport');
-    setCityjson(result.doc);
-    setDirtyIds(new Set());
-    setSelection(null);
-    setMultiSelection(new Set());
-    setReloadToken((t) => t + 1);
-  }, [seqRawText, cityjson, pushUndo]);
-
-  // ── Map drag for position transform ─────────────────────────────────────
-  const dragBaseRef = useRef<{ dx: number; dy: number } | null>(null);
-  const handleDragMove = useCallback(
-    (dx: number, dy: number) => {
-      setPendingTransform((cur) => {
-        if (!cur) return cur;
-        if (!dragBaseRef.current) {
-          dragBaseRef.current = { dx: cur.dx, dy: cur.dy };
-        }
-        const next = { ...cur, dx: dragBaseRef.current.dx + dx, dy: dragBaseRef.current.dy + dy };
-        return cityjson && next.autoTerrain ? snapTransformToTerrain(cityjson, next) : next;
-      });
-    },
-    [cityjson]
-  );
-  useEffect(() => {
-    if (!pendingTransform) dragBaseRef.current = null;
-  }, [pendingTransform]);
-
-  // ── Planning toggle ───────────────────────────────────────────────────────
   const handleToggleZoning = useCallback(async () => {
-    if (!cityjson || zoningLoading) return;
+    if (!coreState.cityjson || zoningLoading) return;
     if (zoningEnabled) {
       setZoningEnabled(false);
       setZones([]);
@@ -1044,8 +61,8 @@ export default function App() {
       return;
     }
 
-    const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
-    const viewportBbox = mapBboxRef.current;
+    const footprintBbox = computeFootprintBbox(extractFootprints(coreState.cityjson));
+    const viewportBbox = coreState.mapBboxRef.current;
     const bbox =
       viewportBbox && isBboxNearHamburg(expandBbox(viewportBbox))
         ? viewportBbox
@@ -1080,672 +97,72 @@ export default function App() {
     } finally {
       setZoningLoading(false);
     }
-  }, [cityjson, zoningEnabled, zoningLoading]);
+  }, [coreState.cityjson, coreState.mapBboxRef, zoningEnabled, zoningLoading]);
 
   const handleZoneSelect = useCallback((zone: ParcelZone) => {
     setSelectedZone(zone);
   }, []);
 
-  const handleFetchOsmRoads = useCallback(async () => {
-    if (!cityjson) return;
-    const viewportBbox = mapBboxRef.current;
-    const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
-    const bbox = viewportBbox ?? footprintBbox;
-    if (!bbox) {
-      alert('Could not derive a map bbox for the OSM road query.');
-      return;
-    }
-    const queryBbox = expandBbox(bbox, 0.15);
-    setRoadStatus('Fetching OSM roads for the current viewport...');
-    try {
-      const body = new URLSearchParams({ data: buildOverpassRoadQuery(queryBbox) });
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-        body,
-      });
-      if (!response.ok) {
-        throw new Error(`Overpass HTTP ${response.status} ${response.statusText}`);
-      }
-      const payload = await response.json();
-      const roads = parseOsmRoadsFromOverpass(payload);
-      setOsmRoads(roads);
-      setShowRoadEditor(true);
-      setRoadStatus(
-        roads.length > 0
-          ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'}. Click one on the map.`
-          : 'No OSM roads returned for this viewport.'
-      );
-    } catch (error) {
-      console.error(error);
-      setRoadStatus(error instanceof Error ? error.message : String(error));
-      alert(`OSM road fetch failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [cityjson]);
+  const roadEditor = useRoadEditor(coreState, undoRedo);
+  const buildingEditor = useBuildingEditor(coreState, undoRedo, { zones, zoningEnabled });
 
-  const handleOsmRoadSelect = useCallback((road: OsmRoadFeature) => {
-    setShowRoadEditor(true);
-    setSelectedOsmRoadId(road.id);
-    const inferred = cloneRoadDraft(road.inferredDraft);
-    const ok = window.confirm(
-      `OSM interpretation for ${road.tags.name ?? road.id}:\n\n` +
-        `${summarizeRoadDraft(inferred)}\n\n` +
-        'Does this match the satellite/road reality?\n\n' +
-        'OK: use this as the edit draft.\n' +
-        'Cancel: keep OSM as a seed, then redraw/edit in the road panel.'
-    );
-    if (ok) {
-      setRoadDraft({ ...inferred, userVerified: true });
-      setRoadStatus('OSM interpretation accepted. Edit widths/speed if needed, then insert.');
-      return;
-    }
-    setRoadDraft({ ...inferred, userVerified: false });
-    setRoadStatus('OSM kept as a seed. Use Draw / redraw road and edit lanes before inserting.');
-  }, []);
-
-  const handleStartRoadDraw = useCallback(() => {
-    setShowRoadEditor(true);
-    setSelection(null);
-    setPendingFootprint(null);
-    setPendingForm(null);
-    setDrawMode('road-line');
-    setRoadStatus('Draw the road centerline on the map, then press Enter.');
-  }, []);
-
-  const handleRoadLineDrawn = useCallback(
-    (lineWgs84: [number, number][]) => {
-      setDrawMode('none');
-      if (lineWgs84.length < 2) {
-        alert('Road centerline needs at least two points.');
-        return;
-      }
-      setRoadDraft((current) => {
-        if (!current) {
-          return createManualRoadDraft(lineWgs84);
-        }
-        const fallback = createManualRoadDraft(lineWgs84).sections[0];
-        const first = current.sections[0] ?? fallback;
-        return {
-          ...current,
-          userVerified: true,
-          sections: [
-            {
-              ...first,
-              id: first.id ?? 'section-1',
-              centerlineWgs84: lineWgs84,
-              bands: first.bands.map((band) => ({
-                ...band,
-                allowedModes: band.allowedModes ? [...band.allowedModes] : undefined,
-              })),
-            },
-          ],
-        };
-      });
-      setRoadStatus('Manual road centerline updated. Check bands and speed, then insert.');
-    },
-    []
-  );
-
-  const handleRoadDraftChange = useCallback((draft: RoadDraft) => {
-    setRoadDraft(draft);
-    setLastInsertedRoadId(null);
-  }, []);
-
-  const handleSplitRoadDraft = useCallback((sectionId: string, fraction: number) => {
-    setRoadDraft((current) => {
-      if (!current) return current;
-      try {
-        const next = splitRoadSectionAtFraction(current, sectionId, fraction);
-        setRoadStatus(`Split ${sectionId} at ${(fraction * 100).toFixed(0)}%.`);
-        return next;
-      } catch (error) {
-        alert(`Road split failed: ${error instanceof Error ? error.message : String(error)}`);
-        return current;
-      }
-    });
-  }, []);
-
-  const handleInsertRoad = useCallback(() => {
-    if (!cityjson || !roadDraft) return;
-    try {
-      pushUndo('Insert CityJSON road');
-      const { value: result } = runStructurallyGuardedMutation(
-        cityjson,
-        'Inserting CityJSON road',
-        () => insertRoadIntoCityJson(cityjson, roadDraft)
-      );
-      setDirtyIds((prev) => {
-        const next = new Set(prev);
-        next.add(result.id);
-        return next;
-      });
-      setSelection({ objectId: result.id });
-      setSelectedRoadArea(null);
-      setLastInsertedRoadId(result.id);
-      setReloadToken((t) => t + 1);
-      markGeometryChanged('Road geometry changed; run Check 3D before export.');
-      setRoadStatus(`Inserted ${result.id} with ${result.areas.length} transportation surfaces.`);
-    } catch (error) {
-      console.error(error);
-      alert(`Road insertion failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [cityjson, roadDraft, pushUndo, markGeometryChanged]);
-
-  const handleExportRoadPayload = useCallback(() => {
-    if (!roadDraft) return;
-    downloadJson(
-      buildRoadEditPayload(roadDraft, lastInsertedRoadId ?? undefined),
-      `${lastInsertedRoadId ?? roadDraft.id ?? 'road-edit'}.payload.json`
-    );
-  }, [roadDraft, lastInsertedRoadId]);
-
-  const handlePostRoadPayload = useCallback(async () => {
-    if (!roadDraft) return;
-    try {
-      const response = await fetch(roadBackendUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildRoadEditPayload(roadDraft, lastInsertedRoadId ?? undefined)),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-      setRoadStatus(`Posted road payload to ${roadBackendUrl}.`);
-    } catch (error) {
-      console.error(error);
-      setRoadStatus(error instanceof Error ? error.message : String(error));
-      alert(`Road backend POST failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [roadDraft, roadBackendUrl, lastInsertedRoadId]);
-
-  const handleStartDraw = useCallback(() => {
-    setSelection(null);
-    setRoadStatus(null);
-    setDrawMode('polygon');
-  }, []);
-
-  const handleCancelDraw = useCallback(() => {
-    setDrawMode('none');
-    setPendingFootprint(null);
-    setPendingForm(null);
-  }, []);
-
-  const handleFootprintDrawn = useCallback((ring: [number, number][]) => {
-    setDrawMode('none');
-    setPendingFootprint(ring);
-  }, []);
-
-  const handleCreateBuilding = useCallback(
-    (form: NewBuildingForm) => {
-      if (!cityjson || !pendingFootprint) return;
-      // Planning compatibility check. This is a lightweight client-side
-      // classification over Hamburg planning attributes, not a legal decision.
-      if (zoningEnabled && zones.length > 0) {
-        const cx = pendingFootprint.reduce((a, v) => a + v[0], 0) / pendingFootprint.length;
-        const cy = pendingFootprint.reduce((a, v) => a + v[1], 0) / pendingFootprint.length;
-        const zone = findZoneForPoint(zones, [cx, cy]);
-        const check = validateBuildingType(zone, form.function);
-        if (!check.allowed) {
-          alert(`Planning layer conflict: ${check.reason}`);
-          return;
-        }
-      }
-      const crs = detectCrs(cityjson);
-      if (!crs.supported) {
-        alert(`Can't generate: CRS ${crs.code} isn't supported. Add a proj4 def.`);
-        setPendingFootprint(null);
-        setPendingForm(null);
-        return;
-      }
-      try {
-        pushUndo('Create new building');
-        const ridgeHeight = form.totalHeight;
-        const eaveHeight =
-          form.roofType === 'flat' ? form.totalHeight : form.totalHeight - form.roofHeight;
-        const { id, objectIds } = createBuildingFromEditor(cityjson, {
-          targetCrs: crs.code,
-          footprintWgs84: pendingFootprint,
-          storeys: form.storeys,
-          eaveHeight,
-          ridgeHeight,
-          roofType: form.roofType,
-          attributes: {
-            function: form.function,
-            yearOfConstruction: form.yearOfConstruction,
-          },
-          openings:
-            form.addWindows || form.addDoor
-              ? { windows: form.addWindows, door: form.addDoor }
-              : undefined,
-          eaveOverhang: form.eaveOverhang,
-          rakeOverhang: form.rakeOverhang,
-        }, {
-          mode: form.splitMode,
-          count: form.splitCount,
-          axis: form.splitAxis,
-        });
-        const newIds = new Set(objectIds);
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          for (const nid of newIds) next.add(nid);
-          return next;
-        });
-        setReloadToken((t) => t + 1);
-        setSelection({ objectId: id });
-        markGeometryChanged();
-      } catch (e) {
-        console.error(e);
-        alert(`Generation failed: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        setPendingFootprint(null);
-        setPendingForm(null);
-      }
-    },
-    [cityjson, pendingFootprint, pushUndo, zoningEnabled, zones, markGeometryChanged]
-  );
-
-  const handleSaveLocal = useCallback(async () => {
-    if (!cityjson || !fileName) return;
-    setSaveStatus('saving');
-    try {
-      await saveDocument(fileName, cityjson);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 1500);
-    } catch (e) {
-      console.error('Local save failed', e);
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 2500);
-    }
-  }, [cityjson, fileName]);
-
-  const runExternalGeometryValidation = useCallback(async (text: string) => {
-    setPrimitiveValidation({
-      kind: 'checking',
-      message: 'Checking exported CityJSON primitives with the local val3dity service...',
-    });
-    try {
-      const result = await validateExportGeometry(
-        catalogConnectionRef.current?.baseUrl ?? DEFAULT_HAMBURG_CATALOG_URL,
-        text
-      );
-      setPrimitiveValidation({
-        kind: result.ok ? 'valid' : 'invalid',
-        message: result.message,
-      });
-      return result.ok;
-    } catch (error) {
-      setPrimitiveValidation({
-        kind: 'unavailable',
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }, []);
-
-  const handleValidateGeometry = useCallback(async () => {
-    if (!cityjson) return;
-    const prepared = prepareValidatedCityJsonExport(cityjson);
-    if (!prepared.ok) {
-      alert(prepared.error);
-      return;
-    }
-    const valid = await runExternalGeometryValidation(prepared.text);
-    if (valid === true) {
-      alert('The current CityJSON passed browser structural validation and local val3dity.');
-    } else if (valid === false) {
-      alert('The current CityJSON failed local val3dity. See the 3D validation status for details.');
-    } else {
-      alert('The local val3dity service is unavailable. Start the Hamburg catalog server to run the 3D check.');
-    }
-  }, [cityjson, runExternalGeometryValidation]);
-
-  const handleExport = useCallback(async () => {
-    if (!cityjson) return;
-    const prepared = prepareValidatedCityJsonExport(cityjson);
-    if (!prepared.ok) {
-      alert(`${prepared.error}\n\nExport stopped so an invalid CityJSON file is not downloaded.`);
-      return;
-    }
-    const geometryValid = await runExternalGeometryValidation(prepared.text);
-    if (geometryValid === false) {
-      alert('Export stopped because val3dity rejected the exact CityJSON bytes prepared for download.');
-      return;
-    }
-    if (
-      geometryValid === null &&
-      !window.confirm(
-        'Browser structural validation passed, but the local val3dity service is unavailable. ' +
-          'Export with 3D primitive validity unchecked?'
-      )
-    ) {
-      return;
-    }
-    const text = prepared.text;
-    const blob = new Blob([text], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const base = fileName.replace(/\.city\.json$|\.json$/i, '') || 'export';
-    a.download = `${base}.modified.city.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [cityjson, fileName, runExternalGeometryValidation]);
-
-  const handleExportGltf = useCallback(() => {
-    if (!cityjson) return;
-    try {
-      const glb = exportToGltf(cityjson);
-      // Pass the underlying ArrayBuffer to Blob — Uint8Array's buffer type
-      // can be ArrayBufferLike (incl. SharedArrayBuffer), which TS strict
-      // mode rejects as a BlobPart. Slicing forces a fresh ArrayBuffer.
-      const blob = new Blob([glb.slice().buffer], { type: 'model/gltf-binary' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const base =
-        fileName.replace(/\.city\.json$|\.json$|\.jsonl$|\.city\.jsonl$/i, '') || 'export';
-      a.download = `${base}.glb`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    }
-  }, [cityjson, fileName]);
-
-  const handleOpenLoader = useCallback(() => {
-    setLoadModalOpen(true);
-  }, []);
-
-  // Cheap integrity check — re-runs only when the doc identity / reload-token
-  // changes, NOT on every render. The walk is O(vertices+faces), <100 ms even
-  // on a Hamburg tile (918 buildings, ~30k vertices).
-  const integrity = useMemo(() => {
-    if (!cityjson) return null;
-    return checkIntegrity(cityjson);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityjson, reloadToken]);
-
-  // ── IFC import ────────────────────────────────────────────────────────────
-
-  /** Step 1: open file picker, parse the picked IFC via web-ifc (WASM),
-   *  surface a summary, and arm the map for placement. The web-ifc module
-   *  + 1.3 MB WASM is dynamically imported here so the initial bundle
-   *  doesn't pay the cost for users who never touch IFC. */
-  const handleImportIfc = useCallback(() => {
-    if (!cityjson) return;
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.ifc';
-    input.style.display = 'none';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      input.remove();
-      if (!file) return;
-      setIfcParsing(true);
-      try {
-        const { parseIfc } = await import('./lib/ifc-import');
-        const parsed = await parseIfc(file);
-        setIfcPending({ parsed, fileName: file.name });
-      } catch (e) {
-        alert(`IFC parse failed: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        setIfcParsing(false);
-      }
-    };
-    document.body.appendChild(input);
-    input.click();
-  }, [cityjson]);
-
-  /** Step 2: user clicked the map — drop the IFC's full triangulated mesh
-   *  at that location. The mesh is emitted as an LoD 3 MultiSurface (with
-   *  GroundSurface / RoofSurface / WallSurface inferred from triangle
-   *  normals), preceded by a clean LoD 1 GroundSurface rectangle so the
-   *  map's footprint extractor renders a tidy outline. */
-  const handleIfcPlacement = useCallback(
-    async (lngLat: [number, number]) => {
-      if (!cityjson || !ifcPending) return;
-      try {
-        pushUndo(`Import IFC: ${ifcPending.fileName}`);
-        const { convertIfcToCityJsonBuilding } = await import('./lib/ifc-to-cityjson');
-        const { value: result } = runStructurallyGuardedMutation(
-          cityjson,
-          `Importing IFC ${ifcPending.fileName}`,
-          () => {
-            const converted = convertIfcToCityJsonBuilding(
-              cityjson,
-              ifcPending.parsed,
-              lngLat,
-              ifcPending.fileName
-            );
-            if (converted.vertexOffset !== cityjson.vertices.length) {
-              throw new Error(
-                `Vertex offset mismatch: expected ${cityjson.vertices.length}, got ${converted.vertexOffset}`
-              );
-            }
-            cityjson.vertices.push(...converted.newVertices);
-            cityjson.CityObjects[converted.id] = converted.cityObject;
-            return converted;
-          }
-        );
-        setDirtyIds((prev) => {
-          const next = new Set(prev);
-          next.add(result.id);
-          return next;
-        });
-        setSelection({ objectId: result.id });
-        setReloadToken((t) => t + 1);
-        markGeometryChanged();
-      } catch (e) {
-        alert(
-          `Could not create building from IFC: ${e instanceof Error ? e.message : String(e)}`
-        );
-      } finally {
-        setIfcPending(null);
-      }
-    },
-    [cityjson, ifcPending, pushUndo, markGeometryChanged]
-  );
-
-  const handleCancelIfcPlacement = useCallback(() => {
-    setIfcPending(null);
-  }, []);
-
-  // Esc key cancels IFC placement (parallel to the polygon-draw cancel).
+  // Keyboard shortcuts: Ctrl+Z / Cmd+Z, Ctrl+C / Ctrl+V, Delete, Backspace.
   useEffect(() => {
-    if (!ifcPending) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        setIfcPending(null);
+        buildingEditor.handleDelete();
+        return;
+      }
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta) return;
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        if (e.shiftKey) undoRedo.handleRedo();
+        else undoRedo.handleUndo();
+      } else if (e.key === 'y') {
+        e.preventDefault();
+        undoRedo.handleRedo();
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        buildingEditor.handleCopy();
+      } else if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        buildingEditor.handlePaste();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ifcPending]);
+  }, [undoRedo, buildingEditor]);
 
-  const handleMergeFile = useCallback(() => {
-    if (!cityjson) return;
-    // Hidden file input — appended, clicked, removed.
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json,.city.json,.jsonl,.city.jsonl';
-    input.style.display = 'none';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      input.remove();
-      if (!file) return;
-      try {
-        const text = await file.text();
-        const parsed = parseCityJsonAuto(text);
-        if (!parsed.ok) {
-          alert(`Could not parse "${file.name}": ${parsed.error}`);
-          return;
-        }
-        // Snapshot before mutation so the user can undo a bad merge.
-        pushUndo(`Merge ${file.name}`);
-        const { value: r } = runStructurallyGuardedMutation(
-          cityjson,
-          `Merging ${file.name}`,
-          () => mergeCityJson(cityjson, parsed.doc)
-        );
-        if (!r.ok) {
-          // Roll back — merge refused, no doc change.
-          undoRef.current.undo({
-            doc: cityjson,
-            dirtyIds: new Set(dirtyIds),
-            selectionId: selection?.objectId ?? null,
-          });
-          setUndoVersion((v) => v + 1);
-          alert(`Merge failed: ${r.reason}`);
-          return;
-        }
-        setReloadToken((t) => t + 1);
-        markGeometryChanged('Merged geometry has not been checked with val3dity yet.');
-        const lines = [
-          `Merged "${file.name}" successfully.`,
-          `Added ${r.added} CityObject${r.added === 1 ? '' : 's'}.`,
-        ];
-        if (r.renamed && r.renamed > 0) {
-          lines.push(
-            `${r.renamed} id conflict${r.renamed === 1 ? '' : 's'} resolved with __mergeN suffix.`
-          );
-        }
-        alert(lines.join('\n'));
-      } catch (e) {
-        alert(`Could not read file: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    };
-    document.body.appendChild(input);
-    input.click();
-  }, [cityjson, pushUndo, dirtyIds, selection, markGeometryChanged]);
-
-  const handleCompactVertices = useCallback(() => {
-    if (!cityjson) return;
-    pushUndo('Compact orphaned vertices');
-    const r = compactVertices(cityjson);
-    if (r.changed) {
-      setReloadToken((t) => t + 1);
-      // Mark every dirty building as still dirty (compact preserves their
-      // semantic state, but the doc is structurally different and we want
-      // the user to feel that an action took place).
-      setSaveStatus('idle');
-    } else {
-      // Roll back the snapshot we just pushed — nothing actually changed.
-      undoRef.current.undo({
-        doc: cityjson,
-        dirtyIds: new Set(dirtyIds),
-        selectionId: selection?.objectId ?? null,
-      });
-      setUndoVersion((v) => v + 1);
-    }
-    alert(
-      r.changed
-        ? `Reclaimed ${r.reclaimed.toLocaleString()} orphaned vertices. ` +
-            `Doc now has ${r.after.toLocaleString()} vertices (was ${r.before.toLocaleString()}).`
-        : 'No orphaned vertices to reclaim.'
-    );
-  }, [cityjson, pushUndo, dirtyIds, selection]);
-
-  const handleShowIntegrity = useCallback(() => {
-    if (!integrity) return;
-    if (integrity.issues.length === 0) {
-      alert(
-        `Current browser structure check: valid.\n` +
-          `Input at load: ${
-            inputIntegrity?.ok
-              ? 'valid'
-              : `${inputIntegrity?.counts.error ?? 0} error(s) detected`
-          }.\n\n` +
-          `ISO 19107 primitive status: ${primitiveValidation.message}`
-      );
-      return;
-    }
-    // Group + cap so the alert isn't a wall of text on huge files. First 12
-    // entries cover the typical case; "+ N more" hints at the rest.
-    const lines: string[] = [];
-    lines.push(
-      `Integrity: ${integrity.counts.error} error(s), ${integrity.counts.warning} warning(s), ${integrity.counts.info} info`
-    );
-    lines.push(
-      `Scanned ${integrity.summary.cityObjects} CityObjects, ${integrity.summary.vertices} vertices (${integrity.summary.referencedVertices} referenced).`
-    );
-    lines.push(
-      `Input at load: ${
-        inputIntegrity?.ok ? 'valid' : `${inputIntegrity?.counts.error ?? 0} error(s) detected`
-      }.`
-    );
-    lines.push(`ISO 19107 primitive status: ${primitiveValidation.message}`);
-    lines.push('');
-    const max = 12;
-    for (const issue of integrity.issues.slice(0, max)) {
-      const tag = issue.severity === 'error' ? '✗' : issue.severity === 'warning' ? '⚠' : 'ℹ';
-      lines.push(`${tag} [${issue.code}] ${issue.message}`);
-    }
-    if (integrity.issues.length > max) {
-      lines.push(`… + ${integrity.issues.length - max} more`);
-    }
-    alert(lines.join('\n'));
-  }, [integrity, inputIntegrity, primitiveValidation.message]);
-
-  // Extract footprints once (memoized on doc identity + reload token) so
-  // FilterBar and the dimmed-set computation share the same derived data.
+  // Derived properties
   const footprintsForFilter = useMemo(() => {
-    if (!cityjson) return [];
-    return extractFootprints(cityjson);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityjson, reloadToken]);
+    if (!coreState.cityjson) return [];
+    return extractFootprints(coreState.cityjson);
+  }, [coreState.cityjson, coreState.reloadToken]);
 
   const filteredIds = useMemo(
-    () => matchingIds(footprintsForFilter, filter),
-    [footprintsForFilter, filter]
+    () => matchingIds(footprintsForFilter, coreState.filter),
+    [footprintsForFilter, coreState.filter]
   );
 
-  const roadAreas = useMemo(() => {
-    if (!cityjson) return [];
-    return extractTransportationAreas(cityjson);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityjson, reloadToken]);
-
-  const roadPreviewAreas = useMemo(() => {
-    if (!cityjson || !roadDraft) return [];
-    try {
-      const previewDoc = JSON.parse(JSON.stringify(cityjson)) as CityJsonDocument;
-      return insertRoadIntoCityJson(previewDoc, roadDraft, { id: '__road_preview__' }).areas;
-    } catch {
-      return [];
-    }
-  }, [cityjson, roadDraft, reloadToken]);
-
-  // Pre-applied filter result for the BuildingListPanel — same input as
-  // matchingIds but we keep the Footprint objects (not just ids) so the
-  // list can show function/year/height per row.
   const filteredFootprints = useMemo(
-    () => applyFilter(footprintsForFilter, filter),
-    [footprintsForFilter, filter]
+    () => applyFilter(footprintsForFilter, coreState.filter),
+    [footprintsForFilter, coreState.filter]
   );
 
-  const filterIsEmpty = isFilterEmpty(filter);
-
-  // Re-derived after every undo/redo/push so the toolbar buttons reflect
-  // the current stack state. `undoVersion` is the dep that drives this.
-  const undoState = useMemo(() => {
-    if (!cityjson) return undefined;
-    return {
-      canUndo: undoRef.current.canUndo(),
-      canRedo: undoRef.current.canRedo(),
-      undoLabel: undoRef.current.peekUndoLabel(),
-      redoLabel: undoRef.current.peekRedoLabel(),
-      onUndo: handleUndo,
-      onRedo: handleRedo,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityjson, undoVersion, handleUndo, handleRedo]);
+  const filterIsEmpty = isFilterEmpty(coreState.filter);
 
   const stats = useMemo(() => {
-    if (!cityjson) return null;
-    const ids = Object.keys(cityjson.CityObjects);
+    const doc = coreState.cityjson;
+    if (!doc) return null;
+    const ids = Object.keys(doc.CityObjects);
     const rootBuildings = ids.filter((id) => {
-      const o = cityjson.CityObjects[id];
+      const o = doc.CityObjects[id];
       return (
         (o.type === 'Building' ||
           o.type === 'Bridge' ||
@@ -1755,116 +172,180 @@ export default function App() {
       );
     });
     return {
-      version: cityjson.version,
+      version: doc.version,
       totalObjects: ids.length,
       rootBuildings: rootBuildings.length,
-      vertices: cityjson.vertices.length,
-      crs: cityjson.metadata?.referenceSystem ?? null,
+      vertices: doc.vertices.length,
+      crs: doc.metadata?.referenceSystem ?? null,
     };
-  }, [cityjson]);
+  }, [coreState.cityjson]);
 
-  // Derived: filtered sub-document for the selected building
   const filteredForSelected = useMemo(() => {
-    if (!cityjson || !selection) return null;
-    return filterToBuilding(cityjson, selection.objectId);
-  }, [cityjson, selection, reloadToken]);
+    if (!coreState.cityjson || !coreState.selection) return null;
+    return filterToBuilding(coreState.cityjson, coreState.selection.objectId);
+  }, [coreState.cityjson, coreState.selection, coreState.reloadToken]);
+
+  const handleSelect = useCallback(
+    (info: SelectionInfo | null) => {
+      if (info?.ctrlKey) {
+        buildingEditor.setMultiSelection((prev) => {
+          const next = new Set(prev);
+          if (next.has(info.objectId)) next.delete(info.objectId);
+          else next.add(info.objectId);
+          return next;
+        });
+        if (!coreState.selection) coreState.setSelection(info);
+        return;
+      }
+      coreState.setSelection(info);
+      if (!info?.ctrlKey) buildingEditor.setMultiSelection(new Set());
+      if (info && coreState.cityjson && !coreState.originals.has(info.objectId)) {
+        const obj = coreState.cityjson.CityObjects[info.objectId];
+        coreState.originals.set(info.objectId, { ...(obj?.attributes ?? {}) });
+      }
+    },
+    [coreState, buildingEditor]
+  );
+
+  const handleAttributeChange = useCallback(
+    (id: string, key: string, value: AttributeValue) => {
+      if (!coreState.cityjson) return;
+      const obj = coreState.cityjson.CityObjects[id];
+      if (!obj) return;
+      const prev = obj.attributes?.[key];
+      if (prev === value) return;
+      undoRedo.pushUndo(`Edit ${id}.${key}`);
+      if (!obj.attributes) obj.attributes = {};
+      obj.attributes[key] = value;
+      coreState.setDirtyIds((prevSet) => {
+        const next = new Set(prevSet);
+        next.add(id);
+        return next;
+      });
+    },
+    [coreState, undoRedo]
+  );
+
+  const handleRevert = useCallback(
+    (id: string) => {
+      if (!coreState.cityjson) return;
+      const snap = coreState.originals.get(id);
+      if (!snap) return;
+      coreState.cityjson.CityObjects[id].attributes = { ...snap };
+      coreState.setDirtyIds((prevSet) => {
+        const next = new Set(prevSet);
+        next.delete(id);
+        return next;
+      });
+      coreState.setSelection((s) => (s ? { ...s } : s));
+    },
+    [coreState]
+  );
 
   return (
     <div className="app">
       <Toolbar
-        fileName={fileName}
+        fileName={coreState.fileName}
         stats={stats}
-        dirtyCount={dirtyIds.size}
-        hasData={!!cityjson}
-        onExport={handleExport}
-        onExportGltf={handleExportGltf}
+        dirtyCount={coreState.dirtyIds.size}
+        hasData={!!coreState.cityjson}
+        onExport={importExport.handleExport}
+        onExportGltf={importExport.handleExportGltf}
         integrity={
-          integrity
+          importExport.integrity
             ? {
-                errorCount: integrity.counts.error,
-                warningCount: integrity.counts.warning,
-                onShow: handleShowIntegrity,
+                errorCount: importExport.integrity.counts.error,
+                warningCount: importExport.integrity.counts.warning,
+                onShow: importExport.handleShowIntegrity,
               }
             : undefined
         }
-        orphanedVertexCount={integrity?.summary.orphanedVertices ?? 0}
-        onCompactVertices={handleCompactVertices}
-        undoState={undoState}
-        showList={showList}
-        onToggleList={() => setShowList((v) => !v)}
-        onMergeFile={handleMergeFile}
-        onImportIfc={handleImportIfc}
-        ifcParsing={ifcParsing}
-        onReloadView={handleReloadView}
-        onOpenLoader={handleOpenLoader}
-        onSaveLocal={handleSaveLocal}
-        saveStatus={saveStatus}
-        drawMode={drawMode}
-        onStartDraw={handleStartDraw}
-        onCancelDraw={handleCancelDraw}
-        roadEditorOpen={showRoadEditor}
-        onToggleRoadEditor={() => setShowRoadEditor((value) => !value)}
-        onCopy={handleCopy}
-        onPaste={handlePaste}
-        canCopy={!!selection || multiSelection.size > 0}
-        canPaste={!!clipboardIds && clipboardIds.size > 0}
-        onDelete={handleDelete}
-        canDelete={!!selection || multiSelection.size > 0}
+        orphanedVertexCount={importExport.integrity?.summary.orphanedVertices ?? 0}
+        onCompactVertices={importExport.handleCompactVertices}
+        undoState={undoRedo.undoState}
+        showList={coreState.showList}
+        onToggleList={() => coreState.setShowList((v) => !v)}
+        onMergeFile={importExport.handleMergeFile}
+        onImportIfc={buildingEditor.handleImportIfc}
+        ifcParsing={buildingEditor.ifcParsing}
+        onReloadView={() => coreState.setReloadToken((t) => t + 1)}
+        onOpenLoader={() => importExport.setLoadModalOpen(true)}
+        onSaveLocal={importExport.handleSaveLocal}
+        saveStatus={coreState.saveStatus}
+        drawMode={coreState.drawMode}
+        onStartDraw={() => {
+          coreState.setSelection(null);
+          roadEditor.setRoadStatus(null);
+          coreState.setDrawMode('polygon');
+        }}
+        onCancelDraw={() => {
+          coreState.setDrawMode('none');
+          buildingEditor.setPendingFootprint(null);
+          buildingEditor.setPendingForm(null);
+        }}
+        roadEditorOpen={roadEditor.showRoadEditor}
+        onToggleRoadEditor={() => roadEditor.setShowRoadEditor((value) => !value)}
+        onCopy={buildingEditor.handleCopy}
+        onPaste={buildingEditor.handlePaste}
+        canCopy={!!coreState.selection || buildingEditor.multiSelection.size > 0}
+        canPaste={!!buildingEditor.clipboardIds && buildingEditor.clipboardIds.size > 0}
+        onDelete={buildingEditor.handleDelete}
+        canDelete={!!coreState.selection || buildingEditor.multiSelection.size > 0}
         zoningEnabled={zoningEnabled}
         zoningLoading={zoningLoading}
         onToggleZoning={handleToggleZoning}
-        onFilterViewport={handleReloadViewport}
-        canFilterViewport={!!seqRawText}
+        onFilterViewport={importExport.handleReloadViewport}
+        canFilterViewport={!!importExport.seqRawText}
         catalogState={
-          catalogConnection
+          catalog.catalogConnection
             ? {
-                loadedTiles: catalogConnection.loadedTiles.size,
-                loading: catalogStatus.kind === 'loading',
-                dirty: dirtyIds.size > 0,
-                error: catalogStatus.kind === 'error' ? catalogStatus.message : undefined,
-                message: catalogStatus.message,
+                loadedTiles: catalog.catalogConnection.loadedTiles.size,
+                loading: catalog.catalogStatus.kind === 'loading',
+                dirty: coreState.dirtyIds.size > 0,
+                error: catalog.catalogStatus.kind === 'error' ? catalog.catalogStatus.message : undefined,
+                message: catalog.catalogStatus.message,
               }
             : undefined
         }
         primitiveValidation={{
-          ...primitiveValidation,
-          onValidate: () => void handleValidateGeometry(),
+          ...coreState.primitiveValidation,
+          onValidate: () => void importExport.handleValidateGeometry(),
         }}
         onLoadCatalogViewport={
-          catalogConnection
+          catalog.catalogConnection
             ? () => {
-                const bbox = mapBboxRef.current;
-                if (bbox) void loadCatalogViewport(bbox);
+                const bbox = catalog.mapBboxRef.current;
+                if (bbox) void catalog.loadCatalogViewport(bbox);
                 else alert('Map viewport is not ready yet.');
               }
             : undefined
         }
-        onPersistCatalog={catalogConnection ? handlePersistCatalog : undefined}
+        onPersistCatalog={catalog.catalogConnection ? catalog.handlePersistCatalog : undefined}
       />
-      {cityjson && footprintsForFilter.length > 0 && (
+      {coreState.cityjson && footprintsForFilter.length > 0 && (
         <FilterBar
           footprints={footprintsForFilter}
-          filter={filter}
-          onChange={setFilter}
+          filter={coreState.filter}
+          onChange={coreState.setFilter}
           matchCount={filteredIds.size}
         />
       )}
       <div className="main">
-        {showList && cityjson && footprintsForFilter.length > 0 && (
+        {coreState.showList && coreState.cityjson && footprintsForFilter.length > 0 && (
           <BuildingListPanel
             filteredFootprints={filteredFootprints}
             totalCount={footprintsForFilter.length}
-            selectedId={selection?.objectId ?? null}
-            onSelect={(id) => setSelection({ objectId: id })}
-            onClose={() => setShowList(false)}
+            selectedId={coreState.selection?.objectId ?? null}
+            onSelect={(id) => coreState.setSelection({ objectId: id })}
+            onClose={() => coreState.setShowList(false)}
           />
         )}
         <div className="viewer-host" style={{ position: 'relative' }}>
-          {ifcPending && (
+          {buildingEditor.ifcPending && (
             <IfcPlacementBanner
-              parsed={ifcPending.parsed}
-              fileName={ifcPending.fileName}
-              onCancel={handleCancelIfcPlacement}
+              parsed={buildingEditor.ifcPending.parsed}
+              fileName={buildingEditor.ifcPending.fileName}
+              onCancel={buildingEditor.handleCancelIfcPlacement}
             />
           )}
           {zoningEnabled && zones.length > 0 && (
@@ -1875,101 +356,108 @@ export default function App() {
               onClearSelected={() => setSelectedZone(null)}
             />
           )}
-          {showRoadEditor && (
+          {roadEditor.showRoadEditor && (
             <RoadEditorPanel
-              osmRoads={osmRoads}
-              selectedOsmRoadId={selectedOsmRoadId}
-              draft={roadDraft}
-              status={roadStatus}
-              basemap={basemap}
-              drawMode={drawMode}
-              backendUrl={roadBackendUrl}
-              insertedRoadId={lastInsertedRoadId}
-              onClose={() => setShowRoadEditor(false)}
-              onFetchOsmRoads={() => void handleFetchOsmRoads()}
-              onBasemapChange={setBasemap}
-              onStartManualDraw={handleStartRoadDraw}
-              onFinishManualDraw={() => setFinishRoadDrawToken((token) => token + 1)}
-              onCancelDraw={handleCancelDraw}
-              onDraftChange={handleRoadDraftChange}
-              onSplitDraft={handleSplitRoadDraft}
-              onInsertRoad={handleInsertRoad}
-              onExportPayload={handleExportRoadPayload}
-              onPostPayload={() => void handlePostRoadPayload()}
-              onBackendUrlChange={setRoadBackendUrl}
+              osmRoads={roadEditor.osmRoads}
+              selectedOsmRoadId={roadEditor.selectedOsmRoadId}
+              draft={roadEditor.roadDraft}
+              status={roadEditor.roadStatus}
+              basemap={roadEditor.basemap}
+              drawMode={coreState.drawMode}
+              backendUrl={roadEditor.roadBackendUrl}
+              insertedRoadId={roadEditor.lastInsertedRoadId}
+              onClose={() => roadEditor.setShowRoadEditor(false)}
+              onFetchOsmRoads={() => void roadEditor.handleFetchOsmRoads()}
+              onBasemapChange={roadEditor.setBasemap}
+              onStartManualDraw={roadEditor.handleStartRoadDraw}
+              onFinishManualDraw={() => roadEditor.setFinishRoadDrawToken((token) => token + 1)}
+              onCancelDraw={() => {
+                coreState.setDrawMode('none');
+                buildingEditor.setPendingFootprint(null);
+                buildingEditor.setPendingForm(null);
+              }}
+              onDraftChange={roadEditor.handleRoadDraftChange}
+              onSplitDraft={roadEditor.handleSplitRoadDraft}
+              onInsertRoad={roadEditor.handleInsertRoad}
+              onExportPayload={roadEditor.handleExportRoadPayload}
+              onPostPayload={() => void roadEditor.handlePostRoadPayload()}
+              onBackendUrlChange={roadEditor.setRoadBackendUrl}
             />
           )}
-          {cityjson ? (
+          {coreState.cityjson ? (
             <MapView
-              cityjson={cityjson}
-              selectedId={selection?.objectId ?? null}
+              cityjson={coreState.cityjson}
+              selectedId={coreState.selection?.objectId ?? null}
               onSelect={handleSelect}
-              reloadToken={reloadToken}
-              drawMode={drawMode}
-              onFootprintDrawn={handleFootprintDrawn}
-              onRoadLineDrawn={handleRoadLineDrawn}
-              finishRoadDrawToken={finishRoadDrawToken}
-              onDrawCanceled={handleCancelDraw}
+              reloadToken={coreState.reloadToken}
+              drawMode={coreState.drawMode}
+              onFootprintDrawn={buildingEditor.setPendingFootprint}
+              onRoadLineDrawn={roadEditor.handleRoadLineDrawn}
+              finishRoadDrawToken={roadEditor.finishRoadDrawToken}
+              onDrawCanceled={() => {
+                coreState.setDrawMode('none');
+                buildingEditor.setPendingFootprint(null);
+                buildingEditor.setPendingForm(null);
+              }}
               filteredIds={filterIsEmpty ? null : filteredIds}
-              onPlacementClick={ifcPending ? handleIfcPlacement : undefined}
-              onViewportChange={handleViewportChange}
-              dragTransformId={pendingTransform?.id ?? null}
-              onDragMove={handleDragMove}
-              multiSelectedIds={multiSelection.size > 0 ? multiSelection : null}
+              onPlacementClick={buildingEditor.ifcPending ? buildingEditor.handleIfcPlacement : undefined}
+              onViewportChange={catalog.handleViewportChange}
+              dragTransformId={buildingEditor.pendingTransform?.id ?? null}
+              onDragMove={buildingEditor.handleDragMove}
+              multiSelectedIds={buildingEditor.multiSelection.size > 0 ? buildingEditor.multiSelection : null}
               zones={zoningEnabled ? zones : []}
               onZoneSelect={handleZoneSelect}
-              basemap={basemap}
-              roadAreas={roadAreas}
-              roadPreviewAreas={roadPreviewAreas}
-              selectedRoadAreaId={selectedRoadArea?.id ?? null}
+              basemap={roadEditor.basemap}
+              roadAreas={roadEditor.roadAreas}
+              roadPreviewAreas={roadEditor.roadPreviewAreas}
+              selectedRoadAreaId={roadEditor.selectedRoadArea?.id ?? null}
               onRoadAreaSelect={(area) => {
-                setSelectedRoadArea(area);
-                setSelection({ objectId: area.roadId });
+                roadEditor.setSelectedRoadArea(area);
+                handleSelect({ objectId: area.roadId });
               }}
-              osmRoads={osmRoads}
-              selectedOsmRoadId={selectedOsmRoadId}
-              onOsmRoadSelect={handleOsmRoadSelect}
+              osmRoads={roadEditor.osmRoads}
+              selectedOsmRoadId={roadEditor.selectedOsmRoadId}
+              onOsmRoadSelect={roadEditor.handleOsmRoadSelect}
+              osm2streetsResult={roadEditor.osm2streetsResult}
+              osm2streetsBbox={roadEditor.osm2streetsBbox}
               footprintEdit={
-                footprintEdit
+                buildingEditor.footprintEdit
                   ? {
-                      buildingId: footprintEdit.buildingId,
-                      footprintWgs84: footprintEdit.initialFootprint,
+                      buildingId: buildingEditor.footprintEdit.buildingId,
+                      footprintWgs84: buildingEditor.footprintEdit.initialFootprint,
                     }
                   : null
               }
-              onFootprintChange={handleFootprintChange}
+              onFootprintChange={buildingEditor.handleFootprintChange}
               preview={
-                pendingFootprint && pendingForm
+                buildingEditor.pendingFootprint && buildingEditor.pendingForm
                   ? {
-                      // Mesh-based preview gives the user the actual roof shape
-                      // in real time; falls back to polygon extrusion if the
-                      // target CRS isn't recognised by proj4.
                       mesh:
                         buildPreviewMesh({
-                          footprintWgs84: pendingFootprint,
-                          targetCrs: detectCrs(cityjson).code,
+                          footprintWgs84: buildingEditor.pendingFootprint,
+                          targetCrs: detectCrs(coreState.cityjson).code,
                           eaveHeight:
-                            pendingForm.roofType === 'flat'
-                              ? pendingForm.totalHeight
-                              : pendingForm.totalHeight - pendingForm.roofHeight,
-                          ridgeHeight: pendingForm.totalHeight,
-                          roofType: pendingForm.roofType,
-                          storeys: pendingForm.storeys,
-                          eaveOverhang: pendingForm.eaveOverhang,
+                            buildingEditor.pendingForm.roofType === 'flat'
+                              ? buildingEditor.pendingForm.totalHeight
+                              : buildingEditor.pendingForm.totalHeight - buildingEditor.pendingForm.roofHeight,
+                          ridgeHeight: buildingEditor.pendingForm.totalHeight,
+                          roofType: buildingEditor.pendingForm.roofType,
+                          storeys: buildingEditor.pendingForm.storeys,
+                          eaveOverhang: buildingEditor.pendingForm.eaveOverhang,
                           openings:
-                            pendingForm.addWindows || pendingForm.addDoor
+                            buildingEditor.pendingForm.addWindows || buildingEditor.pendingForm.addDoor
                               ? {
-                                  windows: pendingForm.addWindows,
-                                  door: pendingForm.addDoor,
+                                  windows: buildingEditor.pendingForm.addWindows,
+                                  door: buildingEditor.pendingForm.addDoor,
                                 }
                               : undefined,
                         }) ?? undefined,
-                      polygon: pendingFootprint,
-                      height: pendingForm.totalHeight,
+                      polygon: buildingEditor.pendingFootprint,
+                      height: buildingEditor.pendingForm.totalHeight,
                     }
-                  : pendingTransform
+                  : buildingEditor.pendingTransform
                   ? (() => {
-                      const t = computeTransformedFootprint(cityjson, pendingTransform);
+                      const t = computeTransformedFootprint(coreState.cityjson, buildingEditor.pendingTransform);
                       return t ? { polygon: t.polygon, height: t.height } : null;
                     })()
                   : null
@@ -1978,34 +466,38 @@ export default function App() {
           ) : (
             <EmptyMapBackdrop />
           )}
-          {(!cityjson || loadModalOpen) && (
+          {(!coreState.cityjson || importExport.loadModalOpen) && (
             <FileLoader
-              onLoaded={handleLoaded}
-              onCatalogLoaded={handleCatalogLoaded}
-              canClose={!!cityjson}
-              onClose={() => setLoadModalOpen(false)}
+              onLoaded={importExport.handleLoaded}
+              onCatalogLoaded={importExport.handleCatalogLoaded}
+              canClose={!!coreState.cityjson}
+              onClose={() => importExport.setLoadModalOpen(false)}
             />
           )}
-          {pendingFootprint && cityjson && (
+          {buildingEditor.pendingFootprint && coreState.cityjson && (
             <BuildingCreator
-              vertexCount={pendingFootprint.length}
-              footprint={pendingFootprint}
-              cityjson={cityjson}
-              onFormChange={setPendingForm}
-              onCreate={handleCreateBuilding}
-              onCancel={handleCancelDraw}
+              vertexCount={buildingEditor.pendingFootprint.length}
+              footprint={buildingEditor.pendingFootprint}
+              cityjson={coreState.cityjson}
+              onFormChange={buildingEditor.setPendingForm}
+              onCreate={buildingEditor.handleCreateBuilding}
+              onCancel={() => {
+                coreState.setDrawMode('none');
+                buildingEditor.setPendingFootprint(null);
+                buildingEditor.setPendingForm(null);
+              }}
             />
           )}
         </div>
 
-        {cityjson && selection && filteredForSelected && (
+        {coreState.cityjson && coreState.selection && filteredForSelected && (
           <aside className={`side-panel ${sidePanelWide ? 'wide' : ''}`}>
             <div className="panel-header">
               <h3>
-                {dirtyIds.has(selection.objectId) && (
+                {coreState.dirtyIds.has(coreState.selection.objectId) && (
                   <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[var(--warn)]" />
                 )}
-                {cityjson.CityObjects[selection.objectId]?.type ?? 'Unknown'}
+                {coreState.cityjson.CityObjects[coreState.selection.objectId]?.type ?? 'Unknown'}
               </h3>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
@@ -2018,7 +510,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    setSelection(null);
+                    coreState.setSelection(null);
                     setSidePanelWide(false);
                   }}
                   aria-label="Close"
@@ -2032,54 +524,54 @@ export default function App() {
             <div className="building-viewer-host">
               <Viewer
                 cityjson={filteredForSelected}
-                reloadToken={reloadToken}
+                reloadToken={coreState.reloadToken}
                 onSelect={() => {}}
                 splitPreview={
-                  splitPreviewHeights
+                  buildingEditor.splitPreviewHeights
                     ? {
-                        buildingId: selection.objectId,
-                        heights: splitPreviewHeights,
-                        floorPlans: splitPreviewFloorPlans ?? undefined,
+                        buildingId: coreState.selection.objectId,
+                        heights: buildingEditor.splitPreviewHeights,
+                        floorPlans: buildingEditor.splitPreviewFloorPlans ?? undefined,
                       }
                     : null
                 }
-                onAdjustSplit={handleAdjustSplit}
+                onAdjustSplit={buildingEditor.handleAdjustSplit}
               />
             </div>
 
             <AttributePanelInline
-              buildingId={selection.objectId}
-              cityjson={cityjson}
-              isDirty={dirtyIds.has(selection.objectId)}
+              buildingId={coreState.selection.objectId}
+              cityjson={coreState.cityjson}
+              isDirty={coreState.dirtyIds.has(coreState.selection.objectId)}
               onAttributeChange={handleAttributeChange}
               onRevert={handleRevert}
-              onSplitByFloor={handleSplitByFloor}
-              onSplitByFloorHeights={handleSplitByFloorHeights}
-              onSplitByFloorPlans={handleSplitByFloorPlans}
-              onCustomHeightsPreview={setSplitPreviewHeights}
-              onFloorPlansPreview={setSplitPreviewFloorPlans}
-              onSplitBySide={handleSplitBySide}
+              onSplitByFloor={buildingEditor.handleSplitByFloor}
+              onSplitByFloorHeights={buildingEditor.handleSplitByFloorHeights}
+              onSplitByFloorPlans={buildingEditor.handleSplitByFloorPlans}
+              onCustomHeightsPreview={buildingEditor.setSplitPreviewHeights}
+              onFloorPlansPreview={buildingEditor.setSplitPreviewFloorPlans}
+              onSplitBySide={buildingEditor.handleSplitBySide}
               pendingTransform={
-                pendingTransform?.id === selection.objectId ? pendingTransform : null
+                buildingEditor.pendingTransform?.id === coreState.selection.objectId ? buildingEditor.pendingTransform : null
               }
               terrainSnap={
-                pendingTransform?.id === selection.objectId
-                  ? estimateTerrainSnap(cityjson, pendingTransform)
+                buildingEditor.pendingTransform?.id === coreState.selection.objectId
+                  ? estimateTerrainSnap(coreState.cityjson, buildingEditor.pendingTransform)
                   : null
               }
-              onStartTransform={handleStartTransform}
-              onUpdateTransform={handleUpdateTransform}
-              onCancelTransform={handleCancelTransform}
-              onSaveTransform={handleSaveTransform}
+              onStartTransform={buildingEditor.handleStartTransform}
+              onUpdateTransform={buildingEditor.handleUpdateTransform}
+              onCancelTransform={buildingEditor.handleCancelTransform}
+              onSaveTransform={buildingEditor.handleSaveTransform}
               inFootprintEdit={
-                footprintEdit?.buildingId === selection.objectId
+                buildingEditor.footprintEdit?.buildingId === coreState.selection.objectId
               }
-              onStartFootprintEdit={handleStartFootprintEdit}
-              onSaveFootprintEdit={handleSaveFootprintEdit}
-              onCancelFootprintEdit={handleCancelFootprintEdit}
-              onMoveOpening={handleMoveOpening}
-              onMakeEditable={handleMakeEditable}
-              onReshapeBuilding={handleReshapeBuilding}
+              onStartFootprintEdit={buildingEditor.handleStartFootprintEdit}
+              onSaveFootprintEdit={buildingEditor.handleSaveFootprintEdit}
+              onCancelFootprintEdit={buildingEditor.handleCancelFootprintEdit}
+              onMoveOpening={buildingEditor.handleMoveOpening}
+              onMakeEditable={buildingEditor.handleMakeEditable}
+              onReshapeBuilding={buildingEditor.handleReshapeBuilding}
             />
           </aside>
         )}
@@ -2088,7 +580,40 @@ export default function App() {
   );
 }
 
-// Attribute panel without its own header (the parent aside owns the header now).
+// ─── Auxiliary helper functions ───────────────────────────────────────────
+
+function computeFootprintBbox(
+  footprints: { polygon: [number, number][] }[]
+): [number, number, number, number] | null {
+  let west = Infinity,
+    south = Infinity,
+    east = -Infinity,
+    north = -Infinity;
+  let any = false;
+  for (const fp of footprints) {
+    for (const [lng, lat] of fp.polygon) {
+      if (lng < west) west = lng;
+      if (lat < south) south = lat;
+      if (lng > east) east = lng;
+      if (lat > north) north = lat;
+      any = true;
+    }
+  }
+  return any ? [west, south, east, north] : null;
+}
+
+function expandBbox(
+  bbox: [number, number, number, number],
+  ratio = 0.15,
+  minPad = 0.002
+): [number, number, number, number] {
+  const [west, south, east, north] = bbox;
+  const lngPad = Math.max((east - west) * ratio, minPad);
+  const latPad = Math.max((north - south) * ratio, minPad);
+  return [west - lngPad, south - latPad, east + lngPad, north + latPad];
+}
+
+// Attribute panel without its own header
 function AttributePanelInline(props: {
   buildingId: string;
   cityjson: CityJsonDocument;
@@ -2115,7 +640,7 @@ function AttributePanelInline(props: {
   onStartFootprintEdit: (id: string) => void;
   onSaveFootprintEdit: () => void;
   onCancelFootprintEdit: () => void;
-  onMoveOpening?: (buildingId: string, opening: import('./lib/opening-edit').OpeningInfo, dx: number, dy: number, dz: number) => void;
+  onMoveOpening?: (buildingId: string, opening: any, dx: number, dy: number, dz: number) => void;
   onMakeEditable?: (buildingId: string) => void;
   onReshapeBuilding?: (
     buildingId: string,
@@ -2162,57 +687,38 @@ function AttributePanelInline(props: {
   );
 }
 
-function computeFootprintBbox(
-  footprints: { polygon: [number, number][] }[]
-): [number, number, number, number] | null {
-  let west = Infinity,
-    south = Infinity,
-    east = -Infinity,
-    north = -Infinity;
-  let any = false;
-  for (const fp of footprints) {
-    for (const [lng, lat] of fp.polygon) {
-      if (lng < west) west = lng;
-      if (lat < south) south = lat;
-      if (lng > east) east = lng;
-      if (lat > north) north = lat;
-      any = true;
-    }
+function EmptyMapBackdrop() {
+  return (
+    <div className="absolute inset-0 overflow-hidden bg-[#101722]">
+      <div className="absolute inset-0 opacity-40">
+        <div className="absolute left-[-12%] top-[-18%] h-[55%] w-[55%] rounded-full bg-[var(--accent)]/30 blur-3xl" />
+        <div className="absolute bottom-[-20%] right-[-10%] h-[60%] w-[60%] rounded-full bg-emerald-500/20 blur-3xl" />
+      </div>
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:48px_48px]" />
+      <div className="absolute bottom-4 left-4 rounded-md border border-[var(--border)] bg-black/25 px-3 py-2 text-xs text-[var(--text-dim)] backdrop-blur-sm">
+        Map workspace is ready. Load a CityJSON or Hamburg catalog to begin.
+      </div>
+    </div>
+  );
+}
+
+function uniqueZonesByLabel(zones: ParcelZone[]): ParcelZone[] {
+  const seen = new Set<string>();
+  const unique: ParcelZone[] = [];
+  for (const zone of zones) {
+    if (seen.has(zone.label)) continue;
+    seen.add(zone.label);
+    unique.push(zone);
   }
-  return any ? [west, south, east, north] : null;
+  return unique;
 }
 
-function expandBbox(
-  bbox: [number, number, number, number],
-  ratio = 0.15,
-  minPad = 0.002
-): [number, number, number, number] {
-  const [west, south, east, north] = bbox;
-  const lngPad = Math.max((east - west) * ratio, minPad);
-  const latPad = Math.max((north - south) * ratio, minPad);
-  return [west - lngPad, south - latPad, east + lngPad, north + latPad];
+function planningSourceLabel(source?: string): string {
+  if (source === 'hamburg-xplan-baugebiet') return 'Hamburg XPlan baugebiet';
+  if (source === 'hamburg-fnp-nutzung') return 'Hamburg FNP land use';
+  return source ?? 'Unknown';
 }
 
-function cloneRoadDraft(draft: RoadDraft): RoadDraft {
-  return JSON.parse(JSON.stringify(draft)) as RoadDraft;
-}
-
-function downloadJson(value: unknown, fileName: string): void {
-  const text = JSON.stringify(value, null, 2);
-  const blob = new Blob([text], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-/**
- * Floating banner shown over the map while the user is in IFC-placement
- * mode. Surfaces the parsed IFC's headline numbers + a Cancel button (Esc
- * also works). Click anywhere on the map to drop the building.
- */
 function ZoneLegend({
   zones,
   selectedZone,
@@ -2372,38 +878,6 @@ function ZoneLegend({
       )}
     </div>
   );
-}
-
-function planningSourceLabel(source?: string): string {
-  if (source === 'hamburg-xplan-baugebiet') return 'Hamburg XPlan baugebiet';
-  if (source === 'hamburg-fnp-nutzung') return 'Hamburg FNP land use';
-  return source ?? 'Unknown';
-}
-
-function EmptyMapBackdrop() {
-  return (
-    <div className="absolute inset-0 overflow-hidden bg-[#101722]">
-      <div className="absolute inset-0 opacity-40">
-        <div className="absolute left-[-12%] top-[-18%] h-[55%] w-[55%] rounded-full bg-[var(--accent)]/30 blur-3xl" />
-        <div className="absolute bottom-[-20%] right-[-10%] h-[60%] w-[60%] rounded-full bg-emerald-500/20 blur-3xl" />
-      </div>
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:48px_48px]" />
-      <div className="absolute bottom-4 left-4 rounded-md border border-[var(--border)] bg-black/25 px-3 py-2 text-xs text-[var(--text-dim)] backdrop-blur-sm">
-        Map workspace is ready. Load a CityJSON or Hamburg catalog to begin.
-      </div>
-    </div>
-  );
-}
-
-function uniqueZonesByLabel(zones: ParcelZone[]): ParcelZone[] {
-  const seen = new Set<string>();
-  const unique: ParcelZone[] = [];
-  for (const zone of zones) {
-    if (seen.has(zone.label)) continue;
-    seen.add(zone.label);
-    unique.push(zone);
-  }
-  return unique;
 }
 
 function IfcPlacementBanner({

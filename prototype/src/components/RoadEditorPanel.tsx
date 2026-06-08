@@ -177,7 +177,7 @@ export default function RoadEditorPanel({
         <section className="space-y-2">
           <div className="grid grid-cols-2 gap-1.5">
             <Button size="sm" variant="primary" onClick={onFetchOsmRoads}>
-              Fetch OSM roads
+              Fetch / Recalculate View
             </Button>
             <Button
               size="sm"

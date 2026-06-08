@@ -166,16 +166,87 @@ export function createManualRoadDraft(
   };
 }
 
-export function buildOverpassRoadQuery(bbox: [number, number, number, number]): string {
+export function buildOverpassRoadQuery(bbox: [number, number, number, number], format: 'json' | 'xml' = 'json'): string {
   const [west, south, east, north] = bbox;
+  const header = format === 'json' ? '[out:json][timeout:25];' : '[out:xml][timeout:25];';
   return [
-    '[out:json][timeout:25];',
+    header,
     '(',
     `  way["highway"](${south},${west},${north},${east});`,
     ');',
     '(._;>;);',
     'out body;',
   ].join('\n');
+}
+
+export function parseOsmRoadsFromXml(xmlText: string): OsmRoadFeature[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'text/xml');
+  const nodes = new Map<string, [number, number]>();
+
+  // Extract nodes
+  const nodeEls = doc.getElementsByTagName('node');
+  for (let i = 0; i < nodeEls.length; i++) {
+    const el = nodeEls[i];
+    const id = el.getAttribute('id');
+    const lat = parseFloat(el.getAttribute('lat') || '');
+    const lon = parseFloat(el.getAttribute('lon') || '');
+    if (id && Number.isFinite(lat) && Number.isFinite(lon)) {
+      nodes.set(id, [lon, lat]);
+    }
+  }
+
+  // Extract ways
+  const wayEls = doc.getElementsByTagName('way');
+  const roads: OsmRoadFeature[] = [];
+
+  for (let i = 0; i < wayEls.length; i++) {
+    const el = wayEls[i];
+    const id = el.getAttribute('id');
+    if (!id) continue;
+
+    // Get tags
+    const tags: Record<string, string> = {};
+    const tagEls = el.getElementsByTagName('tag');
+    for (let j = 0; j < tagEls.length; j++) {
+      const k = tagEls[j].getAttribute('k');
+      const v = tagEls[j].getAttribute('v');
+      if (k && v) {
+        tags[k] = v;
+      }
+    }
+
+    if (!tags.highway || tags.area === 'yes') continue;
+
+    // Get node path
+    const path: [number, number][] = [];
+    const ndEls = el.getElementsByTagName('nd');
+    for (let j = 0; j < ndEls.length; j++) {
+      const ref = ndEls[j].getAttribute('ref');
+      if (ref) {
+        const coords = nodes.get(ref);
+        if (coords) {
+          path.push(coords);
+        }
+      }
+    }
+
+    if (path.length < 2) continue;
+
+    const featureBase = {
+      id: `osm-way-${id}`,
+      osmWayId: id,
+      tags,
+      path,
+    };
+
+    roads.push({
+      ...featureBase,
+      inferredDraft: inferRoadDraftFromOsmRoad(featureBase),
+    });
+  }
+
+  return roads;
 }
 
 export function parseOsmRoadsFromOverpass(payload: unknown): OsmRoadFeature[] {

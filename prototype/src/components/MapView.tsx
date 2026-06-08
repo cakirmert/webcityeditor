@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { PathLayer, PolygonLayer, SolidPolygonLayer } from '@deck.gl/layers';
+import { PathLayer, PolygonLayer, SolidPolygonLayer, GeoJsonLayer } from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
 import {
@@ -111,6 +111,8 @@ interface Props {
   osmRoads?: OsmRoadFeature[];
   selectedOsmRoadId?: string | null;
   onOsmRoadSelect?: (road: OsmRoadFeature) => void;
+  osm2streetsResult?: import('../lib/osm2streets').Osm2StreetsResult | null;
+  osm2streetsBbox?: [number, number, number, number] | null;
 }
 
 /**
@@ -159,6 +161,8 @@ export default function MapView({
   osmRoads = [],
   selectedOsmRoadId = null,
   onOsmRoadSelect,
+  osm2streetsResult = null,
+  osm2streetsBbox = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -366,15 +370,7 @@ export default function MapView({
     // deck.gl's Layer base type is the lowest common denominator; listing the
     // specific parameterised Layer subclasses here is fine and keeps the
     // type-check honest about which layer classes we feed to MapboxOverlay.
-    const layers: Array<
-      | SolidPolygonLayer<Footprint>
-      | PolygonLayer<Footprint>
-      | PolygonLayer<ParcelZone>
-      | PolygonLayer<RoadArea>
-      | PathLayer<OsmRoadFeature>
-      | SolidPolygonLayer<{ polygon: [number, number][]; height: number }>
-      | SimpleMeshLayer<{ position: [number, number] }>
-    > = [];
+    const layers: any[] = [];
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
     // thing drawn, at high zoom it still fires picking when clicking a roof edge.
@@ -541,6 +537,106 @@ export default function MapView({
       );
     }
 
+    if (osm2streetsResult?.lanes) {
+      layers.push(
+        new GeoJsonLayer({
+          id: 'osm2streets-lanes',
+          data: osm2streetsResult.lanes,
+          filled: true,
+          stroked: false,
+          pickable: false,
+          getFillColor: (f: any) => {
+            const props = f.properties || {};
+            if (props.type === 'intersection' || props.intersection) {
+              return [75, 75, 80, 220];
+            }
+            const laneType = props.lane_type || props.type || '';
+            switch (laneType) {
+              case 'driving':
+              case 'car_lane':
+              case 'bus':
+                return [55, 55, 60, 240];
+              case 'biking':
+              case 'bike_lane':
+              case 'bike':
+                return [16, 128, 64, 200];
+              case 'sidewalk':
+              case 'pedestrian':
+              case 'footway':
+                return [180, 180, 185, 200];
+              case 'parking':
+                return [100, 100, 105, 225];
+              case 'green':
+              case 'green_verge':
+              case 'buffer':
+              case 'verge':
+                return [46, 117, 80, 200];
+              default:
+                return [90, 90, 95, 220];
+            }
+          },
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osm2streetsResult?.laneMarkings) {
+      layers.push(
+        new GeoJsonLayer({
+          id: 'osm2streets-lane-markings',
+          data: osm2streetsResult.laneMarkings,
+          stroked: true,
+          filled: false,
+          getLineColor: [255, 255, 255, 180],
+          getLineWidth: 0.15,
+          lineWidthUnits: 'meters',
+          lineWidthMinPixels: 1.5,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osm2streetsResult?.intersectionMarkings) {
+      layers.push(
+        new GeoJsonLayer({
+          id: 'osm2streets-intersection-markings',
+          data: osm2streetsResult.intersectionMarkings,
+          filled: true,
+          stroked: true,
+          getFillColor: [255, 255, 255, 200],
+          getLineColor: [255, 255, 255, 200],
+          getLineWidth: 0.1,
+          lineWidthUnits: 'meters',
+          lineWidthMinPixels: 1,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osm2streetsBbox) {
+      const [west, south, east, north] = osm2streetsBbox;
+      const boxCoords = [
+        [west, south],
+        [east, south],
+        [east, north],
+        [west, north],
+        [west, south],
+      ];
+      layers.push(
+        new PathLayer({
+          id: 'osm2streets-bbox-boundary',
+          data: [{ path: boxCoords }],
+          getPath: (d: any) => d.path,
+          getColor: [30, 144, 255, 255], // DodgerBlue
+          getWidth: 3,
+          widthUnits: 'pixels',
+          widthMinPixels: 2,
+          pickable: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
     // Preview for the in-progress new building (mesh) OR a pending transform (polygon).
     if (preview?.mesh && preview.mesh.positions.length > 0) {
       layers.push(
@@ -631,6 +727,8 @@ export default function MapView({
     osmRoads,
     selectedOsmRoadId,
     onOsmRoadSelect,
+    osm2streetsResult,
+    osm2streetsBbox,
   ]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
