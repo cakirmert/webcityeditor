@@ -4,12 +4,17 @@ import {
   buildOsm2StreetsImportOptions,
   type Osm2StreetsImportOptions,
 } from './osm2streets-options';
+import {
+  buildLaneGeometryFromOsmXml,
+  type GeoJsonFeatureCollection,
+} from './lane-geometry';
 
 export interface Osm2StreetsResult {
-  lanes: any;
-  laneMarkings: any;
-  intersectionMarkings: any;
-  engine: 'osm2lanes' | 'classic';
+  lanes: GeoJsonFeatureCollection;
+  laneMarkings: GeoJsonFeatureCollection;
+  intersectionMarkings: GeoJsonFeatureCollection;
+  engine: 'osm2lanes' | 'classic' | 'ts-fallback';
+  warnings?: string[];
 }
 
 let initPromise: Promise<any> | null = null;
@@ -25,8 +30,6 @@ export async function processOsmXml(
   osmXml: string,
   clipBbox: [number, number, number, number] | null
 ): Promise<Osm2StreetsResult> {
-  await initOsm2Streets();
-
   let clipPtsGeojson = '';
   if (clipBbox) {
     const [west, south, east, north] = clipBbox;
@@ -58,14 +61,38 @@ export async function processOsmXml(
    * combinations without errors. If the classic parser ever fails on a
    * specific dataset, fall back to osm2lanes as a last resort.
    */
-  const primaryOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: false });
+  const errors: string[] = [];
   try {
-    return readOsm2StreetsResult(osmXml, clipPtsGeojson, primaryOptions, 'classic');
+    await initOsm2Streets();
+
+    const primaryOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: false });
+    const classic = readOsm2StreetsResult(osmXml, clipPtsGeojson, primaryOptions, 'classic');
+    if (hasRenderableLanes(classic)) return classic;
+    errors.push('classic osm2streets returned no lane polygons');
+
+    try {
+      const fallbackOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: true });
+      const osm2lanes = readOsm2StreetsResult(
+        osmXml,
+        clipPtsGeojson,
+        fallbackOptions,
+        'osm2lanes'
+      );
+      if (hasRenderableLanes(osm2lanes)) return osm2lanes;
+      errors.push('osm2lanes returned no lane polygons');
+    } catch (error) {
+      errors.push(`osm2lanes failed: ${formatError(error)}`);
+    }
   } catch (error) {
-    console.warn('Classic osm2streets parser failed; retrying with osm2lanes.', error);
-    const fallbackOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: true });
-    return readOsm2StreetsResult(osmXml, clipPtsGeojson, fallbackOptions, 'osm2lanes');
+    errors.push(`osm2streets WASM failed: ${formatError(error)}`);
   }
+
+  const fallback = buildLaneGeometryFromOsmXml(osmXml);
+  return {
+    ...fallback,
+    engine: 'ts-fallback',
+    warnings: [...errors, ...fallback.warnings],
+  };
 }
 
 function readOsm2StreetsResult(
@@ -89,4 +116,12 @@ function readOsm2StreetsResult(
   } finally {
     network.free();
   }
+}
+
+function hasRenderableLanes(result: Osm2StreetsResult): boolean {
+  return Array.isArray(result.lanes?.features) && result.lanes.features.length > 0;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

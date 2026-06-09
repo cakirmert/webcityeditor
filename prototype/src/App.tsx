@@ -102,7 +102,9 @@ export default function App() {
     setSelectedZone(zone);
   }, []);
 
-  const roadEditor = useRoadEditor(coreState, undoRedo);
+  const roadEditor = useRoadEditor(coreState, undoRedo, {
+    zones: zoningEnabled ? zones : [],
+  });
   const buildingEditor = useBuildingEditor(coreState, undoRedo, { zones, zoningEnabled });
 
   const handleMapViewportChange = useCallback(
@@ -412,6 +414,7 @@ export default function App() {
               onExportPayload={roadEditor.handleExportRoadPayload}
               onPostPayload={() => void roadEditor.handlePostRoadPayload()}
               onBackendUrlChange={roadEditor.setRoadBackendUrl}
+              roadFitConflicts={roadEditor.roadFitConflicts}
             />
           )}
           {coreState.cityjson ? (
@@ -441,6 +444,7 @@ export default function App() {
               basemap={roadEditor.basemap}
               roadAreas={roadEditor.roadAreas}
               roadPreviewAreas={roadEditor.roadPreviewAreas}
+              roadFitConflicts={roadEditor.roadFitConflicts}
               selectedRoadAreaId={roadEditor.selectedRoadArea?.id ?? null}
               onRoadAreaSelect={(area) => {
                 roadEditor.setSelectedRoadArea(area);

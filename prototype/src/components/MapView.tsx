@@ -20,6 +20,7 @@ import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type { OsmRoadFeature, RoadArea } from '../lib/transportation';
+import type { RoadFitConflict } from '../lib/road-fit';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -109,6 +110,7 @@ interface Props {
   basemap?: 'map' | 'satellite';
   roadAreas?: RoadArea[];
   roadPreviewAreas?: RoadArea[];
+  roadFitConflicts?: RoadFitConflict[];
   selectedRoadAreaId?: string | null;
   onRoadAreaSelect?: (area: RoadArea) => void;
   osmRoads?: OsmRoadFeature[];
@@ -159,6 +161,7 @@ export default function MapView({
   basemap = 'map',
   roadAreas = [],
   roadPreviewAreas = [],
+  roadFitConflicts = [],
   selectedRoadAreaId = null,
   onRoadAreaSelect,
   osmRoads = [],
@@ -526,6 +529,27 @@ export default function MapView({
       );
     }
 
+    if (roadFitConflicts.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadFitConflict>({
+          id: 'road-fit-conflicts',
+          data: roadFitConflicts,
+          getPolygon: (d) => d.polygon,
+          getFillColor: (d) =>
+            d.severity === 'error' ? [240, 50, 50, 145] : [255, 120, 40, 110],
+          getLineColor: (d) =>
+            d.severity === 'error' ? [255, 235, 235, 255] : [255, 210, 160, 255],
+          getLineWidth: 2,
+          lineWidthMinPixels: 2,
+          stroked: true,
+          filled: true,
+          pickable: false,
+          extruded: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
     if (osm2streetsResult?.lanes) {
       layers.push(
         new GeoJsonLayer({
@@ -760,6 +784,7 @@ export default function MapView({
     onZoneSelect,
     roadAreas,
     roadPreviewAreas,
+    roadFitConflicts,
     selectedRoadAreaId,
     onRoadAreaSelect,
     osmRoads,

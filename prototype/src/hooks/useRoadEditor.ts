@@ -15,6 +15,8 @@ import {
 import { processOsmXml } from '../lib/osm2streets';
 import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
+import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
+import type { ParcelZone } from '../lib/zoning';
 
 type Wgs84Bbox = [number, number, number, number];
 
@@ -133,7 +135,11 @@ function downloadJson(value: unknown, fileName: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
+export function useRoadEditor(
+  coreState: CoreState,
+  undoRedo: UndoRedoState,
+  options: { zones?: ParcelZone[] } = {}
+) {
   const {
     cityjson,
     setSelection,
@@ -190,10 +196,17 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
         setOsm2streetsResult(result);
         setOsm2streetsBbox(queryBbox);
         const engineLabel =
-          result.engine === 'osm2lanes' ? 'osm2lanes lane parser' : 'classic osm2streets fallback';
+          result.engine === 'osm2lanes'
+            ? 'osm2lanes lane parser'
+            : result.engine === 'ts-fallback'
+            ? 'TypeScript lane-geometry fallback'
+            : 'classic osm2streets fallback';
+        const warningSuffix = result.warnings?.length
+          ? ` (${result.warnings.length} fallback warning${result.warnings.length === 1 ? '' : 's'})`
+          : '';
         setRoadStatus(
           roads.length > 0
-            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with ${engineLabel}. Click a road on the map to edit.`
+            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with ${engineLabel}${warningSuffix}. Click a road on the map to edit.`
             : 'No OSM roads returned for this viewport.'
         );
       } catch (wasmError) {
@@ -292,8 +305,36 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
     });
   }, []);
 
+  const roadPreviewAreas = useMemo(() => {
+    if (!cityjson || !roadDraft) return [];
+    try {
+      const previewDoc = JSON.parse(JSON.stringify(cityjson)) as any;
+      return insertRoadIntoCityJson(previewDoc, roadDraft, { id: '__road_preview__' }).areas;
+    } catch {
+      return [];
+    }
+  }, [cityjson, roadDraft, reloadToken]);
+
+  const roadFitConflicts = useMemo<RoadFitConflict[]>(() => {
+    if (!cityjson || roadPreviewAreas.length === 0) return [];
+    return validateRoadFit({
+      roadAreas: roadPreviewAreas,
+      buildingFootprints: extractFootprints(cityjson),
+      affectedLand: options.zones ?? [],
+    });
+  }, [cityjson, roadPreviewAreas, options.zones]);
+
   const handleInsertRoad = useCallback(() => {
     if (!cityjson || !roadDraft) return;
+    const blockingConflicts = roadFitConflicts.filter((conflict) => conflict.severity === 'error');
+    if (blockingConflicts.length > 0) {
+      alert(
+        `Road insertion is blocked by ${blockingConflicts.length} fit conflict${
+          blockingConflicts.length === 1 ? '' : 's'
+        }:\n\n${blockingConflicts.slice(0, 5).map((conflict) => conflict.label).join('\n')}`
+      );
+      return;
+    }
     try {
       pushUndo('Insert CityJSON road');
       const { value: result } = runStructurallyGuardedMutation(
@@ -316,7 +357,16 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
       console.error(error);
       alert(`Road insertion failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [cityjson, roadDraft, pushUndo, setDirtyIds, setSelection, setReloadToken, markGeometryChanged]);
+  }, [
+    cityjson,
+    roadDraft,
+    roadFitConflicts,
+    pushUndo,
+    setDirtyIds,
+    setSelection,
+    setReloadToken,
+    markGeometryChanged,
+  ]);
 
   const handleExportRoadPayload = useCallback(() => {
     if (!roadDraft) return;
@@ -349,16 +399,6 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
     if (!cityjson) return [];
     return extractTransportationAreas(cityjson);
   }, [cityjson, reloadToken]);
-
-  const roadPreviewAreas = useMemo(() => {
-    if (!cityjson || !roadDraft) return [];
-    try {
-      const previewDoc = JSON.parse(JSON.stringify(cityjson)) as any;
-      return insertRoadIntoCityJson(previewDoc, roadDraft, { id: '__road_preview__' }).areas;
-    } catch {
-      return [];
-    }
-  }, [cityjson, roadDraft, reloadToken]);
 
   return {
     showRoadEditor,
@@ -396,6 +436,7 @@ export function useRoadEditor(coreState: CoreState, undoRedo: UndoRedoState) {
     handlePostRoadPayload,
     roadAreas,
     roadPreviewAreas,
+    roadFitConflicts,
   };
 }
 export type RoadEditorState = ReturnType<typeof useRoadEditor>;

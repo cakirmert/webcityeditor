@@ -8,6 +8,7 @@ import {
   type RoadDirection,
   type RoadDraft,
 } from '../lib/transportation';
+import type { RoadFitConflict } from '../lib/road-fit';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -21,6 +22,7 @@ interface Props {
   drawMode: 'none' | 'polygon' | 'road-line';
   backendUrl: string;
   insertedRoadId?: string | null;
+  roadFitConflicts?: RoadFitConflict[];
   onClose: () => void;
   onFetchOsmRoads: () => void;
   onBasemapChange: (basemap: 'map' | 'satellite') => void;
@@ -63,6 +65,7 @@ export default function RoadEditorPanel({
   drawMode,
   backendUrl,
   insertedRoadId,
+  roadFitConflicts = [],
   onClose,
   onFetchOsmRoads,
   onBasemapChange,
@@ -101,6 +104,9 @@ export default function RoadEditorPanel({
   const payloadPreview = draft
     ? JSON.stringify(buildRoadEditPayload(draft, insertedRoadId ?? undefined), null, 2)
     : '';
+  const blockingFitConflicts = roadFitConflicts.filter(
+    (conflict) => conflict.severity === 'error'
+  );
 
   const updateSection = (
     sectionId: string,
@@ -235,6 +241,26 @@ export default function RoadEditorPanel({
           {status && (
             <div className="rounded border border-[var(--border)] bg-[rgba(0,0,0,0.18)] px-2 py-1 text-[11px] text-[var(--text-dim)]">
               {status}
+            </div>
+          )}
+          {roadFitConflicts.length > 0 && (
+            <div className="rounded border border-red-400/45 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-100">
+              <div className="font-semibold">
+                Road fit: {blockingFitConflicts.length > 0 ? 'blocked' : 'warnings'}
+              </div>
+              <ul className="mt-1 space-y-0.5">
+                {roadFitConflicts.slice(0, 4).map((conflict) => (
+                  <li key={conflict.id}>
+                    {conflict.severity === 'error' ? 'Block' : 'Warn'}: {conflict.label}
+                  </li>
+                ))}
+              </ul>
+              {roadFitConflicts.length > 4 && (
+                <div className="mt-1 text-red-100/70">
+                  +{roadFitConflicts.length - 4} more conflict
+                  {roadFitConflicts.length - 4 === 1 ? '' : 's'}
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -372,7 +398,17 @@ export default function RoadEditorPanel({
             </div>
 
             <div className="grid grid-cols-2 gap-1.5 border-t border-[var(--border)] pt-3">
-              <Button size="sm" variant="primary" onClick={onInsertRoad}>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={onInsertRoad}
+                disabled={blockingFitConflicts.length > 0}
+                title={
+                  blockingFitConflicts.length > 0
+                    ? 'Resolve road-fit building overlaps before inserting.'
+                    : undefined
+                }
+              >
                 Insert CityJSON Road
               </Button>
               <Button size="sm" onClick={onExportPayload}>
