@@ -12,7 +12,7 @@ Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`pr
 - Snap-to-existing-footprints while drawing (auto-collected from the loaded CityJSON).
 - Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence.
 - Hamburg planning overlay: fetches real XPlan building-use polygons by viewport, with FNP land-use fallback when XPlan has no polygons.
-- Road editing writes CityJSON Transportation `Road` objects, with OSM as a reference layer and a documented path for patched osm2streets or TS/JS lane geometry, muv-osm semantics, OpenDRIVE/r:trån import, and future road-fit validation against planning/lot/building constraints.
+- Road editing writes CityJSON Transportation `Road` objects, with OSM as a reference layer, patched osm2streets diagnostics, road-fit validation against planning/lot/building constraints, and documented next steps for muv-osm semantics and OpenDRIVE/r:trån import.
 - CityJSONSeq-first Hamburg workflow: connect the local strict catalog once, pan to fetch nearby `.city.jsonl` tiles, use **Save seq** for validated optimistic-concurrency write-back, and let clean off-screen tiles unload automatically.
 - Subdivision into BuildingParts: split by floor, by side, or with per-floor footprint plans. Plans support manual percentage cuts, per-floor overrides, an apply-to-all-floors checkbox, and 2D/3D previews.
 - Live-preview transforms: translate and rotate buildings with a ghost preview on the map, then save or cancel.

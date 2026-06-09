@@ -16,22 +16,19 @@
 
 ### 1.0 Actual Goal
 
-The goal is **reliable lane-level road geometry**, not "use osm2streets at all
-costs." osm2streets is still the first candidate because it already produces
-lane polygons, lane markings, intersection polygons, and crosswalk-style
-markings from OSM. But if the current WASM path cannot be made stable for our
-target data, a narrower TypeScript/JavaScript implementation or a hybrid fallback
-is acceptable.
+The goal is **one reliable osm2streets lane-geometry path**. The app should not
+maintain a second TypeScript/JavaScript lane-geometry backend. osm2streets is the
+chosen visual engine because it already produces lane polygons, lane markings,
+intersection polygons, and crosswalk-style markings from OSM.
 
 Acceptable implementation outcomes:
 
-1. Patch the Rust/osm2lanes source and compile a local WASM package.
-2. Build a TS/JS lane geometry backend that handles the editor's target cases.
-3. Use osm2streets when it succeeds and fall back to TS/JS geometry when it
-   fails, produces empty output, or floods diagnostics.
-
-The UI and `RoadDraft` model should not care which backend produced the visual
-lane geometry.
+1. Patch the npm wrapper so non-fatal Rust diagnostics do not appear as browser
+   `console.error` failures.
+2. Patch the Rust/osm2lanes source and compile a local WASM package if the npm
+   wrapper patch is not enough.
+3. Keep `RoadDraft` as the editable app model, but keep osm2streets as the only
+   lane-geometry generator.
 
 ### 1.1 Console Errors from WASM
 
@@ -230,69 +227,35 @@ npm run dev  # test
 
 ---
 
-## 5. Fallback: TypeScript / JavaScript Geometry Backend
+## 5. Patch Current npm Wrapper
 
-If the forked WASM still cannot handle Hamburg target data reliably, implement a
-small local geometry backend with the same output contract as osm2streets:
+The current npm package maps Rust `error!` logs to browser `console.error`:
 
-```typescript
-interface LaneGeometryResult {
-  lanes: FeatureCollection;
-  laneMarkings: FeatureCollection;
-  intersectionMarkings: FeatureCollection;
-  warnings: Array<{ roadId?: string; message: string; severity: 'info' | 'warn' | 'error' }>;
-}
+```javascript
+imports.wbg.__wbg_error_fe807da27c4a4ced = function(arg0) {
+  console.error(getObject(arg0));
+};
 ```
 
-Minimum viable TS/JS backend:
+Many Hamburg diagnostics are non-fatal geometry edge cases:
 
-1. Consume `RoadDraft` or OSM-inferred lane/band data.
-2. Offset the centerline by cumulative band widths to create lane polygons.
-3. Emit lane marking lines between adjacent bands.
-4. Keep intersections simple at first:
-   - trim road polygons near endpoints
-   - mark complex intersections as "needs manual correction"
-   - preserve the editable road draft instead of failing the whole import
-5. Return warnings instead of throwing for unsupported geometry.
+- `Hack! intersection_polygon(...) called with no roads`
+- `Road #... got trimmed into oblivion`
+- `Road is too short to trim for a degenerate intersection`
 
-This would not be a full osm2streets clone. It only needs to support the editor's
-road-editing workflow and produce stable deck.gl preview layers plus CityJSON
-Transportation surfaces.
+Patch the wrapper so these Rust diagnostics are browser warnings, not red
+errors. This does not change the geometry engine; it fixes the misleading error
+reporting in the packaged WASM bridge.
+
+Tracked implementation:
+
+- add `patch-package`
+- patch `osm2streets-js/osm2streets_js.js`
+- add `postinstall` so the patch is applied after every install
 
 ---
 
-## 6. Backend Selection Strategy
-
-Road geometry generation should be wrapped behind one interface:
-
-```text
-OSM XML/JSON + RoadDraft
-  |
-  |-- patched osm2streets WASM backend
-  |-- TS/JS fallback backend
-  v
-LaneGeometryResult + RoadDraft updates
-```
-
-Selection logic:
-
-1. Try patched WASM when available.
-2. If WASM throws, returns empty critical layers, or exceeds diagnostic
-   thresholds, retry with TS/JS fallback.
-3. Surface backend warnings in the road editor.
-4. Keep insertion/export based on the validated `RoadDraft`, not direct WASM
-   internals.
-
-Success criteria:
-
-- Hamburg target bbox renders lane polygons without red console spam.
-- Road editor remains usable when a geometry backend hits unsupported tags.
-- CityJSON Transportation insertion still works from the same `RoadDraft`.
-- Tests can run without requiring a browser-only WASM side effect.
-
----
-
-## 7. Enable Dual Carriageway Merging
+## 6. Enable Dual Carriageway Merging
 
 **File**: `prototype/src/lib/osm2streets-options.ts`
 
@@ -306,15 +269,15 @@ Success criteria:
 
 ---
 
-## 8. Crosswalk / Intersection Marking Investigation
+## 7. Crosswalk / Intersection Marking Investigation
 
-### 8.1 Why the Demo Works Better
+### 7.1 Why the Demo Works Better
 
 The osm2streets StreetExplorer demo at `a-b-street.github.io/osm2streets` uses
 the **latest Rust source** compiled to WASM, not the 0.1.4 npm package. It has
 geometry bug fixes that the npm package doesn't.
 
-### 8.2 What We Already Render
+### 7.2 What We Already Render
 
 Our code (`MapView.tsx:588-603`) already renders intersection markings:
 
@@ -330,14 +293,14 @@ if (osm2streetsResult?.intersectionMarkings) {
 }
 ```
 
-### 8.3 Expected Improvement From Fork
+### 7.3 Expected Improvement From Fork
 
 Once we build from the latest source:
 1. Fewer "trimmed into oblivion" roads → more intersections have geometry
 2. Fewer "degenerate intersection" errors → crosswalks can be generated
 3. The `toIntersectionMarkingsGeojson()` output will include crosswalk stripes
 
-### 8.4 If Crosswalks Still Don't Appear
+### 7.4 If Crosswalks Still Don't Appear
 
 Check the GeoJSON output:
 ```typescript
@@ -351,9 +314,9 @@ demo's output for the same area.
 
 ---
 
-## 9. Lane Editor UI Improvements
+## 8. Lane Editor UI Improvements
 
-### 9.1 Current State
+### 8.1 Current State
 
 The lane editor (`RoadEditorPanel.tsx`) uses compact form rows:
 - `<select>` for lane type
@@ -361,7 +324,7 @@ The lane editor (`RoadEditorPanel.tsx`) uses compact form rows:
 - `<select>` for direction
 - `[-]` remove button
 
-### 9.2 Desired: Visual Lane Boxes
+### 8.2 Desired: Visual Lane Boxes
 
 Replace the form rows with a **horizontal lane strip** that visually mirrors the
 road rendering:
@@ -380,7 +343,7 @@ Each lane box:
 - Click to select → shows detail panel below (type, direction, allowed modes)
 - Fixed width proportional to lane width in metres
 
-### 9.3 Lane Width Standards
+### 8.3 Lane Width Standards
 
 Lane widths **are** largely standardised, so the user's instinct is correct:
 
@@ -397,14 +360,14 @@ Lane widths **are** largely standardised, so the user's instinct is correct:
 standard width as a label. Only expose the numeric input in an "advanced" or
 "custom width" toggle. This simplifies the UI for 90% of cases.
 
-### 9.4 Implementation Approach
+### 8.4 Implementation Approach
 
 1. Create a new `LaneStrip` component with horizontal colored boxes
 2. Use `dnd-kit` (already used in many React projects) for drag-to-reorder
 3. Keep the existing `addBand()` / `removeBand()` / `updateBand()` logic
 4. Map lane type → color using the same palette as `MapView.tsx:537-565`
 
-### 9.5 Hide Rarely-Used Actions
+### 8.5 Hide Rarely-Used Actions
 
 "Insert CityJSON Road", "Export payload", "POST payload", and the backend
 endpoint input are **power-user / integration features** that clutter the main
@@ -427,9 +390,9 @@ everything else goes into the collapsible section.
 
 ---
 
-## 10. Future: Traffic Signs, Trees, Street Furniture
+## 9. Future: Traffic Signs, Trees, Street Furniture
 
-### 10.1 What osm2streets Provides
+### 9.1 What osm2streets Provides
 
 osm2streets focuses on **lane geometry and intersection polygons**. It does NOT
 generate:
@@ -438,7 +401,7 @@ generate:
 - Street furniture (benches, bollards, lamp posts)
 - Traffic lights (geometry)
 
-### 10.2 Data Sources for Street Furniture
+### 9.2 Data Sources for Street Furniture
 
 | Feature       | OSM Tag           | Approach                          |
 |--------------|-------------------|-----------------------------------|
@@ -448,7 +411,7 @@ generate:
 | Traffic lights| `highway=traffic_signals` | Already in OSM node data |
 | Bollards      | `barrier=bollard` | Query Overpass                    |
 
-### 10.3 Implementation Strategy
+### 9.3 Implementation Strategy
 
 1. Extend the Overpass query in `useRoadEditor.ts` to also fetch `node` types
    with relevant tags (currently only fetches `way[highway]`)
@@ -460,17 +423,15 @@ This is independent of the osm2streets fork and can be done in parallel.
 
 ---
 
-## 11. Verification Checklist
+## 10. Verification Checklist
 
 After completing the fork setup:
 
 - [ ] `wasm-pack build --release --target web` succeeds in `vendor/osm2streets/osm2streets-js`
 - [ ] `npm install` resolves `osm2streets-js` from `file:./vendor/osm2streets-js`
 - [ ] `npm run dev` starts without errors
-- [ ] Browser console shows **zero red `console.error` lines** from osm2streets
+- [ ] Browser console shows **zero red `console.error` lines** from non-fatal osm2streets diagnostics
 - [ ] Lane geometry renders correctly on the map (Hamburg area)
-- [ ] TS/JS fallback produces lane polygons for simple Hamburg road sections if
-      patched WASM fails
 - [ ] Intersection markings / crosswalks appear at intersections
 - [ ] Dual carriageway merging works (if enabled)
 - [ ] Lane editor UI shows visual lane boxes (after UI improvement)
@@ -478,7 +439,7 @@ After completing the fork setup:
 
 ---
 
-## 12. File Change Summary
+## 11. File Change Summary
 
 | Action  | File | Description |
 |---------|------|-------------|
@@ -486,10 +447,10 @@ After completing the fork setup:
 | NEW     | `prototype/scripts/build-osm2streets-wasm.ps1` | WASM build script |
 | NEW     | `prototype/vendor/osm2streets-js/` | Built WASM output directory |
 | MODIFY  | `prototype/package.json` | Change osm2streets-js to `file:` dependency |
+| MODIFY  | `prototype/package.json` | Add `patch-package` and `postinstall` for the npm wrapper patch |
+| NEW     | `prototype/patches/osm2streets-js+0.1.4.patch` | Patch Rust diagnostics to browser warnings |
 | MODIFY  | `prototype/src/lib/osm2streets-options.ts` | Enable dual carriageway experiment |
 | MODIFY  | `prototype/src/lib/osm2streets.ts` | Already switched to classic parser |
-| NEW     | `prototype/src/lib/lane-geometry.ts` | Optional TS/JS fallback geometry backend |
-| NEW     | `prototype/src/lib/lane-geometry.test.ts` | Unit tests for fallback lane polygons and warnings |
 | MODIFY  | `prototype/src/components/RoadEditorPanel.tsx` | Visual lane strip UI + hide export actions behind collapsible |
 | NEW     | `prototype/src/components/LaneStrip.tsx` | New draggable lane visualization |
 | MODIFY  | `vendor/osm2streets/osm2streets-js/src/lib.rs` | Change log level |

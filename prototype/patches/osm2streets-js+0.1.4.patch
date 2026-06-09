@@ -1,0 +1,22 @@
+diff --git a/node_modules/osm2streets-js/osm2streets_js.js b/node_modules/osm2streets-js/osm2streets_js.js
+index 0de4dc4..e19049b 100644
+--- a/node_modules/osm2streets-js/osm2streets_js.js
++++ b/node_modules/osm2streets-js/osm2streets_js.js
+@@ -687,7 +687,7 @@ function getImports() {
+     };
+     imports.wbg.__wbg_error_f851667af71bcfc6 = function(arg0, arg1) {
+         try {
+-            console.error(getStringFromWasm0(arg0, arg1));
++            console.warn(getStringFromWasm0(arg0, arg1));
+         } finally {
+             wasm.__wbindgen_free(arg0, arg1);
+         }
+@@ -700,7 +700,7 @@ function getImports() {
+         console.debug(getObject(arg0));
+     };
+     imports.wbg.__wbg_error_fe807da27c4a4ced = function(arg0) {
+-        console.error(getObject(arg0));
++        console.warn(getObject(arg0));
+     };
+     imports.wbg.__wbg_info_9e6db45ac337c3b5 = function(arg0) {
+         console.info(getObject(arg0));

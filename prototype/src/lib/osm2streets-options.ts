@@ -18,10 +18,9 @@ export function buildOsm2StreetsImportOptions({
    * field is missing, the constructor fails before any lane geometry can be
    * produced with: "missing field `osm2lanes`".
    *
-   * Keep the shape exact and toggle only the parser choice. `useOsm2Lanes`
-   * enables the osm2lanes-backed parser; false uses the classic osm2streets
-   * parser as a graceful fallback when a real OSM tag combination crashes the
-   * older bundled wasm.
+   * Keep the shape exact. The app currently uses the classic osm2streets
+   * parser (`osm2lanes: false`) because the osm2lanes-backed parser in this old
+   * bundled WASM rejects common Hamburg sidewalk tag combinations.
    */
   return {
     debug_each_step: false,

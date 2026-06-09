@@ -26,11 +26,10 @@ the app. Every importer should feed the existing `RoadDraft` shape, then reuse
 `prototype/src/lib/transportation.ts` to generate CityJSON Transportation
 surfaces.
 
-This also changes the osm2streets framing. The goal is not "use osm2streets at
-all costs." The goal is reliable lane-level road geometry. osm2streets is the
-best first candidate because it already produces lane, marking, and intersection
-GeoJSON, but it can be replaced or narrowed if the current WASM package cannot
-handle our data cleanly.
+The current implementation decision is to use one lane-geometry engine:
+osm2streets. The work is therefore focused on making the osm2streets source/npm
+package path handle the Hamburg data cleanly, not on maintaining a parallel
+TypeScript/JavaScript lane backend.
 
 Related focused plan: [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md)
 covers the osm2streets fork, WASM rebuild, crosswalks, dual carriageway merging,
@@ -87,19 +86,17 @@ intersection polygons, and crosswalk markings from OSM. It currently has a
 practical blocker: the published `osm2streets-js` WASM is old and noisy, and real
 Hamburg OSM data can trigger many non-fatal errors or parser edge cases.
 
-Acceptable outcomes:
+Current implementation target:
 
-1. **Repair and rebuild**: fork osm2streets, patch the Rust source and
+1. **Use osm2streets only** for lane polygons, lane markings, and intersection
+   markings.
+2. Patch the npm wrapper so non-fatal Rust diagnostics do not appear as browser
+   `console.error` failures.
+3. If wrapper patching is not enough, fork osm2streets, patch the Rust source and
    osm2lanes edge cases, then compile a local WASM package.
-2. **Replace narrowly**: implement a TypeScript/JavaScript lane geometry engine
-   that handles our editing cases and emits the same GeoJSON/RoadDraft-style
-   output the UI needs.
-3. **Hybrid**: keep osm2streets for cases it handles well, and fall back to a
-   local TS/JS geometry path when WASM output is empty, too noisy, or fails.
 
-The editor should compare osm2streets visual output with the semantic lane model
-from `muv-osm`, but it should not make osm2streets the only source of road rules
-or the only possible lane-geometry backend.
+The editor can still compare osm2streets visual output with the semantic lane
+model from `muv-osm`, but osm2streets remains the single visual geometry engine.
 
 Reference:
 - <https://a-b-street.github.io/osm2streets/>
@@ -180,8 +177,6 @@ Goal: make Hamburg OSM road edits more trustworthy without requiring OpenDRIVE.
    - lane markings
    - crosswalk/intersection markings
    - dual-carriageway visual merge experiment
-   - fallback to local TS/JS lane geometry if the patched WASM still cannot
-     process the target data reliably
 4. Add a graph-ready representation:
    - road section nodes
    - allowed modes per band
@@ -233,7 +228,7 @@ building/affected land parcel, the editor should make that conflict obvious.
 
 The validation should run on generated `RoadDraft` surface polygons, not on raw
 centerlines. That means it works for OSM-seeded, manual, osm2streets-derived,
-TS/JS-derived, and OpenDRIVE-derived roads.
+and OpenDRIVE-derived roads.
 
 1. Define the road envelope sources:
    - existing Hamburg planning overlay where it gives relevant constraints
@@ -271,7 +266,7 @@ inside their limited space.
 | Need | Recommended path | Reason |
 |---|---|---|
 | Better lane/rule inference from OSM | Evaluate `muv-osm` | It is semantic and tag-focused |
-| Better visual lane polygons/crosswalks | Fork/rebuild osm2streets, or replace with TS/JS lane geometry | The requirement is reliable lane-level geometry, not a specific dependency |
+| Better visual lane polygons/crosswalks | Patch/rebuild osm2streets | The implementation target is one lane-geometry engine |
 | Existing `.xodr` import | r:trån -> CityGML Transportation -> importer | r:trån is built for OpenDRIVE validation and CityGML conversion |
 | Browser-only Hamburg editing | OSM + muv-osm + osm2streets -> `RoadDraft` | Avoids heavy OpenDRIVE conversion for normal map edits |
 | Road exceeds available corridor | Road-fit validator over `RoadDraft` surface polygons | Uses the geometry the editor will actually insert/export |
@@ -309,17 +304,10 @@ inside their limited space.
       and browser console errors
 - [ ] Keep osm2streets as a visual validation layer even after `muv-osm`
       semantic parsing is added
-- [ ] Define a fallback interface so WASM and TS/JS lane geometry backends both
-      return the same shape:
-  - lane polygons
-  - lane markings
-  - intersection/crosswalk markings
-  - warnings/confidence metadata
-- [ ] Prototype the minimal TS/JS geometry path for simple road sections:
-  - centerline offset bands
-  - per-band width/direction/mode
-  - intersections initially simplified or marked "needs manual correction"
-  - output compatible with the existing deck.gl preview layers
+- [ ] Patch the current npm wrapper so non-fatal Rust `error!` diagnostics do not
+      become browser `console.error` failures
+- [ ] If geometry still fails, fork/rebuild osm2streets and patch the Rust
+      diagnostics and geometry edge cases at source
 
 ### 7.4 OpenDRIVE/r:trån pipeline
 
@@ -358,8 +346,7 @@ inside their limited space.
 - [ ] OSM road selection still creates a valid `RoadDraft`
 - [ ] CityJSON Transportation insertion remains structurally valid
 - [ ] Existing road editor tests still pass
-- [ ] Lane-geometry backend can be swapped between patched WASM and TS/JS without
-      changing `RoadDraft` or map-layer consumers
+- [ ] osm2streets is the only visual lane-geometry backend used by the app
 - [ ] `muv-osm` semantic output is compared against current inference before it
       replaces any TypeScript heuristic
 - [ ] osm2streets visual output is checked in the browser for Hamburg

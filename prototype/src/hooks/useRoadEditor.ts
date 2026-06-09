@@ -195,18 +195,9 @@ export function useRoadEditor(
         const result = await processOsmXml(xmlText, queryBbox);
         setOsm2streetsResult(result);
         setOsm2streetsBbox(queryBbox);
-        const engineLabel =
-          result.engine === 'osm2lanes'
-            ? 'osm2lanes lane parser'
-            : result.engine === 'ts-fallback'
-            ? 'TypeScript lane-geometry fallback'
-            : 'classic osm2streets fallback';
-        const warningSuffix = result.warnings?.length
-          ? ` (${result.warnings.length} fallback warning${result.warnings.length === 1 ? '' : 's'})`
-          : '';
         setRoadStatus(
           roads.length > 0
-            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with ${engineLabel}${warningSuffix}. Click a road on the map to edit.`
+            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with osm2streets. Click a road on the map to edit.`
             : 'No OSM roads returned for this viewport.'
         );
       } catch (wasmError) {

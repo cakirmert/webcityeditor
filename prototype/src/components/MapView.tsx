@@ -276,7 +276,7 @@ export default function MapView({
       zoom: 16,
       pitch: 55,
       bearing: 20,
-      antialias: true,
+      canvasContextAttributes: { antialias: true },
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
