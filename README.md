@@ -80,6 +80,7 @@ webcityeditor/
 │   ├── PROTOTYPE_STATUS.md              Current state: planned vs delivered, roadmap
 │   ├── HAMBURG_PIPELINE.md              Hamburg complete-city CityGML → validated tiled CityJSONSeq
 │   ├── OSM2STREETS_FORK_PLAN.md         osm2streets WASM/fork and lane UI plan
+│   ├── OSM2STREETS_HANDOFF.md           osm2streets-only implementation handoff for future agents
 │   ├── CITYGML_TRANSPORTATION_PLAN.md   CityGML Transportation, OpenDRIVE, and muv-osm plan
 │   └── src/
 │       ├── components/                   React + shadcn/ui components

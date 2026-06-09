@@ -9,6 +9,10 @@
 > [`CITYGML_TRANSPORTATION_PLAN.md`](CITYGML_TRANSPORTATION_PLAN.md). Keep this
 > file focused on the osm2streets fork, WASM rebuild, crosswalks, dual
 > carriageways, and road-editor UI.
+>
+> **Implementation handoff**: read
+> [`OSM2STREETS_HANDOFF.md`](OSM2STREETS_HANDOFF.md) first for the current
+> "why WASM, why no JS fallback, what remains" decision.
 
 ---
 
