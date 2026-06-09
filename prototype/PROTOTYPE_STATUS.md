@@ -54,7 +54,8 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **Precise road segment split**: the active road section can be split at an explicit percentage along the centerline; both child sections preserve the lane/band layout for later per-section edits.
 - **CityJSON output**: insertion creates one `Road` `MultiSurface` with aligned `TrafficArea` / `AuxiliaryTrafficArea` semantics and private `_roadLayout` metadata for round-trip editing.
 - **Backend-ready payload**: the same draft can be exported or POSTed as `webcityeditor-road-edit-v1` JSON. This is the hand-off shape for future routing/simulation services.
-- **OpenDRIVE boundary**: Hamburg OpenDRIVE / Road2CityGML-style import is not implemented in-browser yet. The intended path is a converter that maps OpenDRIVE lanes/roads into the same `RoadDraft` model, then reuses the existing CityJSON Transportation generator and preview.
+- **OpenDRIVE boundary**: Hamburg OpenDRIVE / Road2CityGML-style import is not implemented in-browser yet. The intended path is a converter that maps OpenDRIVE lanes/roads into the same `RoadDraft` model, then reuses the existing CityJSON Transportation generator and preview. The broader plan is documented in [`CITYGML_TRANSPORTATION_PLAN.md`](CITYGML_TRANSPORTATION_PLAN.md); osm2streets-specific fork and UI work is tracked in [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md).
+- **Road-fit validation idea**: planned, not implemented. Once road-band polygons are generated, compare them against planning/lot corridors and loaded building footprints; overflow areas and affected land/buildings should render red before insertion/export.
 
 ### Edit existing buildings
 - Attribute editor with priority-sorted rows, type coercion (number/string/boolean)
@@ -299,7 +300,8 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 1. **IFC → CityJSON import polish** — Route #2 (`web-ifc` WASM in-browser) is working and covered by unit tests, but should be exercised against known real IFC files for error reporting, IFC-version quirks, and complex storey layouts. Lower priority — current quality is "demo-able but rough."
 2. **Finish Hamburg external validation and quarantine repair** — Install official `cjval` and run it across the generated CityJSONSeq tiles. The source XML schema gate, repository structural gate, and `val3dity` primitive audit are green for the strict editing catalog. Repair and re-audit the 3,387 quarantined originals if the handoff requires lossless full-building coverage.
 3. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-4. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Add authentication, shared-user history, and incremental published-tile regeneration. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
+4. **Transportation module next phase** — Evaluate `muv-osm` for semantic OSM lane/rule parsing, make lane-level geometry reliable via either patched osm2streets WASM or a TypeScript/JavaScript fallback, add road-fit validation against planning/lot/building constraints, and prototype an r:trån-backed OpenDRIVE -> CityGML Transportation importer that normalizes into `RoadDraft`. See `CITYGML_TRANSPORTATION_PLAN.md`.
+5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Add authentication, shared-user history, and incremental published-tile regeneration. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 **Deferred (good ROI not obvious right now):**
 - **WASM straight-skeleton** for non-rectangular gable/hip — CGAL+Emscripten build is 3-7 days for a narrow case (concave L/U/T shapes wanting gable/hip). Workaround: split into rectangular BuildingParts via the existing "Subdivide by side" path, then apply gable/hip per part. Re-evaluate if a demo requires real concave gables.
@@ -320,6 +322,8 @@ webcityeditor/
 └── prototype/
     ├── PROTOTYPE_STATUS.md              THIS FILE
     ├── HAMBURG_PIPELINE.md              Hamburg complete-city CityGML→validated tiled CityJSONSeq workflow
+    ├── OSM2STREETS_FORK_PLAN.md         osm2streets WASM/fork and lane UI plan
+    ├── CITYGML_TRANSPORTATION_PLAN.md   CityGML Transportation, OpenDRIVE, and muv-osm plan
     ├── package.json                     React 18, Three 0.165, deck.gl 9, MapLibre 4, Terra Draw 1.28,
     │                                    pinned cityjson-threejs-loader, web-ifc, shadcn deps, proj4 2
     ├── public/data/manifest.json         Same-origin hosted sample manifest for GitHub Pages demos
