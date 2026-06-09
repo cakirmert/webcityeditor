@@ -168,8 +168,11 @@ async function getIfcApi(): Promise<IfcAPI> {
   if (!apiPromise) {
     apiPromise = (async () => {
       const api = new IfcAPI();
-      const wasmDir = wasmUrl.substring(0, wasmUrl.lastIndexOf('/') + 1);
-      api.SetWasmPath(wasmDir);
+      const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
+      if (!isNode) {
+        const wasmDir = wasmUrl.substring(0, wasmUrl.lastIndexOf('/') + 1);
+        api.SetWasmPath(wasmDir);
+      }
       await api.Init();
       return api;
     })();
