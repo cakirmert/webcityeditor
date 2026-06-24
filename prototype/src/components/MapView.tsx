@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { PathLayer, PolygonLayer, SolidPolygonLayer, GeoJsonLayer } from '@deck.gl/layers';
+import {
+  GeoJsonLayer,
+  PathLayer,
+  PolygonLayer,
+  ScatterplotLayer,
+  SolidPolygonLayer,
+} from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
 import {
@@ -19,8 +25,17 @@ import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
-import type { OsmRoadFeature, RoadArea } from '../lib/transportation';
+import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
+import {
+  buildRoadDraftHandles,
+  buildRoadDraftPaths,
+  insertRoadDraftPoint,
+  toLngLat,
+  updateRoadDraftPoint,
+  type RoadDraftHandle,
+  type RoadDraftPath,
+} from '../lib/road-draft-edit';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -35,6 +50,47 @@ const LOD_EXTRUDE_MAX = 99; // always extrude at z > 14.5 for now
 const DATA_FIT_PADDING = 20;
 const DATA_FIT_MAX_ZOOM = 19;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
+
+type Rgba = [number, number, number, number];
+
+function roadAreaKind(area: RoadArea): string {
+  const usage = area.attributes.transportationUsage;
+  return typeof usage === 'string' ? usage : area.function;
+}
+
+function roadAreaFillColor(area: RoadArea, selected = false, preview = false): Rgba {
+  if (selected) return [255, 170, 40, 230];
+  const alpha = preview ? 218 : 205;
+  switch (roadAreaKind(area)) {
+    case 'car_lane':
+    case 'driving_lane':
+      return [55, 56, 62, alpha + 20];
+    case 'bike_lane':
+      return [18, 136, 74, alpha];
+    case 'sidewalk':
+      return [184, 188, 196, alpha];
+    case 'parking':
+    case 'parking_lane':
+      return [104, 107, 114, alpha];
+    case 'median':
+      return [124, 124, 132, alpha];
+    case 'green':
+    case 'green_verge':
+    case 'verge':
+      return [48, 120, 82, alpha];
+    default:
+      return [88, 91, 100, alpha];
+  }
+}
+
+function roadAreaLineColor(area: RoadArea, selected = false, preview = false): Rgba {
+  if (selected) return [255, 224, 130, 255];
+  if (preview) return [245, 248, 255, 185];
+  const kind = roadAreaKind(area);
+  return kind === 'green' || kind === 'green_verge' || kind === 'verge'
+    ? [116, 190, 142, 165]
+    : [238, 242, 255, 130];
+}
 
 interface Props {
   cityjson: CityJsonDocument;
@@ -113,6 +169,8 @@ interface Props {
   roadFitConflicts?: RoadFitConflict[];
   selectedRoadAreaId?: string | null;
   onRoadAreaSelect?: (area: RoadArea) => void;
+  roadDraft?: RoadDraft | null;
+  onRoadDraftChange?: (draft: RoadDraft) => void;
   osmRoads?: OsmRoadFeature[];
   selectedOsmRoadId?: string | null;
   onOsmRoadSelect?: (road: OsmRoadFeature) => void;
@@ -164,6 +222,8 @@ export default function MapView({
   roadFitConflicts = [],
   selectedRoadAreaId = null,
   onRoadAreaSelect,
+  roadDraft = null,
+  onRoadDraftChange,
   osmRoads = [],
   selectedOsmRoadId = null,
   onOsmRoadSelect,
@@ -174,10 +234,16 @@ export default function MapView({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const drawRef = useRef<TerraDraw | null>(null);
+  const roadDraftRef = useRef<RoadDraft | null>(roadDraft);
+  const roadDraftDragRef = useRef<{ sectionId: string; pointIndex: number } | null>(null);
   const flownForDocRef = useRef<CityJsonDocument | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(16);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
+
+  useEffect(() => {
+    roadDraftRef.current = roadDraft;
+  }, [roadDraft]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -209,6 +275,68 @@ export default function MapView({
     // reloadToken catches in-place geometry edits on the same document object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cityjson, reloadToken]
+  );
+
+  const commitRoadDraft = useCallback(
+    (next: RoadDraft) => {
+      roadDraftRef.current = next;
+      onRoadDraftChange?.(next);
+    },
+    [onRoadDraftChange]
+  );
+
+  const handleRoadDraftHandleDragStart = useCallback(
+    (info: PickingInfo<RoadDraftHandle>) => {
+      if (!info.object || !onRoadDraftChange) return false;
+      const handle = info.object;
+      const draft = roadDraftRef.current;
+      if (!draft) return false;
+      const position = toLngLat(info.coordinate) ?? handle.position;
+      const map = mapRef.current;
+      map?.dragPan.disable();
+
+      if (handle.kind === 'midpoint') {
+        const next = insertRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position);
+        roadDraftDragRef.current = {
+          sectionId: handle.sectionId,
+          pointIndex: handle.pointIndex,
+        };
+        commitRoadDraft(next);
+        return true;
+      }
+
+      roadDraftDragRef.current = {
+        sectionId: handle.sectionId,
+        pointIndex: handle.pointIndex,
+      };
+      commitRoadDraft(updateRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position));
+      return true;
+    },
+    [commitRoadDraft, onRoadDraftChange]
+  );
+
+  const handleRoadDraftHandleDrag = useCallback(
+    (info: PickingInfo<RoadDraftHandle>) => {
+      const active = roadDraftDragRef.current;
+      const draft = roadDraftRef.current;
+      const position = toLngLat(info.coordinate);
+      if (!active || !draft || !position || !onRoadDraftChange) return false;
+      commitRoadDraft(
+        updateRoadDraftPoint(draft, active.sectionId, active.pointIndex, position)
+      );
+      return true;
+    },
+    [commitRoadDraft, onRoadDraftChange]
+  );
+
+  const handleRoadDraftHandleDragEnd = useCallback(
+    (info: PickingInfo<RoadDraftHandle>) => {
+      handleRoadDraftHandleDrag(info);
+      roadDraftDragRef.current = null;
+      mapRef.current?.dragPan.enable();
+      return true;
+    },
+    [handleRoadDraftHandleDrag]
   );
 
   // Detect CRS support and surface a warning if unsupported
@@ -382,6 +510,8 @@ export default function MapView({
     // specific parameterised Layer subclasses here is fine and keeps the
     // type-check honest about which layer classes we feed to MapboxOverlay.
     const layers: any[] = [];
+    const roadDraftPaths = buildRoadDraftPaths(roadDraft);
+    const roadDraftHandles = buildRoadDraftHandles(roadDraft);
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
     // thing drawn, at high zoom it still fires picking when clicking a roof edge.
@@ -478,15 +608,8 @@ export default function MapView({
           id: 'cityjson-road-areas',
           data: roadAreas,
           getPolygon: (d) => d.polygon,
-          getFillColor: (d) => {
-            if (d.id === selectedRoadAreaId) return [255, 180, 60, 190];
-            if (d.function === 'bike_lane') return [60, 190, 120, 145];
-            if (d.function === 'sidewalk') return [120, 150, 180, 125];
-            if (d.surfaceType === 'AuxiliaryTrafficArea') return [90, 160, 80, 120];
-            return [70, 120, 210, 135];
-          },
-          getLineColor: (d) =>
-            d.id === selectedRoadAreaId ? [255, 210, 90, 255] : [45, 95, 170, 220],
+          getFillColor: (d) => roadAreaFillColor(d, d.id === selectedRoadAreaId),
+          getLineColor: (d) => roadAreaLineColor(d, d.id === selectedRoadAreaId),
           getLineWidth: 1,
           lineWidthMinPixels: 1,
           stroked: true,
@@ -511,13 +634,8 @@ export default function MapView({
           id: 'road-draft-preview',
           data: roadPreviewAreas,
           getPolygon: (d) => d.polygon,
-          getFillColor: (d) =>
-            d.function === 'bike_lane'
-              ? [60, 230, 140, 120]
-              : d.function === 'sidewalk'
-              ? [200, 220, 255, 85]
-              : [255, 180, 60, 100],
-          getLineColor: [255, 190, 70, 240],
+          getFillColor: (d) => roadAreaFillColor(d, false, true),
+          getLineColor: (d) => roadAreaLineColor(d, false, true),
           getLineWidth: 1,
           lineWidthMinPixels: 1,
           stroked: true,
@@ -525,6 +643,52 @@ export default function MapView({
           pickable: false,
           extruded: false,
           parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (roadDraftPaths.length > 0) {
+      layers.push(
+        new PathLayer<RoadDraftPath>({
+          id: 'road-draft-centerline',
+          data: roadDraftPaths,
+          getPath: (d) => d.path,
+          getColor: [255, 178, 64, 245],
+          getWidth: 2.5,
+          widthUnits: 'pixels',
+          widthMinPixels: 2,
+          jointRounded: true,
+          capRounded: true,
+          pickable: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (roadDraftHandles.length > 0 && drawMode !== 'road-line' && onRoadDraftChange) {
+      layers.push(
+        new ScatterplotLayer<RoadDraftHandle>({
+          id: 'road-draft-centerline-handles',
+          data: roadDraftHandles,
+          getPosition: (d) => d.position,
+          getFillColor: (d) =>
+            d.kind === 'vertex' ? [255, 196, 84, 255] : [255, 255, 255, 235],
+          getLineColor: (d) =>
+            d.kind === 'vertex' ? [72, 46, 14, 255] : [255, 178, 64, 255],
+          getLineWidth: 2,
+          getRadius: (d) => (d.kind === 'vertex' ? 6 : 4),
+          radiusUnits: 'pixels',
+          radiusMinPixels: 4,
+          radiusMaxPixels: 8,
+          stroked: true,
+          filled: true,
+          pickable: true,
+          autoHighlight: true,
+          highlightColor: [255, 255, 255, 90],
+          parameters: { depthTest: false } as unknown as never,
+          onDragStart: handleRoadDraftHandleDragStart,
+          onDrag: handleRoadDraftHandleDrag,
+          onDragEnd: handleRoadDraftHandleDragEnd,
         })
       );
     }
@@ -784,6 +948,12 @@ export default function MapView({
     onZoneSelect,
     roadAreas,
     roadPreviewAreas,
+    roadDraft,
+    onRoadDraftChange,
+    handleRoadDraftHandleDragStart,
+    handleRoadDraftHandleDrag,
+    handleRoadDraftHandleDragEnd,
+    drawMode,
     roadFitConflicts,
     selectedRoadAreaId,
     onRoadAreaSelect,
@@ -1243,7 +1413,7 @@ function MapColorModeButton({
         border: 'none',
         borderRadius: 4,
         cursor: 'pointer',
-        background: active ? 'var(--primary)' : 'transparent',
+        background: active ? 'var(--accent)' : 'transparent',
         color: active ? '#fff' : 'var(--text-dim)',
         fontFamily: 'inherit',
         fontSize: 11,

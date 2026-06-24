@@ -450,6 +450,8 @@ export default function App() {
                 roadEditor.setSelectedRoadArea(area);
                 handleSelect({ objectId: area.roadId });
               }}
+              roadDraft={roadEditor.roadDraft}
+              onRoadDraftChange={roadEditor.handleRoadDraftChange}
               osmRoads={roadEditor.osmRoads}
               selectedOsmRoadId={roadEditor.selectedOsmRoadId}
               onOsmRoadSelect={roadEditor.handleOsmRoadSelect}
