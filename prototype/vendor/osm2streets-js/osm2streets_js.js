@@ -420,7 +420,10 @@ export class JsStreetNetwork {
      * @param {number} intersection
      */
     collapseIntersection(intersection) {
-        wasm.jsstreetnetwork_collapseIntersection(this.__wbg_ptr, intersection);
+        const ret = wasm.jsstreetnetwork_collapseIntersection(this.__wbg_ptr, intersection);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @returns {string}

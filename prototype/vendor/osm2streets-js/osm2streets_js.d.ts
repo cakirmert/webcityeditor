@@ -54,7 +54,7 @@ export interface InitOutput {
   readonly jsdebugstreets_getLabel: (a: number) => [number, number];
   readonly jsdebugstreets_getNetwork: (a: number) => any;
   readonly jsdebugstreets_toDebugGeojson: (a: number) => [number, number];
-  readonly jsstreetnetwork_collapseIntersection: (a: number, b: number) => void;
+  readonly jsstreetnetwork_collapseIntersection: (a: number, b: number) => [number, number];
   readonly jsstreetnetwork_collapseShortRoad: (a: number, b: number) => void;
   readonly jsstreetnetwork_debugClockwiseOrderingForIntersectionGeojson: (a: number, b: number) => [number, number];
   readonly jsstreetnetwork_debugClockwiseOrderingGeojson: (a: number) => [number, number];
