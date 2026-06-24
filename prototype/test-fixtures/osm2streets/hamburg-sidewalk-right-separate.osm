@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="webcityeditor-regression">
+  <bounds minlat="53.5490" minlon="9.9920" maxlat="53.5520" maxlon="9.9970"/>
+  <node id="2001" lat="53.5495" lon="9.9924"/>
+  <node id="2002" lat="53.5500" lon="9.9940"/>
+  <node id="2003" lat="53.5506" lon="9.9959"/>
+  <way id="2100">
+    <nd ref="2001"/>
+    <nd ref="2002"/>
+    <nd ref="2003"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="name" v="Hamburg Separate Sidewalk Right"/>
+    <tag k="lanes" v="2"/>
+    <tag k="maxspeed" v="50"/>
+    <tag k="sidewalk:left" v="no"/>
+    <tag k="sidewalk:right" v="separate"/>
+  </way>
+</osm>

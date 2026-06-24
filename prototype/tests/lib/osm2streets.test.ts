@@ -5,12 +5,12 @@ import { buildOsm2StreetsImportOptions } from '../../src/lib/osm2streets-options
 import { processOsmXml } from '../../src/lib/osm2streets';
 
 describe('osm2streets WASM options', () => {
-  it('keeps the legacy osm2lanes flag required by the bundled npm WASM', () => {
-    const options = buildOsm2StreetsImportOptions({ useOsm2Lanes: true });
+  it('keeps the import option shape required by the forked WASM', () => {
+    const options = buildOsm2StreetsImportOptions();
 
     /*
      * Regression guard for the browser error:
-     *   "osm2streets Wasm generation failed: missing field `osm2lanes`"
+     *   "osm2streets Wasm generation failed: missing field ..."
      *
      * osm2streets-js types do not document the options shape, so this test
      * makes the required runtime contract explicit.
@@ -20,13 +20,9 @@ describe('osm2streets WASM options', () => {
       dual_carriageway_experiment: false,
       sidepath_zipping_experiment: false,
       inferred_sidewalks: true,
-      osm2lanes: true,
-    });
-  });
-
-  it('can build classic-parser options while preserving the same WASM contract', () => {
-    expect(buildOsm2StreetsImportOptions({ useOsm2Lanes: false })).toMatchObject({
-      osm2lanes: false,
+      inferred_kerbs: true,
+      date_time: null,
+      override_driving_side: '',
     });
   });
 
@@ -36,8 +32,13 @@ describe('osm2streets WASM options', () => {
 
     globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/node_modules/osm2streets-js/osm2streets_js_bg.wasm')) {
-        const wasm = readFileSync(resolve(__dirname, '../../node_modules/osm2streets-js/osm2streets_js_bg.wasm'));
+      if (
+        url.endsWith('/node_modules/osm2streets-js/osm2streets_js_bg.wasm') ||
+        url.endsWith('/vendor/osm2streets-js/osm2streets_js_bg.wasm')
+      ) {
+        const wasm = readFileSync(
+          resolve(__dirname, '../../vendor/osm2streets-js/osm2streets_js_bg.wasm')
+        );
         return new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } });
       }
       return originalFetch(input, init);
@@ -64,7 +65,7 @@ describe('osm2streets WASM options', () => {
         [9.992, 53.549, 9.996, 53.551]
       );
 
-      expect(result.engine).toBe('classic');
+      expect(result.engine).toBe('fork');
       expect(result.lanes).toMatchObject({ type: 'FeatureCollection' });
       expect(result.laneMarkings).toMatchObject({ type: 'FeatureCollection' });
       expect(result.intersectionMarkings).toMatchObject({ type: 'FeatureCollection' });

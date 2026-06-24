@@ -9,14 +9,15 @@ export interface Osm2StreetsResult {
   lanes: any;
   laneMarkings: any;
   intersectionMarkings: any;
-  engine: 'classic';
+  engine: 'fork';
 }
 
 let initPromise: Promise<any> | null = null;
+const textEncoder = new TextEncoder();
 
 export async function initOsm2Streets(): Promise<void> {
   if (!initPromise) {
-    initPromise = initWasm(osm2streetsWasmUrl);
+    initPromise = initWasm({ module_or_path: osm2streetsWasmUrl });
   }
   await initPromise;
 }
@@ -29,12 +30,7 @@ export async function processOsmXml(
 
   const clipPtsGeojson = clipBbox ? buildClipPolygonGeojson(clipBbox) : '';
 
-  /*
-   * Use exactly one geometry engine: the classic osm2streets parser.
-   * The osm2lanes-backed parser in the old npm WASM does not support common
-   * sidewalk tag combinations in Hamburg data.
-   */
-  const importOptions = buildOsm2StreetsImportOptions({ useOsm2Lanes: false });
+  const importOptions = buildOsm2StreetsImportOptions();
   return readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions);
 }
 
@@ -67,7 +63,7 @@ function readOsm2StreetsResult(
   clipPtsGeojson: string,
   importOptions: Osm2StreetsImportOptions
 ): Osm2StreetsResult {
-  const network = new JsStreetNetwork(osmXml, clipPtsGeojson, importOptions);
+  const network = new JsStreetNetwork(textEncoder.encode(osmXml), clipPtsGeojson, importOptions);
   try {
     const lanes = JSON.parse(network.toLanePolygonsGeojson());
     const laneMarkings = JSON.parse(network.toLaneMarkingsGeojson());
@@ -77,7 +73,7 @@ function readOsm2StreetsResult(
       lanes,
       laneMarkings,
       intersectionMarkings,
-      engine: 'classic',
+      engine: 'fork',
     };
   } finally {
     network.free();

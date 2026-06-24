@@ -1,144 +1,138 @@
 # osm2streets Implementation Handoff
 
-> Last updated: 2026-06-09  
-> Purpose: give the next model the current decision, the reason WASM is used,
-> and the remaining non-fallback work.
+> Last updated: 2026-06-24
+> Purpose: give the next model the current osm2streets-only decision, the reason
+> WASM is used, and the remaining non-fallback work.
 
 ## Current Decision
 
-Use **one road-geometry engine**: osm2streets.
+Use **one road-geometry engine**: the forked osm2streets Rust/WASM path.
 
-Do not reintroduce a TypeScript/JavaScript lane-geometry fallback. The fallback
-files were deleted, and `processOsmXml()` now calls only `osm2streets-js` with
-the classic osm2streets parser (`osm2lanes: false`).
+Do not reintroduce a TypeScript/JavaScript lane-geometry fallback. The goal is
+not "use osm2streets at all costs"; the goal is reliable lane-level road
+geometry, and this repo's chosen implementation path is to repair osm2streets at
+the Rust source, rebuild the browser WASM package, and prove the output with
+Hamburg regression fixtures.
 
 Current implementation state:
 
-- `prototype/src/lib/osm2streets.ts` initializes `osm2streets-js` and constructs
-  `JsStreetNetwork`.
-- `prototype/patches/osm2streets-js+0.1.4.patch` changes the packaged JS bridge
-  so non-fatal Rust diagnostics are logged as `console.warn`, not
-  `console.error`.
-- `prototype/package.json` runs `patch-package` on `postinstall`.
-- `prototype/src/lib/osm2streets.test.ts` has a regression test that runs the
-  bundled WASM against minimal OSM XML and asserts that no browser errors are
-  emitted.
+- `vendor/osm2streets` is a Git submodule pointing at the project fork.
+- The fork patches Rust diagnostics so non-fatal geometry cases are warnings,
+  not browser `console.error` failures.
+- The fork normalizes Hamburg-style separately mapped sidewalk tags before
+  `osm2lanes` lane parsing.
+- `prototype/scripts/build-osm2streets-wasm.ps1` rebuilds the WASM package from
+  `vendor/osm2streets/osm2streets-js`.
+- `prototype/vendor/osm2streets-js` contains the checked-in `wasm-pack` output
+  consumed by the Vite app.
+- `prototype/package.json` resolves `osm2streets-js` from
+  `file:./vendor/osm2streets-js`.
+- `prototype/src/lib/osm2streets.ts` initializes the source-built package and
+  returns lane polygons, lane markings, and intersection markings with
+  `engine: 'fork'`.
+- `prototype/test-fixtures/osm2streets` contains committed Hamburg OSM fixtures.
+- `npm run osm2streets:compare` runs those fixtures through the source-built
+  WASM and fails on missing minimum output counts or any `console.error`.
 
 ## Why WASM Is Used
 
 osm2streets is a Rust project. The browser cannot execute Rust source or a
-native Rust binary directly, so the Rust code has to be compiled to WebAssembly
-to run inside the Vite/React app.
+native Rust binary directly, so the Rust engine has to be compiled to
+WebAssembly for the Vite/React app.
 
-WASM is therefore not just a shortcut because something is already configured.
-It is the browser delivery format for the upstream Rust geometry engine. Using
-WASM keeps the editor on the same algorithmic path as osm2streets itself:
+WASM is not being used merely because the old npm package was already
+configured. It is the browser delivery format for the upstream Rust geometry
+engine. Using WASM keeps the editor on the osm2streets algorithmic path:
 
 - lane polygon generation
 - lane marking generation
 - intersection polygon generation
 - crosswalk/intersection marking output
 - dual-carriageway experiments
-- upstream bug fixes from the Rust project
+- upstream Rust bug fixes
 
-The current red console spam is not caused by Vite, React, MapLibre, deck.gl, or
-dependency bundling. Vite is only loading the wasm-pack JS wrapper and `.wasm`
-asset. The problematic messages come from the old published `osm2streets-js`
-WASM package and its Rust logging/geometry edge cases.
+The red console spam was not caused by Vite, React, MapLibre, deck.gl, or
+dependency bundling. Vite only loads the wasm-pack JS wrapper and `.wasm` asset.
+The noisy messages came from the Rust logger and geometry edge cases.
 
-If the road generation runs in a backend service instead of the browser, WASM is
-not required. A backend could call native Rust or a Rust CLI directly. For this
-browser-only prototype path, WASM is the correct way to run the Rust engine.
+If road generation moves to a backend service, WASM is not required. A backend
+could call native Rust or a Rust CLI. For this browser-only prototype path, WASM
+is the right way to run the Rust engine.
 
 ## Could A JS/TypeScript Version Work?
 
 Technically yes, but it would be a separate implementation, not "making
 osm2streets work."
 
-A JS/TypeScript lane geometry engine could offset centerlines and produce simple
-lane polygons for easy roads. That is not enough for this requirement. To
-replace osm2streets properly, a JS version would need to replicate hard geometry
-and topology behavior:
+A JS/TypeScript lane engine could offset centerlines for simple roads. That is
+not enough here. A real replacement would have to replicate:
 
 - OSM way parsing and tag interpretation
 - lane ordering and widths
-- sidepaths, sidewalks, cycle lanes, parking, medians
-- trimming roads into intersections
+- sidepaths, sidewalks, cycle lanes, parking, and medians
+- road trimming into intersections
 - intersection polygons
 - crosswalk and lane markings
 - dual carriageway merging
-- degenerate/short-road handling
-- useful debug output for broken geometry
+- degenerate and short-road handling
+- useful diagnostics for broken geometry
 
-That is a large geometry engine. It would also diverge from osm2streets upstream
-and make every bug fix local to this project. For that reason, JS/TypeScript
-should stay limited to app adapters, `RoadDraft` conversion, validation, and UI.
-It should not be used as a replacement or fallback lane-geometry backend unless
-the project explicitly changes direction later.
+That is a large geometry engine and would diverge from upstream osm2streets. For
+this project, JS/TypeScript should stay limited to app adapters, `RoadDraft`
+conversion, validation, and UI. It should not become a replacement lane-geometry
+backend unless the project explicitly changes direction later.
 
-Directly converting the Rust osm2streets codebase to maintainable JS is also not
-realistic. wasm-bindgen emits JS glue around compiled WASM; it does not produce a
-human-maintainable JS port of the Rust geometry code.
+## Completed In This Pass
 
-## What Is Left
+1. Forked `a-b-street/osm2streets` to the user's GitHub account.
+2. Added the fork as `vendor/osm2streets`.
+3. Patched Rust logging and non-fatal diagnostics at source.
+4. Patched `osm2lanes` tag normalization for separately mapped sidewalk cases.
+5. Added Rust tests for Hamburg sidewalk tag combinations.
+6. Rebuilt `prototype/vendor/osm2streets-js` with `wasm-pack`.
+7. Removed the old npm-wrapper `patch-package` path.
+8. Wired the prototype dependency to `file:./vendor/osm2streets-js`.
+9. Added Hamburg OSM regression fixtures and a comparison script.
+10. Updated tests to load the local WASM package.
 
-The current npm wrapper patch only fixes misleading browser error reporting. It
-does not fix geometry that is empty, wrong, or missing crosswalks. The remaining
-work is to repair the osm2streets source path.
+## What Is Still Left
 
-1. Fork `https://github.com/a-b-street/osm2streets`.
-2. Add the fork as `vendor/osm2streets` or another clearly documented local
-   source dependency.
-3. Add a build script that runs `wasm-pack build --release --target web` from
-   `vendor/osm2streets/osm2streets-js`.
-4. Change `prototype/package.json` from the npm package to the locally built
-   package, for example:
-
-   ```json
-   "osm2streets-js": "file:./vendor/osm2streets-js"
-   ```
-
-5. Patch Rust diagnostics at source:
-   - keep actual fatal failures as errors
-   - downgrade non-fatal geometry messages such as "trimmed into oblivion" and
-     "degenerate intersection" to warnings
-   - reduce noisy `info!` output in the browser logger
-6. Fix Hamburg OSM tag cases in the Rust path, especially sidewalk/separate tags
-   that currently make the older `osm2lanes` parser unreliable.
-7. Re-test parser choice:
-   - current app uses `osm2lanes: false`
-   - after Rust fixes, compare `osm2lanes: true` and `false`
-   - keep the mode that produces better Hamburg lane geometry
-8. Build a small Hamburg regression corpus:
-   - save representative Overpass XML snippets or fixtures
-   - include the areas that produced "called with no roads", "trimmed into
-     oblivion", and "too short to trim" diagnostics
-   - record expected minimum counts for lane polygons, lane markings, and
-     intersection markings
-9. Compare the current npm WASM, the latest upstream demo behavior, and the
-   local fork output for the same Hamburg bboxes.
-10. Test `dual_carriageway_experiment` on divided Hamburg roads before enabling
-    it by default.
-11. Keep road-fit validation separate. It should validate `RoadDraft` or final
-    road-surface polygons against planning/lot/building constraints. It should
-    not become a second lane-geometry generator.
+- Run real browser verification on Hamburg viewports, not only committed
+  fixtures.
+- Compare fixture and viewport output against the upstream osm2streets demo for
+  the same areas when crosswalk/intersection marking quality matters.
+- Test `dual_carriageway_experiment` on representative divided Hamburg roads
+  before enabling it by default.
+- Keep road-fit validation separate. It should validate `RoadDraft` or final
+  road-surface polygons against planning/lot/building constraints and highlight
+  overflow areas; it should not become a second lane-geometry generator.
+- If a fixture exposes wrong geometry, patch the Rust source and add or tighten
+  the fixture expectation in the same commit.
 
 ## Verification Commands
 
-Run these after changes:
+Run these after osm2streets changes:
 
 ```powershell
+cd D:\webcityeditor\vendor\osm2streets
+cargo fmt
+cargo test -p osm2lanes
+cargo test -p osm2streets-js
+
 cd D:\webcityeditor\prototype
+.\scripts\build-osm2streets-wasm.ps1
 npm install
 npm outdated --json
+npm audit --json
+npm run osm2streets:compare
 npm run build
 npm run test -- src/lib/osm2streets.test.ts src/lib/road-fit.test.ts
 npm test
 ```
 
-Known current full-suite caveat: `npm test` fails if
+Known full-suite caveat: `npm test` can fail if
 `prototype/public/fzk-haus.ifc` is absent. That fixture issue is unrelated to
-osm2streets. The last known run had all other tests passing.
+osm2streets.
 
 Browser verification should include:
 

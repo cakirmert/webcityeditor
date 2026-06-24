@@ -27,8 +27,9 @@ the app. Every importer should feed the existing `RoadDraft` shape, then reuse
 surfaces.
 
 The current implementation decision is to use one lane-geometry engine:
-osm2streets. The work is therefore focused on making the osm2streets source/npm
-package path handle the Hamburg data cleanly, not on maintaining a parallel
+osm2streets. The repo now uses a source-built Rust/WASM fork for that path. The
+remaining work is to keep repairing the fork against Hamburg data and compare
+its output with semantic `muv-osm` parsing, not to maintain a parallel
 TypeScript/JavaScript lane backend.
 
 Related focused plan: [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md)
@@ -81,19 +82,20 @@ References:
 
 ### 2.3 osm2streets
 
-osm2streets remains the best current candidate for visual lane polygons,
-intersection polygons, and crosswalk markings from OSM. It currently has a
-practical blocker: the published `osm2streets-js` WASM is old and noisy, and real
-Hamburg OSM data can trigger many non-fatal errors or parser edge cases.
+osm2streets remains the selected engine for visual lane polygons, intersection
+polygons, and crosswalk markings from OSM. The published `osm2streets-js` WASM
+was old and noisy, so this repo now uses a patched source-built Rust/WASM fork.
+Real Hamburg OSM data can still expose geometry and parser edge cases; those
+should be fixed in the fork and captured as fixtures.
 
 Current implementation target:
 
 1. **Use osm2streets only** for lane polygons, lane markings, and intersection
    markings.
-2. Patch the npm wrapper so non-fatal Rust diagnostics do not appear as browser
-   `console.error` failures.
-3. If wrapper patching is not enough, fork osm2streets, patch the Rust source and
-   osm2lanes edge cases, then compile a local WASM package.
+2. Keep the source-built fork in `vendor/osm2streets` as the only browser lane
+   geometry path.
+3. Patch Rust diagnostics, tag normalization, and geometry edge cases at source,
+   then rebuild `prototype/vendor/osm2streets-js`.
 
 The editor can still compare osm2streets visual output with the semantic lane
 model from `muv-osm`, but osm2streets remains the single visual geometry engine.
@@ -298,16 +300,16 @@ inside their limited space.
 
 ### 7.3 osm2streets integration
 
-- [ ] Complete the fork plan in `OSM2STREETS_FORK_PLAN.md`
-- [ ] Run the same Hamburg bbox before/after fork rebuild
-- [ ] Record counts for lane polygons, lane markings, intersection markings,
+- [x] Complete the first fork/rebuild pass in `OSM2STREETS_FORK_PLAN.md`
+- [x] Add committed Hamburg OSM fixtures for forked-WASM regression checks
+- [x] Record counts for lane polygons, lane markings, intersection markings,
       and browser console errors
 - [ ] Keep osm2streets as a visual validation layer even after `muv-osm`
       semantic parsing is added
-- [ ] Patch the current npm wrapper so non-fatal Rust `error!` diagnostics do not
+- [x] Patch Rust source so selected non-fatal `error!` diagnostics do not
       become browser `console.error` failures
-- [ ] If geometry still fails, fork/rebuild osm2streets and patch the Rust
-      diagnostics and geometry edge cases at source
+- [x] Fork/rebuild osm2streets and patch Hamburg sidewalk tag handling at source
+- [ ] Run real Hamburg viewport checks against the source-built fork output
 
 ### 7.4 OpenDRIVE/r:trån pipeline
 

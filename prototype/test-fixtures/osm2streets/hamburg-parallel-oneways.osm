@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="webcityeditor-regression">
+  <bounds minlat="53.5490" minlon="9.9920" maxlat="53.5520" maxlon="9.9970"/>
+  <node id="4001" lat="53.5497" lon="9.9925"/>
+  <node id="4002" lat="53.5501" lon="9.9941"/>
+  <node id="4003" lat="53.5505" lon="9.9957"/>
+  <node id="4011" lat="53.5499" lon="9.9924"/>
+  <node id="4012" lat="53.5503" lon="9.9940"/>
+  <node id="4013" lat="53.5507" lon="9.9956"/>
+  <way id="4100">
+    <nd ref="4001"/>
+    <nd ref="4002"/>
+    <nd ref="4003"/>
+    <tag k="highway" v="primary"/>
+    <tag k="name" v="Hamburg Parallel Oneway East"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="lanes" v="2"/>
+    <tag k="sidewalk:right" v="separate"/>
+  </way>
+  <way id="4101">
+    <nd ref="4013"/>
+    <nd ref="4012"/>
+    <nd ref="4011"/>
+    <tag k="highway" v="primary"/>
+    <tag k="name" v="Hamburg Parallel Oneway West"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="lanes" v="2"/>
+    <tag k="sidewalk:left" v="separate"/>
+  </way>
+</osm>

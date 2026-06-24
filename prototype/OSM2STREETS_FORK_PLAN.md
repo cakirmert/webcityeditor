@@ -1,6 +1,7 @@
 # osm2streets Fork & Road Editor Improvement Plan
 
-> **Status**: Ready for implementation  
+> **Status**: Initial Rust/WASM fork path implemented on 2026-06-24; browser
+> Hamburg verification and UI work remain
 > **Author**: Auto-generated from investigation session (2026-06-08)  
 > **Target**: `webcityeditor/prototype` — Vite + React + MapLibre road editor
 
@@ -25,14 +26,23 @@ maintain a second TypeScript/JavaScript lane-geometry backend. osm2streets is th
 chosen visual engine because it already produces lane polygons, lane markings,
 intersection polygons, and crosswalk-style markings from OSM.
 
-Acceptable implementation outcomes:
+Implemented outcome:
 
-1. Patch the npm wrapper so non-fatal Rust diagnostics do not appear as browser
-   `console.error` failures.
-2. Patch the Rust/osm2lanes source and compile a local WASM package if the npm
-   wrapper patch is not enough.
-3. Keep `RoadDraft` as the editable app model, but keep osm2streets as the only
+1. Fork osm2streets and vendor it as `vendor/osm2streets`.
+2. Patch Rust diagnostics and Hamburg sidewalk tag handling at source.
+3. Rebuild the WASM package into `prototype/vendor/osm2streets-js`.
+4. Keep `RoadDraft` as the editable app model, with osm2streets as the only
    lane-geometry generator.
+
+Current repo state:
+
+- `prototype/package.json` resolves `osm2streets-js` from
+  `file:./vendor/osm2streets-js`.
+- `prototype/scripts/build-osm2streets-wasm.ps1` rebuilds the source package.
+- `prototype/scripts/compare-osm2streets-fixtures.mjs` compares committed
+  Hamburg OSM fixtures against minimum output counts and fails on
+  `console.error`.
+- The old `patch-package` npm-wrapper patch was removed.
 
 ### 1.1 Console Errors from WASM
 
@@ -231,7 +241,12 @@ npm run dev  # test
 
 ---
 
-## 5. Patch Current npm Wrapper
+## 5. Superseded: Patch Current npm Wrapper
+
+This was a temporary option before the fork was added. The current repo no
+longer uses `patch-package` or `prototype/patches/osm2streets-js+0.1.4.patch`.
+Diagnostics are patched in the Rust source and rebuilt into
+`prototype/vendor/osm2streets-js`.
 
 The current npm package maps Rust `error!` logs to browser `console.error`:
 
@@ -251,11 +266,9 @@ Patch the wrapper so these Rust diagnostics are browser warnings, not red
 errors. This does not change the geometry engine; it fixes the misleading error
 reporting in the packaged WASM bridge.
 
-Tracked implementation:
-
-- add `patch-package`
-- patch `osm2streets-js/osm2streets_js.js`
-- add `postinstall` so the patch is applied after every install
+Do not restore this path unless the project deliberately abandons the source
+fork. Source patches are easier to test and keep the app aligned with the real
+geometry engine.
 
 ---
 
@@ -431,15 +444,17 @@ This is independent of the osm2streets fork and can be done in parallel.
 
 After completing the fork setup:
 
-- [ ] `wasm-pack build --release --target web` succeeds in `vendor/osm2streets/osm2streets-js`
-- [ ] `npm install` resolves `osm2streets-js` from `file:./vendor/osm2streets-js`
+- [x] `wasm-pack build --release --target web` succeeds in `vendor/osm2streets/osm2streets-js`
+- [x] `npm install` resolves `osm2streets-js` from `file:./vendor/osm2streets-js`
+- [x] `npm run osm2streets:compare` passes committed Hamburg fixtures
+- [x] Fixture comparison fails on any `console.error` emitted by the WASM bridge
 - [ ] `npm run dev` starts without errors
-- [ ] Browser console shows **zero red `console.error` lines** from non-fatal osm2streets diagnostics
-- [ ] Lane geometry renders correctly on the map (Hamburg area)
-- [ ] Intersection markings / crosswalks appear at intersections
-- [ ] Dual carriageway merging works (if enabled)
-- [ ] Lane editor UI shows visual lane boxes (after UI improvement)
-- [ ] Lanes can be dragged to reorder
+- [ ] Browser console shows **zero red `console.error` lines** from non-fatal osm2streets diagnostics in a real Hamburg viewport
+- [ ] Lane geometry renders correctly on the map for real Hamburg Overpass data
+- [ ] Intersection markings / crosswalks appear at intersections where expected
+- [ ] Dual carriageway merging works after targeted testing, if enabled
+- [ ] Lane editor UI shows visual lane boxes (separate UI improvement)
+- [ ] Lanes can be dragged to reorder (separate UI improvement)
 
 ---
 
@@ -449,14 +464,14 @@ After completing the fork setup:
 |---------|------|-------------|
 | NEW     | `vendor/osm2streets/` | Git submodule (fork of a-b-street/osm2streets) |
 | NEW     | `prototype/scripts/build-osm2streets-wasm.ps1` | WASM build script |
+| NEW     | `prototype/scripts/compare-osm2streets-fixtures.mjs` | Hamburg fixture comparison script |
+| NEW     | `prototype/test-fixtures/osm2streets/` | Committed Hamburg OSM fixture corpus |
 | NEW     | `prototype/vendor/osm2streets-js/` | Built WASM output directory |
 | MODIFY  | `prototype/package.json` | Change osm2streets-js to `file:` dependency |
-| MODIFY  | `prototype/package.json` | Add `patch-package` and `postinstall` for the npm wrapper patch |
-| NEW     | `prototype/patches/osm2streets-js+0.1.4.patch` | Patch Rust diagnostics to browser warnings |
-| MODIFY  | `prototype/src/lib/osm2streets-options.ts` | Enable dual carriageway experiment |
-| MODIFY  | `prototype/src/lib/osm2streets.ts` | Already switched to classic parser |
-| MODIFY  | `prototype/src/components/RoadEditorPanel.tsx` | Visual lane strip UI + hide export actions behind collapsible |
-| NEW     | `prototype/src/components/LaneStrip.tsx` | New draggable lane visualization |
+| DELETE  | `prototype/patches/osm2streets-js+0.1.4.patch` | Remove old npm wrapper patch |
+| MODIFY  | `prototype/src/lib/osm2streets-options.ts` | Match source-built fork `ImportOptions` shape |
+| MODIFY  | `prototype/src/lib/osm2streets.ts` | Load source-built fork and return `engine: 'fork'` |
 | MODIFY  | `vendor/osm2streets/osm2streets-js/src/lib.rs` | Change log level |
-| MODIFY  | `vendor/osm2streets/osm2streets/src/` | Downgrade error! → warn! |
-| MODIFY  | `vendor/osm2streets/osm2lanes/src/.../foot_shoulder.rs` | Fix sidewalk tags |
+| MODIFY  | `vendor/osm2streets/osm2streets/src/` | Downgrade selected non-fatal `error!` diagnostics to `warn!` |
+| MODIFY  | `vendor/osm2streets/osm2lanes/src/algorithm.rs` | Normalize separately mapped sidewalk tags |
+| MODIFY  | `vendor/osm2streets/osm2lanes/src/tests.rs` | Add Hamburg sidewalk tag regressions |

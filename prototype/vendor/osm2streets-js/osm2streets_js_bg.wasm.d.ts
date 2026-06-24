@@ -1,0 +1,37 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_jsdebugstreets_free: (a: number, b: number) => void;
+export const __wbg_jsstreetnetwork_free: (a: number, b: number) => void;
+export const jsdebugstreets_getLabel: (a: number) => [number, number];
+export const jsdebugstreets_getNetwork: (a: number) => any;
+export const jsdebugstreets_toDebugGeojson: (a: number) => [number, number];
+export const jsstreetnetwork_collapseIntersection: (a: number, b: number) => void;
+export const jsstreetnetwork_collapseShortRoad: (a: number, b: number) => void;
+export const jsstreetnetwork_debugClockwiseOrderingForIntersectionGeojson: (a: number, b: number) => [number, number];
+export const jsstreetnetwork_debugClockwiseOrderingGeojson: (a: number) => [number, number];
+export const jsstreetnetwork_debugMovementsFromLaneGeojson: (a: number, b: number, c: number) => [number, number];
+export const jsstreetnetwork_debugRoadsConnectedToIntersectionGeojson: (a: number, b: number) => [number, number];
+export const jsstreetnetwork_findAllBlocks: (a: number, b: number) => [number, number];
+export const jsstreetnetwork_findBlock: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const jsstreetnetwork_getDebugSteps: (a: number) => [number, number];
+export const jsstreetnetwork_getGeometryForWay: (a: number, b: bigint) => [number, number];
+export const jsstreetnetwork_getOsmTagsForWay: (a: number, b: bigint) => [number, number, number, number];
+export const jsstreetnetwork_new: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+export const jsstreetnetwork_overwriteOsmTagsForWay: (a: number, b: bigint, c: number, d: number) => void;
+export const jsstreetnetwork_toGeojsonPlain: (a: number) => [number, number];
+export const jsstreetnetwork_toIntersectionMarkingsGeojson: (a: number) => [number, number];
+export const jsstreetnetwork_toJson: (a: number) => [number, number];
+export const jsstreetnetwork_toLaneMarkingsGeojson: (a: number) => [number, number];
+export const jsstreetnetwork_toLanePolygonsGeojson: (a: number) => [number, number];
+export const jsstreetnetwork_wayToXml: (a: number, b: bigint) => [number, number, number, number];
+export const jsstreetnetwork_zipSidepath: (a: number, b: number) => void;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_export_2: WebAssembly.Table;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_dealloc: (a: number) => void;
+export const __externref_drop_slice: (a: number, b: number) => void;
+export const __wbindgen_start: () => void;

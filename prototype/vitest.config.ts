@@ -13,6 +13,12 @@ export default defineConfig({
         ),
       },
       {
+        find: /^osm2streets-js\/osm2streets_js_bg\.wasm\?url$/,
+        replacement: `${fileURLToPath(
+          new URL('./vendor/osm2streets-js/osm2streets_js_bg.wasm', import.meta.url)
+        )}?url`,
+      },
+      {
         find: /^osm2streets-js\/osm2streets_js_bg\.wasm$/,
         replacement: fileURLToPath(
           new URL('./node_modules/osm2streets-js/osm2streets_js_bg.wasm', import.meta.url)

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "hamburg-sidewalk-both-separate",
+    "file": "hamburg-sidewalk-both-separate.osm",
+    "bbox": [9.992, 53.549, 9.997, 53.552],
+    "minimum": {
+      "lanes": 6,
+      "laneMarkings": 380,
+      "intersectionMarkings": 0
+    }
+  },
+  {
+    "id": "hamburg-sidewalk-right-separate",
+    "file": "hamburg-sidewalk-right-separate.osm",
+    "bbox": [9.992, 53.549, 9.997, 53.552],
+    "minimum": {
+      "lanes": 4,
+      "laneMarkings": 268,
+      "intersectionMarkings": 0
+    }
+  },
+  {
+    "id": "hamburg-short-intersection",
+    "file": "hamburg-short-intersection.osm",
+    "bbox": [9.992, 53.549, 9.997, 53.552],
+    "minimum": {
+      "lanes": 24,
+      "laneMarkings": 316,
+      "intersectionMarkings": 4
+    }
+  },
+  {
+    "id": "hamburg-parallel-oneways",
+    "file": "hamburg-parallel-oneways.osm",
+    "bbox": [9.992, 53.549, 9.997, 53.552],
+    "minimum": {
+      "lanes": 12,
+      "laneMarkings": 904,
+      "intersectionMarkings": 0
+    }
+  }
+]

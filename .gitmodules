@@ -1,0 +1,3 @@
+[submodule "vendor/osm2streets"]
+	path = vendor/osm2streets
+	url = git@github.com:cakirmert/osm2streets.git

@@ -1,0 +1,21 @@
+{
+  "name": "osm2streets-js",
+  "type": "module",
+  "description": "Javascript API for osm2streets",
+  "version": "0.1.4",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/a-b-street/osm2streets"
+  },
+  "files": [
+    "osm2streets_js_bg.wasm",
+    "osm2streets_js.js",
+    "osm2streets_js.d.ts"
+  ],
+  "main": "osm2streets_js.js",
+  "types": "osm2streets_js.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
