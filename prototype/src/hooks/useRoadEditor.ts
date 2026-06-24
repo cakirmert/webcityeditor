@@ -19,6 +19,10 @@ import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
 
 type Wgs84Bbox = [number, number, number, number];
+interface FetchOsmRoadOptions {
+  source?: 'viewport' | 'loaded-data';
+  allowLargeQuery?: boolean;
+}
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -86,13 +90,18 @@ function limitRoadQueryBbox(bbox: Wgs84Bbox): { bbox: Wgs84Bbox; wasLimited: boo
   };
 }
 
-async function fetchOsmRoadXml(queryBbox: Wgs84Bbox): Promise<{ xmlText: string; endpoint: string }> {
-  const body = new URLSearchParams({ data: buildOverpassRoadQuery(queryBbox, 'xml') });
+async function fetchOsmRoadXml(
+  queryBbox: Wgs84Bbox,
+  timeoutMs = ROAD_QUERY_TIMEOUT_MS
+): Promise<{ xmlText: string; endpoint: string }> {
+  const body = new URLSearchParams({
+    data: buildOverpassRoadQuery(queryBbox, 'xml', Math.ceil(timeoutMs / 1000)),
+  });
   const errors: string[] = [];
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), ROAD_QUERY_TIMEOUT_MS);
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -107,7 +116,7 @@ async function fetchOsmRoadXml(queryBbox: Wgs84Bbox): Promise<{ xmlText: string;
     } catch (error) {
       const message =
         error instanceof Error && error.name === 'AbortError'
-          ? `timed out after ${ROAD_QUERY_TIMEOUT_MS / 1000}s`
+          ? `timed out after ${timeoutMs / 1000}s`
           : error instanceof Error
           ? error.message
           : String(error);
@@ -165,28 +174,36 @@ export function useRoadEditor(
   const [osm2streetsResult, setOsm2streetsResult] = useState<import('../lib/osm2streets').Osm2StreetsResult | null>(null);
   const [osm2streetsBbox, setOsm2streetsBbox] = useState<[number, number, number, number] | null>(null);
 
-  const handleFetchOsmRoads = useCallback(async () => {
+  const handleFetchOsmRoads = useCallback(async (fetchOptions: FetchOsmRoadOptions = {}) => {
     if (!cityjson) return;
     setShowRoadEditor(true);
     const viewportBbox = coreState.mapBboxRef.current;
     const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
-    const bbox = viewportBbox ?? footprintBbox;
+    const bbox =
+      fetchOptions.source === 'loaded-data'
+        ? footprintBbox ?? viewportBbox
+        : viewportBbox ?? footprintBbox;
+    const scopeLabel =
+      fetchOptions.source === 'loaded-data' ? 'loaded Hamburg extent' : 'current viewport';
     if (!bbox) {
       setRoadStatus('Could not derive a map bbox. Draw a road manually, or move the map and try again.');
       return;
     }
     const expandedBbox = expandBbox(bbox, 0.08);
-    const { bbox: queryBbox, wasLimited } = limitRoadQueryBbox(expandedBbox);
+    const { bbox: queryBbox, wasLimited } = fetchOptions.allowLargeQuery
+      ? { bbox: expandedBbox, wasLimited: false }
+      : limitRoadQueryBbox(expandedBbox);
+    const timeoutMs = fetchOptions.allowLargeQuery ? 60_000 : ROAD_QUERY_TIMEOUT_MS;
     setRoadStatus(
       wasLimited
         ? 'Fetching OSM roads for the centre of this viewport. The query was limited to avoid public Overpass timeouts.'
-        : 'Fetching OSM roads for the current viewport...'
+        : `Fetching OSM roads for the ${scopeLabel}...`
     );
     try {
       // Public Overpass instances occasionally return 504 for perfectly valid
       // queries. Rotate through known public instances and keep the editor open
       // so manual drawing remains available when the network path is unhappy.
-      const { xmlText, endpoint } = await fetchOsmRoadXml(queryBbox);
+      const { xmlText, endpoint } = await fetchOsmRoadXml(queryBbox, timeoutMs);
       const roads = parseOsmRoadsFromXml(xmlText);
       setOsmRoads(roads);
 
@@ -195,9 +212,15 @@ export function useRoadEditor(
         const result = await processOsmXml(xmlText, queryBbox);
         setOsm2streetsResult(result);
         setOsm2streetsBbox(queryBbox);
+        const warningCount = result.diagnostics.filter((diagnostic) => diagnostic.level === 'warn').length;
+        const errorCount = result.diagnostics.filter((diagnostic) => diagnostic.level === 'error').length;
+        const diagnosticSuffix =
+          warningCount > 0 || errorCount > 0
+            ? ` osm2streets reported ${warningCount} warning${warningCount === 1 ? '' : 's'} and ${errorCount} error${errorCount === 1 ? '' : 's'}; first diagnostic: ${result.diagnostics[0]?.message ?? 'none'}.`
+            : '';
         setRoadStatus(
           roads.length > 0
-            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with osm2streets. Click a road on the map to edit.`
+            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with osm2streets.${diagnosticSuffix} Click a road on the map to edit.`
             : 'No OSM roads returned for this viewport.'
         );
       } catch (wasmError) {

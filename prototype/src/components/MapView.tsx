@@ -47,8 +47,8 @@ import {
  */
 const LOD_OUTLINE_MAX = 14.5;
 const LOD_EXTRUDE_MAX = 99; // always extrude at z > 14.5 for now
-const DATA_FIT_PADDING = 20;
-const DATA_FIT_MAX_ZOOM = 19;
+const DATA_FIT_PADDING = 56;
+const DATA_FIT_MAX_ZOOM = 14.25;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 
 type Rgba = [number, number, number, number];
@@ -238,7 +238,7 @@ export default function MapView({
   const roadDraftDragRef = useRef<{ sectionId: string; pointIndex: number } | null>(null);
   const flownForDocRef = useRef<CityJsonDocument | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [zoom, setZoom] = useState<number>(16);
+  const [zoom, setZoom] = useState<number>(12);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
 
   useEffect(() => {
@@ -401,9 +401,9 @@ export default function MapView({
         ],
       },
       center: initialCenter,
-      zoom: 16,
-      pitch: 55,
-      bearing: 20,
+      zoom: 12,
+      pitch: 0,
+      bearing: 0,
       canvasContextAttributes: { antialias: true },
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
@@ -473,16 +473,16 @@ export default function MapView({
           map.fitBounds(bbox, {
             padding: DATA_FIT_PADDING,
             maxZoom: DATA_FIT_MAX_ZOOM,
-            pitch: 55,
-            bearing: map.getBearing(),
+            pitch: 0,
+            bearing: 0,
             duration: 0,
           });
         } else if (centre && Number.isFinite(centre[0]) && Number.isFinite(centre[1])) {
           map.flyTo({
             center: centre,
-            zoom: 16,
-            pitch: 55,
-            bearing: map.getBearing(),
+            zoom: 12,
+            pitch: 0,
+            bearing: 0,
             duration: 0,
           });
         } else {

@@ -10,6 +10,12 @@ export interface Osm2StreetsResult {
   laneMarkings: any;
   intersectionMarkings: any;
   engine: 'fork';
+  diagnostics: Osm2StreetsDiagnostic[];
+}
+
+export interface Osm2StreetsDiagnostic {
+  level: 'warn' | 'error';
+  message: string;
 }
 
 let initPromise: Promise<any> | null = null;
@@ -31,7 +37,26 @@ export async function processOsmXml(
   const clipPtsGeojson = clipBbox ? buildClipPolygonGeojson(clipBbox) : '';
 
   const importOptions = buildOsm2StreetsImportOptions();
-  return readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions);
+  const diagnostics: Osm2StreetsDiagnostic[] = [];
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.warn = (...args: unknown[]) => {
+    diagnostics.push({ level: 'warn', message: formatConsoleMessage(args) });
+    originalWarn(...args);
+  };
+  console.error = (...args: unknown[]) => {
+    diagnostics.push({ level: 'error', message: formatConsoleMessage(args) });
+    originalError(...args);
+  };
+  try {
+    return {
+      ...readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions),
+      diagnostics,
+    };
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
 }
 
 function buildClipPolygonGeojson([west, south, east, north]: [
@@ -74,8 +99,23 @@ function readOsm2StreetsResult(
       laneMarkings,
       intersectionMarkings,
       engine: 'fork',
+      diagnostics: [],
     };
   } finally {
     network.free();
   }
+}
+
+function formatConsoleMessage(args: unknown[]): string {
+  return args
+    .map((arg) => {
+      if (typeof arg === 'string') return arg;
+      if (arg instanceof Error) return arg.message;
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    })
+    .join(' ');
 }

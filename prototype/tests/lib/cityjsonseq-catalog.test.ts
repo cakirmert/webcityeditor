@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  fetchCityJsonSeqCatalog,
   fetchCityJsonSeqViewport,
   normalizeCatalogBaseUrl,
   parseCityJsonSeqStrict,
@@ -131,6 +132,25 @@ describe('fetchCityJsonSeqViewport', () => {
         1
       )
     ).rejects.toThrow(/Zoom in/);
+  });
+});
+
+describe('fetchCityJsonSeqCatalog', () => {
+  it('fetches every tile exposed by the Hamburg catalog endpoint', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'http://127.0.0.1:8787/api/hamburg/tiles') return response(queryResponse());
+      if (url.endsWith('/tiles/tile-a.city.jsonl')) return response(tileText('Building_A', 565000));
+      if (url.endsWith('/tiles/tile-b.city.jsonl')) return response(tileText('Building_B', 566000));
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const loaded = await fetchCityJsonSeqCatalog('http://127.0.0.1:8787', new Set(), fetchImpl);
+
+    expect(loaded.queriedTileCount).toBe(2);
+    expect(loaded.tileIds).toEqual(['tile-a', 'tile-b']);
+    expect(Object.keys(loaded.doc!.CityObjects).sort()).toEqual(['Building_A', 'Building_B']);
+    expect(fetchImpl).toHaveBeenCalledWith(new URL('http://127.0.0.1:8787/api/hamburg/tiles'));
   });
 });
 

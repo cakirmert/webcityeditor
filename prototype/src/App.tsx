@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import FileLoader from './components/FileLoader';
 import MapView from './components/MapView';
@@ -25,6 +25,11 @@ import { buildPreviewMesh } from './lib/preview-mesh';
 import { computeTransformedFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
 import {
+  DEFAULT_HAMBURG_CATALOG_URL,
+  fetchCityJsonSeqCatalog,
+  type CityJsonSeqViewportLoad,
+} from './lib/cityjsonseq-catalog';
+import {
   fetchPlanningZones,
   getPlanningProviderForBbox,
   planningCoverageSummary,
@@ -46,6 +51,12 @@ export default function App() {
   const importExport = useImportExport(coreState, undoRedo, catalog);
 
   const [sidePanelWide, setSidePanelWide] = useState(false);
+  const autoHamburgLoadStartedRef = useRef(false);
+  const autoRoadFetchStateRef = useRef<'idle' | 'pending' | 'done'>('idle');
+  const [autoHamburgStatus, setAutoHamburgStatus] = useState<{
+    kind: 'loading' | 'error';
+    message: string;
+  } | null>(null);
 
   // ── Planning layer (zones) ────────────────────────────────────────────────
   const [zones, setZones] = useState<ParcelZone[]>([]);
@@ -106,6 +117,85 @@ export default function App() {
     zones: zoningEnabled ? zones : [],
   });
   const buildingEditor = useBuildingEditor(coreState, undoRedo, { zones, zoningEnabled });
+
+  const handleLoadedForApp = useCallback(
+    (doc: CityJsonDocument, fileName: string, rawText: string | null) => {
+      setAutoHamburgStatus(null);
+      importExport.handleLoaded(doc, fileName, rawText);
+    },
+    [importExport.handleLoaded]
+  );
+
+  const handleCatalogLoadedForApp = useCallback(
+    (
+      loaded: CityJsonSeqViewportLoad,
+      catalogUrl: string,
+      options: { loadMode?: 'viewport' | 'all' } = {}
+    ) => {
+      setAutoHamburgStatus(null);
+      importExport.handleCatalogLoaded(loaded, catalogUrl, options);
+      if (options.loadMode === 'all' && loaded.doc) {
+        autoRoadFetchStateRef.current = 'pending';
+        roadEditor.setShowRoadEditor(true);
+        roadEditor.setRoadStatus(
+          `Loaded ${loaded.tiles.length} Hamburg catalog tile${loaded.tiles.length === 1 ? '' : 's'}; fetching OSM roads for the loaded extent...`
+        );
+      }
+    },
+    [importExport.handleCatalogLoaded, roadEditor.setRoadStatus, roadEditor.setShowRoadEditor]
+  );
+
+  useEffect(() => {
+    if (autoHamburgLoadStartedRef.current || coreState.cityjson) return;
+    autoHamburgLoadStartedRef.current = true;
+    setAutoHamburgStatus({
+      kind: 'loading',
+      message: 'Loading every tile from the local Hamburg CityJSONSeq catalog...',
+    });
+    catalog.setCatalogStatus({
+      kind: 'loading',
+      message: 'Loading every tile from the local Hamburg CityJSONSeq catalog...',
+    });
+    importExport.setLoadModalOpen(false);
+
+    void (async () => {
+      try {
+        const loaded = await fetchCityJsonSeqCatalog(DEFAULT_HAMBURG_CATALOG_URL);
+        if (!loaded.doc || loaded.tiles.length === 0) {
+          throw new Error('The local Hamburg catalog returned no CityJSONSeq tiles.');
+        }
+        handleCatalogLoadedForApp(loaded, DEFAULT_HAMBURG_CATALOG_URL, {
+          loadMode: 'all',
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        catalog.setCatalogStatus({
+          kind: 'error',
+          message: `Hamburg auto-load failed: ${message}`,
+        });
+        setAutoHamburgStatus({
+          kind: 'error',
+          message:
+            `Hamburg auto-load failed: ${message}. Start the local catalog server at ` +
+            `${DEFAULT_HAMBURG_CATALOG_URL} and reconnect.`,
+        });
+        importExport.setLoadModalOpen(true);
+      }
+    })();
+  }, [catalog, coreState.cityjson, handleCatalogLoadedForApp, importExport]);
+
+  useEffect(() => {
+    if (!coreState.cityjson || autoRoadFetchStateRef.current !== 'pending') return;
+    autoRoadFetchStateRef.current = 'done';
+    const timer = window.setTimeout(() => {
+      roadEditor.setShowRoadEditor(true);
+      void roadEditor.handleFetchOsmRoads({
+        source: 'loaded-data',
+        allowLargeQuery: true,
+      });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [coreState.cityjson, roadEditor.handleFetchOsmRoads, roadEditor.setShowRoadEditor]);
 
   const handleMapViewportChange = useCallback(
     (bbox: Wgs84Bbox) => {
@@ -270,6 +360,10 @@ export default function App() {
     },
     [coreState]
   );
+
+  const autoHamburgLoading = autoHamburgStatus?.kind === 'loading';
+  const showFileLoader =
+    importExport.loadModalOpen || (!coreState.cityjson && !autoHamburgLoading);
 
   return (
     <div className="app">
@@ -503,12 +597,20 @@ export default function App() {
           ) : (
             <EmptyMapBackdrop />
           )}
-          {(!coreState.cityjson || importExport.loadModalOpen) && (
+          {autoHamburgLoading && !coreState.cityjson && (
+            <AutoHamburgLoading message={autoHamburgStatus.message} />
+          )}
+          {showFileLoader && (
             <FileLoader
-              onLoaded={importExport.handleLoaded}
-              onCatalogLoaded={importExport.handleCatalogLoaded}
+              onLoaded={handleLoadedForApp}
+              onCatalogLoaded={handleCatalogLoadedForApp}
               canClose={!!coreState.cityjson}
               onClose={() => importExport.setLoadModalOpen(false)}
+              banner={
+                autoHamburgStatus?.kind === 'error'
+                  ? { kind: 'err', message: autoHamburgStatus.message }
+                  : undefined
+              }
             />
           )}
           {buildingEditor.pendingFootprint && coreState.cityjson && (
@@ -767,6 +869,16 @@ function EmptyMapBackdrop() {
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:48px_48px]" />
       <div className="absolute bottom-4 left-4 rounded-md border border-[var(--border)] bg-black/25 px-3 py-2 text-xs text-[var(--text-dim)] backdrop-blur-sm">
         Map workspace is ready. Load a CityJSON file or catalog to begin.
+      </div>
+    </div>
+  );
+}
+
+function AutoHamburgLoading({ message }: { message: string }) {
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#101722]">
+      <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-dim)] shadow-2xl">
+        {message}
       </div>
     </div>
   );

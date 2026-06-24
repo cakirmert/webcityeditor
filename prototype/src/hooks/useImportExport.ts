@@ -75,18 +75,27 @@ export function useImportExport(
   );
 
   const handleCatalogLoaded = useCallback(
-    (loaded: CityJsonSeqViewportLoad, catalogUrl: string) => {
+    (
+      loaded: CityJsonSeqViewportLoad,
+      catalogUrl: string,
+      options: { loadMode?: CatalogConnection['loadMode'] } = {}
+    ) => {
       if (!loaded.doc) return;
-      handleLoaded(loaded.doc, `Hamburg CityJSONSeq catalog (${loaded.tileIds.length} tiles)`);
+      const tileCount = loaded.tiles.length;
+      handleLoaded(loaded.doc, `Hamburg CityJSONSeq catalog (${tileCount} tiles)`);
       const connection: CatalogConnection = {
         baseUrl: normalizeCatalogBaseUrl(catalogUrl).toString(),
         crs: loaded.crs,
         loadedTiles: new Map(loaded.tiles.map((tile) => [tile.catalog.id, tile])),
+        loadMode: options.loadMode ?? 'viewport',
       };
       setCatalogConnection(connection);
       setCatalogStatus({
         kind: 'ok',
-        message: `${loaded.tileIds.length} strict CityJSONSeq tiles loaded`,
+        message:
+          options.loadMode === 'all'
+            ? `${tileCount} strict CityJSONSeq tile${tileCount === 1 ? '' : 's'} loaded from the full catalog`
+            : `${tileCount} strict CityJSONSeq tile${tileCount === 1 ? '' : 's'} loaded`,
       });
       setPrimitiveValidation({
         kind: 'valid',

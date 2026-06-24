@@ -52,6 +52,7 @@ export interface CatalogConnection {
   baseUrl: string;
   crs: string;
   loadedTiles: Map<string, CityJsonSeqLoadedTile>;
+  loadMode?: 'viewport' | 'all';
 }
 
 export type PrimitiveValidationState = {
@@ -74,4 +75,3 @@ export interface NewBuildingForm {
   eaveOverhang: number;
   rakeOverhang: number;
 }
-

@@ -10,6 +10,7 @@ export type Bbox = [number, number, number, number];
 export const DEFAULT_HAMBURG_CATALOG_URL = 'http://127.0.0.1:8787';
 export const DEFAULT_HAMBURG_VIEWPORT_BBOX: Bbox = [565000, 5936000, 566000, 5937000];
 export const MAX_CATALOG_TILES_PER_VIEWPORT = 25;
+const CATALOG_TILE_FETCH_CONCURRENCY = 4;
 
 export interface CityJsonSeqCatalogTile {
   id: string;
@@ -66,27 +67,62 @@ export async function fetchCityJsonSeqViewport(
     throw new Error(`Catalog query failed: HTTP ${response.status} ${response.statusText}`);
   }
   const query = validateTileQuery(await response.json());
+  return fetchCityJsonSeqTiles(baseUrl, query, loadedTileIds, fetchImpl, maxTiles, (count) =>
+    `Viewport matches ${count} unloaded tiles. Zoom in before loading ` +
+    `(maximum ${maxTiles} tiles per request).`
+  );
+}
+
+export async function fetchCityJsonSeqCatalog(
+  catalogUrl: string,
+  loadedTileIds: ReadonlySet<string> = new Set(),
+  fetchImpl: typeof fetch = fetch,
+  maxTiles = Infinity
+): Promise<CityJsonSeqViewportLoad> {
+  const baseUrl = normalizeCatalogBaseUrl(catalogUrl);
+  const queryUrl = new URL('api/hamburg/tiles', baseUrl);
+  const response = await fetchImpl(queryUrl);
+  if (!response.ok) {
+    throw new Error(`Catalog query failed: HTTP ${response.status} ${response.statusText}`);
+  }
+  const query = validateTileQuery(await response.json());
+  return fetchCityJsonSeqTiles(baseUrl, query, loadedTileIds, fetchImpl, maxTiles, (count) =>
+    `Catalog contains ${count} unloaded tiles. Increase the startup tile limit or use viewport loading.`
+  );
+}
+
+async function fetchCityJsonSeqTiles(
+  baseUrl: URL,
+  query: CityJsonSeqTileQuery,
+  loadedTileIds: ReadonlySet<string>,
+  fetchImpl: typeof fetch,
+  maxTiles: number,
+  tooManyMessage: (count: number) => string
+): Promise<CityJsonSeqViewportLoad> {
   const tiles = query.tiles.filter((tile) => !loadedTileIds.has(tile.id));
   if (tiles.length > maxTiles) {
-    throw new Error(
-      `Viewport matches ${tiles.length} unloaded tiles. Zoom in before loading ` +
-        `(maximum ${maxTiles} tiles per request).`
-    );
+    throw new Error(tooManyMessage(tiles.length));
   }
 
-  const fetched = await Promise.all(
-    tiles.map(async (tile) => {
-      const tileResponse = await fetchImpl(new URL(tile.url, baseUrl));
-      if (!tileResponse.ok) {
-        throw new Error(`Tile ${tile.id} failed: HTTP ${tileResponse.status} ${tileResponse.statusText}`);
-      }
-      const text = await tileResponse.text();
-      return {
-        doc: parseCityJsonSeqStrict(text, tile.file),
-        tile: describeCityJsonSeqTileStrict(text, tile),
-      };
-    })
-  );
+  const fetched: Array<{ doc: CityJsonDocument; tile: CityJsonSeqLoadedTile }> = [];
+  for (let index = 0; index < tiles.length; index += CATALOG_TILE_FETCH_CONCURRENCY) {
+    const batch = tiles.slice(index, index + CATALOG_TILE_FETCH_CONCURRENCY);
+    fetched.push(
+      ...(await Promise.all(
+        batch.map(async (tile) => {
+          const tileResponse = await fetchImpl(new URL(tile.url, baseUrl));
+          if (!tileResponse.ok) {
+            throw new Error(`Tile ${tile.id} failed: HTTP ${tileResponse.status} ${tileResponse.statusText}`);
+          }
+          const text = await tileResponse.text();
+          return {
+            doc: parseCityJsonSeqStrict(text, tile.file),
+            tile: describeCityJsonSeqTileStrict(text, tile),
+          };
+        })
+      ))
+    );
+  }
 
   const docs = fetched.map(({ doc }) => doc);
   const doc = docs.shift() ?? null;

@@ -39,10 +39,22 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
   // Map viewport bbox ref
   const mapBboxRef = useRef<[number, number, number, number] | null>(null);
 
+  const commitCatalogConnection = useCallback((next: CatalogConnection | null) => {
+    catalogConnectionRef.current = next;
+    setCatalogConnection(next);
+  }, []);
+
   const loadCatalogViewport = useCallback(async (bboxWgs84: Bbox) => {
     const source = catalogConnectionRef.current;
     const doc = cityjsonRef.current;
     if (!source || !doc || catalogLoadingRef.current) return;
+    if (source.loadMode === 'all') {
+      setCatalogStatus({
+        kind: 'ok',
+        message: `${source.loadedTiles.size} strict sequence tiles loaded; full catalog is already in memory.`,
+      });
+      return;
+    }
 
     catalogLoadingRef.current = true;
     setCatalogStatus({
@@ -160,7 +172,8 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
   const handleViewportChange = useCallback(
     (bbox: Bbox) => {
       mapBboxRef.current = bbox;
-      if (!catalogConnectionRef.current) return;
+      const source = catalogConnectionRef.current;
+      if (!source || source.loadMode === 'all') return;
       if (catalogViewportTimerRef.current !== null) {
         window.clearTimeout(catalogViewportTimerRef.current);
       }
@@ -183,7 +196,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
 
   return {
     catalogConnection,
-    setCatalogConnection,
+    setCatalogConnection: commitCatalogConnection,
     catalogConnectionRef,
     catalogStatus,
     setCatalogStatus,

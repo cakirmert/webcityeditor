@@ -166,9 +166,17 @@ export function createManualRoadDraft(
   };
 }
 
-export function buildOverpassRoadQuery(bbox: [number, number, number, number], format: 'json' | 'xml' = 'json'): string {
+export function buildOverpassRoadQuery(
+  bbox: [number, number, number, number],
+  format: 'json' | 'xml' = 'json',
+  timeoutSeconds = 25
+): string {
   const [west, south, east, north] = bbox;
-  const header = format === 'json' ? '[out:json][timeout:25];' : '[out:xml][timeout:25];';
+  const timeout = Math.max(1, Math.round(timeoutSeconds));
+  const header =
+    format === 'json'
+      ? `[out:json][timeout:${timeout}];`
+      : `[out:xml][timeout:${timeout}];`;
   return [
     header,
     '(',

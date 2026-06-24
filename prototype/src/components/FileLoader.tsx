@@ -4,8 +4,7 @@ import { deleteDocument, listDocuments, loadDocument } from '../lib/storage';
 import { parseCityJsonAuto } from '../lib/cityjson';
 import {
   DEFAULT_HAMBURG_CATALOG_URL,
-  DEFAULT_HAMBURG_VIEWPORT_BBOX,
-  fetchCityJsonSeqViewport,
+  fetchCityJsonSeqCatalog,
   parseCityJsonSeqStrict,
   type CityJsonSeqViewportLoad,
 } from '../lib/cityjsonseq-catalog';
@@ -20,12 +19,16 @@ interface Props {
    * memory anyway. `null` for `rawText` means "don't keep me around."
   */
   onLoaded: (doc: CityJsonDocument, fileName: string, rawText: string | null) => void;
-  /** Connect a bbox-queryable CityJSONSeq tile catalog. The initial centre
-   *  viewport is loaded here; subsequent viewport expansion is owned by App. */
-  onCatalogLoaded?: (loaded: CityJsonSeqViewportLoad, catalogUrl: string) => void;
+  /** Connect a CityJSONSeq tile catalog. The full local Hamburg catalog is loaded. */
+  onCatalogLoaded?: (
+    loaded: CityJsonSeqViewportLoad,
+    catalogUrl: string,
+    options?: { loadMode?: 'viewport' | 'all' }
+  ) => void;
   /** Enabled when the loader is opened over an already-loaded map. */
   canClose?: boolean;
   onClose?: () => void;
+  banner?: { kind: 'info' | 'err'; message: string };
 }
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
@@ -73,7 +76,13 @@ interface HostedCityJsonSample {
   checkAvailability?: boolean;
 }
 
-export default function FileLoader({ onLoaded, onCatalogLoaded, canClose = false, onClose }: Props) {
+export default function FileLoader({
+  onLoaded,
+  onCatalogLoaded,
+  canClose = false,
+  onClose,
+  banner,
+}: Props) {
   const [url, setUrl] = useState(() => publicAssetUrl(DEFAULT_HAMBURG_SAMPLE));
   const [catalogUrl, setCatalogUrl] = useState(DEFAULT_HAMBURG_CATALOG_URL);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -207,20 +216,17 @@ export default function FileLoader({ onLoaded, onCatalogLoaded, canClose = false
     if (!catalogUrl.trim() || !onCatalogLoaded) return;
     setStatus({ kind: 'info', msg: `Connecting to CityJSONSeq catalog ${catalogUrl}…` });
     try {
-      const loaded = await fetchCityJsonSeqViewport(
-        catalogUrl,
-        DEFAULT_HAMBURG_VIEWPORT_BBOX
-      );
+      const loaded = await fetchCityJsonSeqCatalog(catalogUrl);
       if (!loaded.doc || loaded.tileIds.length === 0) {
-        throw new Error('The Hamburg centre viewport returned no CityJSONSeq tiles');
+        throw new Error('The Hamburg catalog returned no CityJSONSeq tiles');
       }
-      onCatalogLoaded(loaded, catalogUrl);
+      onCatalogLoaded(loaded, catalogUrl, { loadMode: 'all' });
       onClose?.();
       setStatus({
         kind: 'ok',
         msg:
           `Connected CityJSONSeq catalog: ${loaded.tileIds.length} tiles, ` +
-          `${loaded.features.toLocaleString()} editable features. Map panning loads nearby tiles.`,
+          `${loaded.features.toLocaleString()} editable features.`,
       });
     } catch (e) {
       setStatus({
@@ -379,6 +385,18 @@ export default function FileLoader({ onLoaded, onCatalogLoaded, canClose = false
           )}
         </div>
 
+        {banner && (
+          <div
+            className={`mb-3 rounded-md px-3 py-2 text-xs ${
+              banner.kind === 'err'
+                ? 'border border-[var(--error)] bg-[var(--error)]/10 text-[var(--error)]'
+                : 'border border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)]'
+            }`}
+          >
+            {banner.message}
+          </div>
+        )}
+
         <div
           className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-4 text-center text-xs transition-colors ${
             dragActive
@@ -414,8 +432,8 @@ export default function FileLoader({ onLoaded, onCatalogLoaded, canClose = false
               <code className="rounded bg-[var(--surface)] px-1">
                 npm run data:hamburg-lod2:serve
               </code>
-              , then connect here. The app loads only the current viewport and
-              fetches nearby tiles as you pan.
+              , then connect here. The app loads every tile exposed by the local
+              catalog.
             </div>
             <div className="flex gap-2">
               <Input
