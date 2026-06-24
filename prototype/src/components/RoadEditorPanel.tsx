@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import {
   buildRoadEditPayload,
   summarizeRoadDraft,
@@ -81,6 +81,8 @@ export default function RoadEditorPanel({
 }: Props) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [splitPercent, setSplitPercent] = useState(50);
+  const [draggingBandIndex, setDraggingBandIndex] = useState<number | null>(null);
+  const [dropBandIndex, setDropBandIndex] = useState<number | null>(null);
   const activeSection = useMemo(() => {
     if (!draft) return null;
     return (
@@ -137,6 +139,46 @@ export default function RoadEditorPanel({
       ...section,
       bands: section.bands.filter((_, index) => index !== bandIndex),
     }));
+  };
+
+  const reorderBand = (fromIndex: number, toIndex: number) => {
+    if (!activeSection || fromIndex === toIndex) return;
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= activeSection.bands.length ||
+      toIndex >= activeSection.bands.length
+    ) {
+      return;
+    }
+    updateSection(activeSection.id, (section) => {
+      const bands = [...section.bands];
+      const [moved] = bands.splice(fromIndex, 1);
+      bands.splice(toIndex, 0, moved);
+      return { ...section, bands };
+    });
+  };
+
+  const handleBandDragStart = (
+    event: DragEvent<HTMLButtonElement>,
+    index: number
+  ) => {
+    setDraggingBandIndex(index);
+    setDropBandIndex(index);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleBandDrop = (
+    event: DragEvent<HTMLButtonElement>,
+    index: number
+  ) => {
+    event.preventDefault();
+    const raw = event.dataTransfer.getData('text/plain');
+    const fromIndex = Number(raw);
+    if (Number.isInteger(fromIndex)) reorderBand(fromIndex, index);
+    setDraggingBandIndex(null);
+    setDropBandIndex(null);
   };
 
   const addBand = (kind: RoadBandKind) => {
@@ -316,10 +358,52 @@ export default function RoadEditorPanel({
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label>Road bands, left to right</Label>
+                <Label>Lane order</Label>
                 <span className="text-[10px] text-[var(--text-faint)]">
                   widths in metres
                 </span>
+              </div>
+              <div
+                data-testid="road-band-order-strip"
+                className="flex gap-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[rgba(0,0,0,0.22)] p-1"
+              >
+                {activeSection.bands.map((band, index) => (
+                  <button
+                    key={`${band.id ?? band.kind}-${index}-strip`}
+                    type="button"
+                    draggable
+                    data-testid={`road-band-box-${index}`}
+                    onDragStart={(event) => handleBandDragStart(event, index)}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      setDropBandIndex(index);
+                    }}
+                    onDrop={(event) => handleBandDrop(event, index)}
+                    onDragEnd={() => {
+                      setDraggingBandIndex(null);
+                      setDropBandIndex(null);
+                    }}
+                    className={`min-h-14 min-w-[74px] flex-1 cursor-grab rounded border px-2 py-1 text-left text-[10px] font-semibold shadow-sm transition active:cursor-grabbing ${
+                      draggingBandIndex === index
+                        ? 'border-[var(--accent)] opacity-55'
+                        : dropBandIndex === index
+                        ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
+                        : 'border-[rgba(255,255,255,0.18)]'
+                    }`}
+                    style={{
+                      flexGrow: Math.max(0.8, band.widthM),
+                      background: bandBoxBackground(band.kind),
+                      color: bandBoxTextColor(band.kind),
+                    }}
+                    title={`Band ${index + 1}: ${labelBand(band.kind)} (${band.widthM} m)`}
+                    aria-label={`Band ${index + 1}: ${labelBand(band.kind)}, ${band.widthM} metres`}
+                  >
+                    <span className="block text-[9px] opacity-75">#{index + 1}</span>
+                    <span className="block truncate">{labelBand(band.kind)}</span>
+                    <span className="block text-[9px] opacity-80">{band.widthM} m</span>
+                  </button>
+                ))}
               </div>
               {activeSection.bands.map((band, index) => (
                 <div
@@ -457,4 +541,27 @@ function defaultModes(kind: RoadBandKind): string[] {
 
 function labelBand(kind: RoadBandKind): string {
   return kind.replaceAll('_', ' ');
+}
+
+function bandBoxBackground(kind: RoadBandKind): string {
+  switch (kind) {
+    case 'car_lane':
+      return 'linear-gradient(180deg, #4a4d57 0%, #343741 100%)';
+    case 'bike_lane':
+      return 'linear-gradient(180deg, #16844c 0%, #0f6539 100%)';
+    case 'sidewalk':
+      return 'linear-gradient(180deg, #d6dbe3 0%, #aeb6c2 100%)';
+    case 'parking':
+      return 'linear-gradient(180deg, #7b7f8a 0%, #5f6370 100%)';
+    case 'median':
+      return 'linear-gradient(180deg, #8f8f9a 0%, #70707b 100%)';
+    case 'green':
+      return 'linear-gradient(180deg, #3e8d5d 0%, #2d6f49 100%)';
+    default:
+      return 'linear-gradient(180deg, #4a4d57 0%, #343741 100%)';
+  }
+}
+
+function bandBoxTextColor(kind: RoadBandKind): string {
+  return kind === 'sidewalk' ? '#111827' : '#ffffff';
 }
