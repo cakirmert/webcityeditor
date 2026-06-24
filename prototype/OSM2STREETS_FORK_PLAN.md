@@ -40,8 +40,9 @@ Current repo state:
   `file:./vendor/osm2streets-js`.
 - `prototype/scripts/build-osm2streets-wasm.ps1` rebuilds the source package.
 - `prototype/scripts/compare-osm2streets-fixtures.mjs` compares committed
-  Hamburg OSM fixtures against minimum output counts and fails on
-  `console.error`.
+  Hamburg OSM fixtures between the source-built WASM package and native Rust
+  executable, then fails on count, diagnostics, or normalized-output
+  differences.
 - The old `patch-package` npm-wrapper patch was removed.
 
 ### 1.1 Console Errors from WASM
@@ -447,7 +448,9 @@ After completing the fork setup:
 - [x] `wasm-pack build --release --target web` succeeds in `vendor/osm2streets/osm2streets-js`
 - [x] `npm install` resolves `osm2streets-js` from `file:./vendor/osm2streets-js`
 - [x] `npm run osm2streets:compare` passes committed Hamburg fixtures
-- [x] Fixture comparison fails on any `console.error` emitted by the WASM bridge
+- [x] Fixture comparison confirms WASM and native outputs match for identical
+      Hamburg OSM cuts
+- [x] Fixture comparison records warnings/errors and fails on any emitted error
 - [ ] `npm run dev` starts without errors
 - [ ] Browser console shows **zero red `console.error` lines** from non-fatal osm2streets diagnostics in a real Hamburg viewport
 - [ ] Lane geometry renders correctly on the map for real Hamburg Overpass data
@@ -475,3 +478,4 @@ After completing the fork setup:
 | MODIFY  | `vendor/osm2streets/osm2streets/src/` | Downgrade selected non-fatal `error!` diagnostics to `warn!` |
 | MODIFY  | `vendor/osm2streets/osm2lanes/src/algorithm.rs` | Normalize separately mapped sidewalk tags |
 | MODIFY  | `vendor/osm2streets/osm2lanes/src/tests.rs` | Add Hamburg sidewalk tag regressions |
+| NEW     | `vendor/osm2streets/osm2streets-js/src/bin/webcityeditor_native_export.rs` | Native executable for WASM/native output comparison |

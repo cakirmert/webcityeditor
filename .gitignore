@@ -17,6 +17,7 @@ unpacked_v*/
 
 # Test + coverage
 prototype/coverage/
+prototype/test-output/
 *.test.log
 
 # Environment

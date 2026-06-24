@@ -54,7 +54,7 @@ From `prototype/`:
 | `npm run data:hamburg-lod2 -- geometry-audit --allow-invalid` | Audit CityJSONSeq solids with `val3dity`, isolating validator crashes per feature |
 | `npm run data:hamburg-lod2 -- geometry-clean` | Build a strict editing catalog and quarantine primitive-invalid source features |
 | `npm run data:hamburg-lod2:serve` | Serve the generated Hamburg tile catalog locally on port `8787` |
-| `npm run osm2streets:compare` | Run committed Hamburg OSM regression fixtures through the source-built osm2streets WASM package |
+| `npm run osm2streets:compare` | Compare source-built osm2streets WASM and native executable outputs for committed Hamburg OSM fixtures |
 
 ## Hosting
 

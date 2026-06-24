@@ -304,6 +304,8 @@ inside their limited space.
 - [x] Add committed Hamburg OSM fixtures for forked-WASM regression checks
 - [x] Record counts for lane polygons, lane markings, intersection markings,
       and browser console errors
+- [x] Compare forked WASM output against a native Rust executable for the same
+      committed Hamburg fixture cuts
 - [ ] Keep osm2streets as a visual validation layer even after `muv-osm`
       semantic parsing is added
 - [x] Patch Rust source so selected non-fatal `error!` diagnostics do not

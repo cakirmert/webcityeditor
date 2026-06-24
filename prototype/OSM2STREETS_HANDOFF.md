@@ -27,12 +27,17 @@ Current implementation state:
   consumed by the Vite app.
 - `prototype/package.json` resolves `osm2streets-js` from
   `file:./vendor/osm2streets-js`.
+- `vendor/osm2streets/osm2streets-js/src/bin/webcityeditor_native_export.rs`
+  is the native executable used to compare browser WASM output against native
+  Rust output for the same fixture input.
 - `prototype/src/lib/osm2streets.ts` initializes the source-built package and
   returns lane polygons, lane markings, and intersection markings with
   `engine: 'fork'`.
 - `prototype/test-fixtures/osm2streets` contains committed Hamburg OSM fixtures.
-- `npm run osm2streets:compare` runs those fixtures through the source-built
-  WASM and fails on missing minimum output counts or any `console.error`.
+- `npm run osm2streets:compare` runs those fixtures through both the
+  source-built WASM package and native executable, writes both output sets to
+  `prototype/test-output/osm2streets-comparison/`, and fails on count,
+  diagnostics, or normalized-output differences.
 
 ## Why WASM Is Used
 
@@ -94,6 +99,7 @@ backend unless the project explicitly changes direction later.
 8. Wired the prototype dependency to `file:./vendor/osm2streets-js`.
 9. Added Hamburg OSM regression fixtures and a comparison script.
 10. Updated tests to load the local WASM package.
+11. Added native Rust executable comparison for the same Hamburg fixtures.
 
 ## What Is Still Left
 
