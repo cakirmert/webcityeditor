@@ -119,6 +119,7 @@ That means:
    - keep osm2streets as visual reference
    - create/edit a RoadDraft from selected osm2streets road/lane data
    - export/insert CityJSON Transportation surfaces in the document CRS
+   - produce final JSON/CityJSON and CityGML outputs from the normalized road model
 
 ## Metric and CRS Plan
 
@@ -346,7 +347,7 @@ Acceptance:
 - Clicking a lane or intersection surfaces the same core information as the Street Explorer.
 - User can turn a selected osm2streets road into a local RoadDraft without manually retracing the centerline.
 
-### Phase 4 - Bridge osm2streets Geometry to CityJSON Transportation
+### Phase 4 - Bridge osm2streets Geometry to CityJSON/CityGML Transportation
 
 Files:
 
@@ -380,9 +381,27 @@ Tasks:
    - Correct semantic class.
    - No uncontrolled overlap with building footprints unless explicitly allowed.
 
+5. Define the final export contract:
+
+   - Strictly speaking, osm2streets consumes OSM XML and emits GeoJSON-like lane/intersection feature collections; it is not the canonical exporter.
+   - The durable export path should be:
+
+     ```text
+     OSM XML / Overpass data
+       -> osm2streets lane + intersection geometry
+       -> RoadDraft with OSM/osm2streets provenance
+       -> CityJSON Transportation Road
+       -> optional CityGML Transportation export
+     ```
+
+   - JSON output should include both the existing road-edit payload JSON and CityJSON Transportation objects.
+   - CityGML output should come either from a focused CityGML Transportation writer or from CityJSON -> CityGML conversion after semantic preservation is tested.
+   - Raw osm2streets GeoJSON can still be exported for debugging, but it should not be the long-term interchange format.
+
 Acceptance:
 
 - A selected osm2streets road can become a valid CityJSON Transportation set in EPSG:25832.
+- The same osm2streets-derived road can be exported as structured JSON/CityJSON and has a documented path to CityGML Transportation.
 - Inserted bike lanes remain semantically bike lanes and visually green.
 - Intersections can be inserted or at least retained as reference geometry without disappearing.
 
@@ -447,6 +466,7 @@ Unit tests:
 - `transportation.ts`
   - WGS84 osm2streets polygons project to EPSG:25832 without losing closure.
   - inserted lane surfaces preserve `transportationUsage`.
+  - osm2streets-derived drafts export to CityJSON `Road` objects with provenance.
 
 Integration tests:
 
@@ -455,6 +475,7 @@ Integration tests:
   - intersection polygons feature count > 0.
   - at least one `Biking` lane exists.
   - at least one crossing/sidewalk corner marking exists when tags support it.
+  - exporting the selected osm2streets-derived draft produces JSON/CityJSON with bike-lane semantics intact.
 
 Browser/visual checks:
 
@@ -501,8 +522,10 @@ Browser/visual checks:
 7. Replace road query meters-per-degree math with EPSG:25832 metric bbox conversion.
 8. Add "create RoadDraft from osm2streets road" as the first bridge from explorer view to editor workflow.
 9. Ensure RoadDraft preview and inserted CityJSON road layers reuse the same semantic color helpers as initial osm2streets rendering.
-10. Decide how intersection polygons should persist in CityJSON Transportation.
-11. Add optional debug layers only after the main visual parity path is stable.
+10. Add JSON/CityJSON export coverage for osm2streets-derived RoadDrafts.
+11. Decide whether CityGML export should be direct or CityJSON -> CityGML via converter tooling.
+12. Decide how intersection polygons should persist in CityJSON Transportation.
+13. Add optional debug layers only after the main visual parity path is stable.
 
 ## Definition of Done for Explorer Parity
 
@@ -512,5 +535,6 @@ Browser/visual checks:
 - Sidewalks, parking lanes, bus lanes, buffers, and shared-use paths have stable colors.
 - Intersections are selectable or inspectable.
 - Road drafting/editing still works and remains visually on top of the osm2streets reference layers.
+- An OSM XML / osm2streets-derived road can become JSON/CityJSON output, with a tested or documented CityGML Transportation export path.
 - All editable or persisted road geometry uses a metric CRS, preferably EPSG:25832 for Hamburg.
 - WGS84 is treated as a map/API exchange format, not the internal editing geometry base.

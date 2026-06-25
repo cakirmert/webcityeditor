@@ -134,6 +134,8 @@ OSM Overpass XML/JSON
 RoadDraft
   v
 CityJSON Transportation Road + preview surfaces
+  v
+CityJSON / JSON export and optional CityGML Transportation export
 
 OpenDRIVE .xodr
   v
@@ -152,6 +154,14 @@ The app should treat `RoadDraft` as the editable intermediate contract:
 - `osmTags` and future `semanticTags` carry source evidence.
 - `_roadLayout` metadata on generated CityJSON keeps round-trip editing
   possible.
+
+The OSM/osm2streets path should also be an export pipeline, not only a preview.
+Strictly speaking, osm2streets consumes OSM XML and returns lane/intersection
+geometry; it does not by itself define the long-term CityGML/CityJSON export
+contract. The target should be OSM XML/Overpass data -> osm2streets geometry and
+OSM semantics -> `RoadDraft` -> CityJSON/JSON, with CityGML Transportation
+export provided by either a focused writer or a tested CityJSON -> CityGML
+conversion step.
 
 The OpenDRIVE path can be server-side first. r:trån is a JVM CLI/library
 workflow, not a natural browser dependency. The browser can upload or reference
@@ -271,6 +281,7 @@ inside their limited space.
 | Better visual lane polygons/crosswalks | Patch/rebuild osm2streets | The implementation target is one lane-geometry engine |
 | Existing `.xodr` import | r:trån -> CityGML Transportation -> importer | r:trån is built for OpenDRIVE validation and CityGML conversion |
 | Browser-only Hamburg editing | OSM + muv-osm + osm2streets -> `RoadDraft` | Avoids heavy OpenDRIVE conversion for normal map edits |
+| OSM XML / osm2streets-derived export | `RoadDraft` -> CityJSON/JSON -> optional CityGML | Keeps osm2streets as geometry/provenance input, not the canonical interchange format |
 | Road exceeds available corridor | Road-fit validator over `RoadDraft` surface polygons | Uses the geometry the editor will actually insert/export |
 | Simulation handoff | Future CityJSON/RoadDraft -> OpenDRIVE exporter | Implement only when `.xodr` output is explicitly required |
 | CityGML Transportation authoring | Existing `transportation.ts` generator | Keeps one source of truth in the app |
@@ -312,6 +323,11 @@ inside their limited space.
       become browser `console.error` failures
 - [x] Fork/rebuild osm2streets and patch Hamburg sidewalk tag handling at source
 - [ ] Run real Hamburg viewport checks against the source-built fork output
+- [ ] Normalize selected osm2streets roads into `RoadDraft` and verify they
+      export as JSON/CityJSON with lane, bike-lane, sidewalk, and intersection
+      provenance intact
+- [ ] Decide and test the CityGML export leg for osm2streets-derived roads:
+      direct CityGML writer or CityJSON -> CityGML converter
 
 ### 7.4 OpenDRIVE/r:trån pipeline
 
