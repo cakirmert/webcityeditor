@@ -398,10 +398,51 @@ Tasks:
    - CityGML output should come either from a focused CityGML Transportation writer or from CityJSON -> CityGML conversion after semantic preservation is tested.
    - Raw osm2streets GeoJSON can still be exported for debugging, but it should not be the long-term interchange format.
 
+6. Normalize osm2streets output into polygon assets:
+
+   - The end product of the osm2streets path should not be only a centerline or a styled preview feature. It should become one polygon asset per lane, sidewalk, bike lane, parking band, median, or other TrafficArea/AuxiliaryTrafficArea.
+   - Each asset should carry enough information to be written directly as CityJSON Transportation and later CityGML Transportation.
+   - This is the same shape as the `BikeLaneAsset -> CityJSON Road` converter pattern: a `surfacePolygon` plus semantic and provenance attributes.
+
+   ```ts
+   interface TrafficAreaPolygonAsset {
+     id: string;
+     name?: string;
+     source: 'osm2streets';
+     crsUri: string;
+     roadId: string;
+     sectionId: string;
+     trafficSpaceId: string;
+     trafficAreaId: string;
+     laneType: string;
+     trafficDirection: 'forward' | 'backward' | 'both' | 'none';
+     granularity: 'lane' | 'road_section' | 'intersection';
+     centerLineRole: 'derived_from_osm' | 'derived_from_osm2streets' | 'manual';
+     centerLine: [number, number, number][];
+     widthMeters?: number;
+     surfacePolygon: [number, number, number][];
+     functionCode: string;
+     functionLabel: string;
+     usageCode: string;
+     usageLabel: string;
+     osmWayIds?: string[];
+     osmNodeIds?: string[];
+     osm2streetsRoadId?: string;
+     osm2streetsLaneIndex?: number;
+     tags?: Record<string, string>;
+   }
+   ```
+
+   - `surfacePolygon` is the export-critical geometry. It should be closed, valid, and in the active metric CRS, not degrees.
+   - `centerLine` is retained for editing, graph building, and provenance, but the CityJSON surface should come from `surfacePolygon`.
+   - Bike lanes must preserve `laneType`, `functionCode`/`functionLabel`, and `usageCode`/`usageLabel`, so they do not degrade into generic road asphalt during export.
+   - Intersections can use the same contract with `granularity: 'intersection'` once the CityJSON object/semantic mapping is settled.
+
 Acceptance:
 
 - A selected osm2streets road can become a valid CityJSON Transportation set in EPSG:25832.
 - The same osm2streets-derived road can be exported as structured JSON/CityJSON and has a documented path to CityGML Transportation.
+- Each exported traffic area is backed by a polygon asset with lane type, direction, width, centerline, function/usage semantics, and OSM/osm2streets provenance.
 - Inserted bike lanes remain semantically bike lanes and visually green.
 - Intersections can be inserted or at least retained as reference geometry without disappearing.
 
@@ -467,6 +508,7 @@ Unit tests:
   - WGS84 osm2streets polygons project to EPSG:25832 without losing closure.
   - inserted lane surfaces preserve `transportationUsage`.
   - osm2streets-derived drafts export to CityJSON `Road` objects with provenance.
+  - `TrafficAreaPolygonAsset.surfacePolygon` becomes a CityJSON `MultiSurface` boundary and preserves function/usage semantics.
 
 Integration tests:
 
@@ -476,6 +518,7 @@ Integration tests:
   - at least one `Biking` lane exists.
   - at least one crossing/sidewalk corner marking exists when tags support it.
   - exporting the selected osm2streets-derived draft produces JSON/CityJSON with bike-lane semantics intact.
+  - the exported bike-lane asset has `surfacePolygon`, `centerLine`, `widthMeters`, `trafficDirection`, `functionCode`, and `usageCode`.
 
 Browser/visual checks:
 
@@ -523,9 +566,10 @@ Browser/visual checks:
 8. Add "create RoadDraft from osm2streets road" as the first bridge from explorer view to editor workflow.
 9. Ensure RoadDraft preview and inserted CityJSON road layers reuse the same semantic color helpers as initial osm2streets rendering.
 10. Add JSON/CityJSON export coverage for osm2streets-derived RoadDrafts.
-11. Decide whether CityGML export should be direct or CityJSON -> CityGML via converter tooling.
-12. Decide how intersection polygons should persist in CityJSON Transportation.
-13. Add optional debug layers only after the main visual parity path is stable.
+11. Add the `TrafficAreaPolygonAsset` normalization step so lane/bike/sidewalk polygons carry the metadata needed for CityJSON and CityGML.
+12. Decide whether CityGML export should be direct or CityJSON -> CityGML via converter tooling.
+13. Decide how intersection polygons should persist in CityJSON Transportation.
+14. Add optional debug layers only after the main visual parity path is stable.
 
 ## Definition of Done for Explorer Parity
 
@@ -536,5 +580,6 @@ Browser/visual checks:
 - Intersections are selectable or inspectable.
 - Road drafting/editing still works and remains visually on top of the osm2streets reference layers.
 - An OSM XML / osm2streets-derived road can become JSON/CityJSON output, with a tested or documented CityGML Transportation export path.
+- osm2streets-derived lanes, including bike lanes, are normalized as metric surface polygons with centerline, width, direction, function/usage, and provenance attributes before export.
 - All editable or persisted road geometry uses a metric CRS, preferably EPSG:25832 for Hamburg.
 - WGS84 is treated as a map/API exchange format, not the internal editing geometry base.

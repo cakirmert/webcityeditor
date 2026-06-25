@@ -163,6 +163,13 @@ OSM semantics -> `RoadDraft` -> CityJSON/JSON, with CityGML Transportation
 export provided by either a focused writer or a tested CityJSON -> CityGML
 conversion step.
 
+Before export, osm2streets-derived lane geometry should be normalized into
+polygon assets. Each asset should contain a metric `surfacePolygon`, centerline,
+width, traffic direction, road/section/traffic-space ids, function/usage codes
+and labels, lane type, and OSM/osm2streets provenance. This keeps bike lanes,
+sidewalks, parking, medians, and intersection areas as explicit semantic
+surfaces instead of reducing them to styled preview geometry.
+
 The OpenDRIVE path can be server-side first. r:trån is a JVM CLI/library
 workflow, not a natural browser dependency. The browser can upload or reference
 `.xodr`; the backend runs validation/conversion and returns either CityGML,
@@ -326,6 +333,9 @@ inside their limited space.
 - [ ] Normalize selected osm2streets roads into `RoadDraft` and verify they
       export as JSON/CityJSON with lane, bike-lane, sidewalk, and intersection
       provenance intact
+- [ ] Add a polygon-asset normalization contract for osm2streets-derived
+      traffic areas: `surfacePolygon`, centerline, width, direction, function
+      and usage codes/labels, ids, lane type, and source provenance
 - [ ] Decide and test the CityGML export leg for osm2streets-derived roads:
       direct CityGML writer or CityJSON -> CityGML converter
 
