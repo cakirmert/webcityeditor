@@ -4,9 +4,16 @@ export type ValidationResult =
   | { ok: true; doc: CityJsonDocument }
   | { ok: false; error: string };
 
+export interface CityJsonSeqFeatureValue {
+  type: string;
+  id: string;
+  CityObjects: Record<string, CityObject>;
+  vertices: [number, number, number][];
+}
+
 /**
  * Validate that a parsed JSON object is a CityJSON document we can handle.
- * Does not run cjio-level schema validation — we check the structural minimums
+ * Does not run cjio-level schema validation - we check the structural minimums
  * the renderer and edit pipeline need.
  */
 export function validateCityJson(data: unknown): ValidationResult {
@@ -73,7 +80,7 @@ export function parseCityJsonAuto(
   try {
     header = JSON.parse(firstLine);
   } catch {
-    // Not valid JSON on line 1 — fall back to treating whole file as monolithic
+    // Not valid JSON on line 1 - fall back to treating whole file as monolithic
     return parseCityJson(text);
   }
   if (
@@ -96,7 +103,7 @@ export function parseCityJsonAuto(
  * feature counts into the thousands this is fine in memory; above that,
  * pass `limitFeatures` to load only the first N.
  *
- * `viewportBbox` (optional, in the data's CRS — same coords as the decoded
+ * `viewportBbox` (optional, in the data's CRS - same coords as the decoded
  * vertices, NOT WGS84) skips features whose vertex bbox doesn't intersect.
  * This is a big memory win on city-scale CityJSONSeq files: only the tiles
  * the user is actually looking at get parsed and held in memory.
@@ -129,7 +136,27 @@ export function parseCityJsonSeq(
     };
   }
 
-  const doc: CityJsonDocument = {
+  const doc = createCityJsonSeqDocument(header);
+
+  let featureCount = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (limitFeatures !== undefined && featureCount >= limitFeatures) break;
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    let feature: CityJsonSeqFeatureValue;
+    try {
+      feature = JSON.parse(raw);
+    } catch {
+      continue; // Skip malformed lines rather than failing the whole load
+    }
+    if (appendCityJsonSeqFeature(doc, feature, viewportBbox)) featureCount++;
+  }
+
+  return { ok: true, doc };
+}
+
+export function createCityJsonSeqDocument(header: CityJsonDocument): CityJsonDocument {
+  return {
     type: 'CityJSON',
     version: header.version,
     metadata: header.metadata,
@@ -137,84 +164,61 @@ export function parseCityJsonSeq(
     CityObjects: { ...(header.CityObjects ?? {}) },
     vertices: [...(header.vertices ?? [])],
   };
+}
 
-  let featureCount = 0;
-  for (let i = 1; i < lines.length; i++) {
-    if (limitFeatures !== undefined && featureCount >= limitFeatures) break;
-    const raw = lines[i].trim();
-    if (!raw) continue;
-    let feature: {
-      type?: string;
-      CityObjects?: Record<string, CityObject>;
-      vertices?: [number, number, number][];
-    };
-    try {
-      feature = JSON.parse(raw);
-    } catch {
-      continue; // Skip malformed lines rather than failing the whole load
-    }
-    if (feature.type !== 'CityJSONFeature' || !feature.CityObjects) continue;
+export function appendCityJsonSeqFeature(
+  doc: CityJsonDocument,
+  feature: CityJsonSeqFeatureValue,
+  viewportBbox?: [number, number, number, number]
+): boolean {
+  if (feature.type !== 'CityJSONFeature' || !feature.CityObjects) return false;
 
-    // Viewport bbox check: drop features whose decoded XY extent doesn't
-    // intersect the requested viewport. This is the streaming win — we avoid
-    // copying their vertices and CityObjects into the in-memory doc at all.
-    if (viewportBbox && feature.vertices && feature.vertices.length > 0) {
-      if (!featureIntersectsBbox(feature.vertices, doc.transform, viewportBbox)) {
-        continue;
-      }
+  if (viewportBbox && feature.vertices && feature.vertices.length > 0) {
+    if (!featureIntersectsBbox(feature.vertices, doc.transform, viewportBbox)) {
+      return false;
     }
-
-    const offset = doc.vertices.length;
-    if (feature.vertices && feature.vertices.length > 0) {
-      for (const v of feature.vertices) doc.vertices.push(v);
-    }
-
-    for (const [id, obj] of Object.entries(feature.CityObjects)) {
-      if (offset > 0 && obj.geometry) {
-        obj.geometry = (obj.geometry as unknown[]).map((g) =>
-          shiftGeometryIndices(g, offset)
-        );
-      }
-      doc.CityObjects[id] = obj;
-    }
-
-    // Non-conformant CityJSONSeq fix (observed on Hamburg LoD2 export from
-    // citygml-tools): the feature's declared `id` points to an implicit
-    // Building that's referenced by the BuildingParts' `parents` field but
-    // isn't itself an entry in `CityObjects`. Per CityJSONSeq spec the parent
-    // MUST be present. We synthesize it so extractFootprints, filterToBuilding,
-    // and picking all work — without it the map has no Buildings to frame.
-    const featureId = (feature as { id?: string }).id;
-    if (
-      typeof featureId === 'string' &&
-      !doc.CityObjects[featureId] &&
-      Object.keys(feature.CityObjects).length > 0
-    ) {
-      const childIds: string[] = [];
-      const inheritAttrs: Record<string, unknown> = {};
-      for (const [id, obj] of Object.entries(feature.CityObjects)) {
-        if ((obj.parents ?? []).includes(featureId)) {
-          childIds.push(id);
-          // Hoist common attributes (measuredHeight, storeys, roofType, …) to
-          // the synthesized parent so clicking the Building shows something
-          // useful rather than an empty attribute list.
-          for (const [k, v] of Object.entries(obj.attributes ?? {})) {
-            if (!(k in inheritAttrs)) inheritAttrs[k] = v;
-          }
-        }
-      }
-      if (childIds.length > 0) {
-        doc.CityObjects[featureId] = {
-          type: 'Building',
-          children: childIds,
-          attributes: inheritAttrs as CityObject['attributes'],
-        };
-      }
-    }
-    featureCount++;
   }
 
-  return { ok: true, doc };
+  const offset = doc.vertices.length;
+  if (feature.vertices && feature.vertices.length > 0) {
+    for (const v of feature.vertices) doc.vertices.push(v);
+  }
+
+  for (const [id, obj] of Object.entries(feature.CityObjects)) {
+    if (offset > 0 && obj.geometry) {
+      obj.geometry = (obj.geometry as unknown[]).map((g) =>
+        shiftGeometryIndices(g, offset)
+      );
+    }
+    doc.CityObjects[id] = obj;
+  }
+
+  const featureId = feature.id;
+  if (
+    typeof featureId === 'string' &&
+    !doc.CityObjects[featureId] &&
+    Object.keys(feature.CityObjects).length > 0
+  ) {
+    const childIds: string[] = [];
+    const inheritAttrs: Record<string, unknown> = {};
+    for (const [id, obj] of Object.entries(feature.CityObjects)) {
+      if ((obj.parents ?? []).includes(featureId)) {
+        childIds.push(id);
+        for (const [k, v] of Object.entries(obj.attributes ?? {})) {
+          if (!(k in inheritAttrs)) inheritAttrs[k] = v;
+        }
+      }
+    }
+    if (childIds.length > 0) {
+      doc.CityObjects[featureId] = {
+        type: 'Building',
+        children: childIds,
+        attributes: inheritAttrs as CityObject['attributes'],
+      };
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -223,15 +227,16 @@ export function parseCityJsonSeq(
  * outside the user's viewport before they consume any memory.
  *
  * Bbox format: [minX, minY, maxX, maxY] in the SAME CRS as the doc transform
- * (typically the projected CRS of the source data — e.g. EPSG:28992 for
+ * (typically the projected CRS of the source data - e.g. EPSG:28992 for
  * Dutch RD New). Callers must reproject WGS84 map viewports themselves
  * before invoking the parser.
  */
 function featureIntersectsBbox(
   vertices: [number, number, number][],
   transform: CityJsonDocument['transform'],
-  bbox: [number, number, number, number]
+  bbox: [number, number, number, number] | undefined
 ): boolean {
+  if (!bbox) return true;
   const sx = transform?.scale?.[0] ?? 1;
   const sy = transform?.scale?.[1] ?? 1;
   const tx = transform?.translate?.[0] ?? 0;
@@ -344,7 +349,7 @@ export function diffAttributes(
  * Used by the "sample" button and by tests.
  */
 export function buildSampleCube(): CityJsonDocument {
-  // A 10 × 8 × 10 m cube placed at TU Delft campus in EPSG:28992 (Dutch RD New).
+  // A 10 x 8 x 10 m cube placed at TU Delft campus in EPSG:28992 (Dutch RD New).
   // Vertices are stored as millimetre integers (scale 0.001) translated to Delft.
   // translate = [85000, 447000, 0] means vertex 0 sits at (85000m, 447000m) in RD,
   // which projects to roughly lng 4.3571, lat 52.0116 (Delft), lining up with OSM tiles.

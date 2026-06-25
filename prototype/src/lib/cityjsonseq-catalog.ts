@@ -1,6 +1,10 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument } from '../types';
-import { parseCityJsonSeq } from './cityjson';
+import {
+  appendCityJsonSeqFeature,
+  createCityJsonSeqDocument,
+  type CityJsonSeqFeatureValue,
+} from './cityjson';
 import { checkIntegrity } from './integrity';
 import { mergeCityJson } from './merge';
 import './projection';
@@ -115,22 +119,25 @@ async function fetchCityJsonSeqTiles(
             throw new Error(`Tile ${tile.id} failed: HTTP ${tileResponse.status} ${tileResponse.statusText}`);
           }
           const text = await tileResponse.text();
-          return {
-            doc: parseCityJsonSeqStrict(text, tile.file),
-            tile: describeCityJsonSeqTileStrict(text, tile),
-          };
+          return parseCityJsonSeqTileStrict(text, tile);
         })
       ))
     );
+    if (index + CATALOG_TILE_FETCH_CONCURRENCY < tiles.length) {
+      await yieldToBrowser();
+    }
   }
 
   const docs = fetched.map(({ doc }) => doc);
   const doc = docs.shift() ?? null;
   if (doc) {
-    for (const incoming of docs) {
+    for (const [index, incoming] of docs.entries()) {
       const merged = mergeCityJson(doc, incoming);
       if (!merged.ok) {
         throw new Error(`Could not merge catalog tile: ${merged.reason}`);
+      }
+      if (index % 8 === 7) {
+        await yieldToBrowser();
       }
     }
   }
@@ -171,70 +178,90 @@ export function projectWgs84BboxToCrs(bbox: Bbox, crs: string): Bbox {
 }
 
 export function parseCityJsonSeqStrict(text: string, name = 'CityJSONSeq input'): CityJsonDocument {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) throw new Error(`${name}: expected a header and at least one feature`);
-  for (const [index, line] of lines.entries()) {
-    let value: { type?: unknown };
-    try {
-      value = JSON.parse(line) as { type?: unknown };
-    } catch (error) {
-      throw new Error(
-        `${name}:${index + 1}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    const expected = index === 0 ? 'CityJSON' : 'CityJSONFeature';
-    if (value.type !== expected) {
-      throw new Error(`${name}:${index + 1}: expected ${expected}, got ${String(value.type)}`);
-    }
-  }
-
-  const parsed = parseCityJsonSeq(text);
-  if (!parsed.ok) throw new Error(`${name}: ${parsed.error}`);
-  const integrity = checkIntegrity(parsed.doc);
-  if (!integrity.ok) {
-    const first = integrity.issues.find((issue) => issue.severity === 'error');
-    throw new Error(`${name}: structural integrity failed: ${first?.message ?? 'unknown error'}`);
-  }
-  return parsed.doc;
+  return parseCityJsonSeqStrictValues(text, name).doc;
 }
 
 export function describeCityJsonSeqTileStrict(
   text: string,
   catalog: CityJsonSeqCatalogTile
 ): CityJsonSeqLoadedTile {
+  const parsed = parseCityJsonSeqStrictValues(text, catalog.file);
+  return { catalog, header: parsed.header, features: parsed.features };
+}
+
+function parseCityJsonSeqTileStrict(
+  text: string,
+  catalog: CityJsonSeqCatalogTile
+): { doc: CityJsonDocument; tile: CityJsonSeqLoadedTile } {
+  const parsed = parseCityJsonSeqStrictValues(text, catalog.file);
+  return {
+    doc: parsed.doc,
+    tile: { catalog, header: parsed.header, features: parsed.features },
+  };
+}
+
+function parseCityJsonSeqStrictValues(
+  text: string,
+  name: string
+): {
+  doc: CityJsonDocument;
+  header: Record<string, unknown>;
+  features: CityJsonSeqFeatureTemplate[];
+} {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) throw new Error(`${catalog.file}: expected a header and at least one feature`);
-  const values = lines.map((line, index) => {
-    try {
-      return JSON.parse(line) as unknown;
-    } catch (error) {
-      throw new Error(
-        `${catalog.file}:${index + 1}: invalid JSON: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  });
-  const header = values[0];
+  if (lines.length < 2) throw new Error(`${name}: expected a header and at least one feature`);
+  const header = parseStrictJsonLine(lines[0], name, 1);
   if (!isObject(header) || header.type !== 'CityJSON') {
-    throw new Error(`${catalog.file}:1: expected CityJSON`);
+    throw new Error(`${name}:1: expected CityJSON`);
   }
-  const features = values.slice(1).map((value, index) => {
+  const doc = createCityJsonSeqDocument(header as unknown as CityJsonDocument);
+  const features: CityJsonSeqFeatureTemplate[] = [];
+
+  for (let index = 1; index < lines.length; index++) {
+    const value = parseStrictJsonLine(lines[index], name, index + 1);
     if (
       !isObject(value) ||
       value.type !== 'CityJSONFeature' ||
       typeof value.id !== 'string' ||
       !isObject(value.CityObjects)
     ) {
-      throw new Error(`${catalog.file}:${index + 2}: expected CityJSONFeature`);
+      throw new Error(`${name}:${index + 1}: expected CityJSONFeature`);
     }
-    return {
+    features.push({
       id: value.id,
       objectIds: Object.keys(value.CityObjects),
       value,
-    };
-  });
-  return { catalog, header, features };
+    });
+    if (!appendCityJsonSeqFeature(doc, value as unknown as CityJsonSeqFeatureValue)) {
+      throw new Error(`${name}:${index + 1}: could not append CityJSONFeature`);
+    }
+  }
+
+  const integrity = checkIntegrity(doc);
+  if (!integrity.ok) {
+    const first = integrity.issues.find((issue) => issue.severity === 'error');
+    throw new Error(`${name}: structural integrity failed: ${first?.message ?? 'unknown error'}`);
+  }
+
+  return { doc, header, features };
+}
+
+function parseStrictJsonLine(line: string, name: string, lineNumber: number): Record<string, unknown> {
+  try {
+    const value = JSON.parse(line) as unknown;
+    if (!isObject(value)) {
+      throw new Error('line is not a JSON object');
+    }
+    return value;
+  } catch (error) {
+    throw new Error(
+      `${name}:${lineNumber}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 export function normalizeCatalogBaseUrl(value: string): URL {

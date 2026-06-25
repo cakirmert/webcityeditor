@@ -23,7 +23,6 @@ import type { CityJsonDocument, SelectionInfo } from '../types';
 import { applyVertexTransform, detectCrs, projectToWgs84 } from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
-import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
@@ -50,6 +49,7 @@ const LOD_EXTRUDE_MAX = 99; // always extrude at z > 14.5 for now
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
+const DEFAULT_INITIAL_ZOOM = 12;
 
 type Rgba = [number, number, number, number];
 
@@ -176,6 +176,12 @@ interface Props {
   onOsmRoadSelect?: (road: OsmRoadFeature) => void;
   osm2streetsResult?: import('../lib/osm2streets').Osm2StreetsResult | null;
   osm2streetsBbox?: [number, number, number, number] | null;
+  initialView?: {
+    center: [number, number];
+    zoom: number;
+    disableDataFit?: boolean;
+  };
+  precomputedFootprints?: Footprint[];
 }
 
 /**
@@ -229,6 +235,8 @@ export default function MapView({
   onOsmRoadSelect,
   osm2streetsResult = null,
   osm2streetsBbox = null,
+  initialView,
+  precomputedFootprints,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -238,7 +246,7 @@ export default function MapView({
   const roadDraftDragRef = useRef<{ sectionId: string; pointIndex: number } | null>(null);
   const flownForDocRef = useRef<CityJsonDocument | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [zoom, setZoom] = useState<number>(12);
+  const [zoom, setZoom] = useState<number>(initialView?.zoom ?? DEFAULT_INITIAL_ZOOM);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
 
   useEffect(() => {
@@ -264,17 +272,11 @@ export default function MapView({
   }, [onRoadLineDrawn]);
 
   const footprints = useMemo(
-    () => extractFootprints(cityjson),
+    () => precomputedFootprints ?? extractFootprints(cityjson),
     // reloadToken is intentionally a dep so "Reload view" after an edit
     // (e.g. changed measuredHeight) rebuilds the deck.gl data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cityjson, reloadToken]
-  );
-  const detailMesh = useMemo(
-    () => buildCityJsonMapMesh(cityjson),
-    // reloadToken catches in-place geometry edits on the same document object.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cityjson, reloadToken]
+    [cityjson, reloadToken, precomputedFootprints]
   );
 
   const commitRoadDraft = useCallback(
@@ -361,12 +363,16 @@ export default function MapView({
     const container = containerRef.current;
     if (!container) return;
 
-    const initialBbox =
-      computeFootprintBounds(footprints) ??
-      computeVertexBounds(cityjson) ??
-      computeMetadataBounds(cityjson);
+    const initialBbox = initialView
+      ? null
+      : computeFootprintBounds(footprints) ??
+        computeVertexBounds(cityjson) ??
+        computeMetadataBounds(cityjson);
     const initialCenter =
-      boundsCenter(initialBbox) ?? computeTranslateCentre(cityjson) ?? [4.3571, 52.0116];
+      initialView?.center ??
+      boundsCenter(initialBbox) ??
+      computeTranslateCentre(cityjson) ??
+      [4.3571, 52.0116];
 
     const map = new maplibregl.Map({
       container,
@@ -401,7 +407,7 @@ export default function MapView({
         ],
       },
       center: initialCenter,
-      zoom: 12,
+      zoom: initialView?.zoom ?? DEFAULT_INITIAL_ZOOM,
       pitch: 0,
       bearing: 0,
       canvasContextAttributes: { antialias: true },
@@ -454,7 +460,9 @@ export default function MapView({
     if (!map || !overlay) return;
 
     // Fit the camera to the dataset ONLY on first load of a given document
-    // (not on every selection or edit).
+    // (not on every selection or edit). Hamburg catalog startup deliberately
+    // uses a city-center overview instead, because a partial local catalog
+    // should not pull the first view away from Hamburg centre.
     //
     // IMPORTANT: MapLibre can drop the camera move if we call fitBounds before
     // its style has loaded — the initial center/zoom from the Map constructor
@@ -469,7 +477,15 @@ export default function MapView({
 
       const bbox = footprintBbox ?? vertexBbox ?? metaBbox;
       const doFit = () => {
-        if (bbox && isFiniteBbox(bbox)) {
+        if (initialView?.disableDataFit) {
+          map.flyTo({
+            center: initialView.center,
+            zoom: initialView.zoom,
+            pitch: 0,
+            bearing: 0,
+            duration: 0,
+          });
+        } else if (bbox && isFiniteBbox(bbox)) {
           map.fitBounds(bbox, {
             padding: DATA_FIT_PADDING,
             maxZoom: DATA_FIT_MAX_ZOOM,
@@ -480,7 +496,7 @@ export default function MapView({
         } else if (centre && Number.isFinite(centre[0]) && Number.isFinite(centre[1])) {
           map.flyTo({
             center: centre,
-            zoom: 12,
+            zoom: DEFAULT_INITIAL_ZOOM,
             pitch: 0,
             bearing: 0,
             duration: 0,
@@ -937,7 +953,6 @@ export default function MapView({
     overlay.setProps({ layers });
   }, [
     footprints,
-    detailMesh,
     selectedId,
     onSelect,
     zoom,

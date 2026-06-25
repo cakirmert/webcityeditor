@@ -52,7 +52,12 @@ export function useImportExport(
   const [inputIntegrity, setInputIntegrity] = useState<ReturnType<typeof checkIntegrity> | null>(null);
 
   const handleLoaded = useCallback(
-    (doc: CityJsonDocument, name: string, rawText: string | null = null) => {
+    (
+      doc: CityJsonDocument,
+      name: string,
+      rawText: string | null = null,
+      options: { skipIntegrity?: boolean } = {}
+    ) => {
       setCityjson(doc);
       setFileName(name);
       setSeqRawText(rawText);
@@ -64,7 +69,7 @@ export function useImportExport(
       undoRef.current.clear();
       setUndoVersion((v) => v + 1);
       originals.clear();
-      setInputIntegrity(checkIntegrity(doc));
+      setInputIntegrity(options.skipIntegrity ? null : checkIntegrity(doc));
       setPrimitiveValidation({
         kind: 'unchecked',
         message: 'Loaded input has not been checked for ISO 19107 primitive validity in this session.',
@@ -82,7 +87,9 @@ export function useImportExport(
     ) => {
       if (!loaded.doc) return;
       const tileCount = loaded.tiles.length;
-      handleLoaded(loaded.doc, `Hamburg CityJSONSeq catalog (${tileCount} tiles)`);
+      handleLoaded(loaded.doc, `Hamburg CityJSONSeq catalog (${tileCount} tiles)`, null, {
+        skipIntegrity: options.loadMode === 'all',
+      });
       const connection: CatalogConnection = {
         baseUrl: normalizeCatalogBaseUrl(catalogUrl).toString(),
         crs: loaded.crs,

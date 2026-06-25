@@ -44,6 +44,9 @@ import type { FloorPlanDivision, SplitAxis } from './lib/subdivision';
 import type { IfcImportResult } from './lib/ifc-import';
 import type { PendingTransform } from './lib/transform-preview';
 
+const HAMBURG_CITY_CENTER: [number, number] = [9.9937, 53.5511];
+const HAMBURG_OVERVIEW_ZOOM = 10.25;
+
 export default function App() {
   const coreState = useCoreState();
   const undoRedo = useUndoRedo(coreState);
@@ -52,7 +55,6 @@ export default function App() {
 
   const [sidePanelWide, setSidePanelWide] = useState(false);
   const autoHamburgLoadStartedRef = useRef(false);
-  const autoRoadFetchStateRef = useRef<'idle' | 'pending' | 'done'>('idle');
   const [autoHamburgStatus, setAutoHamburgStatus] = useState<{
     kind: 'loading' | 'error';
     message: string;
@@ -135,14 +137,12 @@ export default function App() {
       setAutoHamburgStatus(null);
       importExport.handleCatalogLoaded(loaded, catalogUrl, options);
       if (options.loadMode === 'all' && loaded.doc) {
-        autoRoadFetchStateRef.current = 'pending';
-        roadEditor.setShowRoadEditor(true);
         roadEditor.setRoadStatus(
-          `Loaded ${loaded.tiles.length} Hamburg catalog tile${loaded.tiles.length === 1 ? '' : 's'}; fetching OSM roads for the loaded extent...`
+          `Loaded ${loaded.tiles.length} Hamburg catalog tile${loaded.tiles.length === 1 ? '' : 's'}. Open Roads and click Fetch / Recalculate View when you want OSM roads.`
         );
       }
     },
-    [importExport.handleCatalogLoaded, roadEditor.setRoadStatus, roadEditor.setShowRoadEditor]
+    [importExport.handleCatalogLoaded, roadEditor.setRoadStatus]
   );
 
   useEffect(() => {
@@ -183,19 +183,6 @@ export default function App() {
       }
     })();
   }, [catalog, coreState.cityjson, handleCatalogLoadedForApp, importExport]);
-
-  useEffect(() => {
-    if (!coreState.cityjson || autoRoadFetchStateRef.current !== 'pending') return;
-    autoRoadFetchStateRef.current = 'done';
-    const timer = window.setTimeout(() => {
-      roadEditor.setShowRoadEditor(true);
-      void roadEditor.handleFetchOsmRoads({
-        source: 'loaded-data',
-        allowLargeQuery: true,
-      });
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [coreState.cityjson, roadEditor.handleFetchOsmRoads, roadEditor.setShowRoadEditor]);
 
   const handleMapViewportChange = useCallback(
     (bbox: Wgs84Bbox) => {
@@ -517,6 +504,16 @@ export default function App() {
               selectedId={coreState.selection?.objectId ?? null}
               onSelect={handleSelect}
               reloadToken={coreState.reloadToken}
+              precomputedFootprints={footprintsForFilter}
+              initialView={
+                catalog.catalogConnection
+                  ? {
+                      center: HAMBURG_CITY_CENTER,
+                      zoom: HAMBURG_OVERVIEW_ZOOM,
+                      disableDataFit: true,
+                    }
+                  : undefined
+              }
               drawMode={coreState.drawMode}
               onFootprintDrawn={buildingEditor.setPendingFootprint}
               onRoadLineDrawn={roadEditor.handleRoadLineDrawn}
