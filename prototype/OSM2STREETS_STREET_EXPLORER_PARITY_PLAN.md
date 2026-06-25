@@ -82,6 +82,12 @@ In this prototype:
    - osm2streets internally works in metric space, but its public GeoJSON output is WGS84.
    - Our application should make the conversion boundary explicit to avoid approximate meter math and drift between preview, editing, and export.
 
+6. Initial rendering and edit-mode rendering can drift.
+   - The initial osm2streets reference render and the RoadDraft/editing render are separate code paths today.
+   - That kind of split is how bike lanes can be missing or drawn with the wrong color in one mode while looking correct in another.
+   - Style decisions for lane type, marking type, intersection type, and selected/edit overlays must come from shared helpers instead of being reimplemented per layer.
+   - The initial render, selected-road render, editable draft preview, and inserted CityJSON road render should be tested against the same lane semantics.
+
 ## Target Architecture
 
 ### Principle
@@ -93,6 +99,7 @@ That means:
 - osm2streets layers are the "reference/explorer" visualization.
 - RoadDraft and CityJSON Transportation remain the "edit/export" model.
 - The bridge between the two must preserve IDs and dimensions so an osm2streets lane or road can seed an editable RoadDraft without losing provenance.
+- Rendering helpers are shared across initial preview and edit mode, so lane semantics do not change just because a road becomes editable.
 
 ### Data Flow
 
@@ -218,6 +225,9 @@ Tasks:
    - `osm2streetsIntersectionFillColor(kind: string): Rgba`
    - `osm2streetsLaneMarkingFillColor(type: string): Rgba`
    - `osm2streetsIntersectionMarkingFillColor(type: string): Rgba`
+   - `roadBandFillColor(kind: RoadBandKind, sourceType?: string): Rgba`
+
+   These helpers must be used by both the initial osm2streets layers and the editing/preview layers. Do not copy lane-color switches into `MapView.tsx` branches.
 
 2. Match the explorer's lane color semantics:
 
@@ -270,9 +280,17 @@ Tasks:
    7. editable RoadDraft handles and selected overlays.
    8. warnings/conflicts/bbox outlines.
 
+7. Keep render-mode parity explicit:
+
+   - Initial osm2streets result render: uses the same `Biking`, `Sidewalk`, `Bus`, parking, and buffer color mapping as edit mode.
+   - Selected osm2streets road render: may add an outline or highlight, but must not replace semantic fill colors.
+   - RoadDraft preview: maps draft band kinds back to the same visual vocabulary, especially bike lanes and sidewalks.
+   - Inserted CityJSON `Road` surfaces: reuse the same TrafficArea/AuxiliaryTrafficArea style mapping so inserted roads do not visually regress after save.
+
 Acceptance:
 
 - A bike lane from osm2streets appears green.
+- The same bike lane remains green before selection, while selected, while used as an edit draft, and after insertion as a CityJSON road preview.
 - Intersection polygons are visible.
 - Crossing and stop-line markings have filled width, not just thin strokes.
 - Existing RoadDraft editing remains usable above the osm2streets preview.
@@ -444,6 +462,7 @@ Browser/visual checks:
 - Fetch OSM roads in Hamburg.
 - Verify:
   - bike lanes are green.
+  - bike lanes stay green in the initial osm2streets render, selected-road state, editable RoadDraft preview, and inserted-road render.
   - intersections are visible.
   - lane/intersection markings draw above lane polygons.
   - selected RoadDraft handles draw above osm2streets.
@@ -481,13 +500,15 @@ Browser/visual checks:
 6. Add simple lane/intersection inspector readouts.
 7. Replace road query meters-per-degree math with EPSG:25832 metric bbox conversion.
 8. Add "create RoadDraft from osm2streets road" as the first bridge from explorer view to editor workflow.
-9. Decide how intersection polygons should persist in CityJSON Transportation.
-10. Add optional debug layers only after the main visual parity path is stable.
+9. Ensure RoadDraft preview and inserted CityJSON road layers reuse the same semantic color helpers as initial osm2streets rendering.
+10. Decide how intersection polygons should persist in CityJSON Transportation.
+11. Add optional debug layers only after the main visual parity path is stable.
 
 ## Definition of Done for Explorer Parity
 
 - Fetching OSM roads in Hamburg shows lane polygons, intersection polygons, lane markings, and intersection markings.
 - Bike lanes are visually distinct and green.
+- Bike lanes remain visually distinct across initial render, selected state, edit preview, and inserted-road rendering.
 - Sidewalks, parking lanes, bus lanes, buffers, and shared-use paths have stable colors.
 - Intersections are selectable or inspectable.
 - Road drafting/editing still works and remains visually on top of the osm2streets reference layers.

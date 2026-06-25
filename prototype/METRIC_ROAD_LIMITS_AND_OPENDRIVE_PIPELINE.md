@@ -62,6 +62,7 @@ interface RoadConstraintContext {
   allowedCorridorsM: MetricPolygonFeature[];
   affectedLandM: MetricPolygonFeature[];
   softPlanningZonesM: MetricPolygonFeature[];
+  verticalPolicy: 'unknown-2d' | 'surface-only' | 'z-aware';
 }
 ```
 
@@ -99,11 +100,13 @@ interface RoadLimitConflict {
     | 'building_clearance'
     | 'outside_corridor'
     | 'affected_planning_area'
+    | 'vertical_uncertainty'
     | 'missing_corridor_data';
   roadAreaId: string;
   affectedId?: string;
   areaM2?: number;
   clearanceM?: number;
+  verticalSeparationM?: number;
   label: string;
   polygonWgs84: [number, number][];
   polygonMetric: [number, number][];
@@ -116,7 +119,22 @@ Default rule behavior:
 - `building_clearance`: error or warning depending on configured clearance policy.
 - `outside_corridor`: warning until a trusted corridor source exists; then error.
 - `affected_planning_area`: warning, with an override path.
+- `vertical_uncertainty`: warning when a 2D overlap might be valid because the road is underground, covered, tunneled, on a bridge, or otherwise vertically separated.
 - `missing_corridor_data`: info, shown only when corridor checks are requested but no source is loaded.
+
+## 3D and Underground Roads Caveat
+
+Planning/building footprint limits must not become a naive "2D overlap means illegal road" rule. Some roads are below grade, covered, or tunneled and can legitimately pass underneath buildings or building footprints. Other road segments can be elevated above land parcels or cross over lower infrastructure.
+
+Validation should therefore be conservative:
+
+- If the road is known to be at surface level and overlaps a building footprint, treat it as a blocking `building_overlap`.
+- If the road has evidence of being underground or vertically separated, such as `tunnel=yes`, `covered=yes`, `layer=-1`, OpenDRIVE elevation, CityGML Tunnel/Transportation elevation, or a reliable z profile, do a z-aware clearance check before blocking.
+- If the road overlaps a building footprint in 2D but vertical data is missing, report `vertical_uncertainty` as a warning instead of silently deleting or clamping the road.
+- Portal, ramp, and cut-and-cover entrances should still be checked at surface level where they emerge.
+- Planning polygons can still be affected by underground construction, but that is a different warning than "road surface hits building".
+
+The first implementation can stay 2D for visible surface-road editing, but the API and conflict model should leave room for z-aware checks before corridor limits become hard blockers.
 
 ## Building and Planning Data as Road Limits
 
@@ -131,11 +149,13 @@ Tasks:
 - Add projection helpers for WGS84 rings and bboxes.
 - Convert `RoadArea.polygon`, building footprints, and planning polygons to EPSG:25832 for Hamburg.
 - Compute overlap polygons where possible, not only "these two polygons intersect".
+- Inspect road vertical hints from OSM tags, OpenDRIVE import metadata, or CityJSON semantics before escalating a 2D footprint overlap to a hard blocker.
 - Keep rendering conflict polygons in WGS84 so deck.gl can draw them.
 
 Acceptance:
 
-- A road preview that crosses a loaded building is blocked.
+- A surface-level road preview that crosses a loaded building is blocked.
+- A road preview marked as underground or vertically separated is reported as `vertical_uncertainty` or checked with z clearance instead of automatically blocked by the building footprint above.
 - The map highlights the affected building/overlap area.
 - The conflict list names the road surface and affected building id.
 
@@ -205,8 +225,9 @@ Selection criteria:
 4. Add robust polygon intersection output, not only intersection tests.
 5. Split conflicts into hard blockers and warnings.
 6. Add buffered-building clearance checks.
-7. Add optional corridor source plumbing.
-8. Add "fit to corridor" only after the validator proves reliable.
+7. Add vertical hints and `vertical_uncertainty` handling before turning planning/corridor conflicts into hard blockers.
+8. Add optional corridor source plumbing.
+9. Add "fit to corridor" only after the validator proves reliable.
 
 ## OpenDRIVE / r:trån Trial Pipeline
 
@@ -360,6 +381,8 @@ Road limit tests:
 - Road fully outside all buildings and inside corridor: no conflict.
 - Road overlaps a building: blocking `building_overlap`.
 - Road touches only building clearance buffer: `building_clearance`.
+- Underground/tunneled road overlaps a building footprint in 2D with known vertical separation: no blocking building conflict.
+- Road overlaps a building footprint in 2D with unknown vertical data: `vertical_uncertainty` warning unless explicitly marked as surface-level.
 - Road leaves corridor: `outside_corridor`.
 - Road crosses planning polygon: `affected_planning_area`.
 - Missing corridor source: no hard block.
@@ -377,6 +400,8 @@ OpenDRIVE pipeline tests:
 
 - Which Hamburg dataset should be the first trusted road corridor source?
 - Should corridor overflow become a hard error only after parcel/right-of-way data is loaded?
+- What vertical clearance threshold should distinguish true building collision from a valid underground or elevated road?
+- Which source should win when OSM `layer`/`tunnel`, OpenDRIVE elevation, and CityGML geometry disagree?
 - Should OpenDRIVE-derived roads be editable immediately or start read-only?
 - Should lane topology be stored in CityJSON private metadata, a sidecar graph, or both?
 - Should we build a custom CityGML Transportation parser before relying on CityJSON conversion?
