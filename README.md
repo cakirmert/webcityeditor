@@ -2,7 +2,7 @@
 
 Browser-based LoD 2 city-model editor. Prefers tiled CityJSONSeq input, also loads monolithic CityJSON 2.0, renders buildings on a MapLibre + deck.gl map, and lets you edit, create, transform, subdivide, and export buildings. A lightweight optional local server provides strict whole-city Hamburg tile loading and write-back.
 
-Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`prototype/PROTOTYPE_STATUS.md`](prototype/PROTOTYPE_STATUS.md) for the full planned-vs-delivered breakdown, [`prototype/HAMBURG_PIPELINE.md`](prototype/HAMBURG_PIPELINE.md) for the Hamburg CityGML-to-CityJSON pipeline, and [`prototype/CITYGML_TRANSPORTATION_PLAN.md`](prototype/CITYGML_TRANSPORTATION_PLAN.md) for the CityGML Transportation/OpenDRIVE/muv-osm roadmap.
+Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`prototype/PROTOTYPE_STATUS.md`](prototype/PROTOTYPE_STATUS.md) for the full planned-vs-delivered breakdown, [`prototype/HAMBURG_PIPELINE.md`](prototype/HAMBURG_PIPELINE.md) for the Hamburg CityGML-to-CityJSON pipeline, [`prototype/CITYGML_TRANSPORTATION_PLAN.md`](prototype/CITYGML_TRANSPORTATION_PLAN.md) for the CityGML Transportation/OpenDRIVE/muv-osm roadmap, and [`prototype/METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md`](prototype/METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md) for the metric road-limit and r:trån trial pipeline plan.
 
 ## Features
 
@@ -41,7 +41,7 @@ From `prototype/`:
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Vite dev server with HMR |
+| `npm run dev` | Start the local Hamburg catalog server, then Vite with HMR |
 | `npm test` | Run all tests once |
 | `npm run test:watch` | Watch-mode tests |
 | `npm run build` | Production bundle + TypeScript type-check |
@@ -84,6 +84,8 @@ webcityeditor/
 │   ├── OSM2STREETS_FORK_PLAN.md         osm2streets WASM/fork and lane UI plan
 │   ├── OSM2STREETS_HANDOFF.md           osm2streets-only implementation handoff for future agents
 │   ├── CITYGML_TRANSPORTATION_PLAN.md   CityGML Transportation, OpenDRIVE, and muv-osm plan
+│   ├── METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md
+│   │                                      Metric road-limit and r:trån trial pipeline plan
 │   ├── scripts/build-osm2streets-wasm.ps1
 │   ├── test-fixtures/osm2streets/        Hamburg OSM regression fixtures and expected counts
 │   ├── vendor/osm2streets-js/            Built wasm-pack package consumed by the Vite app
