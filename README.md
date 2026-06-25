@@ -83,6 +83,8 @@ webcityeditor/
 │   ├── HAMBURG_PIPELINE.md              Hamburg complete-city CityGML → validated tiled CityJSONSeq
 │   ├── OSM2STREETS_FORK_PLAN.md         osm2streets WASM/fork and lane UI plan
 │   ├── OSM2STREETS_HANDOFF.md           osm2streets-only implementation handoff for future agents
+│   ├── OSM2STREETS_LANE_VALIDATION_NOTES.md
+│   │                                      External Python lane-validation spike notes
 │   ├── CITYGML_TRANSPORTATION_PLAN.md   CityGML Transportation, OpenDRIVE, and muv-osm plan
 │   ├── METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md
 │   │                                      Metric road-limit and r:trån trial pipeline plan

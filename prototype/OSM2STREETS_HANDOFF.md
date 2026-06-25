@@ -38,6 +38,11 @@ Current implementation state:
   source-built WASM package and native executable, writes both output sets to
   `prototype/test-output/osm2streets-comparison/`, and fails on count,
   diagnostics, or normalized-output differences.
+- `prototype/OSM2STREETS_LANE_VALIDATION_NOTES.md` records an external
+  Python-binding validation spike from
+  `C:\Users\dmz-admin\Downloads\lane_validation`, including web-tool-style
+  layer names, options, clipping workaround, and interpretation of
+  `network_plain`.
 
 ## Why WASM Is Used
 
