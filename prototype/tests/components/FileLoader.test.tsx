@@ -75,7 +75,7 @@ describe('<FileLoader />', () => {
     global.fetch = originalFetch;
   });
 
-  it('connects the local whole-city CityJSONSeq catalog', async () => {
+  it('connects the local CityJSONSeq catalog in viewport streaming mode', async () => {
     const onLoaded = vi.fn();
     const onCatalogLoaded = vi.fn();
     const originalFetch = global.fetch;
@@ -141,10 +141,11 @@ describe('<FileLoader />', () => {
     await userEvent.click(screen.getByRole('button', { name: /connect catalog/i }));
 
     await waitFor(() => expect(onCatalogLoaded).toHaveBeenCalledTimes(1));
-    const [loaded, catalogUrl] = onCatalogLoaded.mock.calls[0];
+    const [loaded, catalogUrl, options] = onCatalogLoaded.mock.calls[0];
     expect(loaded.doc.CityObjects.Building_A).toBeDefined();
     expect(loaded.tileIds).toEqual(['tile-a']);
     expect(catalogUrl).toBe('http://127.0.0.1:8787');
+    expect(options).toEqual({ loadMode: 'viewport' });
     expect(screen.getByText(/Connected CityJSONSeq catalog/)).toBeInTheDocument();
 
     global.fetch = originalFetch;

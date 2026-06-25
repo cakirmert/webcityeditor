@@ -6,6 +6,7 @@ import {
   fetchCityJsonSeqViewport,
   projectWgs84BboxToCrs,
   type Bbox,
+  type CityJsonSeqLoadedTile,
 } from '../lib/cityjsonseq-catalog';
 import {
   CatalogWritebackError,
@@ -13,6 +14,8 @@ import {
   persistDirtyCityJsonSeqTiles,
 } from '../lib/cityjsonseq-writeback';
 import { mergeCityJson } from '../lib/merge';
+
+const MAX_CATALOG_VIEWPORT_SPAN_METERS = 4500;
 
 export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
   const {
@@ -57,12 +60,43 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
     }
 
     catalogLoadingRef.current = true;
-    setCatalogStatus({
-      kind: 'loading',
-      message: `${source.loadedTiles.size} tiles loaded; checking viewport...`,
-    });
     try {
       const bbox = projectWgs84BboxToCrs(bboxWgs84, source.crs);
+      if (isOversizedCatalogViewport(bbox)) {
+        const retainedTileIds = intersectingLoadedTileIds(source.loadedTiles, bbox);
+        const eviction = evictCleanCityJsonSeqTiles(
+          doc,
+          source.loadedTiles,
+          retainedTileIds,
+          dirtyIdsRef.current
+        );
+        if (eviction.evictedTileIds.length > 0) {
+          const next = { ...source, loadedTiles: eviction.tiles };
+          catalogConnectionRef.current = next;
+          setCatalogConnection(next);
+          setFileName(`Hamburg CityJSONSeq catalog (${eviction.tiles.size} tiles)`);
+          setSelection((current) =>
+            current && !doc.CityObjects[current.objectId] ? null : current
+          );
+          undoRef.current.clear();
+          setUndoVersion((version) => version + 1);
+          setReloadToken((token) => token + 1);
+        }
+        setCatalogStatus({
+          kind: 'ok',
+          message:
+            `Zoom in to stream building tiles for this view; ${eviction.tiles.size} tile` +
+            `${eviction.tiles.size === 1 ? '' : 's'} kept loaded` +
+            (eviction.evictedTileIds.length > 0
+              ? `; unloaded ${eviction.evictedTileIds.length} clean off-screen tiles`
+              : ''),
+        });
+        return;
+      }
+      setCatalogStatus({
+        kind: 'loading',
+        message: `${source.loadedTiles.size} tiles loaded; checking viewport...`,
+      });
       const loaded = await fetchCityJsonSeqViewport(
         source.baseUrl,
         bbox,
@@ -208,3 +242,24 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
 }
 
 export type CatalogState = ReturnType<typeof useCatalog>;
+
+function isOversizedCatalogViewport(bbox: Bbox): boolean {
+  return (
+    Math.abs(bbox[2] - bbox[0]) > MAX_CATALOG_VIEWPORT_SPAN_METERS ||
+    Math.abs(bbox[3] - bbox[1]) > MAX_CATALOG_VIEWPORT_SPAN_METERS
+  );
+}
+
+function intersectingLoadedTileIds(
+  tiles: ReadonlyMap<string, CityJsonSeqLoadedTile>,
+  bbox: Bbox
+): Set<string> {
+  const retained = new Set<string>();
+  for (const [tileId, tile] of tiles) {
+    const [minX, minY, , maxX, maxY] = tile.catalog.extent;
+    if (!(maxX < bbox[0] || minX > bbox[2] || maxY < bbox[1] || minY > bbox[3])) {
+      retained.add(tileId);
+    }
+  }
+  return retained;
+}

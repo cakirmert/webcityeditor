@@ -4,7 +4,8 @@ import { deleteDocument, listDocuments, loadDocument } from '../lib/storage';
 import { parseCityJsonAuto } from '../lib/cityjson';
 import {
   DEFAULT_HAMBURG_CATALOG_URL,
-  fetchCityJsonSeqCatalog,
+  DEFAULT_HAMBURG_VIEWPORT_BBOX,
+  fetchCityJsonSeqViewport,
   parseCityJsonSeqStrict,
   type CityJsonSeqViewportLoad,
 } from '../lib/cityjsonseq-catalog';
@@ -19,7 +20,7 @@ interface Props {
    * memory anyway. `null` for `rawText` means "don't keep me around."
   */
   onLoaded: (doc: CityJsonDocument, fileName: string, rawText: string | null) => void;
-  /** Connect a CityJSONSeq tile catalog. The full local Hamburg catalog is loaded. */
+  /** Connect a CityJSONSeq tile catalog. Buildings stream from the current camera view. */
   onCatalogLoaded?: (
     loaded: CityJsonSeqViewportLoad,
     catalogUrl: string,
@@ -216,17 +217,20 @@ export default function FileLoader({
     if (!catalogUrl.trim() || !onCatalogLoaded) return;
     setStatus({ kind: 'info', msg: `Connecting to CityJSONSeq catalog ${catalogUrl}…` });
     try {
-      const loaded = await fetchCityJsonSeqCatalog(catalogUrl);
+      const loaded = await fetchCityJsonSeqViewport(
+        catalogUrl,
+        DEFAULT_HAMBURG_VIEWPORT_BBOX
+      );
       if (!loaded.doc || loaded.tileIds.length === 0) {
-        throw new Error('The Hamburg catalog returned no CityJSONSeq tiles');
+        throw new Error('The Hamburg catalog returned no CityJSONSeq tiles for the initial view');
       }
-      onCatalogLoaded(loaded, catalogUrl, { loadMode: 'all' });
+      onCatalogLoaded(loaded, catalogUrl, { loadMode: 'viewport' });
       onClose?.();
       setStatus({
         kind: 'ok',
         msg:
-          `Connected CityJSONSeq catalog: ${loaded.tileIds.length} tiles, ` +
-          `${loaded.features.toLocaleString()} editable features.`,
+          `Connected CityJSONSeq catalog: ${loaded.tileIds.length} initial tiles, ` +
+          `${loaded.features.toLocaleString()} editable features. Move the map to stream more buildings.`,
       });
     } catch (e) {
       setStatus({
@@ -427,13 +431,14 @@ export default function FileLoader({
               Hamburg larger dataset
             </div>
             <div className="mb-2 text-[10px] text-[var(--text-faint)]">
-              For more than the hosted 180-building demo, start the local strict
-              CityJSONSeq server with{' '}
+              For more than the hosted 180-building demo, use the local strict
+              CityJSONSeq catalog. <code className="rounded bg-[var(--surface)] px-1">npm run dev</code>{' '}
+              starts it automatically; to run only the catalog use{' '}
               <code className="rounded bg-[var(--surface)] px-1">
                 npm run data:hamburg-lod2:serve
               </code>
-              , then connect here. The app loads every tile exposed by the local
-              catalog.
+              . The app loads the initial Hamburg view first, then streams
+              building tiles as the camera moves.
             </div>
             <div className="flex gap-2">
               <Input

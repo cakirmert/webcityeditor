@@ -26,7 +26,8 @@ import { computeTransformedFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
 import {
   DEFAULT_HAMBURG_CATALOG_URL,
-  fetchCityJsonSeqCatalog,
+  DEFAULT_HAMBURG_VIEWPORT_BBOX,
+  fetchCityJsonSeqViewport,
   type CityJsonSeqViewportLoad,
 } from './lib/cityjsonseq-catalog';
 import {
@@ -45,7 +46,7 @@ import type { IfcImportResult } from './lib/ifc-import';
 import type { PendingTransform } from './lib/transform-preview';
 
 const HAMBURG_CITY_CENTER: [number, number] = [9.9937, 53.5511];
-const HAMBURG_OVERVIEW_ZOOM = 10.25;
+const HAMBURG_OVERVIEW_ZOOM = 9.75;
 
 export default function App() {
   const coreState = useCoreState();
@@ -150,22 +151,25 @@ export default function App() {
     autoHamburgLoadStartedRef.current = true;
     setAutoHamburgStatus({
       kind: 'loading',
-      message: 'Loading every tile from the local Hamburg CityJSONSeq catalog...',
+      message: 'Loading Hamburg buildings for the initial map view...',
     });
     catalog.setCatalogStatus({
       kind: 'loading',
-      message: 'Loading every tile from the local Hamburg CityJSONSeq catalog...',
+      message: 'Loading Hamburg buildings for the initial map view...',
     });
     importExport.setLoadModalOpen(false);
 
     void (async () => {
       try {
-        const loaded = await fetchCityJsonSeqCatalog(DEFAULT_HAMBURG_CATALOG_URL);
+        const loaded = await fetchCityJsonSeqViewport(
+          DEFAULT_HAMBURG_CATALOG_URL,
+          DEFAULT_HAMBURG_VIEWPORT_BBOX
+        );
         if (!loaded.doc || loaded.tiles.length === 0) {
-          throw new Error('The local Hamburg catalog returned no CityJSONSeq tiles.');
+          throw new Error('The local Hamburg catalog returned no CityJSONSeq tiles for the initial map view.');
         }
         handleCatalogLoadedForApp(loaded, DEFAULT_HAMBURG_CATALOG_URL, {
-          loadMode: 'all',
+          loadMode: 'viewport',
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -192,7 +196,7 @@ export default function App() {
       coreState.mapBboxRef.current = bbox;
       catalog.handleViewportChange(bbox);
     },
-    [catalog, coreState.mapBboxRef]
+    [catalog.handleViewportChange, coreState.mapBboxRef]
   );
 
   const handleToggleRoadEditor = useCallback(() => {
