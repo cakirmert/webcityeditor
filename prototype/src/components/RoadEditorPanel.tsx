@@ -9,6 +9,8 @@ import {
   type RoadDraft,
 } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
+import type { Osm2StreetsSelection } from '../lib/osm2streets';
+import Osm2StreetsInspector from './Osm2StreetsInspector';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -23,6 +25,7 @@ interface Props {
   backendUrl: string;
   insertedRoadId?: string | null;
   roadFitConflicts?: RoadFitConflict[];
+  osm2streetsSelection?: Osm2StreetsSelection;
   onClose: () => void;
   onFetchOsmRoads: () => void;
   onBasemapChange: (basemap: 'map' | 'satellite') => void;
@@ -35,6 +38,8 @@ interface Props {
   onExportPayload: () => void;
   onPostPayload: () => void;
   onBackendUrlChange: (url: string) => void;
+  onCreateDraftFromOsm2StreetsSelection: () => void;
+  onClearOsm2StreetsSelection: () => void;
 }
 
 const BAND_KINDS: RoadBandKind[] = [
@@ -66,6 +71,7 @@ export default function RoadEditorPanel({
   backendUrl,
   insertedRoadId,
   roadFitConflicts = [],
+  osm2streetsSelection = null,
   onClose,
   onFetchOsmRoads,
   onBasemapChange,
@@ -78,6 +84,8 @@ export default function RoadEditorPanel({
   onExportPayload,
   onPostPayload,
   onBackendUrlChange,
+  onCreateDraftFromOsm2StreetsSelection,
+  onClearOsm2StreetsSelection,
 }: Props) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [splitPercent, setSplitPercent] = useState(50);
@@ -305,6 +313,11 @@ export default function RoadEditorPanel({
               )}
             </div>
           )}
+          <Osm2StreetsInspector
+            selection={osm2streetsSelection}
+            onCreateDraft={onCreateDraftFromOsm2StreetsSelection}
+            onClear={onClearOsm2StreetsSelection}
+          />
         </section>
 
         {draft && activeSection ? (

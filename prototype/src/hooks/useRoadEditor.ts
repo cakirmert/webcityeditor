@@ -13,6 +13,8 @@ import {
   summarizeRoadDraft,
 } from '../lib/transportation';
 import { processOsmXml } from '../lib/osm2streets';
+import type { Osm2StreetsSelection } from '../lib/osm2streets';
+import { buildRoadDraftFromOsm2StreetsSelection } from '../lib/osm2streets-draft';
 import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
@@ -173,10 +175,12 @@ export function useRoadEditor(
   const [finishRoadDrawToken, setFinishRoadDrawToken] = useState(0);
   const [osm2streetsResult, setOsm2streetsResult] = useState<import('../lib/osm2streets').Osm2StreetsResult | null>(null);
   const [osm2streetsBbox, setOsm2streetsBbox] = useState<[number, number, number, number] | null>(null);
+  const [osm2streetsSelection, setOsm2streetsSelection] = useState<Osm2StreetsSelection>(null);
 
   const handleFetchOsmRoads = useCallback(async (fetchOptions: FetchOsmRoadOptions = {}) => {
     if (!cityjson) return;
     setShowRoadEditor(true);
+    setOsm2streetsSelection(null);
     const viewportBbox = coreState.mapBboxRef.current;
     const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
     const bbox =
@@ -241,6 +245,7 @@ export function useRoadEditor(
 
   const handleOsmRoadSelect = useCallback((road: OsmRoadFeature) => {
     setShowRoadEditor(true);
+    setOsm2streetsSelection(null);
     setSelectedOsmRoadId(road.id);
     const inferred = cloneRoadDraft(road.inferredDraft);
     const ok = window.confirm(
@@ -258,6 +263,45 @@ export function useRoadEditor(
     setRoadDraft({ ...inferred, userVerified: false });
     setRoadStatus('OSM kept as a seed. Use Draw / redraw road and edit lanes before inserting.');
   }, []);
+
+  const handleOsm2StreetsSelect = useCallback((selection: Osm2StreetsSelection) => {
+    setShowRoadEditor(true);
+    setOsm2streetsSelection(selection);
+    if (!selection) return;
+    if (selection.kind === 'lane') {
+      const props = selection.feature.properties ?? {};
+      setRoadStatus(
+        `Selected osm2streets lane ${props.index ?? '?'} on road ${props.road ?? '?'}. Inspect it or create an editable draft.`
+      );
+    } else {
+      const props = selection.feature.properties ?? {};
+      setRoadStatus(
+        `Selected osm2streets intersection ${props.id ?? '?'} (${props.intersection_kind ?? props.kind ?? 'unknown'}).`
+      );
+    }
+  }, []);
+
+  const handleCreateDraftFromOsm2StreetsSelection = useCallback(() => {
+    if (!osm2streetsResult || !osm2streetsSelection) return;
+    try {
+      const { draft, matchedOsmRoad } = buildRoadDraftFromOsm2StreetsSelection(
+        osm2streetsSelection,
+        osm2streetsResult,
+        osmRoads
+      );
+      setRoadDraft(draft);
+      setSelectedOsmRoadId(matchedOsmRoad?.id ?? null);
+      setRoadStatus(
+        matchedOsmRoad
+          ? `Created editable draft from osm2streets road ${draft.id} using OSM way ${matchedOsmRoad.osmWayId}.`
+          : `Created editable draft from osm2streets road ${draft.id}; source OSM centerline was unavailable, so the selected lane polygon seeded the centerline.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRoadStatus(message);
+      alert(`osm2streets draft creation failed: ${message}`);
+    }
+  }, [osm2streetsResult, osm2streetsSelection, osmRoads]);
 
   const handleStartRoadDraw = useCallback(() => {
     setShowRoadEditor(true);
@@ -439,8 +483,12 @@ export function useRoadEditor(
     setOsm2streetsResult,
     osm2streetsBbox,
     setOsm2streetsBbox,
+    osm2streetsSelection,
+    setOsm2streetsSelection,
     handleFetchOsmRoads,
     handleOsmRoadSelect,
+    handleOsm2StreetsSelect,
+    handleCreateDraftFromOsm2StreetsSelection,
     handleStartRoadDraw,
     handleRoadLineDrawn,
     handleRoadDraftChange,

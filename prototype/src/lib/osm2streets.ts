@@ -16,9 +16,24 @@ export interface Osm2StreetsResult {
 
 export interface GeoJsonFeatureCollection {
   type: 'FeatureCollection';
-  features: any[];
+  features: Osm2StreetsFeature[];
   [key: string]: any;
 }
+
+export interface Osm2StreetsFeature {
+  type?: 'Feature';
+  properties?: Record<string, any>;
+  geometry?: {
+    type: string;
+    coordinates: any;
+  } | null;
+  [key: string]: any;
+}
+
+export type Osm2StreetsSelection =
+  | { kind: 'lane'; feature: Osm2StreetsFeature }
+  | { kind: 'intersection'; feature: Osm2StreetsFeature }
+  | null;
 
 export interface Osm2StreetsDiagnostic {
   level: 'warn' | 'error';

@@ -500,6 +500,11 @@ export default function App() {
               onPostPayload={() => void roadEditor.handlePostRoadPayload()}
               onBackendUrlChange={roadEditor.setRoadBackendUrl}
               roadFitConflicts={roadEditor.roadFitConflicts}
+              osm2streetsSelection={roadEditor.osm2streetsSelection}
+              onCreateDraftFromOsm2StreetsSelection={
+                roadEditor.handleCreateDraftFromOsm2StreetsSelection
+              }
+              onClearOsm2StreetsSelection={() => roadEditor.setOsm2streetsSelection(null)}
             />
           )}
           {coreState.cityjson ? (
@@ -552,6 +557,8 @@ export default function App() {
               onOsmRoadSelect={roadEditor.handleOsmRoadSelect}
               osm2streetsResult={roadEditor.osm2streetsResult}
               osm2streetsBbox={roadEditor.osm2streetsBbox}
+              osm2streetsSelection={roadEditor.osm2streetsSelection}
+              onOsm2StreetsSelect={roadEditor.handleOsm2StreetsSelect}
               footprintEdit={
                 buildingEditor.footprintEdit
                   ? {

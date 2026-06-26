@@ -26,6 +26,7 @@ import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
+import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import {
   osm2streetsIntersectionFillColor,
   osm2streetsIntersectionMarkingFillColor,
@@ -78,6 +79,24 @@ function roadAreaLineColor(area: RoadArea, selected = false, preview = false): R
   return kind === 'green' || kind === 'green_verge' || kind === 'verge'
     ? [116, 190, 142, 165]
     : [238, 242, 255, 130];
+}
+
+function isSelectedOsm2StreetsFeature(
+  feature: any,
+  selection: Osm2StreetsSelection,
+  kind: 'lane' | 'intersection'
+): boolean {
+  if (!selection || selection.kind !== kind) return false;
+  const props = feature?.properties ?? {};
+  const selected = selection.feature.properties ?? {};
+  if (kind === 'lane') {
+    return props.road !== undefined && selected.road !== undefined
+      ? props.road === selected.road && props.index === selected.index
+      : feature === selection.feature;
+  }
+  return props.id !== undefined && selected.id !== undefined
+    ? props.id === selected.id
+    : feature === selection.feature;
 }
 
 interface Props {
@@ -164,6 +183,8 @@ interface Props {
   onOsmRoadSelect?: (road: OsmRoadFeature) => void;
   osm2streetsResult?: import('../lib/osm2streets').Osm2StreetsResult | null;
   osm2streetsBbox?: [number, number, number, number] | null;
+  osm2streetsSelection?: Osm2StreetsSelection;
+  onOsm2StreetsSelect?: (selection: Osm2StreetsSelection) => void;
   initialView?: {
     center: [number, number];
     zoom: number;
@@ -223,6 +244,8 @@ export default function MapView({
   onOsmRoadSelect,
   osm2streetsResult = null,
   osm2streetsBbox = null,
+  osm2streetsSelection = null,
+  onOsm2StreetsSelect,
   initialView,
   precomputedFootprints,
 }: Props) {
@@ -610,14 +633,23 @@ export default function MapView({
       layers.push(
         new GeoJsonLayer({
           id: 'osm2streets-lanes',
-          data: osm2streetsResult.lanes,
+          data: osm2streetsResult.lanes as any,
           filled: true,
           stroked: false,
-          pickable: false,
-          getFillColor: (feature: any) =>
-            osm2streetsLaneFillColor(
+          pickable: !!onOsm2StreetsSelect,
+          getFillColor: (feature: any) => {
+            if (isSelectedOsm2StreetsFeature(feature, osm2streetsSelection, 'lane')) {
+              return [255, 170, 40, 235];
+            }
+            return osm2streetsLaneFillColor(
               feature?.properties?.lane_type ?? feature?.properties?.type ?? ''
-            ),
+            );
+          },
+          onClick: (info: PickingInfo<any>) => {
+            if (info.object) {
+              onOsm2StreetsSelect?.({ kind: 'lane', feature: info.object });
+            }
+          },
           parameters: { depthTest: false } as unknown as never,
         })
       );
@@ -634,14 +666,23 @@ export default function MapView({
             data: {
               ...osm2streetsResult.plain,
               features: intersections,
-            },
+            } as any,
             filled: true,
             stroked: false,
-            pickable: false,
-            getFillColor: (feature: any) =>
-              osm2streetsIntersectionFillColor(
+            pickable: !!onOsm2StreetsSelect,
+            getFillColor: (feature: any) => {
+              if (isSelectedOsm2StreetsFeature(feature, osm2streetsSelection, 'intersection')) {
+                return [255, 184, 72, 205];
+              }
+              return osm2streetsIntersectionFillColor(
                 feature?.properties?.intersection_kind ?? feature?.properties?.kind ?? ''
-              ),
+              );
+            },
+            onClick: (info: PickingInfo<any>) => {
+              if (info.object) {
+                onOsm2StreetsSelect?.({ kind: 'intersection', feature: info.object });
+              }
+            },
             parameters: { depthTest: false } as unknown as never,
           })
         );
@@ -652,7 +693,7 @@ export default function MapView({
       layers.push(
         new GeoJsonLayer({
           id: 'osm2streets-lane-markings',
-          data: osm2streetsResult.laneMarkings,
+          data: osm2streetsResult.laneMarkings as any,
           filled: true,
           stroked: false,
           pickable: false,
@@ -669,7 +710,7 @@ export default function MapView({
       layers.push(
         new GeoJsonLayer({
           id: 'osm2streets-intersection-markings',
-          data: osm2streetsResult.intersectionMarkings,
+          data: osm2streetsResult.intersectionMarkings as any,
           filled: true,
           stroked: false,
           pickable: false,
@@ -965,6 +1006,8 @@ export default function MapView({
     onOsmRoadSelect,
     osm2streetsResult,
     osm2streetsBbox,
+    osm2streetsSelection,
+    onOsm2StreetsSelect,
     mapColorMode,
   ]);
 

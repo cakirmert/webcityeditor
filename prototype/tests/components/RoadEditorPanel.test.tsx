@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import RoadEditorPanel from '../../src/components/RoadEditorPanel';
 import type { RoadDraft } from '../../src/lib/transportation';
@@ -24,7 +25,15 @@ const draft: RoadDraft = {
   ],
 };
 
-function renderPanel(onDraftChange = vi.fn()) {
+function renderPanel(
+  onDraftChange = vi.fn(),
+  options: {
+    osm2streetsSelection?: ComponentProps<typeof RoadEditorPanel>['osm2streetsSelection'];
+    onCreateDraftFromOsm2StreetsSelection?: () => void;
+  } = {}
+) {
+  const onCreateDraftFromOsm2StreetsSelection =
+    options.onCreateDraftFromOsm2StreetsSelection ?? vi.fn();
   render(
     <RoadEditorPanel
       osmRoads={[]}
@@ -46,9 +55,12 @@ function renderPanel(onDraftChange = vi.fn()) {
       onExportPayload={() => {}}
       onPostPayload={() => {}}
       onBackendUrlChange={() => {}}
+      osm2streetsSelection={options.osm2streetsSelection}
+      onCreateDraftFromOsm2StreetsSelection={onCreateDraftFromOsm2StreetsSelection}
+      onClearOsm2StreetsSelection={() => {}}
     />
   );
-  return { onDraftChange };
+  return { onDraftChange, onCreateDraftFromOsm2StreetsSelection };
 }
 
 function createDataTransfer() {
@@ -87,5 +99,34 @@ describe('<RoadEditorPanel />', () => {
       'sidewalk',
       'bike_lane',
     ]);
+  });
+
+  it('shows osm2streets lane inspection and triggers draft creation', () => {
+    const onCreateDraftFromOsm2StreetsSelection = vi.fn();
+    renderPanel(vi.fn(), {
+      onCreateDraftFromOsm2StreetsSelection,
+      osm2streetsSelection: {
+        kind: 'lane',
+        feature: {
+          type: 'Feature',
+          properties: {
+            road: 42,
+            index: 1,
+            type: 'Biking',
+            direction: 'Forward',
+            width: 1.75,
+            speed_limit: 'None',
+            allowed_turns: ['left'],
+            osm_way_ids: [3100],
+          },
+          geometry: null,
+        },
+      },
+    });
+
+    expect(screen.getByText('osm2streets lane')).toBeInTheDocument();
+    expect(screen.getByText('Biking')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create editable road draft' }));
+    expect(onCreateDraftFromOsm2StreetsSelection).toHaveBeenCalledTimes(1);
   });
 });
