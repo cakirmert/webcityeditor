@@ -27,6 +27,15 @@ import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../l
 import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
 import {
+  osm2streetsIntersectionFillColor,
+  osm2streetsIntersectionMarkingFillColor,
+  osm2streetsLaneFillColor,
+  osm2streetsLaneMarkingFillColor,
+  roadBandFillColor,
+  withAlpha,
+  type Rgba,
+} from '../lib/osm2streets-style';
+import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   insertRoadDraftPoint,
@@ -51,8 +60,6 @@ const DATA_FIT_MAX_ZOOM = 14.25;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
 
-type Rgba = [number, number, number, number];
-
 function roadAreaKind(area: RoadArea): string {
   const usage = area.attributes.transportationUsage;
   return typeof usage === 'string' ? usage : area.function;
@@ -60,27 +67,8 @@ function roadAreaKind(area: RoadArea): string {
 
 function roadAreaFillColor(area: RoadArea, selected = false, preview = false): Rgba {
   if (selected) return [255, 170, 40, 230];
-  const alpha = preview ? 218 : 205;
-  switch (roadAreaKind(area)) {
-    case 'car_lane':
-    case 'driving_lane':
-      return [55, 56, 62, alpha + 20];
-    case 'bike_lane':
-      return [18, 136, 74, alpha];
-    case 'sidewalk':
-      return [184, 188, 196, alpha];
-    case 'parking':
-    case 'parking_lane':
-      return [104, 107, 114, alpha];
-    case 'median':
-      return [124, 124, 132, alpha];
-    case 'green':
-    case 'green_verge':
-    case 'verge':
-      return [48, 120, 82, alpha];
-    default:
-      return [88, 91, 100, alpha];
-  }
+  const base = roadBandFillColor(roadAreaKind(area));
+  return preview ? withAlpha(base, 218) : base;
 }
 
 function roadAreaLineColor(area: RoadArea, selected = false, preview = false): Rgba {
@@ -618,6 +606,82 @@ export default function MapView({
       );
     }
 
+    if (osm2streetsResult?.lanes) {
+      layers.push(
+        new GeoJsonLayer({
+          id: 'osm2streets-lanes',
+          data: osm2streetsResult.lanes,
+          filled: true,
+          stroked: false,
+          pickable: false,
+          getFillColor: (feature: any) =>
+            osm2streetsLaneFillColor(
+              feature?.properties?.lane_type ?? feature?.properties?.type ?? ''
+            ),
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osm2streetsResult?.plain) {
+      const intersections = osm2streetsResult.plain.features.filter(
+        (feature) => feature?.properties?.type === 'intersection'
+      );
+      if (intersections.length > 0) {
+        layers.push(
+          new GeoJsonLayer({
+            id: 'osm2streets-intersections',
+            data: {
+              ...osm2streetsResult.plain,
+              features: intersections,
+            },
+            filled: true,
+            stroked: false,
+            pickable: false,
+            getFillColor: (feature: any) =>
+              osm2streetsIntersectionFillColor(
+                feature?.properties?.intersection_kind ?? feature?.properties?.kind ?? ''
+              ),
+            parameters: { depthTest: false } as unknown as never,
+          })
+        );
+      }
+    }
+
+    if (osm2streetsResult?.laneMarkings) {
+      layers.push(
+        new GeoJsonLayer({
+          id: 'osm2streets-lane-markings',
+          data: osm2streetsResult.laneMarkings,
+          filled: true,
+          stroked: false,
+          pickable: false,
+          getFillColor: (feature: any) =>
+            osm2streetsLaneMarkingFillColor(
+              feature?.properties?.type ?? feature?.properties?.marking_type ?? ''
+            ),
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    if (osm2streetsResult?.intersectionMarkings) {
+      layers.push(
+        new GeoJsonLayer({
+          id: 'osm2streets-intersection-markings',
+          data: osm2streetsResult.intersectionMarkings,
+          filled: true,
+          stroked: false,
+          pickable: false,
+          getFillColor: (feature: any) =>
+            osm2streetsIntersectionMarkingFillColor(
+              feature?.properties?.type ?? feature?.properties?.marking_type ?? ''
+            ),
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
     if (roadAreas.length > 0) {
       layers.push(
         new PolygonLayer<RoadArea>({
@@ -725,82 +789,6 @@ export default function MapView({
           filled: true,
           pickable: false,
           extruded: false,
-          parameters: { depthTest: false } as unknown as never,
-        })
-      );
-    }
-
-    if (osm2streetsResult?.lanes) {
-      layers.push(
-        new GeoJsonLayer({
-          id: 'osm2streets-lanes',
-          data: osm2streetsResult.lanes,
-          filled: true,
-          stroked: false,
-          pickable: false,
-          getFillColor: (f: any) => {
-            const props = f.properties || {};
-            if (props.type === 'intersection' || props.intersection) {
-              return [75, 75, 80, 220];
-            }
-            const laneType = props.lane_type || props.type || '';
-            switch (laneType) {
-              case 'driving':
-              case 'car_lane':
-              case 'bus':
-                return [55, 55, 60, 240];
-              case 'biking':
-              case 'bike_lane':
-              case 'bike':
-                return [16, 128, 64, 200];
-              case 'sidewalk':
-              case 'pedestrian':
-              case 'footway':
-                return [180, 180, 185, 200];
-              case 'parking':
-                return [100, 100, 105, 225];
-              case 'green':
-              case 'green_verge':
-              case 'buffer':
-              case 'verge':
-                return [46, 117, 80, 200];
-              default:
-                return [90, 90, 95, 220];
-            }
-          },
-          parameters: { depthTest: false } as unknown as never,
-        })
-      );
-    }
-
-    if (osm2streetsResult?.laneMarkings) {
-      layers.push(
-        new GeoJsonLayer({
-          id: 'osm2streets-lane-markings',
-          data: osm2streetsResult.laneMarkings,
-          stroked: true,
-          filled: false,
-          getLineColor: [255, 255, 255, 180],
-          getLineWidth: 0.15,
-          lineWidthUnits: 'meters',
-          lineWidthMinPixels: 1.5,
-          parameters: { depthTest: false } as unknown as never,
-        })
-      );
-    }
-
-    if (osm2streetsResult?.intersectionMarkings) {
-      layers.push(
-        new GeoJsonLayer({
-          id: 'osm2streets-intersection-markings',
-          data: osm2streetsResult.intersectionMarkings,
-          filled: true,
-          stroked: true,
-          getFillColor: [255, 255, 255, 200],
-          getLineColor: [255, 255, 255, 200],
-          getLineWidth: 0.1,
-          lineWidthUnits: 'meters',
-          lineWidthMinPixels: 1,
           parameters: { depthTest: false } as unknown as never,
         })
       );

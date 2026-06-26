@@ -4,6 +4,32 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildOsm2StreetsImportOptions } from '../../src/lib/osm2streets-options';
 import { processOsmXml } from '../../src/lib/osm2streets';
 
+function installWasmFetchMock(): () => void {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = String(input);
+    if (
+      url.endsWith('/node_modules/osm2streets-js/osm2streets_js_bg.wasm') ||
+      url.endsWith('/vendor/osm2streets-js/osm2streets_js_bg.wasm')
+    ) {
+      const wasm = readFileSync(
+        resolve(__dirname, '../../vendor/osm2streets-js/osm2streets_js_bg.wasm')
+      );
+      return new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+function isIntersectionFeature(feature: any): boolean {
+  return feature?.properties?.type === 'intersection';
+}
+
 describe('osm2streets WASM options', () => {
   it('keeps the import option shape required by the forked WASM', () => {
     const options = buildOsm2StreetsImportOptions();
@@ -28,21 +54,7 @@ describe('osm2streets WASM options', () => {
 
   it('runs the bundled osm2streets WASM without emitting browser errors', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const originalFetch = globalThis.fetch;
-
-    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const url = String(input);
-      if (
-        url.endsWith('/node_modules/osm2streets-js/osm2streets_js_bg.wasm') ||
-        url.endsWith('/vendor/osm2streets-js/osm2streets_js_bg.wasm')
-      ) {
-        const wasm = readFileSync(
-          resolve(__dirname, '../../vendor/osm2streets-js/osm2streets_js_bg.wasm')
-        );
-        return new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } });
-      }
-      return originalFetch(input, init);
-    }) as typeof fetch;
+    const restoreFetch = installWasmFetchMock();
 
     try {
       const result = await processOsmXml(
@@ -66,13 +78,37 @@ describe('osm2streets WASM options', () => {
       );
 
       expect(result.engine).toBe('fork');
+      expect(result.plain).toMatchObject({ type: 'FeatureCollection' });
       expect(result.lanes).toMatchObject({ type: 'FeatureCollection' });
       expect(result.laneMarkings).toMatchObject({ type: 'FeatureCollection' });
       expect(result.intersectionMarkings).toMatchObject({ type: 'FeatureCollection' });
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
-      globalThis.fetch = originalFetch;
+      restoreFetch();
       errorSpy.mockRestore();
+    }
+  });
+
+  it('returns plain road and intersection polygons for the Hamburg intersection fixture', async () => {
+    const restoreFetch = installWasmFetchMock();
+    const osmXml = readFileSync(
+      resolve(__dirname, '../../test-fixtures/osm2streets/hamburg-short-intersection.osm'),
+      'utf8'
+    );
+
+    try {
+      const result = await processOsmXml(osmXml, [9.992, 53.549, 9.997, 53.552]);
+
+      expect(result.plain).toMatchObject({ type: 'FeatureCollection' });
+      expect(result.plain.features.length).toBeGreaterThan(0);
+      expect(result.plain.features.some(isIntersectionFeature)).toBe(true);
+      expect(
+        result.diagnostics.some((item) =>
+          item.message.includes('did not include intersection polygons')
+        )
+      ).toBe(false);
+    } finally {
+      restoreFetch();
     }
   });
 });

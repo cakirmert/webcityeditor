@@ -6,11 +6,18 @@ import {
 } from './osm2streets-options';
 
 export interface Osm2StreetsResult {
-  lanes: any;
-  laneMarkings: any;
-  intersectionMarkings: any;
+  plain: GeoJsonFeatureCollection;
+  lanes: GeoJsonFeatureCollection;
+  laneMarkings: GeoJsonFeatureCollection;
+  intersectionMarkings: GeoJsonFeatureCollection;
   engine: 'fork';
   diagnostics: Osm2StreetsDiagnostic[];
+}
+
+export interface GeoJsonFeatureCollection {
+  type: 'FeatureCollection';
+  features: any[];
+  [key: string]: any;
 }
 
 export interface Osm2StreetsDiagnostic {
@@ -49,10 +56,7 @@ export async function processOsmXml(
     originalError(...args);
   };
   try {
-    return {
-      ...readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions),
-      diagnostics,
-    };
+    return readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions, diagnostics);
   } finally {
     console.warn = originalWarn;
     console.error = originalError;
@@ -86,24 +90,52 @@ function buildClipPolygonGeojson([west, south, east, north]: [
 function readOsm2StreetsResult(
   osmXml: string,
   clipPtsGeojson: string,
-  importOptions: Osm2StreetsImportOptions
+  importOptions: Osm2StreetsImportOptions,
+  diagnostics: Osm2StreetsDiagnostic[]
 ): Osm2StreetsResult {
   const network = new JsStreetNetwork(textEncoder.encode(osmXml), clipPtsGeojson, importOptions);
   try {
-    const lanes = JSON.parse(network.toLanePolygonsGeojson());
-    const laneMarkings = JSON.parse(network.toLaneMarkingsGeojson());
-    const intersectionMarkings = JSON.parse(network.toIntersectionMarkingsGeojson());
+    const plain = parseFeatureCollection(network.toGeojsonPlain(), 'plain road/intersection GeoJSON');
+    const lanes = parseFeatureCollection(network.toLanePolygonsGeojson(), 'lane polygons GeoJSON');
+    const laneMarkings = parseFeatureCollection(
+      network.toLaneMarkingsGeojson(),
+      'lane markings GeoJSON'
+    );
+    const intersectionMarkings = parseFeatureCollection(
+      network.toIntersectionMarkingsGeojson(),
+      'intersection markings GeoJSON'
+    );
+    if (!plain.features.some((feature) => feature?.properties?.type === 'intersection')) {
+      diagnostics.push({
+        level: 'warn',
+        message:
+          'osm2streets plain GeoJSON did not include intersection polygons for this extract.',
+      });
+    }
 
     return {
+      plain,
       lanes,
       laneMarkings,
       intersectionMarkings,
       engine: 'fork',
-      diagnostics: [],
+      diagnostics,
     };
   } finally {
     network.free();
   }
+}
+
+function parseFeatureCollection(text: string, label: string): GeoJsonFeatureCollection {
+  const value = JSON.parse(text);
+  if (
+    !value ||
+    value.type !== 'FeatureCollection' ||
+    !Array.isArray(value.features)
+  ) {
+    throw new Error(`osm2streets returned invalid ${label}`);
+  }
+  return value;
 }
 
 function formatConsoleMessage(args: unknown[]): string {
