@@ -39,6 +39,7 @@ interface Props {
   onPostPayload: () => void;
   onBackendUrlChange: (url: string) => void;
   onCreateDraftFromOsm2StreetsSelection: () => void;
+  onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
 }
 
@@ -85,6 +86,7 @@ export default function RoadEditorPanel({
   onPostPayload,
   onBackendUrlChange,
   onCreateDraftFromOsm2StreetsSelection,
+  onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
 }: Props) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
@@ -316,6 +318,7 @@ export default function RoadEditorPanel({
           <Osm2StreetsInspector
             selection={osm2streetsSelection}
             onCreateDraft={onCreateDraftFromOsm2StreetsSelection}
+            onHighlightConnectedRoads={onHighlightConnectedOsm2StreetsRoads}
             onClear={onClearOsm2StreetsSelection}
           />
         </section>

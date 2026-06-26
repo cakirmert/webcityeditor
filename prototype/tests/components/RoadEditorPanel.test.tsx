@@ -30,10 +30,13 @@ function renderPanel(
   options: {
     osm2streetsSelection?: ComponentProps<typeof RoadEditorPanel>['osm2streetsSelection'];
     onCreateDraftFromOsm2StreetsSelection?: () => void;
+    onHighlightConnectedOsm2StreetsRoads?: () => void;
   } = {}
 ) {
   const onCreateDraftFromOsm2StreetsSelection =
     options.onCreateDraftFromOsm2StreetsSelection ?? vi.fn();
+  const onHighlightConnectedOsm2StreetsRoads =
+    options.onHighlightConnectedOsm2StreetsRoads ?? vi.fn();
   render(
     <RoadEditorPanel
       osmRoads={[]}
@@ -57,10 +60,15 @@ function renderPanel(
       onBackendUrlChange={() => {}}
       osm2streetsSelection={options.osm2streetsSelection}
       onCreateDraftFromOsm2StreetsSelection={onCreateDraftFromOsm2StreetsSelection}
+      onHighlightConnectedOsm2StreetsRoads={onHighlightConnectedOsm2StreetsRoads}
       onClearOsm2StreetsSelection={() => {}}
     />
   );
-  return { onDraftChange, onCreateDraftFromOsm2StreetsSelection };
+  return {
+    onDraftChange,
+    onCreateDraftFromOsm2StreetsSelection,
+    onHighlightConnectedOsm2StreetsRoads,
+  };
 }
 
 function createDataTransfer() {
@@ -128,5 +136,31 @@ describe('<RoadEditorPanel />', () => {
     expect(screen.getByText('Biking')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Create editable road draft' }));
     expect(onCreateDraftFromOsm2StreetsSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows osm2streets intersection inspection and triggers connected-road highlight', () => {
+    const onHighlightConnectedOsm2StreetsRoads = vi.fn();
+    renderPanel(vi.fn(), {
+      onHighlightConnectedOsm2StreetsRoads,
+      osm2streetsSelection: {
+        kind: 'intersection',
+        feature: {
+          type: 'Feature',
+          properties: {
+            id: 2,
+            type: 'intersection',
+            intersection_kind: 'Connection',
+            control: 'Uncontrolled',
+            osm_node_ids: [12, 13],
+          },
+          geometry: null,
+        },
+      },
+    });
+
+    expect(screen.getByText('osm2streets intersection')).toBeInTheDocument();
+    expect(screen.getByText('Connection')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight connected roads' }));
+    expect(onHighlightConnectedOsm2StreetsRoads).toHaveBeenCalledTimes(1);
   });
 });

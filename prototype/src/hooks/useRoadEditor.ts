@@ -15,6 +15,7 @@ import {
 import { processOsmXml } from '../lib/osm2streets';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import { buildRoadDraftFromOsm2StreetsSelection } from '../lib/osm2streets-draft';
+import { connectedRoadIdsForIntersection } from '../lib/osm2streets-selection';
 import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
@@ -176,11 +177,13 @@ export function useRoadEditor(
   const [osm2streetsResult, setOsm2streetsResult] = useState<import('../lib/osm2streets').Osm2StreetsResult | null>(null);
   const [osm2streetsBbox, setOsm2streetsBbox] = useState<[number, number, number, number] | null>(null);
   const [osm2streetsSelection, setOsm2streetsSelection] = useState<Osm2StreetsSelection>(null);
+  const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
 
   const handleFetchOsmRoads = useCallback(async (fetchOptions: FetchOsmRoadOptions = {}) => {
     if (!cityjson) return;
     setShowRoadEditor(true);
     setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
     const viewportBbox = coreState.mapBboxRef.current;
     const footprintBbox = computeFootprintBbox(extractFootprints(cityjson));
     const bbox =
@@ -246,6 +249,7 @@ export function useRoadEditor(
   const handleOsmRoadSelect = useCallback((road: OsmRoadFeature) => {
     setShowRoadEditor(true);
     setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
     setSelectedOsmRoadId(road.id);
     const inferred = cloneRoadDraft(road.inferredDraft);
     const ok = window.confirm(
@@ -267,6 +271,7 @@ export function useRoadEditor(
   const handleOsm2StreetsSelect = useCallback((selection: Osm2StreetsSelection) => {
     setShowRoadEditor(true);
     setOsm2streetsSelection(selection);
+    setHighlightedOsm2StreetsRoadIds(new Set());
     if (!selection) return;
     if (selection.kind === 'lane') {
       const props = selection.feature.properties ?? {};
@@ -279,6 +284,23 @@ export function useRoadEditor(
         `Selected osm2streets intersection ${props.id ?? '?'} (${props.intersection_kind ?? props.kind ?? 'unknown'}).`
       );
     }
+  }, []);
+
+  const handleHighlightConnectedOsm2StreetsRoads = useCallback(() => {
+    const connected = connectedRoadIdsForIntersection(osm2streetsSelection, osm2streetsResult);
+    setHighlightedOsm2StreetsRoadIds(connected);
+    if (connected.size === 0) {
+      setRoadStatus('No connected osm2streets road polygons were found for this intersection.');
+      return;
+    }
+    setRoadStatus(
+      `Highlighted ${connected.size} osm2streets road polygon${connected.size === 1 ? '' : 's'} connected to the selected intersection.`
+    );
+  }, [osm2streetsResult, osm2streetsSelection]);
+
+  const handleClearOsm2StreetsSelection = useCallback(() => {
+    setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
   }, []);
 
   const handleCreateDraftFromOsm2StreetsSelection = useCallback(() => {
@@ -485,9 +507,13 @@ export function useRoadEditor(
     setOsm2streetsBbox,
     osm2streetsSelection,
     setOsm2streetsSelection,
+    highlightedOsm2StreetsRoadIds,
+    setHighlightedOsm2StreetsRoadIds,
     handleFetchOsmRoads,
     handleOsmRoadSelect,
     handleOsm2StreetsSelect,
+    handleHighlightConnectedOsm2StreetsRoads,
+    handleClearOsm2StreetsSelection,
     handleCreateDraftFromOsm2StreetsSelection,
     handleStartRoadDraw,
     handleRoadLineDrawn,

@@ -4,12 +4,14 @@ import { Button } from './ui/button';
 interface Props {
   selection: Osm2StreetsSelection;
   onCreateDraft: () => void;
+  onHighlightConnectedRoads: () => void;
   onClear: () => void;
 }
 
 export default function Osm2StreetsInspector({
   selection,
   onCreateDraft,
+  onHighlightConnectedRoads,
   onClear,
 }: Props) {
   if (!selection) return null;
@@ -41,7 +43,10 @@ export default function Osm2StreetsInspector({
       {selection.kind === 'lane' ? (
         <LaneDetails properties={props} onCreateDraft={onCreateDraft} />
       ) : (
-        <IntersectionDetails properties={props} />
+        <IntersectionDetails
+          properties={props}
+          onHighlightConnectedRoads={onHighlightConnectedRoads}
+        />
       )}
     </section>
   );
@@ -81,16 +86,27 @@ function LaneDetails({
   );
 }
 
-function IntersectionDetails({ properties }: { properties: Record<string, any> }) {
+function IntersectionDetails({
+  properties,
+  onHighlightConnectedRoads,
+}: {
+  properties: Record<string, any>;
+  onHighlightConnectedRoads: () => void;
+}) {
   return (
-    <dl className="grid grid-cols-[92px_1fr] gap-x-2 gap-y-1 text-[11px]">
-      <InspectorRow label="Kind" value={properties.intersection_kind ?? properties.kind} />
-      <InspectorRow label="Control" value={properties.control} />
-      <InspectorRow label="Crossing" value={properties.crossing_kind ?? properties.crossing} />
-      <InspectorRow label="Island" value={properties.island} />
-      <InspectorRow label="Movements" value={properties.movements} />
-      <InspectorRow label="OSM nodes" value={properties.osm_node_ids ?? properties.osm_nodes} />
-    </dl>
+    <>
+      <dl className="grid grid-cols-[92px_1fr] gap-x-2 gap-y-1 text-[11px]">
+        <InspectorRow label="Kind" value={properties.intersection_kind ?? properties.kind} />
+        <InspectorRow label="Control" value={properties.control} />
+        <InspectorRow label="Crossing" value={properties.crossing_kind ?? properties.crossing} />
+        <InspectorRow label="Island" value={properties.island} />
+        <InspectorRow label="Movements" value={properties.movements} />
+        <InspectorRow label="OSM nodes" value={properties.osm_node_ids ?? properties.osm_nodes} />
+      </dl>
+      <Button size="sm" className="w-full" onClick={onHighlightConnectedRoads}>
+        Highlight connected roads
+      </Button>
+    </>
   );
 }
 

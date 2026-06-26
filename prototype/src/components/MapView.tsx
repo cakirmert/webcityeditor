@@ -184,6 +184,7 @@ interface Props {
   osm2streetsResult?: import('../lib/osm2streets').Osm2StreetsResult | null;
   osm2streetsBbox?: [number, number, number, number] | null;
   osm2streetsSelection?: Osm2StreetsSelection;
+  highlightedOsm2StreetsRoadIds?: Set<number | string>;
   onOsm2StreetsSelect?: (selection: Osm2StreetsSelection) => void;
   initialView?: {
     center: [number, number];
@@ -245,6 +246,7 @@ export default function MapView({
   osm2streetsResult = null,
   osm2streetsBbox = null,
   osm2streetsSelection = null,
+  highlightedOsm2StreetsRoadIds = new Set(),
   onOsm2StreetsSelect,
   initialView,
   precomputedFootprints,
@@ -641,6 +643,9 @@ export default function MapView({
             if (isSelectedOsm2StreetsFeature(feature, osm2streetsSelection, 'lane')) {
               return [255, 170, 40, 235];
             }
+            if (highlightedOsm2StreetsRoadIds.has(feature?.properties?.road)) {
+              return [255, 210, 92, 218];
+            }
             return osm2streetsLaneFillColor(
               feature?.properties?.lane_type ?? feature?.properties?.type ?? ''
             );
@@ -683,6 +688,33 @@ export default function MapView({
                 onOsm2StreetsSelect?.({ kind: 'intersection', feature: info.object });
               }
             },
+            parameters: { depthTest: false } as unknown as never,
+          })
+        );
+      }
+    }
+
+    if (highlightedOsm2StreetsRoadIds.size > 0 && osm2streetsResult?.plain) {
+      const connectedRoads = osm2streetsResult.plain.features.filter(
+        (feature) =>
+          feature?.properties?.type === 'road' &&
+          highlightedOsm2StreetsRoadIds.has(feature.properties.id)
+      );
+      if (connectedRoads.length > 0) {
+        layers.push(
+          new GeoJsonLayer({
+            id: 'osm2streets-connected-roads',
+            data: {
+              ...osm2streetsResult.plain,
+              features: connectedRoads,
+            } as any,
+            filled: false,
+            stroked: true,
+            pickable: false,
+            getLineColor: [255, 218, 92, 245],
+            getLineWidth: 4,
+            lineWidthUnits: 'pixels',
+            lineWidthMinPixels: 3,
             parameters: { depthTest: false } as unknown as never,
           })
         );
@@ -1007,6 +1039,7 @@ export default function MapView({
     osm2streetsResult,
     osm2streetsBbox,
     osm2streetsSelection,
+    highlightedOsm2StreetsRoadIds,
     onOsm2StreetsSelect,
     mapColorMode,
   ]);
