@@ -7,6 +7,14 @@
       "enabled": true,
       "checkAvailability": true,
       "source": "https://www.arcgis.com/home/item.html?id=1ef87c53adff4c07b9b3010e9d8264fb"
+    },
+    {
+      "label": "Hamburg osm2streets roads - real fixture",
+      "description": "Real native osm2streets lane-polygons output from the Hamburg short-intersection OSM fixture, converted to CityJSON Transportation Road surfaces.",
+      "url": "data/transportation/osm2streets-hamburg-short-intersection.city.json",
+      "enabled": true,
+      "checkAvailability": true,
+      "source": "test-fixtures/osm2streets/hamburg-short-intersection.osm"
     }
   ],
   "planningLayers": [
