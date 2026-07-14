@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
@@ -14,14 +14,21 @@ import {
 } from '../lib/transportation';
 import { processOsmXml } from '../lib/osm2streets';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
+import { insertOsm2StreetsRoadIntoCityJson } from '../lib/osm2streets-cityjson';
 import { buildRoadDraftFromOsm2StreetsSelection } from '../lib/osm2streets-draft';
 import { connectedRoadIdsForIntersection } from '../lib/osm2streets-selection';
+import { activeMetricCrsForCityJson } from '../lib/projection';
+import { limitRoadQueryBbox, type Wgs84Bbox } from '../lib/road-query';
 import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
+import {
+  parseRoadCorridorGeoJson,
+  type RoadAllowedCorridor,
+} from '../lib/road-corridor';
+import { fitRoadDraftWidthsToCorridors } from '../lib/road-corridor-fit';
 
-type Wgs84Bbox = [number, number, number, number];
 interface FetchOsmRoadOptions {
   source?: 'viewport' | 'loaded-data';
   allowLargeQuery?: boolean;
@@ -37,6 +44,8 @@ const OVERPASS_ENDPOINTS = [
 const ROAD_QUERY_MAX_WIDTH_METERS = 1_600;
 const ROAD_QUERY_MAX_HEIGHT_METERS = 1_600;
 const ROAD_QUERY_TIMEOUT_MS = 25_000;
+const ROAD_BUILDING_CLEARANCE_BLOCK_METERS = 0.5;
+const ROAD_BUILDING_CLEARANCE_WARNING_METERS = 1;
 
 function computeFootprintBbox(
   footprints: { polygon: [number, number, number][] }[]
@@ -67,30 +76,6 @@ function expandBbox(
   const lngPad = Math.max((east - west) * ratio, minPad);
   const latPad = Math.max((north - south) * ratio, minPad);
   return [west - lngPad, south - latPad, east + lngPad, north + latPad];
-}
-
-function limitRoadQueryBbox(bbox: Wgs84Bbox): { bbox: Wgs84Bbox; wasLimited: boolean } {
-  const [west, south, east, north] = bbox;
-  const centerLng = (west + east) / 2;
-  const centerLat = (south + north) / 2;
-  const metersPerDegreeLat = 111_320;
-  const metersPerDegreeLng = Math.max(
-    1,
-    metersPerDegreeLat * Math.cos((centerLat * Math.PI) / 180)
-  );
-  const halfWidthDeg = ROAD_QUERY_MAX_WIDTH_METERS / 2 / metersPerDegreeLng;
-  const halfHeightDeg = ROAD_QUERY_MAX_HEIGHT_METERS / 2 / metersPerDegreeLat;
-  const limited: Wgs84Bbox = [
-    Math.max(west, centerLng - halfWidthDeg),
-    Math.max(south, centerLat - halfHeightDeg),
-    Math.min(east, centerLng + halfWidthDeg),
-    Math.min(north, centerLat + halfHeightDeg),
-  ];
-  return {
-    bbox: limited,
-    wasLimited:
-      limited[0] !== west || limited[1] !== south || limited[2] !== east || limited[3] !== north,
-  };
 }
 
 async function fetchOsmRoadXml(
@@ -178,6 +163,79 @@ export function useRoadEditor(
   const [osm2streetsBbox, setOsm2streetsBbox] = useState<[number, number, number, number] | null>(null);
   const [osm2streetsSelection, setOsm2streetsSelection] = useState<Osm2StreetsSelection>(null);
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
+  const [allowedCorridors, setAllowedCorridors] = useState<RoadAllowedCorridor[]>([]);
+
+  useEffect(() => {
+    setAllowedCorridors([]);
+  }, [cityjson]);
+
+  const handleLoadRoadCorridorFile = useCallback(async (file: File) => {
+    try {
+      const value = JSON.parse(await file.text()) as unknown;
+      const corridors = parseRoadCorridorGeoJson(value, file.name);
+      setAllowedCorridors(corridors);
+      setRoadStatus(
+        `Loaded ${corridors.length} trusted corridor polygon${corridors.length === 1 ? '' : 's'} from ${file.name}.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRoadStatus(`Corridor import failed: ${message}`);
+      alert(`Corridor import failed: ${message}`);
+    }
+  }, []);
+
+  const handleClearRoadCorridors = useCallback(() => {
+    setAllowedCorridors([]);
+    setRoadStatus('Cleared the trusted road corridor.');
+  }, []);
+
+  const handleFitRoadDraftToCorridors = useCallback(() => {
+    if (!cityjson || !roadDraft) {
+      setRoadStatus('Create or select an editable road draft before fitting it.');
+      return;
+    }
+    if (allowedCorridors.length === 0) {
+      setRoadStatus('Load a trusted corridor before fitting road widths.');
+      return;
+    }
+
+    const result = fitRoadDraftWidthsToCorridors(cityjson, roadDraft, allowedCorridors, {
+      metricCrs: activeMetricCrsForCityJson(cityjson),
+    });
+    if (result.status === 'unfit') {
+      const message = result.reason ?? 'The road draft cannot be fitted to the trusted corridor.';
+      setRoadStatus(`Corridor fit refused: ${message}`);
+      alert(`Corridor fit refused: ${message}`);
+      return;
+    }
+    if (result.status === 'unchanged') {
+      setRoadStatus('The editable road draft already fits inside the trusted corridor.');
+      return;
+    }
+
+    const changedSections = result.sections.filter((section) => section.scale < 1 - 1e-9);
+    const widthSummary = changedSections
+      .map(
+        (section) =>
+          `${section.sectionId}: ${section.originalWidthM.toFixed(2)} m -> ${section.fittedWidthM.toFixed(2)} m`
+      )
+      .join('\n');
+    const accepted = confirm(
+      `Fit ${changedSections.length} road section${changedSections.length === 1 ? '' : 's'} to the trusted corridor?\n\n` +
+        `${widthSummary}\n\n` +
+        'This scales band widths proportionally. Centerlines, band order, directions, and semantics stay unchanged.'
+    );
+    if (!accepted) {
+      setRoadStatus('Corridor fit cancelled; the road draft was not changed.');
+      return;
+    }
+
+    setRoadDraft(result.draft);
+    setLastInsertedRoadId(null);
+    setRoadStatus(
+      `Fitted ${changedSections.length} road section${changedSections.length === 1 ? '' : 's'} to the trusted corridor. Review the new band widths before insertion.`
+    );
+  }, [allowedCorridors, cityjson, roadDraft]);
 
   const handleFetchOsmRoads = useCallback(async (fetchOptions: FetchOsmRoadOptions = {}) => {
     if (!cityjson) return;
@@ -197,13 +255,18 @@ export function useRoadEditor(
       return;
     }
     const expandedBbox = expandBbox(bbox, 0.08);
+    const metricCrs = activeMetricCrsForCityJson(cityjson);
     const { bbox: queryBbox, wasLimited } = fetchOptions.allowLargeQuery
       ? { bbox: expandedBbox, wasLimited: false }
-      : limitRoadQueryBbox(expandedBbox);
+      : limitRoadQueryBbox(expandedBbox, {
+          metricCrs,
+          maxWidthMeters: ROAD_QUERY_MAX_WIDTH_METERS,
+          maxHeightMeters: ROAD_QUERY_MAX_HEIGHT_METERS,
+        });
     const timeoutMs = fetchOptions.allowLargeQuery ? 60_000 : ROAD_QUERY_TIMEOUT_MS;
     setRoadStatus(
       wasLimited
-        ? 'Fetching OSM roads for the centre of this viewport. The query was limited to avoid public Overpass timeouts.'
+        ? `Fetching OSM roads for the centre of this viewport. The query was limited to a metric ${metricCrs} window to avoid public Overpass timeouts.`
         : `Fetching OSM roads for the ${scopeLabel}...`
     );
     try {
@@ -371,6 +434,26 @@ export function useRoadEditor(
     setLastInsertedRoadId(null);
   }, []);
 
+  const handleEditSelectedRoadArea = useCallback((area: RoadArea) => {
+    if (!area.editableDraft) {
+      setRoadStatus(`${area.roadId} does not include editable _roadLayout metadata.`);
+      return;
+    }
+    const draft = cloneRoadDraft(area.editableDraft);
+    setRoadDraft({
+      ...draft,
+      id: draft.id ?? area.roadId,
+    });
+    setSelectedRoadArea(area);
+    setLastInsertedRoadId(area.roadId);
+    setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
+    setSelectedOsmRoadId(null);
+    setRoadStatus(
+      `Loaded editable layout from ${area.roadId}. Review the draft, then export or insert the edited road.`
+    );
+  }, []);
+
   const handleSplitRoadDraft = useCallback((sectionId: string, fraction: number) => {
     setRoadDraft((current) => {
       if (!current) return current;
@@ -401,8 +484,13 @@ export function useRoadEditor(
       roadAreas: roadPreviewAreas,
       buildingFootprints: extractFootprints(cityjson),
       affectedLand: options.zones ?? [],
+      allowedCorridors,
+      corridorSeverity: 'error',
+      metricCrs: activeMetricCrsForCityJson(cityjson),
+      buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
+      buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
     });
-  }, [cityjson, roadPreviewAreas, options.zones]);
+  }, [cityjson, roadPreviewAreas, options.zones, allowedCorridors]);
 
   const handleInsertRoad = useCallback(() => {
     if (!cityjson || !roadDraft) return;
@@ -441,6 +529,83 @@ export function useRoadEditor(
     cityjson,
     roadDraft,
     roadFitConflicts,
+    pushUndo,
+    setDirtyIds,
+    setSelection,
+    setReloadToken,
+    markGeometryChanged,
+  ]);
+
+  const handleInsertOsm2StreetsSelection = useCallback(() => {
+    if (!cityjson || !osm2streetsResult || !osm2streetsSelection) return;
+    try {
+      const previewDoc = JSON.parse(JSON.stringify(cityjson)) as typeof cityjson;
+      const preview = insertOsm2StreetsRoadIntoCityJson(
+        previewDoc,
+        osm2streetsSelection,
+        osm2streetsResult,
+        osmRoads
+      );
+      const conflicts = validateRoadFit({
+        roadAreas: preview.areas,
+        buildingFootprints: extractFootprints(cityjson),
+        affectedLand: options.zones ?? [],
+        allowedCorridors,
+        corridorSeverity: 'error',
+        metricCrs: activeMetricCrsForCityJson(cityjson),
+        buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
+        buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
+      });
+      const blockingConflicts = conflicts.filter((conflict) => conflict.severity === 'error');
+      if (blockingConflicts.length > 0) {
+        alert(
+          `osm2streets road insertion is blocked by ${blockingConflicts.length} fit conflict${
+            blockingConflicts.length === 1 ? '' : 's'
+          }:\n\n${blockingConflicts.slice(0, 5).map((conflict) => conflict.label).join('\n')}`
+        );
+        return;
+      }
+
+      pushUndo('Insert osm2streets CityJSON road');
+      const { value: result } = runStructurallyGuardedMutation(
+        cityjson,
+        'Inserting osm2streets CityJSON road',
+        () =>
+          insertOsm2StreetsRoadIntoCityJson(
+            cityjson,
+            osm2streetsSelection,
+            osm2streetsResult,
+            osmRoads
+          )
+      );
+      setDirtyIds((prev) => {
+        const next = new Set(prev);
+        next.add(result.id);
+        return next;
+      });
+      setSelection({ objectId: result.id });
+      setSelectedRoadArea(null);
+      setLastInsertedRoadId(result.id);
+      setReloadToken((t) => t + 1);
+      markGeometryChanged('Road geometry changed; run Check 3D before export.');
+      setRoadStatus(
+        `Inserted ${result.id} from exact osm2streets polygons with ${result.areas.length} transportation surfaces.`
+      );
+    } catch (error) {
+      console.error(error);
+      alert(
+        `osm2streets CityJSON insertion failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }, [
+    cityjson,
+    osm2streetsResult,
+    osm2streetsSelection,
+    osmRoads,
+    allowedCorridors,
+    options.zones,
     pushUndo,
     setDirtyIds,
     setSelection,
@@ -509,6 +674,10 @@ export function useRoadEditor(
     setOsm2streetsSelection,
     highlightedOsm2StreetsRoadIds,
     setHighlightedOsm2StreetsRoadIds,
+    allowedCorridors,
+    handleLoadRoadCorridorFile,
+    handleClearRoadCorridors,
+    handleFitRoadDraftToCorridors,
     handleFetchOsmRoads,
     handleOsmRoadSelect,
     handleOsm2StreetsSelect,
@@ -518,8 +687,10 @@ export function useRoadEditor(
     handleStartRoadDraw,
     handleRoadLineDrawn,
     handleRoadDraftChange,
+    handleEditSelectedRoadArea,
     handleSplitRoadDraft,
     handleInsertRoad,
+    handleInsertOsm2StreetsSelection,
     handleExportRoadPayload,
     handlePostRoadPayload,
     roadAreas,

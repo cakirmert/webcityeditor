@@ -10,14 +10,14 @@ Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`pr
 - Side-panel Three.js editor for the selected building (uses TU Delft's [`cityjson-threejs-loader`](https://github.com/cityjson/cityjson-threejs-loader)).
 - Parametric new-building flow: Terra Draw footprint -> fullscreen creator with live 3D preview -> flat / pyramid / gable / hip roofs.
 - Snap-to-existing-footprints while drawing (auto-collected from the loaded CityJSON).
-- Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence.
+- Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence, and tested local change-report / visual-diff artifacts.
 - Hamburg planning overlay: fetches real XPlan building-use polygons by viewport, with FNP land-use fallback when XPlan has no polygons.
-- Road editing writes CityJSON Transportation `Road` objects, with OSM as a reference layer, a source-built osm2streets Rust/WASM fork for lane geometry, road-fit validation against planning/lot/building constraints, and documented next steps for muv-osm semantics and OpenDRIVE/r:trån import.
+- Road editing writes CityJSON Transportation `Road` objects, with OSM as a reference layer, a source-built osm2streets Rust/WASM fork for OSM-derived lane geometry, metric exact-lane polygon assets, vertical-aware road-fit validation, trusted GeoJSON corridor checks plus explicit proportional fitting, and a tested `citygml-tools` bridge for CityGML XML output.
 - CityJSONSeq-first Hamburg workflow: connect the local strict catalog once, pan to fetch nearby `.city.jsonl` tiles, use **Save seq** for validated optimistic-concurrency write-back, and let clean off-screen tiles unload automatically.
 - Subdivision into BuildingParts: split by floor, by side, or with per-floor footprint plans. Plans support manual percentage cuts, per-floor overrides, an apply-to-all-floors checkbox, and 2D/3D previews.
 - Live-preview transforms: translate and rotate buildings with a ghost preview on the map, then save or cancel.
 - 10 CRS registered via proj4 (EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514).
-- 385 tests across validation, round-trip, generation, subdivision, transforms, CityJSONSeq catalog loading and write-back, IFC import, Hamburg data preparation, planning data, and UI components.
+- 497 tests across validation, round-trip, generation, subdivision, transforms, CityJSONSeq catalog loading and write-back, IFC import, Hamburg data preparation, transportation conversion, local edit artifacts, planning data, and UI components.
 
 ## Setup
 
@@ -54,6 +54,8 @@ From `prototype/`:
 | `npm run data:hamburg-lod2 -- geometry-audit --allow-invalid` | Audit CityJSONSeq solids with `val3dity`, isolating validator crashes per feature |
 | `npm run data:hamburg-lod2 -- geometry-clean` | Build a strict editing catalog and quarantine primitive-invalid source features |
 | `npm run data:hamburg-lod2:serve` | Serve the generated Hamburg tile catalog locally on port `8787` |
+| `npm run data:hamburg-roads` | Batch-run the native osm2streets exporter over Hamburg OSM tiles and emit validated CityJSONSeq `Road` tiles |
+| `npm run cityjson:to-citygml -- INPUT.city.json --require-road` | Convert exported CityJSON roads to CityGML 3.0 with `citygml-tools from-cityjson`, then schema-validate the `.gml` |
 | `npm run osm2streets:compare` | Compare source-built osm2streets WASM and native executable outputs for committed Hamburg OSM fixtures |
 
 ## Hosting
@@ -88,7 +90,10 @@ webcityeditor/
 │   ├── CITYGML_TRANSPORTATION_PLAN.md   CityGML Transportation, OpenDRIVE, and muv-osm plan
 │   ├── METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md
 │   │                                      Metric road-limit and r:trån trial pipeline plan
+│   ├── OSM2STREETS_PANIC_HARDENING_PLAN.md
+│   │                                      Three-bbox Rust/WASM hardening and visual acceptance handoff
 │   ├── scripts/build-osm2streets-wasm.ps1
+│   ├── scripts/cityjson-to-citygml.mjs
 │   ├── test-fixtures/osm2streets/        Hamburg OSM regression fixtures and expected counts
 │   ├── vendor/osm2streets-js/            Built wasm-pack package consumed by the Vite app
 │   └── src/

@@ -164,5 +164,7 @@ The external Python validation is still useful because it documents the web-tool
   - intersection polygon count from `to_geojson_plain()`
   - lane marking and intersection marking counts
   - raw OSM XML copied separately from generated geometry
-- Feed `Lane polygons.geojson` into the planned `TrafficAreaPolygonAsset` normalization step.
+- Keep feeding `Lane polygons.geojson` through the delivered metric
+  `TrafficAreaPolygonAsset` normalization step and extend its fixture coverage
+  when new lane semantics appear.
 - Keep `Intersection polygons.geojson` as a support layer for intersection surfaces, movements, and crossing context.

@@ -26,6 +26,7 @@ import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
+import type { RoadAllowedCorridor } from '../lib/road-corridor';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import {
   osm2streetsIntersectionFillColor,
@@ -58,6 +59,7 @@ const LOD_OUTLINE_MAX = 14.5;
 const LOD_EXTRUDE_MAX = 99; // always extrude at z > 14.5 for now
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
+const ROAD_DATA_FIT_MAX_ZOOM = 18;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
 
@@ -66,9 +68,14 @@ function roadAreaKind(area: RoadArea): string {
   return typeof usage === 'string' ? usage : area.function;
 }
 
+function roadAreaSourceType(area: RoadArea): string | undefined {
+  const sourceType = area.attributes.sourceType;
+  return typeof sourceType === 'string' ? sourceType : undefined;
+}
+
 function roadAreaFillColor(area: RoadArea, selected = false, preview = false): Rgba {
   if (selected) return [255, 170, 40, 230];
-  const base = roadBandFillColor(roadAreaKind(area));
+  const base = roadBandFillColor(roadAreaKind(area), roadAreaSourceType(area));
   return preview ? withAlpha(base, 218) : base;
 }
 
@@ -174,6 +181,7 @@ interface Props {
   roadAreas?: RoadArea[];
   roadPreviewAreas?: RoadArea[];
   roadFitConflicts?: RoadFitConflict[];
+  allowedRoadCorridors?: RoadAllowedCorridor[];
   selectedRoadAreaId?: string | null;
   onRoadAreaSelect?: (area: RoadArea) => void;
   roadDraft?: RoadDraft | null;
@@ -236,6 +244,7 @@ export default function MapView({
   roadAreas = [],
   roadPreviewAreas = [],
   roadFitConflicts = [],
+  allowedRoadCorridors = [],
   selectedRoadAreaId = null,
   onRoadAreaSelect,
   roadDraft = null,
@@ -362,14 +371,14 @@ export default function MapView({
         `Reference system ${crs.code} is not yet supported. Add a proj4 definition ` +
           `in src/lib/projection.ts, or use CityJSON in EPSG:28992 / 25832 / 25833.`
       );
-    } else if (footprints.length === 0) {
+    } else if (footprints.length === 0 && roadAreas.length === 0) {
       setWarning(
         'No buildings with extractable footprints found. Data may lack GroundSurface semantics.'
       );
     } else {
       setWarning(null);
     }
-  }, [cityjson, footprints]);
+  }, [cityjson, footprints, roadAreas]);
 
   // Init map once
   useEffect(() => {
@@ -379,6 +388,7 @@ export default function MapView({
     const initialBbox = initialView
       ? null
       : computeFootprintBounds(footprints) ??
+        computeRoadAreaBounds(roadAreas) ??
         computeVertexBounds(cityjson) ??
         computeMetadataBounds(cityjson);
     const initialCenter =
@@ -484,11 +494,13 @@ export default function MapView({
     if (flownForDocRef.current !== cityjson) {
       flownForDocRef.current = cityjson;
       const footprintBbox = computeFootprintBounds(footprints);
+      const roadAreaBbox = computeRoadAreaBounds(roadAreas);
       const vertexBbox = computeVertexBounds(cityjson);
       const metaBbox = computeMetadataBounds(cityjson);
       const centre = computeTranslateCentre(cityjson);
 
-      const bbox = footprintBbox ?? vertexBbox ?? metaBbox;
+      const bbox = footprintBbox ?? roadAreaBbox ?? vertexBbox ?? metaBbox;
+      const fitMaxZoom = footprintBbox ? DATA_FIT_MAX_ZOOM : ROAD_DATA_FIT_MAX_ZOOM;
       const doFit = () => {
         if (initialView?.disableDataFit) {
           map.flyTo({
@@ -501,7 +513,7 @@ export default function MapView({
         } else if (bbox && isFiniteBbox(bbox)) {
           map.fitBounds(bbox, {
             padding: DATA_FIT_PADDING,
-            maxZoom: DATA_FIT_MAX_ZOOM,
+            maxZoom: fitMaxZoom,
             pitch: 0,
             bearing: 0,
             duration: 0,
@@ -800,6 +812,25 @@ export default function MapView({
       );
     }
 
+    if (allowedRoadCorridors.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadAllowedCorridor>({
+          id: 'road-editing-corridors',
+          data: allowedRoadCorridors,
+          getPolygon: (d) => d.polygon,
+          getFillColor: [45, 212, 191, 22],
+          getLineColor: [94, 234, 212, 255],
+          getLineWidth: 2,
+          lineWidthMinPixels: 2,
+          stroked: true,
+          filled: true,
+          pickable: false,
+          extruded: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
     if (roadDraftPaths.length > 0) {
       layers.push(
         new PathLayer<RoadDraftPath>({
@@ -1031,6 +1062,7 @@ export default function MapView({
     handleRoadDraftHandleDragEnd,
     drawMode,
     roadFitConflicts,
+    allowedRoadCorridors,
     selectedRoadAreaId,
     onRoadAreaSelect,
     osmRoads,
@@ -1530,6 +1562,30 @@ function computeFootprintBounds(
   let any = false;
   for (const fp of footprints) {
     for (const [lng, lat] of fp.polygon) {
+      if (lng < minLng) minLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lng > maxLng) maxLng = lng;
+      if (lat > maxLat) maxLat = lat;
+      any = true;
+    }
+  }
+  if (!any) return null;
+  return [
+    [minLng, minLat],
+    [maxLng, maxLat],
+  ];
+}
+
+function computeRoadAreaBounds(roadAreas: RoadArea[]): maplibregl.LngLatBoundsLike | null {
+  if (roadAreas.length === 0) return null;
+  let minLng = Infinity,
+    minLat = Infinity,
+    maxLng = -Infinity,
+    maxLat = -Infinity;
+  let any = false;
+  for (const area of roadAreas) {
+    for (const [lng, lat] of area.polygon) {
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
       if (lng < minLng) minLng = lng;
       if (lat < minLat) minLat = lat;
       if (lng > maxLng) maxLng = lng;

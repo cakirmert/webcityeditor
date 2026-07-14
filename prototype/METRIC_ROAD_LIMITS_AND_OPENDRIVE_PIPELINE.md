@@ -1,6 +1,8 @@
 # Metric Road Limits and OpenDRIVE Pipeline Plan
 
-> **Status**: Detailed implementation plan, not yet an importer implementation  
+> **Status**: Road-fit baseline, metric clearance, query limiting, vertical
+> profiles, trusted visible GeoJSON corridor input, and explicit proportional
+> fitting are implemented; the OpenDRIVE importer remains
 > **Date**: 2026-06-25  
 > **Scope**: `webcityeditor/prototype` road editor, Hamburg building/planning context, OpenDRIVE trial import path
 
@@ -32,7 +34,12 @@ The prototype already has the important pieces to build on:
 - `validateRoadFit()` checks generated road preview polygons against building footprints and planning/land polygons.
 - `useRoadEditor()` blocks insertion for hard building-overlap conflicts and shows warning conflicts on the map.
 
-The main gap is that the validation is still WGS84-polygon based and coarse. The next version should perform the constraint calculations in metric CRS and use a clearer corridor model.
+Road-fit overlap, difference, clearance, and corridor-fit geometry now runs in
+the active metric CRS and returns precise WGS84 highlight polygons.
+User-approved WGS84 GeoJSON Polygon/MultiPolygon files act as trusted visible
+corridors. The explicit fit action finds the largest safe proportional band
+width per editable section, asks for confirmation, and refuses to move a
+centerline or shrink a semantic band below 0.40 m.
 
 ## Metric Editing Principle
 
@@ -159,6 +166,14 @@ Acceptance:
 - The map highlights the affected building/overlap area.
 - The conflict list names the road surface and affected building id.
 
+Implemented slice (2026-07-10): `RoadDraft` and `RoadArea` carry optional
+vertical profiles. Manual roads default to surface; OSM `tunnel`, `covered`,
+`bridge`, `location`, and `layer` tags are retained as vertical evidence; exact
+osm2streets surfaces use the same path. Missing z becomes a warning, known
+separation clears the conflict, and known in-range elevation remains blocking.
+The 2026-07-12 slice added robust metric overlap/difference polygons for the
+highlight layer.
+
 ### Stage 2: Clearance and Fit
 
 Road surfaces should not merely avoid buildings; they should respect a small clearance.
@@ -182,6 +197,17 @@ Acceptance:
 - Near-building clearance violations are reported separately.
 - WGS84 precision does not create false positives because the work happens in metres.
 
+Implemented slices:
+
+- 2026-07-10: `validateRoadFit()` accepts a metric CRS and a
+  building-clearance warning threshold. The road editor passes the active metric
+  CRS with a 1 m warning threshold, and focused tests cover road polygons just
+  inside and just outside that clearance.
+- 2026-07-11: `validateRoadFit()` also accepts a 0.5 m hard building-clearance
+  threshold. The road editor passes that threshold for editable draft previews
+  and exact osm2streets insert previews, so direct footprint overlap and
+  sub-0.5 m clearance now block insertion while 0.5-1 m remains warning-only.
+
 ### Stage 3: Corridor-Aware Editing
 
 Once a corridor source exists, the editor should use it to guide road creation.
@@ -193,6 +219,16 @@ Tasks:
 - Snap or clamp road-width handles to the corridor only after the warning-only validator is stable.
 - Offer "fit to corridor" as an explicit action, not as silent geometry mutation.
 
+Implemented slices (2026-07-14): `useRoadEditor()` owns optional trusted
+corridors imported from user-approved WGS84 GeoJSON Polygon/MultiPolygon files.
+The road panel exposes load/clear controls, MapView renders the active boundary,
+and both editable-draft previews and exact osm2streets insert checks pass the
+corridors into `validateRoadFit()` as blocking trusted constraints. The editor
+also exposes `Fit draft widths to corridor`: it binary-searches projected
+preview geometry for the largest safe proportional width per section, presents
+the proposed before/after widths for confirmation, and refuses centerline moves
+or bands narrower than 0.40 m.
+
 Acceptance:
 
 - The user can see why a street is considered too wide.
@@ -201,7 +237,9 @@ Acceptance:
 
 ## Recommended Geometry Library Work
 
-The current pure TypeScript polygon checks are good enough for coarse feedback, but metric corridor fitting needs robust polygon operations.
+The original pure TypeScript polygon checks were sufficient only for coarse
+feedback. Metric conflict highlighting and corridor fitting required robust
+projected polygon operations.
 
 Evaluate:
 
@@ -217,17 +255,23 @@ Selection criteria:
 - Has deterministic output for small fixtures.
 - Does not force a large GIS stack into the browser bundle.
 
+Implemented slice (2026-07-12): `polygon-clipping` is now used inside
+`validateRoadFit()` for projected intersection/difference conflict geometry.
+The validator converts road, building, planning, and corridor rings into metres,
+computes overlap or overflow polygons, then converts the highlighted polygon
+back to WGS84 for the existing deck.gl conflict layer.
+
 ## Road Limit Implementation Order
 
-1. Add active metric CRS helpers.
-2. Replace `limitRoadQueryBbox()` meters-per-degree math with metric bbox clipping.
-3. Add `projectRoadFitContext()` to convert road, building, planning, and corridor polygons.
-4. Add robust polygon intersection output, not only intersection tests.
-5. Split conflicts into hard blockers and warnings.
-6. Add buffered-building clearance checks.
-7. Add vertical hints and `vertical_uncertainty` handling before turning planning/corridor conflicts into hard blockers.
-8. Add optional corridor source plumbing.
-9. Add "fit to corridor" only after the validator proves reliable.
+1. ✅ Add active metric CRS helpers.
+2. ✅ Replace road-query meters-per-degree math with metric bbox clipping.
+3. ✅ Project road/building/planning/corridor operations at the validator boundary; a separate `projectRoadFitContext()` wrapper was unnecessary.
+4. ✅ Add robust polygon intersection/difference output, not only intersection tests.
+5. ✅ Split conflicts into hard blockers and warnings.
+6. ✅ Add metric building-clearance warnings plus the separate 0.5 m hard buffer.
+7. ✅ Add OSM/manual vertical profiles, known-z separation, and `vertical_uncertainty` handling.
+8. ✅ Connect an optional trusted corridor source to the editor and render its boundary.
+9. ✅ Add explicit, confirmation-gated proportional "fit to corridor" with centerline and minimum-width refusal rules.
 
 ## OpenDRIVE / r:trån Trial Pipeline
 
@@ -378,14 +422,17 @@ When both pieces exist, the intended workflow is:
 
 Road limit tests:
 
-- Road fully outside all buildings and inside corridor: no conflict.
-- Road overlaps a building: blocking `building_overlap`.
-- Road touches only building clearance buffer: `building_clearance`.
-- Underground/tunneled road overlaps a building footprint in 2D with known vertical separation: no blocking building conflict.
-- Road overlaps a building footprint in 2D with unknown vertical data: `vertical_uncertainty` warning unless explicitly marked as surface-level.
-- Road leaves corridor: `outside_corridor`.
-- Road crosses planning polygon: `affected_planning_area`.
-- Missing corridor source: no hard block.
+- [x] Road fully outside all buildings and inside corridor: no conflict.
+- [x] Road overlaps a building: blocking `building_overlap`.
+- [x] Road touches only the delivered 1 m warning threshold: `building_clearance`.
+- [x] Underground/elevated road overlaps in 2D with known vertical separation: no building conflict.
+- [x] Road overlaps in 2D with missing vertical elevation: `vertical_uncertainty` warning unless surface-level.
+- [x] Known road elevation inside the building range remains blocking.
+- [x] Road leaves corridor: `outside_corridor`.
+- [x] Road crosses planning/land polygons: `affected_land`.
+- [x] Missing corridor source: no hard block.
+- [x] Trusted corridor source and visible boundary.
+- [x] Explicit editor `fit to corridor` control with proportional-width, confirmation, and refusal-path coverage.
 
 OpenDRIVE pipeline tests:
 

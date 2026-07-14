@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildRoadDraftFromOsm2StreetsSelection } from '../../src/lib/osm2streets-draft';
+import {
+  buildOsm2StreetsRoadAssets,
+  buildRoadDraftFromOsm2StreetsSelection,
+} from '../../src/lib/osm2streets-draft';
 import type { Osm2StreetsResult, Osm2StreetsSelection } from '../../src/lib/osm2streets';
 import type { OsmRoadFeature } from '../../src/lib/transportation';
 
@@ -72,6 +75,59 @@ describe('buildRoadDraftFromOsm2StreetsSelection', () => {
       kind: 'bike_lane',
       allowedModes: ['bicycle'],
     });
+  });
+
+  it('normalizes sibling lane polygons into reusable road surface assets', () => {
+    const selection: Osm2StreetsSelection = { kind: 'lane', feature: result.lanes.features[1] };
+
+    const assets = buildOsm2StreetsRoadAssets(selection, result, [osmRoad], {
+      crsCode: 'EPSG:25832',
+      elevationM: 7.5,
+    });
+
+    expect(assets.roadId).toBe('7');
+    expect(assets.matchedOsmRoad).toBe(osmRoad);
+    expect(assets.sourceOsmWayIds).toEqual([3100]);
+    expect(assets.lanes.map((lane) => lane.band.kind)).toEqual([
+      'car_lane',
+      'bike_lane',
+      'sidewalk',
+      'parking',
+    ]);
+    expect(assets.lanes[0].ringsWgs84[0]).toEqual([
+      [9.992, 53.549],
+      [9.993, 53.549],
+      [9.993, 53.55],
+      [9.992, 53.55],
+    ]);
+    expect(assets.lanes[0]).toMatchObject({
+      source: 'osm2streets',
+      crsUri: 'https://www.opengis.net/def/crs/EPSG/0/25832',
+      sectionId: 'osm2streets-road-7-section-1',
+      trafficSpaceId: 'osm2streets-road-7',
+      trafficAreaId: 'osm2streets-road-7-lane-0',
+      laneType: 'Driving',
+      trafficDirection: 'forward',
+      granularity: 'lane',
+      centerLineRole: 'derived_from_osm',
+      widthMeters: 3.25,
+      functionCode: 'driving_lane',
+      functionLabel: 'Driving lane',
+      usageCode: 'car_lane',
+      usageLabel: 'Motor vehicle traffic',
+      osmWayIds: ['3100'],
+      osm2streetsRoadId: '7',
+      osm2streetsLaneIndex: 0,
+    });
+    expect(assets.lanes[0].surfacePolygon).toHaveLength(5);
+    expect(assets.lanes[0].surfacePolygon[0]).toEqual(
+      assets.lanes[0].surfacePolygon[assets.lanes[0].surfacePolygon.length - 1]
+    );
+    expect(assets.lanes[0].surfacePolygon[0][0]).toBeGreaterThan(500_000);
+    expect(assets.lanes[0].surfacePolygon[0][2]).toBe(7.5);
+    expect(assets.lanes[0].centerLine).toHaveLength(osmRoad.path.length);
+    expect(assets.lanes[0].centerLine[0][2]).toBe(7.5);
+    expect(assets.lanes[0].properties.osm_way_ids).toEqual([3100]);
   });
 });
 

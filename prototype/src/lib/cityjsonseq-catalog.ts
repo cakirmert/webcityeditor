@@ -1,4 +1,3 @@
-import proj4 from 'proj4';
 import type { CityJsonDocument } from '../types';
 import {
   appendCityJsonSeqFeature,
@@ -7,7 +6,7 @@ import {
 } from './cityjson';
 import { checkIntegrity } from './integrity';
 import { mergeCityJson } from './merge';
-import './projection';
+import { projectWgs84BboxToCrs as projectWgs84BboxToCrsBase } from './projection';
 
 export type Bbox = [number, number, number, number];
 
@@ -153,28 +152,7 @@ async function fetchCityJsonSeqTiles(
 }
 
 export function projectWgs84BboxToCrs(bbox: Bbox, crs: string): Bbox {
-  const [west, south, east, north] = bbox;
-  const corners: [number, number][] = [
-    [west, south],
-    [east, south],
-    [east, north],
-    [west, north],
-  ];
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const corner of corners) {
-    const [x, y] = proj4('EPSG:4326', crs, corner) as [number, number];
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  }
-  if (![minX, minY, maxX, maxY].every(Number.isFinite)) {
-    throw new Error(`Could not project viewport into ${crs}`);
-  }
-  return [minX, minY, maxX, maxY];
+  return projectWgs84BboxToCrsBase(bbox, crs);
 }
 
 export function parseCityJsonSeqStrict(text: string, name = 'CityJSONSeq input'): CityJsonDocument {

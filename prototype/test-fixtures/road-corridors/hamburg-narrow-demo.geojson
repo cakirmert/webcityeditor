@@ -1,0 +1,25 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "hamburg-narrow-demo",
+      "properties": {
+        "name": "Hamburg narrow road-fit demo corridor",
+        "purpose": "Draw a north-south editable road around longitude 9.994 inside this corridor, then fit its default bands."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [9.99394, 53.5496],
+            [9.99406, 53.5496],
+            [9.99406, 53.5504],
+            [9.99394, 53.5504],
+            [9.99394, 53.5496]
+          ]
+        ]
+      }
+    }
+  ]
+}

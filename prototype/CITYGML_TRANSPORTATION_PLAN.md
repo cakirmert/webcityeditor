@@ -1,6 +1,9 @@
 # CityGML Transportation & OpenDRIVE Integration Plan
 
-> **Status**: Research plan, ready to split into implementation tasks  
+> **Status**: Partially implemented; exact osm2streets surfaces, metric polygon
+> assets, CityGML bridge, road-fit baseline, clearance, vertical hints, a
+> trusted visible GeoJSON corridor source, and explicit proportional corridor
+> fitting are delivered, while `muv-osm` and OpenDRIVE import remain
 > **Author**: Codex documentation pass from transport-module discussion (2026-06-09)  
 > **Target**: `webcityeditor/prototype` road editor, CityJSON Transportation output, future backend importer
 
@@ -26,11 +29,11 @@ the app. Every importer should feed the existing `RoadDraft` shape, then reuse
 `prototype/src/lib/transportation.ts` to generate CityJSON Transportation
 surfaces.
 
-The current implementation decision is to use one lane-geometry engine:
-osm2streets. The repo now uses a source-built Rust/WASM fork for that path. The
-remaining work is to keep repairing the fork against Hamburg data and compare
-its output with semantic `muv-osm` parsing, not to maintain a parallel
-TypeScript/JavaScript lane backend.
+The current implementation decision is to use one OSM-derived reference and
+exact-surface lane-geometry engine: osm2streets. The repo uses a source-built
+Rust/WASM fork for that path. The TypeScript ribbon builder remains the
+intentional generator for manual/editable `RoadDraft` geometry; it does not
+compete with osm2streets as an OSM interpretation backend.
 
 Related focused plan: [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md)
 covers the osm2streets fork, WASM rebuild, crosswalks, dual carriageway merging,
@@ -90,8 +93,8 @@ should be fixed in the fork and captured as fixtures.
 
 Current implementation target:
 
-1. **Use osm2streets only** for lane polygons, lane markings, and intersection
-   markings.
+1. **Use osm2streets only** for OSM-derived reference/exact lane polygons, lane
+   markings, and intersection markings.
 2. Keep the source-built fork in `vendor/osm2streets` as the only browser lane
    geometry path.
 3. Patch Rust diagnostics, tag normalization, and geometry edge cases at source,
@@ -155,13 +158,30 @@ The app should treat `RoadDraft` as the editable intermediate contract:
 - `_roadLayout` metadata on generated CityJSON keeps round-trip editing
   possible.
 
-The OSM/osm2streets path should also be an export pipeline, not only a preview.
+The OSM/osm2streets path is also an export pipeline, not only a preview.
 Strictly speaking, osm2streets consumes OSM XML and returns lane/intersection
 geometry; it does not by itself define the long-term CityGML/CityJSON export
-contract. The target should be OSM XML/Overpass data -> osm2streets geometry and
-OSM semantics -> `RoadDraft` -> CityJSON/JSON, with CityGML Transportation
-export provided by either a focused writer or a tested CityJSON -> CityGML
+contract. There are two deliberate branches: editable selections seed
+`RoadDraft` and its ribbon generator, while exact osm2streets lane polygons are
+normalized directly into metric traffic-area assets and CityJSON surfaces.
+Both retain OSM/osm2streets provenance and feed the tested CityJSON -> CityGML
 conversion step.
+
+The chosen first implementation is:
+
+```text
+OSM XML / Overpass data
+  -> osm2streets GeoJSON lane polygons
+  -> exact CityJSON Transportation Road MultiSurface
+  -> citygml-tools from-cityjson
+  -> CityGML 3.0 Transportation XML
+```
+
+This keeps the browser authoring/export contract as CityJSON and uses the
+officially documented CityJSON <-> CityGML converter only when XML is needed.
+The repo wrapper is `npm run cityjson:to-citygml -- INPUT.city.json
+--require-road`, which runs `citygml-tools from-cityjson` and then
+`citygml-tools validate` on the generated `.gml` file.
 
 Before export, osm2streets-derived lane geometry should be normalized into
 polygon assets. Each asset should contain a metric `surfacePolygon`, centerline,
@@ -169,6 +189,12 @@ width, traffic direction, road/section/traffic-space ids, function/usage codes
 and labels, lane type, and OSM/osm2streets provenance. This keeps bike lanes,
 sidewalks, parking, medians, and intersection areas as explicit semantic
 surfaces instead of reducing them to styled preview geometry.
+
+Implemented in `src/lib/osm2streets-draft.ts`: `TrafficAreaPolygonAsset`
+contains a closed metric `surfacePolygon`, metric centerline, CRS URI, width,
+direction, traffic-space/area ids, function and usage codes/labels, lane type,
+and OSM/osm2streets provenance. `osm2streets-cityjson.ts` writes those metric
+assets directly as CityJSON `MultiSurface` boundaries.
 
 The OpenDRIVE path can be server-side first. r:trån is a JVM CLI/library
 workflow, not a natural browser dependency. The browser can upload or reference
@@ -330,14 +356,33 @@ inside their limited space.
       become browser `console.error` failures
 - [x] Fork/rebuild osm2streets and patch Hamburg sidewalk tag handling at source
 - [ ] Run real Hamburg viewport checks against the source-built fork output
-- [ ] Normalize selected osm2streets roads into `RoadDraft` and verify they
-      export as JSON/CityJSON with lane, bike-lane, sidewalk, and intersection
+- [x] Normalize selected osm2streets roads into `RoadDraft` and verify they
+      export as JSON/CityJSON with lane, bike-lane, sidewalk, and road
       provenance intact
-- [ ] Add a polygon-asset normalization contract for osm2streets-derived
+- [x] Add a polygon-asset normalization contract for osm2streets-derived
       traffic areas: `surfacePolygon`, centerline, width, direction, function
       and usage codes/labels, ids, lane type, and source provenance
-- [ ] Decide and test the CityGML export leg for osm2streets-derived roads:
-      direct CityGML writer or CityJSON -> CityGML converter
+- [x] Decide and test the CityGML export leg for osm2streets-derived roads:
+      CityJSON -> CityGML conversion via `citygml-tools from-cityjson`,
+      wrapped by `scripts/cityjson-to-citygml.mjs` and covered by an integration
+      test that validates the generated CityGML 3.0 Transportation XML
+- [x] Run an end-to-end visual browser check: load the exact-surface
+      CityJSON road sample through the app, verify the map renders distinct
+      road bands, select an imported CityJSON road surface, and run the CityGML
+      converter against the same fixture
+- [x] Replace the synthetic smoke visual with a real native osm2streets Hamburg
+      fixture: committed lane-polygons GeoJSON -> CityJSON -> app import,
+      metadata selection card, browser screenshots, and source-vs-CityJSON
+      polygon visual diff artifacts
+- [x] Add a batch converter for osm2streets `lane-polygons.geojson`:
+      `scripts/osm2streets-lanes-to-cityjson.mjs` emits monolithic CityJSON
+      and CityJSONSeq `Road` features with tile-prefixed ids for large exports
+- [ ] Complete the whole-Hamburg road CityJSONSeq export after hardening the
+      native fork. The 2026-07-03 tiled run produced 10 validated road tiles
+      (182,396 `Road` features, 497,421 surfaces, 2,641,099 vertices) but three
+      small bboxes still panic in native osm2streets and are quarantined in
+      `Data/hamburg-roads-osm2streets/cityjsonseq/hamburg-osm2streets-roads-current-summary.json`.
+      The executable handoff is [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md).
 
 ### 7.4 OpenDRIVE/r:trån pipeline
 
@@ -351,41 +396,62 @@ inside their limited space.
 
 ### 7.5 Road-fit validation
 
-- [ ] Identify the first corridor/lot source to use in Hamburg:
-  - existing planning polygons as a coarse first pass
-  - parcel/lot data when available
+- [x] Identify the first road-fit sources:
   - loaded CityJSON building footprints for collision checks
-- [ ] Add pure geometry tests for road footprint overflow:
-  - inside corridor
+  - existing planning polygons as coarse warning geometry
+  - trusted parcel/road-corridor data remains a later data-source upgrade
+- [x] Add pure geometry tests for road footprint overflow:
+  - inside corridor, including boundary-aligned road polygons
   - partially outside corridor
   - building overlap
   - no corridor data available
-- [ ] Add deck.gl conflict layers:
+- [x] Compute robust metric intersection/difference polygons instead of using
+      whole affected rings as the current conflict geometry
+- [x] Add deck.gl conflict layers:
   - overflow polygons in red
-  - affected buildings outlined or tinted red
-  - affected planning/lot polygons highlighted
-- [ ] Add editor UX rules:
+  - affected building/planning polygons highlighted in red
+- [x] Add editor UX rules:
   - block building intersections by default
-  - warn and allow override for uncertain planning/lot overflow
+  - warn and allow override for uncertain planning/lot conflicts
   - show conflict count before inserting/exporting the road
+- [x] Add OSM/manual vertical profiles and 3D-aware building decisions:
+  - surface or known in-range overlaps remain blocking
+  - tunnel/bridge overlaps without metric elevation become
+    `vertical_uncertainty` warnings
+  - known vertical separation suppresses overlap and clearance conflicts
+- [x] Connect a trusted corridor source to editor state and add visible
+      corridor-aware editing controls. The road panel imports/clears user-approved
+      WGS84 GeoJSON Polygon/MultiPolygon files, the map renders the boundary,
+      and preview/exact-surface fit checks receive the active corridors.
+- [x] Add `fit to corridor` as an explicit user action: compute the largest
+      safe proportional width per editable section in projected geometry,
+      preview exact before/after totals for confirmation, preserve centerlines
+      and semantics, and refuse bands below the 0.40 m editor minimum.
 
 ---
 
 ## 8. Verification Checklist
 
-- [ ] OSM road selection still creates a valid `RoadDraft`
-- [ ] CityJSON Transportation insertion remains structurally valid
-- [ ] Existing road editor tests still pass
-- [ ] osm2streets is the only visual lane-geometry backend used by the app
+- [x] OSM road selection still creates a valid `RoadDraft`
+- [x] CityJSON Transportation insertion remains structurally valid
+- [x] Existing road editor tests still pass
+- [x] Road/building edits produce local CityJSON, semantic change-report, and
+      GeoJSON visual-diff artifacts in tests
+- [x] Re-imported osm2streets-derived CityJSON roads preserve render polygons,
+      lane colors, and TrafficArea/AuxiliaryTrafficArea semantics
+- [x] osm2streets is the only OSM-derived reference/exact-surface geometry path
+      used by the app; manual/editable drafts intentionally use ribbon geometry
 - [ ] `muv-osm` semantic output is compared against current inference before it
       replaces any TypeScript heuristic
-- [ ] osm2streets visual output is checked in the browser for Hamburg
+- [x] The committed real Hamburg fixture and exact-surface sample are checked in
+      the browser; a fresh live Overpass viewport pass remains pending
 - [ ] r:trån conversion produces CityGML 3 Transportation that can be imported
       without losing lane topology
 - [ ] Imported OpenDRIVE-derived roads can be previewed on the same deck.gl map
-- [ ] Road-fit conflicts highlight overflow areas and affected buildings/land in
-      red before insertion/export
-- [ ] Exported CityJSON reopens with editable `_roadLayout` metadata where
+- [x] Road-fit conflict polygons and affected buildings/land are highlighted in
+      red or amber before insertion/export; projected intersection/difference
+      geometry now narrows highlights to the actual overlap or overflow polygon
+- [x] Exported CityJSON reopens with editable `_roadLayout` metadata where
       edits are allowed
 
 ---

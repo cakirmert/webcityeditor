@@ -2,7 +2,11 @@
 
 ## Purpose
 
-The current prototype already calls the local `osm2streets-js` WASM fork, but its map rendering is only a partial preview. The osm2streets Street Explorer demo shows a richer model: intersection polygons, lane polygons, lane markings, intersection markings, hover/debug layers, and lane/intersection popups. We should move the prototype toward that same visual and semantic quality while keeping our CityJSON editing/export workflow.
+The prototype calls the local `osm2streets-js` WASM fork and now implements the
+core Street Explorer parity path: intersection/lane polygons, polygon and line
+markings, shared semantic styling, lane/intersection inspection, connected-road
+highlighting, and exact CityJSON surface insertion. Optional dynamic debug
+layers and a fresh live Hamburg viewport verification remain.
 
 This plan is intentionally detailed so the work can be resumed later without rediscovering the same code paths.
 
@@ -46,47 +50,45 @@ In `vendor/osm2streets/osm2streets`:
 In this prototype:
 
 - `prototype/src/lib/osm2streets.ts`
-  - We currently return `lanes`, `laneMarkings`, and `intersectionMarkings`.
-  - We do not return `network.toGeojsonPlain()`, so the app has no intersection polygon layer.
+  - Returns `plain`, `lanes`, `laneMarkings`, and `intersectionMarkings` from
+    the source-built fork.
 - `prototype/src/components/MapView.tsx`
-  - We render osm2streets lane polygons, lane markings, and intersection markings with deck.gl.
-  - Lane coloring checks lowercase/local names like `bike_lane`, but osm2streets emits Rust enum display names like `Biking`, `Driving`, and `Sidewalk`.
-  - Lane markings are currently configured mostly as stroked lines, while the explorer treats them as filled polygons.
+  - Renders lane/intersection polygons plus polygon and line marking layers in
+    explorer-style order through shared layer/style helpers.
 - `prototype/src/hooks/useRoadEditor.ts`
-  - OSM fetch still uses approximate meters-per-degree math for query sizing.
+  - Limits OSM queries in the active metric CRS, exposes inspection/highlight
+    state, and validates both editable and exact-surface insertion previews.
 - `prototype/src/lib/transportation.ts`
-  - CityJSON Transportation insertion is metric once data is in a projected CRS, but the road preview path and osm2streets visualization are not yet unified around a single metric contract.
+  - Projects editable `RoadDraft` ribbons into the document CRS and carries
+    vertical-placement metadata for road-fit decisions.
+- `prototype/src/lib/osm2streets-draft.ts`
+  - Normalizes exact lane polygons into the metric `TrafficAreaPolygonAsset`
+    export contract before CityJSON insertion.
 
-## Current Gaps
+## Original Gaps And Current Resolution
 
-1. Intersection polygons are missing.
-   - We only render `osm2streetsResult.intersectionMarkings`.
-   - The explorer's visible intersection surface comes from `toGeojsonPlain()` filtered to `type == "intersection"`.
+1. **Intersection polygons — delivered.** The wrapper returns `plain`, and the
+   map filters/renders explorer-style intersection surfaces separately from
+   intersection markings.
+2. **Lane colors — delivered.** Shared `osm2streets-style.ts` helpers understand
+   Rust enum display values such as `Biking`, `Driving`, `Sidewalk`, parking,
+   buffer, bus, and shared-use types.
+3. **Lane/intersection markings — delivered.** Polygon markings retain their
+   fill geometry, while line features receive dedicated stroked layers.
+4. **Interactive inspection — delivered.** Lanes and intersections expose ids,
+   direction, width, turns, OSM provenance, draft creation, exact insertion,
+   and connected-road highlighting.
+5. **Metric boundary — delivered for distance/export work.** Map/API exchange
+   stays WGS84, Overpass limits are computed in the active projected CRS, and
+   exact traffic-area assets are projected into the active metric CRS before
+   CityJSON insertion.
+6. **Semantic render drift — substantially addressed.** Reference and inserted
+   road layers reuse shared semantic colors and real Hamburg fixtures. Editable
+   `RoadDraft` ribbons remain a deliberate separate geometry representation,
+   with shared styling rather than pretending to retain exact polygons.
 
-2. Lane colors are partly wrong.
-   - Our code checks names like `biking` and `bike_lane`.
-   - osm2streets emits enum display strings such as `Biking`, `Driving`, `Sidewalk`, `SharedUse`, `Bus`, `Parking(Parallel)`, `Buffer(Curb)`, and `Buffer(Planters)`.
-   - Result: bike lanes and other non-car lanes can fall through to the default color.
-
-3. Lane markings are not rendered like the explorer.
-   - The explorer uses filled polygon layers for markings.
-   - Our deck.gl layer is set up as stroked/line-oriented, which loses width and detail for arrows, stop lines, hatching, and buffer markings.
-
-4. No interactive osm2streets inspection.
-   - The explorer can click lanes/intersections and inspect IDs, movements, crossing info, and OSM provenance.
-   - Our app uses osm2streets mostly as a reference backdrop for manual road drafting.
-
-5. No explicit metric road-geometry boundary.
-   - CityJSON geometry is metric when the document CRS is projected, commonly EPSG:25832 for Hamburg.
-   - OSM and MapLibre are WGS84.
-   - osm2streets internally works in metric space, but its public GeoJSON output is WGS84.
-   - Our application should make the conversion boundary explicit to avoid approximate meter math and drift between preview, editing, and export.
-
-6. Initial rendering and edit-mode rendering can drift.
-   - The initial osm2streets reference render and the RoadDraft/editing render are separate code paths today.
-   - That kind of split is how bike lanes can be missing or drawn with the wrong color in one mode while looking correct in another.
-   - Style decisions for lane type, marking type, intersection type, and selected/edit overlays must come from shared helpers instead of being reimplemented per layer.
-   - The initial render, selected-road render, editable draft preview, and inserted CityJSON road render should be tested against the same lane semantics.
+Remaining parity work is a fresh live Hamburg Overpass/browser pass, optional
+dynamic debug layers, and a schema decision for persisted intersections.
 
 ## Target Architecture
 
@@ -125,7 +127,10 @@ That means:
 
 ### Required Direction
 
-Use a projected metric CRS for all geometry editing, offsets, widths, snapping, CityJSON creation, and validation. For Hamburg this should be EPSG:25832, ETRS89 / UTM zone 32N. More generally, use a dynamic UTM/metric CRS per loaded city when the CityJSON document CRS is not already supported.
+Use a projected metric CRS for all distance-sensitive geometry operations,
+offsets, widths, snapping, CityJSON creation, and clearance validation. For
+Hamburg this should be EPSG:25832, ETRS89 / UTM zone 32N. `RoadDraft` retains a
+WGS84 centerline for map editing, then projects it at the computation boundary.
 
 ### Boundary Rules
 
@@ -134,13 +139,15 @@ Use a projected metric CRS for all geometry editing, offsets, widths, snapping, 
   - Overpass/OSM API bbox.
   - osm2streets public GeoJSON output, unless we extend the WASM API.
 - Metric CRS:
-  - RoadDraft geometry.
+  - Temporary projected `RoadDraft` geometry used for offsets/insertion.
+  - Exact `TrafficAreaPolygonAsset` surface polygons and centerlines.
   - Lane offsets and widths.
   - CityJSON vertices.
   - Collision/fit checks against buildings and zoning.
   - Transform handles and numeric move values.
 - Conversion boundary:
-  - Convert WGS84 to the active metric CRS as soon as geometry becomes editable.
+  - Keep map-edited centerlines in WGS84 and convert to the active metric CRS
+    before any distance, width, fit, or persistence calculation.
   - Convert metric CRS to WGS84 only for map display and external OSM/API calls.
 
 ### Concrete Work
@@ -151,7 +158,8 @@ Use a projected metric CRS for all geometry editing, offsets, widths, snapping, 
    - Fallback: derive UTM zone from map center and register/use an EPSG code when possible.
 
 2. Replace remaining meters-per-degree approximations.
-   - `useRoadEditor.ts` query sizing should project the viewport center to active metric CRS, build a metric bbox, then unproject bbox corners to WGS84 for Overpass.
+   - Done for `useRoadEditor.ts` query sizing: the viewport is clamped through
+     the active metric CRS and unprojected for Overpass.
    - `BuildingCreator.tsx` contains small local meter approximations for preview metrics. These can remain temporarily for UI estimation, but the long-term goal is the same metric CRS helper.
 
 3. Add road geometry conversion utilities.
@@ -391,11 +399,11 @@ Tasks:
        -> osm2streets lane + intersection geometry
        -> RoadDraft with OSM/osm2streets provenance
        -> CityJSON Transportation Road
-       -> optional CityGML Transportation export
+       -> optional CityGML Transportation export via citygml-tools
      ```
 
    - JSON output should include both the existing road-edit payload JSON and CityJSON Transportation objects.
-   - CityGML output should come either from a focused CityGML Transportation writer or from CityJSON -> CityGML conversion after semantic preservation is tested.
+   - CityGML output should use CityJSON -> CityGML conversion with `citygml-tools from-cityjson` after semantic preservation is tested.
    - Raw osm2streets GeoJSON can still be exported for debugging, but it should not be the long-term interchange format.
 
 6. Normalize osm2streets output into polygon assets:
@@ -504,7 +512,7 @@ Unit tests:
   - `Parking(Parallel)` maps to parking grey.
   - unknown lane type maps to fallback.
   - marking types map to expected colors.
-- `transportation.ts`
+- `osm2streets-draft.ts` and `osm2streets-cityjson.ts`
   - WGS84 osm2streets polygons project to EPSG:25832 without losing closure.
   - inserted lane surfaces preserve `transportationUsage`.
   - osm2streets-derived drafts export to CityJSON `Road` objects with provenance.
@@ -556,18 +564,20 @@ Browser/visual checks:
 
 ## Suggested Implementation Order
 
-1. Add `plain` output from `toGeojsonPlain()` and test it.
-2. Add explorer-style color helpers and tests.
-3. Render intersection polygons.
-4. Fix lane polygon colors for osm2streets enum values.
-5. Render lane/intersection markings as filled polygon layers.
-6. Add simple lane/intersection inspector readouts.
-7. Replace road query meters-per-degree math with EPSG:25832 metric bbox conversion.
-8. Add "create RoadDraft from osm2streets road" as the first bridge from explorer view to editor workflow.
-9. Ensure RoadDraft preview and inserted CityJSON road layers reuse the same semantic color helpers as initial osm2streets rendering.
-10. Add JSON/CityJSON export coverage for osm2streets-derived RoadDrafts.
-11. Add the `TrafficAreaPolygonAsset` normalization step so lane/bike/sidewalk polygons carry the metadata needed for CityJSON and CityGML.
-12. Decide whether CityGML export should be direct or CityJSON -> CityGML via converter tooling.
+1. ✅ Add `plain` output from `toGeojsonPlain()` and test it.
+2. ✅ Add explorer-style color helpers and tests.
+3. ✅ Render intersection polygons.
+4. ✅ Fix lane polygon colors for osm2streets enum values.
+5. ✅ Render polygon and line lane/intersection markings with appropriate layers.
+6. ✅ Add lane/intersection inspector readouts and actions.
+7. ✅ Replace road query meters-per-degree math with active-CRS metric bbox conversion.
+8. ✅ Add "create RoadDraft from osm2streets road" as the first editable bridge.
+9. ✅ Reuse semantic color helpers for reference, draft, and inserted road layers.
+10. ✅ Add JSON/CityJSON coverage for editable drafts and selected exact polygons.
+11. ✅ Add the full metric `TrafficAreaPolygonAsset` normalization contract in
+    `osm2streets-draft.ts`, including surface/centerline geometry, CRS,
+    function/usage semantics, ids, width, direction, and provenance.
+12. ✅ Use CityJSON -> CityGML through `npm run cityjson:to-citygml`.
 13. Decide how intersection polygons should persist in CityJSON Transportation.
 14. Add optional debug layers only after the main visual parity path is stable.
 
@@ -581,5 +591,7 @@ Browser/visual checks:
 - Road drafting/editing still works and remains visually on top of the osm2streets reference layers.
 - An OSM XML / osm2streets-derived road can become JSON/CityJSON output, with a tested or documented CityGML Transportation export path.
 - osm2streets-derived lanes, including bike lanes, are normalized as metric surface polygons with centerline, width, direction, function/usage, and provenance attributes before export.
-- All editable or persisted road geometry uses a metric CRS, preferably EPSG:25832 for Hamburg.
-- WGS84 is treated as a map/API exchange format, not the internal editing geometry base.
+- Persisted exact road surfaces and all distance-sensitive operations use the
+  active metric CRS, preferably EPSG:25832 for Hamburg.
+- `RoadDraft.centerlineWgs84` remains the editable map-exchange coordinate
+  shape and is projected before width, fit, and insertion calculations.

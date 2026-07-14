@@ -15,6 +15,9 @@
     "data:hamburg-center": "node scripts/build-hamburg-center-sample.mjs",
     "data:hamburg-lod2": "node scripts/hamburg-lod2.mjs",
     "data:hamburg-lod2:serve": "node scripts/hamburg-lod2.mjs serve",
+    "data:hamburg-roads": "node scripts/build-hamburg-osm2streets-roads.mjs",
+    "cityjson:to-citygml": "node scripts/cityjson-to-citygml.mjs",
+    "osm2streets:cityjson": "node scripts/osm2streets-lanes-to-cityjson.mjs",
     "osm2streets:compare": "node scripts/compare-osm2streets-fixtures.mjs"
   },
   "dependencies": {
@@ -33,6 +36,7 @@
     "lucide-react": "^1.21.0",
     "maplibre-gl": "^5.24.0",
     "osm2streets-js": "file:./vendor/osm2streets-js",
+    "polygon-clipping": "^0.15.7",
     "proj4": "^2.20.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

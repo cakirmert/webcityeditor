@@ -85,37 +85,41 @@ describe('classifySurfaceFromNormal', () => {
 });
 
 import { parseIfc } from '../../src/lib/ifc-import';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 
+const fzkHausIfcPath = resolve(__dirname, '../../public/fzk-haus.ifc');
+
 describe('parseIfc with real FZK-Haus', () => {
-  it('loads and parses real fzk-haus.ifc successfully', async () => {
-    const filePath = resolve(__dirname, '../../public/fzk-haus.ifc');
-    const buffer = readFileSync(filePath);
-    const file = new File([buffer], 'fzk-haus.ifc');
-    // jsdom File does not implement arrayBuffer()
-    file.arrayBuffer = async () => {
-      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-    };
-    const parsed = await parseIfc(file);
-    console.log('FZK-Haus parsed properties:', {
-      width: parsed.width,
-      depth: parsed.depth,
-      height: parsed.height,
-      storeyCount: parsed.storeyCount,
-      verticesCount: parsed.vertices.length / 3,
-      indicesCount: parsed.indices.length,
-      refLat: parsed.refLat,
-      refLon: parsed.refLon,
-      refElevation: parsed.refElevation,
-    });
-    expect(parsed.width).toBeGreaterThan(5);
-    expect(parsed.depth).toBeGreaterThan(5);
-    expect(parsed.height).toBeGreaterThan(5);
-    expect(parsed.vertices.length).toBeGreaterThan(0);
-    expect(parsed.indices.length).toBeGreaterThan(0);
-    expect(parsed.vertices.length / 3).toBeGreaterThan(30_000);
-    expect(parsed.indices.length / 3).toBeGreaterThan(20_000);
-    expect(parsed.triangleSourceClass).toHaveLength(parsed.indices.length / 3);
-  });
+  it.skipIf(!existsSync(fzkHausIfcPath))(
+    'loads and parses real fzk-haus.ifc successfully when the optional fixture is present',
+    async () => {
+      const buffer = readFileSync(fzkHausIfcPath);
+      const file = new File([buffer], 'fzk-haus.ifc');
+      // jsdom File does not implement arrayBuffer()
+      file.arrayBuffer = async () => {
+        return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+      };
+      const parsed = await parseIfc(file);
+      console.log('FZK-Haus parsed properties:', {
+        width: parsed.width,
+        depth: parsed.depth,
+        height: parsed.height,
+        storeyCount: parsed.storeyCount,
+        verticesCount: parsed.vertices.length / 3,
+        indicesCount: parsed.indices.length,
+        refLat: parsed.refLat,
+        refLon: parsed.refLon,
+        refElevation: parsed.refElevation,
+      });
+      expect(parsed.width).toBeGreaterThan(5);
+      expect(parsed.depth).toBeGreaterThan(5);
+      expect(parsed.height).toBeGreaterThan(5);
+      expect(parsed.vertices.length).toBeGreaterThan(0);
+      expect(parsed.indices.length).toBeGreaterThan(0);
+      expect(parsed.vertices.length / 3).toBeGreaterThan(30_000);
+      expect(parsed.indices.length / 3).toBeGreaterThan(20_000);
+      expect(parsed.triangleSourceClass).toHaveLength(parsed.indices.length / 3);
+    }
+  );
 });

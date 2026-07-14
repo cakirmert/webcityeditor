@@ -114,9 +114,11 @@ backend unless the project explicitly changes direction later.
   the same areas when crosswalk/intersection marking quality matters.
 - Test `dual_carriageway_experiment` on representative divided Hamburg roads
   before enabling it by default.
-- Keep road-fit validation separate. It should validate `RoadDraft` or final
-  road-surface polygons against planning/lot/building constraints and highlight
-  overflow areas; it should not become a second lane-geometry generator.
+- Keep road-fit validation separate. The delivered baseline validates editable
+  and exact road surfaces against buildings/planning data, including metric
+  clearance and vertical uncertainty. Robust projected difference geometry and
+  trusted corridor plumbing remain; road-fit must not become a second
+  lane-geometry generator.
 - If a fixture exposes wrong geometry, patch the Rust source and add or tighten
   the fixture expectation in the same commit.
 

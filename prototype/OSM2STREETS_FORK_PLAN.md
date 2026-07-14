@@ -1,7 +1,8 @@
 # osm2streets Fork & Road Editor Improvement Plan
 
-> **Status**: Initial Rust/WASM fork path implemented on 2026-06-24; browser
-> Hamburg verification and UI work remain
+> **Status**: Rust/WASM fork, explorer layers, inspector, exact-surface export,
+> visual lane strip, drag reordering, and advanced-action collapse implemented;
+> live Hamburg viewport verification and optional UI polish remain
 > **Author**: Auto-generated from investigation session (2026-06-08)  
 > **Target**: `webcityeditor/prototype` — Vite + React + MapLibre road editor
 
@@ -10,6 +11,9 @@
 > [`CITYGML_TRANSPORTATION_PLAN.md`](CITYGML_TRANSPORTATION_PLAN.md). Keep this
 > file focused on the osm2streets fork, WASM rebuild, crosswalks, dual
 > carriageways, and road-editor UI.
+> The three-bbox crash-reproduction, Rust/WASM hardening, complete Hamburg
+> export, and focused visual-acceptance sequence is tracked in
+> [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md).
 >
 > **Implementation handoff**: read
 > [`OSM2STREETS_HANDOFF.md`](OSM2STREETS_HANDOFF.md) first for the current
@@ -21,10 +25,12 @@
 
 ### 1.0 Actual Goal
 
-The goal is **one reliable osm2streets lane-geometry path**. The app should not
-maintain a second TypeScript/JavaScript lane-geometry backend. osm2streets is the
-chosen visual engine because it already produces lane polygons, lane markings,
-intersection polygons, and crosswalk-style markings from OSM.
+The goal is **one reliable osm2streets path for OSM-derived reference and exact
+lane geometry**. osm2streets is the chosen OSM visual engine because it already
+produces lane polygons, lane markings, intersection polygons, and
+crosswalk-style markings. The TypeScript ribbon builder remains intentionally
+limited to manual/editable `RoadDraft` previews and insertion; it is not a
+second OSM interpretation engine.
 
 Implemented outcome:
 
@@ -32,7 +38,7 @@ Implemented outcome:
 2. Patch Rust diagnostics and Hamburg sidewalk tag handling at source.
 3. Rebuild the WASM package into `prototype/vendor/osm2streets-js`.
 4. Keep `RoadDraft` as the editable app model, with osm2streets as the only
-   lane-geometry generator.
+   OSM-derived reference/exact-surface lane-geometry generator.
 
 Current repo state:
 
@@ -91,14 +97,10 @@ the results are often empty because:
 
 ### 1.4 Lane Editor UI Limitations
 
-Current lane editing is functional but uses small form rows:
-```
-[car lane ▼] [3.25] [backward ▼] [-]
-[car lane ▼] [3.25] [forward  ▼] [-]
-```
-
-**Desired**: Bigger visual lane boxes that mirror the on-map rendering, with
-drag-to-reorder support.
+The lane editor now combines a proportional, colored horizontal lane strip with
+the detailed form controls. The strip shows width and direction, and supports
+native HTML5 drag-to-reorder. Click-to-select details and hiding custom widths
+by default remain optional polish.
 
 ---
 
@@ -336,16 +338,14 @@ demo's output for the same area.
 
 ### 8.1 Current State
 
-The lane editor (`RoadEditorPanel.tsx`) uses compact form rows:
-- `<select>` for lane type
-- `<input type="number">` for width
-- `<select>` for direction
-- `[-]` remove button
+The lane editor (`RoadEditorPanel.tsx`) now renders colored lane boxes in a
+horizontal strip, proportional to width, with direction arrows and native
+HTML5 drag/drop reordering. Detailed type, width, direction, and remove controls
+remain below the strip.
 
-### 8.2 Desired: Visual Lane Boxes
+### 8.2 Visual Lane Boxes
 
-Replace the form rows with a **horizontal lane strip** that visually mirrors the
-road rendering:
+The delivered **horizontal lane strip** mirrors the road rendering:
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -358,7 +358,7 @@ Each lane box:
 - Color-coded to match the map rendering (grey=sidewalk, green=bike, dark=car)
 - Shows direction arrow (◄ backward, ► forward, ◄► both)
 - Draggable left/right to reorder (HTML5 drag-and-drop or a library like `dnd-kit`)
-- Click to select → shows detail panel below (type, direction, allowed modes)
+- Click-to-select detail panel remains optional follow-up work
 - Fixed width proportional to lane width in metres
 
 ### 8.3 Lane Width Standards
@@ -380,8 +380,9 @@ standard width as a label. Only expose the numeric input in an "advanced" or
 
 ### 8.4 Implementation Approach
 
-1. Create a new `LaneStrip` component with horizontal colored boxes
-2. Use `dnd-kit` (already used in many React projects) for drag-to-reorder
+1. Keep the strip colocated with the draft controls until a separate component
+   improves reuse enough to justify extraction
+2. Use native HTML5 drag/drop for the current dependency-free reorder path
 3. Keep the existing `addBand()` / `removeBand()` / `updateBand()` logic
 4. Map lane type → color using the same palette as `MapView.tsx:537-565`
 
@@ -456,8 +457,8 @@ After completing the fork setup:
 - [ ] Lane geometry renders correctly on the map for real Hamburg Overpass data
 - [ ] Intersection markings / crosswalks appear at intersections where expected
 - [ ] Dual carriageway merging works after targeted testing, if enabled
-- [ ] Lane editor UI shows visual lane boxes (separate UI improvement)
-- [ ] Lanes can be dragged to reorder (separate UI improvement)
+- [x] Lane editor UI shows proportional visual lane boxes with direction arrows
+- [x] Lanes can be dragged to reorder, with focused component coverage
 
 ---
 

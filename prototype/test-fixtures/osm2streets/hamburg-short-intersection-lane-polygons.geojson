@@ -1,0 +1,1725 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99313925721413,
+              53.55002787866833
+            ],
+            [
+              9.993930371392937,
+              53.55002787866833
+            ],
+            [
+              9.993930371392937,
+              53.55004136849161
+            ],
+            [
+              9.99313925721413,
+              53.55004136849161
+            ],
+            [
+              9.99313925721413,
+              53.55002787866833
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 0,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 0,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99313925721413,
+              53.55002697934678
+            ],
+            [
+              9.993930371392937,
+              53.55002697934678
+            ],
+            [
+              9.993930371392937,
+              53.55002787866833
+            ],
+            [
+              9.99313925721413,
+              53.55002787866833
+            ],
+            [
+              9.99313925721413,
+              53.55002697934678
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 1,
+        "layer": 0,
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 0,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99313925721413,
+              53.549999999700226
+            ],
+            [
+              9.993930371392937,
+              53.549999999700226
+            ],
+            [
+              9.993930371392937,
+              53.55002697934678
+            ],
+            [
+              9.99313925721413,
+              53.55002697934678
+            ],
+            [
+              9.99313925721413,
+              53.549999999700226
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 2,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 0,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99313925721413,
+              53.54997302005367
+            ],
+            [
+              9.993930371392937,
+              53.54997302005367
+            ],
+            [
+              9.993930371392937,
+              53.549999999700226
+            ],
+            [
+              9.99313925721413,
+              53.549999999700226
+            ],
+            [
+              9.99313925721413,
+              53.54997302005367
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 3,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 0,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99313925721413,
+              53.54997212073212
+            ],
+            [
+              9.993930371392937,
+              53.54997212073212
+            ],
+            [
+              9.993930371392937,
+              53.54997302005367
+            ],
+            [
+              9.99313925721413,
+              53.54997302005367
+            ],
+            [
+              9.99313925721413,
+              53.54997212073212
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 4,
+        "layer": 0,
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 0,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99313925721413,
+              53.54995863090884
+            ],
+            [
+              9.993930371392937,
+              53.54995863090884
+            ],
+            [
+              9.993930371392937,
+              53.54997212073212
+            ],
+            [
+              9.99313925721413,
+              53.54997212073212
+            ],
+            [
+              9.99313925721413,
+              53.54995863090884
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 5,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 0,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.55002787866833
+            ],
+            [
+              9.994860742785871,
+              53.55002787866833
+            ],
+            [
+              9.994860742785871,
+              53.55004136849161
+            ],
+            [
+              9.994069628607065,
+              53.55004136849161
+            ],
+            [
+              9.994069628607065,
+              53.55002787866833
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 0,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 1,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.55002697934678
+            ],
+            [
+              9.994860742785871,
+              53.55002697934678
+            ],
+            [
+              9.994860742785871,
+              53.55002787866833
+            ],
+            [
+              9.994069628607065,
+              53.55002787866833
+            ],
+            [
+              9.994069628607065,
+              53.55002697934678
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 1,
+        "layer": 0,
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 1,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.549999999700226
+            ],
+            [
+              9.994860742785871,
+              53.549999999700226
+            ],
+            [
+              9.994860742785871,
+              53.55002697934678
+            ],
+            [
+              9.994069628607065,
+              53.55002697934678
+            ],
+            [
+              9.994069628607065,
+              53.549999999700226
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 2,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 1,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.54997302005367
+            ],
+            [
+              9.994860742785871,
+              53.54997302005367
+            ],
+            [
+              9.994860742785871,
+              53.549999999700226
+            ],
+            [
+              9.994069628607065,
+              53.549999999700226
+            ],
+            [
+              9.994069628607065,
+              53.54997302005367
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 3,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 1,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.54997212073212
+            ],
+            [
+              9.994860742785871,
+              53.54997212073212
+            ],
+            [
+              9.994860742785871,
+              53.54997302005367
+            ],
+            [
+              9.994069628607065,
+              53.54997302005367
+            ],
+            [
+              9.994069628607065,
+              53.54997212073212
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 4,
+        "layer": 0,
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 1,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.54995863090884
+            ],
+            [
+              9.994860742785871,
+              53.54995863090884
+            ],
+            [
+              9.994860742785871,
+              53.54997212073212
+            ],
+            [
+              9.994069628607065,
+              53.54997212073212
+            ],
+            [
+              9.994069628607065,
+              53.54995863090884
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 5,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3100
+        ],
+        "road": 1,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.9939530763735,
+              53.54958273788254
+            ],
+            [
+              9.9939530763735,
+              53.54995863090884
+            ],
+            [
+              9.993930371392937,
+              53.54995863090884
+            ],
+            [
+              9.993930371392937,
+              53.54958273788254
+            ],
+            [
+              9.9939530763735,
+              53.54958273788254
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 0,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 2,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.993954590038872,
+              53.54958273788254
+            ],
+            [
+              9.993954590038872,
+              53.54995863090884
+            ],
+            [
+              9.9939530763735,
+              53.54995863090884
+            ],
+            [
+              9.9939530763735,
+              53.54958273788254
+            ],
+            [
+              9.993954590038872,
+              53.54958273788254
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 1,
+        "layer": 0,
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 2,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994,
+              53.54958273788254
+            ],
+            [
+              9.994,
+              53.54995863090884
+            ],
+            [
+              9.993954590038872,
+              53.54995863090884
+            ],
+            [
+              9.993954590038872,
+              53.54958273788254
+            ],
+            [
+              9.994,
+              53.54958273788254
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 2,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 2,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99404540996113,
+              53.54958273788254
+            ],
+            [
+              9.99404540996113,
+              53.54995863090884
+            ],
+            [
+              9.994,
+              53.54995863090884
+            ],
+            [
+              9.994,
+              53.54958273788254
+            ],
+            [
+              9.99404540996113,
+              53.54958273788254
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 3,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 2,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.9940469236265,
+              53.54958273788254
+            ],
+            [
+              9.9940469236265,
+              53.54995863090884
+            ],
+            [
+              9.99404540996113,
+              53.54995863090884
+            ],
+            [
+              9.99404540996113,
+              53.54958273788254
+            ],
+            [
+              9.9940469236265,
+              53.54958273788254
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 4,
+        "layer": 0,
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 2,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.54958273788254
+            ],
+            [
+              9.994069628607065,
+              53.54995863090884
+            ],
+            [
+              9.9940469236265,
+              53.54995863090884
+            ],
+            [
+              9.9940469236265,
+              53.54958273788254
+            ],
+            [
+              9.994069628607065,
+              53.54958273788254
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 5,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 2,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.9939530763735,
+              53.55004136849161
+            ],
+            [
+              9.9939530763735,
+              53.550417262417234
+            ],
+            [
+              9.993930371392937,
+              53.550417262417234
+            ],
+            [
+              9.993930371392937,
+              53.55004136849161
+            ],
+            [
+              9.9939530763735,
+              53.55004136849161
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 0,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 3,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.993954590038872,
+              53.55004136849161
+            ],
+            [
+              9.993954590038872,
+              53.550417262417234
+            ],
+            [
+              9.9939530763735,
+              53.550417262417234
+            ],
+            [
+              9.9939530763735,
+              53.55004136849161
+            ],
+            [
+              9.993954590038872,
+              53.55004136849161
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 1,
+        "layer": 0,
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 3,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994,
+              53.55004136849161
+            ],
+            [
+              9.994,
+              53.550417262417234
+            ],
+            [
+              9.993954590038872,
+              53.550417262417234
+            ],
+            [
+              9.993954590038872,
+              53.55004136849161
+            ],
+            [
+              9.994,
+              53.55004136849161
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Backward",
+        "index": 2,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 3,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.99404540996113,
+              53.55004136849161
+            ],
+            [
+              9.99404540996113,
+              53.550417262417234
+            ],
+            [
+              9.994,
+              53.550417262417234
+            ],
+            [
+              9.994,
+              53.55004136849161
+            ],
+            [
+              9.99404540996113,
+              53.55004136849161
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 3,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": false,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "UseSidepath"
+                  }
+                ],
+                "LandBased": [
+                  {
+                    "value": "Yes"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 3,
+        "speed_limit": "None",
+        "type": "Driving",
+        "width": 3.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.9940469236265,
+              53.55004136849161
+            ],
+            [
+              9.9940469236265,
+              53.550417262417234
+            ],
+            [
+              9.99404540996113,
+              53.550417262417234
+            ],
+            [
+              9.99404540996113,
+              53.55004136849161
+            ],
+            [
+              9.9940469236265,
+              53.55004136849161
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 4,
+        "layer": 0,
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 3,
+        "speed_limit": "None",
+        "type": "Buffer(Curb)",
+        "width": 0.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.994069628607065,
+              53.55004136849161
+            ],
+            [
+              9.994069628607065,
+              53.550417262417234
+            ],
+            [
+              9.9940469236265,
+              53.550417262417234
+            ],
+            [
+              9.9940469236265,
+              53.55004136849161
+            ],
+            [
+              9.994069628607065,
+              53.55004136849161
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "allowed_turns": [],
+        "direction": "Forward",
+        "index": 5,
+        "layer": 0,
+        "muv": {
+          "electrifications": [],
+          "is_sidepath": true,
+          "smoothness": null,
+          "surface": null,
+          "track_widths": [],
+          "travel": {
+            "backward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            },
+            "forward": {
+              "access": {
+                "All": [
+                  {
+                    "value": "No"
+                  }
+                ],
+                "Foot": [
+                  {
+                    "value": "Designated"
+                  }
+                ],
+                "Vehicle": [
+                  {
+                    "value": "No"
+                  }
+                ]
+              }
+            }
+          },
+          "width": null
+        },
+        "osm_way_ids": [
+          3101
+        ],
+        "road": 3,
+        "speed_limit": "None",
+        "type": "Sidewalk",
+        "width": 1.5
+      }
+    }
+  ]
+}

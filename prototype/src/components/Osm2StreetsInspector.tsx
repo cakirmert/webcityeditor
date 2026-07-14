@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 interface Props {
   selection: Osm2StreetsSelection;
   onCreateDraft: () => void;
+  onInsertCityJson: () => void;
   onHighlightConnectedRoads: () => void;
   onClear: () => void;
 }
@@ -11,6 +12,7 @@ interface Props {
 export default function Osm2StreetsInspector({
   selection,
   onCreateDraft,
+  onInsertCityJson,
   onHighlightConnectedRoads,
   onClear,
 }: Props) {
@@ -41,7 +43,11 @@ export default function Osm2StreetsInspector({
       </div>
 
       {selection.kind === 'lane' ? (
-        <LaneDetails properties={props} onCreateDraft={onCreateDraft} />
+        <LaneDetails
+          properties={props}
+          onCreateDraft={onCreateDraft}
+          onInsertCityJson={onInsertCityJson}
+        />
       ) : (
         <IntersectionDetails
           properties={props}
@@ -55,9 +61,11 @@ export default function Osm2StreetsInspector({
 function LaneDetails({
   properties,
   onCreateDraft,
+  onInsertCityJson,
 }: {
   properties: Record<string, any>;
   onCreateDraft: () => void;
+  onInsertCityJson: () => void;
 }) {
   return (
     <>
@@ -81,6 +89,9 @@ function LaneDetails({
       )}
       <Button size="sm" variant="primary" className="w-full" onClick={onCreateDraft}>
         Create editable road draft
+      </Button>
+      <Button size="sm" className="w-full" onClick={onInsertCityJson}>
+        Insert exact CityJSON surfaces
       </Button>
     </>
   );

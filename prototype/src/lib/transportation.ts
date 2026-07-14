@@ -17,6 +17,17 @@ export type RoadBandKind =
 
 export type RoadDirection = 'forward' | 'backward' | 'both' | 'none';
 
+export type RoadVerticalPlacement = 'surface' | 'underground' | 'elevated' | 'unknown';
+
+export interface RoadVerticalProfile {
+  placement: RoadVerticalPlacement;
+  source: 'manual' | 'osm_tags' | 'opendrive' | 'cityjson_geometry' | 'user' | 'unspecified';
+  /** Absolute road-surface elevation in the document's vertical datum, when known. */
+  elevationM?: number;
+  /** OSM layer is an ordering hint, not a metric elevation. */
+  osmLayer?: number;
+}
+
 export interface RoadBand {
   id?: string;
   kind: RoadBandKind;
@@ -40,6 +51,7 @@ export interface RoadDraft {
   source: 'osm' | 'manual' | 'opendrive';
   sourceOsmWayId?: number | string;
   osmTags?: Record<string, string>;
+  vertical?: RoadVerticalProfile;
   userVerified?: boolean;
   sections: RoadSectionDraft[];
 }
@@ -61,6 +73,8 @@ export interface RoadArea {
   surfaceType: 'TrafficArea' | 'AuxiliaryTrafficArea';
   function: string;
   polygon: [number, number][];
+  vertical?: RoadVerticalProfile;
+  editableDraft?: RoadDraft;
   attributes: Record<string, JsonValue>;
 }
 
@@ -154,6 +168,10 @@ export function createManualRoadDraft(
     id: makeStableId('road-draft'),
     name: options.name ?? 'Manual road edit',
     source: 'manual',
+    vertical: {
+      placement: 'surface',
+      source: 'manual',
+    },
     userVerified: true,
     sections: [
       {
@@ -393,6 +411,7 @@ export function inferRoadDraftFromOsmRoad(
     source: 'osm',
     sourceOsmWayId: road.osmWayId,
     osmTags: { ...tags },
+    vertical: inferRoadVerticalProfileFromOsmTags(tags),
     userVerified: false,
     sections: [
       {
@@ -403,6 +422,44 @@ export function inferRoadDraftFromOsmRoad(
       },
     ],
   };
+}
+
+export function inferRoadVerticalProfileFromOsmTags(
+  tags: Record<string, string> = {}
+): RoadVerticalProfile {
+  const layer = parseSignedNumber(tags.layer);
+  const location = tags.location?.trim().toLowerCase();
+  const undergroundEvidence =
+    isTruthyOsmTag(tags.tunnel) ||
+    isTruthyOsmTag(tags.covered) ||
+    location === 'underground' ||
+    (layer !== null && layer < 0);
+  const elevatedEvidence =
+    isTruthyOsmTag(tags.bridge) ||
+    location === 'overground' ||
+    location === 'elevated' ||
+    location === 'overhead' ||
+    (layer !== null && layer > 0);
+
+  let placement: RoadVerticalPlacement;
+  if (undergroundEvidence && elevatedEvidence) placement = 'unknown';
+  else if (undergroundEvidence) placement = 'underground';
+  else if (elevatedEvidence) placement = 'elevated';
+  else placement = 'surface';
+
+  return {
+    placement,
+    source: 'osm_tags',
+    ...(layer === null ? {} : { osmLayer: layer }),
+  };
+}
+
+export function roadVerticalProfileForDraft(draft: RoadDraft): RoadVerticalProfile {
+  if (draft.vertical) return { ...draft.vertical };
+  if (draft.source === 'manual') return { placement: 'surface', source: 'manual' };
+  if (draft.source === 'osm') return inferRoadVerticalProfileFromOsmTags(draft.osmTags);
+  if (draft.source === 'opendrive') return { placement: 'unknown', source: 'opendrive' };
+  return { placement: 'unknown', source: 'unspecified' };
 }
 
 export function splitRoadSectionAtFraction(
@@ -447,7 +504,15 @@ export function insertRoadIntoCityJson(
     throw new Error(`Cannot create road: CRS ${crs.code} is not supported by proj4.`);
   }
   const id = options.id ?? uniqueRoadId(doc);
-  const baseElevation = options.baseElevation ?? computeBbox(doc).min.z;
+  const draftVertical = roadVerticalProfileForDraft(draft);
+  const baseElevation =
+    options.baseElevation ??
+    (Number.isFinite(draftVertical.elevationM)
+      ? draftVertical.elevationM ?? computeBbox(doc).min.z
+      : computeBbox(doc).min.z);
+  const vertical = resolveRoadVerticalProfile(draftVertical, baseElevation, {
+    fallbackIsExplicit: Number.isFinite(options.baseElevation),
+  });
   const projectedAreas = buildProjectedRoadAreas(doc, draft, crs.code);
 
   const t = doc.transform ?? { scale: [1, 1, 1], translate: [0, 0, 0] };
@@ -481,6 +546,8 @@ export function insertRoadIntoCityJson(
       trafficDirection: area.attributes.trafficDirection,
       surfaceMaterial: area.attributes.surfaceMaterial,
       maxspeed: area.attributes.maxspeed ?? null,
+      verticalPlacement: vertical.placement,
+      roadElevation: vertical.elevationM ?? null,
     });
   }
 
@@ -495,6 +562,7 @@ export function insertRoadIntoCityJson(
       _source: draft.source,
       _osmWayId: draft.sourceOsmWayId ?? null,
       _osmTags: draft.osmTags ? jsonRecord(draft.osmTags) : null,
+      _verticalProfile: roadVerticalProfileToJson(vertical),
       _roadLayout: roadDraftToJson(draft),
     },
     geometry: [
@@ -518,6 +586,7 @@ export function insertRoadIntoCityJson(
     areas: projectedAreas.map((area) => ({
       ...area,
       roadId: id,
+      vertical,
       polygon: area.polygon.map((point) =>
         projectToWgs84(crs.code, { x: point.x, y: point.y, z: baseElevation })
       ),
@@ -532,6 +601,8 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
   const areas: RoadArea[] = [];
   for (const [roadId, object] of Object.entries(doc.CityObjects)) {
     if (object.type !== 'Road') continue;
+    const objectVertical = roadVerticalProfileFromCityObject(object);
+    const editableDraft = readEditableRoadDraftFromCityObject(object);
     for (const geometry of object.geometry ?? []) {
       const geom = geometry as {
         type?: string;
@@ -552,16 +623,21 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
         const surface =
           typeof semanticIndex === 'number' ? surfaces[semanticIndex] ?? {} : {};
         const polygon: [number, number][] = [];
+        let minElevation = Infinity;
+        let maxElevation = -Infinity;
         for (const vertexIndex of ring) {
           const vertex = doc.vertices[vertexIndex];
           if (!vertex) continue;
           const c = applyVertexTransform(vertex, doc);
           polygon.push(projectToWgs84(crs.code, c));
+          minElevation = Math.min(minElevation, c.z);
+          maxElevation = Math.max(maxElevation, c.z);
         }
         if (polygon.length < 3) continue;
         closeLngLatRing(polygon);
         const surfaceType =
           surface.type === 'AuxiliaryTrafficArea' ? 'AuxiliaryTrafficArea' : 'TrafficArea';
+        const osm2streetsProperties = jsonObject(surface.osm2streetsProperties);
         areas.push({
           id: `${roadId}-surface-${surfaceIndex}`,
           roadId,
@@ -571,10 +647,39 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
           surfaceType,
           function: String(surface.function ?? 'road_surface'),
           polygon,
+          vertical: objectVertical
+            ? resolveRoadVerticalProfile(
+                objectVertical,
+                Number.isFinite(minElevation) &&
+                Number.isFinite(maxElevation) &&
+                  maxElevation - minElevation <= 0.01
+                  ? (minElevation + maxElevation) / 2
+                  : undefined,
+                { fallbackIsExplicit: objectVertical.source === 'cityjson_geometry' }
+              )
+            : {
+                placement: 'unknown',
+                source: 'cityjson_geometry',
+                ...(Number.isFinite(minElevation) &&
+                Number.isFinite(maxElevation) &&
+                maxElevation - minElevation <= 0.01
+                  ? { elevationM: (minElevation + maxElevation) / 2 }
+                  : {}),
+              },
+          ...(editableDraft ? { editableDraft: cloneDraft(editableDraft) } : {}),
           attributes: {
             function: String(surface.function ?? 'road_surface'),
+            transportationUsage: (surface.transportationUsage ?? null) as JsonValue,
             trafficDirection: (surface.trafficDirection ?? null) as JsonValue,
+            allowedModes: (surface.allowedModes ?? null) as JsonValue,
+            surfaceMaterial: (surface.surfaceMaterial ?? null) as JsonValue,
             maxspeed: (surface.maxspeed ?? null) as JsonValue,
+            source: (surface.source ?? null) as JsonValue,
+            sourceType: (surface.sourceType ?? osm2streetsProperties?.type ?? null) as JsonValue,
+            osm2streetsRoadId: (surface.osm2streetsRoadId ?? null) as JsonValue,
+            osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
+            osmWayIds: (surface.osmWayIds ?? null) as JsonValue,
+            osm2streetsPropertiesJson: (surface.osm2streetsPropertiesJson ?? null) as JsonValue,
           },
         });
       }
@@ -860,6 +965,17 @@ function parsePositiveNumber(value: string | undefined): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseSignedNumber(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isTruthyOsmTag(value: string | undefined): boolean {
+  if (!value) return false;
+  return !['no', 'false', '0', 'none'].includes(value.trim().toLowerCase());
+}
+
 function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
@@ -999,6 +1115,218 @@ function jsonRecord(record: Record<string, string>): JsonValue {
   return { ...record } as JsonValue;
 }
 
+function resolveRoadVerticalProfile(
+  profile: RoadVerticalProfile,
+  fallbackSurfaceElevation?: number,
+  options: { fallbackIsExplicit?: boolean } = {}
+): RoadVerticalProfile {
+  if (Number.isFinite(profile.elevationM)) return { ...profile };
+  if (
+    Number.isFinite(fallbackSurfaceElevation) &&
+    (profile.placement === 'surface' || options.fallbackIsExplicit)
+  ) {
+    return { ...profile, elevationM: fallbackSurfaceElevation };
+  }
+  const withoutElevation = { ...profile };
+  delete withoutElevation.elevationM;
+  return withoutElevation;
+}
+
+function roadVerticalProfileToJson(profile: RoadVerticalProfile): JsonValue {
+  return {
+    placement: profile.placement,
+    source: profile.source,
+    elevationM: Number.isFinite(profile.elevationM) ? profile.elevationM ?? null : null,
+    osmLayer: Number.isFinite(profile.osmLayer) ? profile.osmLayer ?? null : null,
+  };
+}
+
+function roadVerticalProfileFromCityObject(object: CityObject): RoadVerticalProfile | null {
+  const attributes = unknownRecord(object.attributes);
+  const explicit = readRoadVerticalProfile(attributes?._verticalProfile);
+  if (explicit) return explicit;
+
+  const layout = unknownRecord(attributes?._roadLayout);
+  const layoutProfile = readRoadVerticalProfile(layout?.vertical);
+  if (layoutProfile) return layoutProfile;
+
+  const osmTags = stringRecord(attributes?._osmTags);
+  return osmTags ? inferRoadVerticalProfileFromOsmTags(osmTags) : null;
+}
+
+export function readEditableRoadDraftFromCityObject(object: CityObject): RoadDraft | null {
+  const attributes = unknownRecord(object.attributes);
+  const layout = unknownRecord(attributes?._roadLayout);
+  if (!layout) return null;
+  return readRoadDraft(layout);
+}
+
+function readRoadDraft(value: unknown): RoadDraft | null {
+  const record = unknownRecord(value);
+  if (!record) return null;
+
+  const source =
+    record.source === 'osm' || record.source === 'manual' || record.source === 'opendrive'
+      ? record.source
+      : null;
+  if (!source || !Array.isArray(record.sections)) return null;
+
+  const sections: RoadSectionDraft[] = [];
+  for (const sectionValue of record.sections) {
+    const section = readRoadSectionDraft(sectionValue);
+    if (!section) return null;
+    sections.push(section);
+  }
+  if (sections.length === 0) return null;
+
+  const vertical = readRoadVerticalProfile(record.vertical);
+  const osmTags = stringRecord(record.osmTags);
+  const draft: RoadDraft = {
+    source,
+    sections,
+  };
+  if (typeof record.id === 'string' && record.id.length > 0) draft.id = record.id;
+  if (typeof record.name === 'string' && record.name.length > 0) draft.name = record.name;
+  if (
+    typeof record.sourceOsmWayId === 'string' ||
+    (typeof record.sourceOsmWayId === 'number' && Number.isFinite(record.sourceOsmWayId))
+  ) {
+    draft.sourceOsmWayId = record.sourceOsmWayId;
+  }
+  if (osmTags) draft.osmTags = osmTags;
+  if (vertical) draft.vertical = vertical;
+  if (typeof record.userVerified === 'boolean') draft.userVerified = record.userVerified;
+  return draft;
+}
+
+function readRoadSectionDraft(value: unknown): RoadSectionDraft | null {
+  const record = unknownRecord(value);
+  if (!record || typeof record.id !== 'string' || record.id.length === 0) return null;
+  const centerlineWgs84 = readWgs84Line(record.centerlineWgs84);
+  if (!centerlineWgs84 || !Array.isArray(record.bands)) return null;
+
+  const bands: RoadBand[] = [];
+  for (const bandValue of record.bands) {
+    const band = readRoadBand(bandValue);
+    if (!band) return null;
+    bands.push(band);
+  }
+  if (bands.length === 0) return null;
+
+  const section: RoadSectionDraft = {
+    id: record.id,
+    centerlineWgs84,
+    bands,
+  };
+  if (typeof record.maxspeedKmh === 'number' && Number.isFinite(record.maxspeedKmh)) {
+    section.maxspeedKmh = record.maxspeedKmh;
+  } else if (record.maxspeedKmh === null) {
+    section.maxspeedKmh = null;
+  }
+  return section;
+}
+
+function readRoadBand(value: unknown): RoadBand | null {
+  const record = unknownRecord(value);
+  if (!record) return null;
+  const kinds: RoadBandKind[] = ['car_lane', 'bike_lane', 'sidewalk', 'median', 'green', 'parking'];
+  const directions: RoadDirection[] = ['forward', 'backward', 'both', 'none'];
+  const kind = kinds.includes(record.kind as RoadBandKind) ? (record.kind as RoadBandKind) : null;
+  const widthM =
+    typeof record.widthM === 'number' && Number.isFinite(record.widthM) && record.widthM > 0
+      ? record.widthM
+      : null;
+  if (!kind || widthM === null) return null;
+
+  const band: RoadBand = { kind, widthM };
+  if (typeof record.id === 'string' && record.id.length > 0) band.id = record.id;
+  if (directions.includes(record.direction as RoadDirection)) {
+    band.direction = record.direction as RoadDirection;
+  }
+  if (typeof record.surface === 'string' && record.surface.length > 0) {
+    band.surface = record.surface;
+  }
+  if (Array.isArray(record.allowedModes)) {
+    const allowedModes = record.allowedModes.filter(
+      (mode): mode is string => typeof mode === 'string' && mode.length > 0
+    );
+    if (allowedModes.length > 0) band.allowedModes = allowedModes;
+  }
+  if (typeof record.maxspeedKmh === 'number' && Number.isFinite(record.maxspeedKmh)) {
+    band.maxspeedKmh = record.maxspeedKmh;
+  } else if (record.maxspeedKmh === null) {
+    band.maxspeedKmh = null;
+  }
+  return band;
+}
+
+function readWgs84Line(value: unknown): [number, number][] | null {
+  if (!Array.isArray(value)) return null;
+  const line: [number, number][] = [];
+  for (const point of value) {
+    if (
+      Array.isArray(point) &&
+      typeof point[0] === 'number' &&
+      typeof point[1] === 'number' &&
+      Number.isFinite(point[0]) &&
+      Number.isFinite(point[1])
+    ) {
+      line.push([point[0], point[1]]);
+    } else {
+      return null;
+    }
+  }
+  const normalized = normaliseWgs84Line(line);
+  return normalized.length >= 2 ? normalized : null;
+}
+
+function readRoadVerticalProfile(value: unknown): RoadVerticalProfile | null {
+  const record = unknownRecord(value);
+  if (!record) return null;
+  const placements: RoadVerticalPlacement[] = ['surface', 'underground', 'elevated', 'unknown'];
+  const sources: RoadVerticalProfile['source'][] = [
+    'manual',
+    'osm_tags',
+    'opendrive',
+    'cityjson_geometry',
+    'user',
+    'unspecified',
+  ];
+  const placement = placements.includes(record.placement as RoadVerticalPlacement)
+    ? (record.placement as RoadVerticalPlacement)
+    : null;
+  if (!placement) return null;
+  const source = sources.includes(record.source as RoadVerticalProfile['source'])
+    ? (record.source as RoadVerticalProfile['source'])
+    : 'unspecified';
+  return {
+    placement,
+    source,
+    ...(typeof record.elevationM === 'number' && Number.isFinite(record.elevationM)
+      ? { elevationM: record.elevationM }
+      : {}),
+    ...(typeof record.osmLayer === 'number' && Number.isFinite(record.osmLayer)
+      ? { osmLayer: record.osmLayer }
+      : {}),
+  };
+}
+
+function unknownRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringRecord(value: unknown): Record<string, string> | null {
+  const record = unknownRecord(value);
+  if (!record) return null;
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry === 'string') result[key] = entry;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 function closeLngLatRing(ring: [number, number][]): void {
   const first = ring[0];
   const last = ring[ring.length - 1];
@@ -1012,6 +1340,12 @@ function readFace(face: unknown): number[][] {
     (ring): ring is number[] =>
       Array.isArray(ring) && ring.every((idx) => typeof idx === 'number')
   );
+}
+
+function jsonObject(value: JsonValue | undefined): Record<string, JsonValue> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, JsonValue>)
+    : null;
 }
 
 function uniqueRoadId(doc: CityJsonDocument): string {

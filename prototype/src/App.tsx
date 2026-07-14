@@ -500,14 +500,21 @@ export default function App() {
               onPostPayload={() => void roadEditor.handlePostRoadPayload()}
               onBackendUrlChange={roadEditor.setRoadBackendUrl}
               roadFitConflicts={roadEditor.roadFitConflicts}
+              allowedCorridors={roadEditor.allowedCorridors}
+              selectedRoadArea={roadEditor.selectedRoadArea}
+              onEditSelectedRoadArea={roadEditor.handleEditSelectedRoadArea}
               osm2streetsSelection={roadEditor.osm2streetsSelection}
               onCreateDraftFromOsm2StreetsSelection={
                 roadEditor.handleCreateDraftFromOsm2StreetsSelection
               }
+              onInsertOsm2StreetsSelection={roadEditor.handleInsertOsm2StreetsSelection}
               onHighlightConnectedOsm2StreetsRoads={
                 roadEditor.handleHighlightConnectedOsm2StreetsRoads
               }
               onClearOsm2StreetsSelection={roadEditor.handleClearOsm2StreetsSelection}
+              onLoadCorridorFile={roadEditor.handleLoadRoadCorridorFile}
+              onClearCorridors={roadEditor.handleClearRoadCorridors}
+              onFitDraftToCorridors={roadEditor.handleFitRoadDraftToCorridors}
             />
           )}
           {coreState.cityjson ? (
@@ -548,6 +555,7 @@ export default function App() {
               roadAreas={roadEditor.roadAreas}
               roadPreviewAreas={roadEditor.roadPreviewAreas}
               roadFitConflicts={roadEditor.roadFitConflicts}
+              allowedRoadCorridors={roadEditor.allowedCorridors}
               selectedRoadAreaId={roadEditor.selectedRoadArea?.id ?? null}
               onRoadAreaSelect={(area) => {
                 roadEditor.setSelectedRoadArea(area);

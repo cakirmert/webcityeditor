@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectCrs, projectToWgs84 } from '../../src/lib/projection';
+import { activeMetricCrsForCityJson, detectCrs, projectToWgs84 } from '../../src/lib/projection';
 import { buildSampleCube } from '../../src/lib/cityjson';
 
 describe('detectCrs', () => {
@@ -46,6 +46,26 @@ describe('detectCrs', () => {
     expect(crs.code).toBe('EPSG:25832');
     expect(crs.supported).toBe(true);
     expect(crs.inferred).toBe(true);
+  });
+});
+
+describe('activeMetricCrsForCityJson', () => {
+  it('uses a supported projected source CRS for road editing geometry', () => {
+    expect(
+      activeMetricCrsForCityJson({
+        ...buildSampleCube(),
+        metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832' },
+      })
+    ).toBe('EPSG:25832');
+  });
+
+  it('falls back when the source CRS is not a planar metric editing CRS', () => {
+    expect(
+      activeMetricCrsForCityJson({
+        ...buildSampleCube(),
+        metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/4978' },
+      })
+    ).toBe('EPSG:25832');
   });
 });
 

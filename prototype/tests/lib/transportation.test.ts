@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildSampleCube } from '../../src/lib/cityjson';
+import { buildSampleCube, parseCityJson } from '../../src/lib/cityjson';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import {
   buildRoadEditPayload,
   createManualRoadDraft,
   extractTransportationAreas,
   inferRoadDraftFromOsmRoad,
+  inferRoadVerticalProfileFromOsmTags,
   insertRoadIntoCityJson,
   parseOsmRoadsFromOverpass,
   splitRoadSectionAtFraction,
@@ -76,6 +77,18 @@ describe('transportation roads', () => {
     ]);
   });
 
+  it.each([
+    [{ tunnel: 'yes' }, 'underground'],
+    [{ covered: 'yes' }, 'underground'],
+    [{ layer: '-1' }, 'underground'],
+    [{ bridge: 'yes' }, 'elevated'],
+    [{ layer: '2' }, 'elevated'],
+    [{ bridge: 'yes', layer: '-1' }, 'unknown'],
+    [{ layer: 'not-a-number' }, 'surface'],
+  ] as const)('infers %s OSM vertical hints as %s', (tags, placement) => {
+    expect(inferRoadVerticalProfileFromOsmTags(tags)).toMatchObject({ placement });
+  });
+
   it('inserts a valid CityJSON Road MultiSurface with transportation semantics', () => {
     const doc = buildSampleCube();
     const draft = createManualRoadDraft(delftRoad, { maxspeedKmh: 30 });
@@ -108,6 +121,51 @@ describe('transportation roads', () => {
     expect(areas[0].roadId).toBe('road-test');
     expect(areas[0].polygon.length).toBeGreaterThanOrEqual(4);
     expect(areas.some((area) => area.function === 'bike_lane')).toBe(true);
+  });
+
+  it('reopens inserted Road objects with editable _roadLayout metadata', () => {
+    const doc = buildSampleCube();
+    const draft = createManualRoadDraft(delftRoad, { name: 'Reopened road', maxspeedKmh: 30 });
+    draft.vertical = { placement: 'underground', source: 'user', elevationM: -4 };
+    insertRoadIntoCityJson(doc, draft, { id: 'road-test' });
+
+    const prepared = prepareValidatedCityJsonExport(doc);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const parsed = parseCityJson(prepared.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const areas = extractTransportationAreas(parsed.doc).filter((area) => area.roadId === 'road-test');
+
+    expect(areas[0].editableDraft).toMatchObject({
+      name: 'Reopened road',
+      source: 'manual',
+      vertical: { placement: 'underground', source: 'user', elevationM: -4 },
+    });
+    expect(areas[0].editableDraft?.sections[0].centerlineWgs84).toEqual(draft.sections[0].centerlineWgs84);
+    expect(areas[0].editableDraft?.sections[0].bands.map((band) => band.kind)).toEqual(
+      draft.sections[0].bands.map((band) => band.kind)
+    );
+  });
+
+  it('uses a known draft elevation for geometry and preserves its vertical profile', () => {
+    const doc = buildSampleCube();
+    const draft = createManualRoadDraft(delftRoad, { maxspeedKmh: 30 });
+    draft.vertical = { placement: 'elevated', source: 'user', elevationM: 42 };
+
+    const inserted = insertRoadIntoCityJson(doc, draft, { id: 'elevated-road' });
+    const extracted = extractTransportationAreas(doc).filter(
+      (area) => area.roadId === 'elevated-road'
+    );
+
+    expect(inserted.areas[0].vertical).toEqual(draft.vertical);
+    expect(extracted[0].vertical).toEqual(draft.vertical);
+    expect(doc.CityObjects['elevated-road'].attributes?._verticalProfile).toMatchObject({
+      placement: 'elevated',
+      source: 'user',
+      elevationM: 42,
+    });
   });
 
   it('splits a road section into two building-block sections while preserving bands', () => {

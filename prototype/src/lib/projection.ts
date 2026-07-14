@@ -69,6 +69,10 @@ export interface CrsInfo {
   inferred?: boolean;
 }
 
+export type Bbox2D = [number, number, number, number];
+
+const NON_METRIC_EDITING_CRS = new Set(['EPSG:4326', 'EPSG:4978']);
+
 /**
  * Detect the projected CRS declared in a CityJSON document. If the metadata
  * doesn't declare one (some citygml-tools output, some hand-authored files),
@@ -104,6 +108,15 @@ export function detectCrs(doc: CityJsonDocument): CrsInfo {
     }
   }
   return { code: 'UNKNOWN', supported: false };
+}
+
+export function activeMetricCrsForCityJson(
+  doc: CityJsonDocument,
+  fallback = 'EPSG:25832'
+): string {
+  const crs = detectCrs(doc);
+  if (crs.supported && !NON_METRIC_EDITING_CRS.has(crs.code)) return crs.code;
+  return fallback;
 }
 
 export interface CityCoord {
@@ -188,6 +201,44 @@ export function projectToWgs84(code: string, coord: CityCoord): [number, number]
   }
   const [lng, lat] = proj4(code, 'EPSG:4326', [coord.x, coord.y]) as [number, number];
   return [lng, lat];
+}
+
+export function projectWgs84BboxToCrs(bbox: Bbox2D, crs: string): Bbox2D {
+  return projectBboxCorners(bbox, 'EPSG:4326', crs, `Could not project WGS84 bbox into ${crs}`);
+}
+
+export function projectCrsBboxToWgs84(bbox: Bbox2D, crs: string): Bbox2D {
+  return projectBboxCorners(bbox, crs, 'EPSG:4326', `Could not project ${crs} bbox into WGS84`);
+}
+
+function projectBboxCorners(
+  bbox: Bbox2D,
+  fromCrs: string,
+  toCrs: string,
+  errorMessage: string
+): Bbox2D {
+  const [westOrMinX, southOrMinY, eastOrMaxX, northOrMaxY] = bbox;
+  const corners: [number, number][] = [
+    [westOrMinX, southOrMinY],
+    [eastOrMaxX, southOrMinY],
+    [eastOrMaxX, northOrMaxY],
+    [westOrMinX, northOrMaxY],
+  ];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const corner of corners) {
+    const [x, y] = proj4(fromCrs, toCrs, corner) as [number, number];
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) {
+    throw new Error(errorMessage);
+  }
+  return [minX, minY, maxX, maxY];
 }
 
 /** Bulk convert all CityJSON vertices to lng/lat/elev (in WGS84). Slow but simple. */
