@@ -30,6 +30,9 @@ function renderPanel(
   options: {
     osm2streetsSelection?: ComponentProps<typeof RoadEditorPanel>['osm2streetsSelection'];
     selectedRoadArea?: RoadArea;
+    draftDirty?: boolean;
+    editingRoadId?: string;
+    onCancelEdit?: () => void;
     onEditSelectedRoadArea?: (area: RoadArea) => void;
     onCreateDraftFromOsm2StreetsSelection?: () => void;
     onInsertOsm2StreetsSelection?: () => void;
@@ -41,11 +44,13 @@ function renderPanel(
   const onInsertOsm2StreetsSelection = options.onInsertOsm2StreetsSelection ?? vi.fn();
   const onHighlightConnectedOsm2StreetsRoads =
     options.onHighlightConnectedOsm2StreetsRoads ?? vi.fn();
-  render(
+  const rendered = render(
     <RoadEditorPanel
       osmRoads={[]}
       selectedOsmRoadId={null}
       draft={draft}
+      draftDirty={options.draftDirty ?? false}
+      editingRoadId={options.editingRoadId ?? null}
       status={null}
       basemap="map"
       drawMode="none"
@@ -56,6 +61,7 @@ function renderPanel(
       onStartManualDraw={() => {}}
       onFinishManualDraw={() => {}}
       onCancelDraw={() => {}}
+      onCancelEdit={options.onCancelEdit ?? vi.fn()}
       onDraftChange={onDraftChange}
       onSplitDraft={() => {}}
       onInsertRoad={() => {}}
@@ -76,6 +82,7 @@ function renderPanel(
     onCreateDraftFromOsm2StreetsSelection,
     onInsertOsm2StreetsSelection,
     onHighlightConnectedOsm2StreetsRoads,
+    unmount: rendered.unmount,
   };
 }
 
@@ -107,6 +114,25 @@ describe('<RoadEditorPanel />', () => {
     expect(disclosure).not.toHaveAttribute('open');
     fireEvent.click(screen.getByText('CityJSON Export & Backend'));
     expect(disclosure).toHaveAttribute('open');
+  });
+
+  it('offers an explicit road-edit cancel action', () => {
+    const onCancelEdit = vi.fn();
+    renderPanel(vi.fn(), { onCancelEdit });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel road edit' }));
+
+    expect(onCancelEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels updates to an existing road and only enables save after a change', () => {
+    const { unmount } = renderPanel(vi.fn(), { editingRoadId: 'road-1' });
+    expect(screen.getByRole('button', { name: 'Save road changes' })).toBeDisabled();
+    unmount();
+
+    renderPanel(vi.fn(), { editingRoadId: 'road-1', draftDirty: true });
+    expect(screen.getByRole('button', { name: 'Save road changes' })).toBeEnabled();
+    expect(screen.getByText('Unsaved changes to road-1')).toBeInTheDocument();
   });
 
   it('stores user-selected vertical placement on the road draft', () => {
@@ -183,8 +209,8 @@ describe('<RoadEditorPanel />', () => {
   });
 
   it('shows selected imported CityJSON road-surface metadata', () => {
-    renderPanel(vi.fn(), {
-      selectedRoadArea: {
+    const onEditSelectedRoadArea = vi.fn();
+    const selectedRoadArea: RoadArea = {
         id: 'surface-1',
         roadId: 'osm2streets-road-7',
         sectionId: 'section-1',
@@ -202,7 +228,10 @@ describe('<RoadEditorPanel />', () => {
           osmWayIds: ['3100'],
           osm2streetsPropertiesJson: '{"type":"Driving","width":3}',
         },
-      },
+      };
+    renderPanel(vi.fn(), {
+      selectedRoadArea,
+      onEditSelectedRoadArea,
     });
 
     expect(screen.getByText('CityJSON road surface')).toBeInTheDocument();
@@ -210,6 +239,8 @@ describe('<RoadEditorPanel />', () => {
     expect(screen.getByText('Driving')).toBeInTheDocument();
     expect(screen.getByText('road 7, lane 2')).toBeInTheDocument();
     expect(screen.getByText('3100')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create editable layout' }));
+    expect(onEditSelectedRoadArea).toHaveBeenCalledWith(selectedRoadArea);
   });
 
   it('offers editing when an imported CityJSON road carries a saved layout', () => {

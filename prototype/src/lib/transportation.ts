@@ -572,6 +572,9 @@ export function insertRoadIntoCityJson(
     throw new Error(`Cannot create road: CRS ${crs.code} is not supported by proj4.`);
   }
   const id = options.id ?? uniqueRoadId(doc);
+  const existingRoad = doc.CityObjects[id];
+  const existingAttributes = existingRoad?.type === 'Road' ? existingRoad.attributes ?? {} : {};
+  const changedAt = new Date().toISOString();
   const draftVertical = roadVerticalProfileForDraft(draft);
   const baseElevation =
     options.baseElevation ??
@@ -624,14 +627,18 @@ export function insertRoadIntoCityJson(
   const cityObject: CityObject = {
     type: 'Road',
     attributes: {
+      ...existingAttributes,
       class: 'transportation',
       function: 'road',
-      name: draft.name ?? null,
-      _createdBy: 'city-editor-prototype',
-      _createdAt: new Date().toISOString(),
+      name: draft.name ?? existingAttributes.name ?? null,
+      _createdBy: existingAttributes._createdBy ?? 'city-editor-prototype',
+      _createdAt: existingAttributes._createdAt ?? changedAt,
+      ...(existingRoad?.type === 'Road' ? { _updatedAt: changedAt } : {}),
       _source: draft.source,
-      _osmWayId: draft.sourceOsmWayId ?? null,
-      _osmTags: draft.osmTags ? jsonRecord(draft.osmTags) : null,
+      _osmWayId: draft.sourceOsmWayId ?? existingAttributes._osmWayId ?? null,
+      _osmTags: draft.osmTags
+        ? jsonRecord(draft.osmTags)
+        : (existingAttributes._osmTags ?? null),
       _verticalProfile: roadVerticalProfileToJson(vertical),
       _roadLayout: roadDraftToJson(draft),
     },
@@ -744,11 +751,19 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             allowedModes: (surface.allowedModes ?? null) as JsonValue,
             surfaceMaterial: (surface.surfaceMaterial ?? null) as JsonValue,
             maxspeed: (surface.maxspeed ?? null) as JsonValue,
-            source: (surface.source ?? null) as JsonValue,
+            source: (surface.source ?? object.attributes?._source ?? null) as JsonValue,
+            roadName: (object.attributes?.name ?? null) as JsonValue,
             sourceType: (surface.sourceType ?? osm2streetsProperties?.type ?? null) as JsonValue,
-            osm2streetsRoadId: (surface.osm2streetsRoadId ?? null) as JsonValue,
+            osm2streetsRoadId: (
+              surface.osm2streetsRoadId ?? object.attributes?._osm2streetsRoadId ?? null
+            ) as JsonValue,
             osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
-            osmWayIds: (surface.osmWayIds ?? null) as JsonValue,
+            osmWayIds: (
+              surface.osmWayIds ??
+              object.attributes?._osmWayIds ??
+              object.attributes?._osmWayId ??
+              null
+            ) as JsonValue,
             osm2streetsPropertiesJson: (surface.osm2streetsPropertiesJson ?? null) as JsonValue,
           },
         });
@@ -756,6 +771,224 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
     }
   }
   return areas;
+}
+
+/**
+ * Build the editable ribbon model from an imported CityJSON Road that only
+ * carries exact Transportation surfaces. The original polygons stay untouched
+ * until the caller explicitly saves the derived draft back to the document.
+ */
+export function deriveEditableRoadDraftFromAreas(
+  areas: RoadArea[],
+  roadId: string
+): RoadDraft {
+  const roadAreas = areas.filter((area) => area.roadId === roadId);
+  if (roadAreas.length === 0) {
+    throw new Error(`Could not find CityJSON Transportation surfaces for ${roadId}.`);
+  }
+
+  const sectionGroups = new Map<string, RoadArea[]>();
+  for (const area of roadAreas) {
+    const sectionId = area.sectionId || `${roadId}-section-1`;
+    const current = sectionGroups.get(sectionId) ?? [];
+    current.push(area);
+    sectionGroups.set(sectionId, current);
+  }
+
+  const sections = [...sectionGroups.entries()]
+    .sort(([, a], [, b]) => minimumSurfaceIndex(a) - minimumSurfaceIndex(b))
+    .map(([sectionId, sectionAreas]) => {
+      const orderedAreas = uniqueImportedBandAreas(sectionAreas);
+      const bands = orderedAreas.map((area, index) => importedRoadBand(area, index));
+      const centerlineWgs84 = deriveCenterlineFromImportedAreas(sectionAreas);
+      const maxspeedKmh = bands.find((band) => Number.isFinite(band.maxspeedKmh))
+        ?.maxspeedKmh;
+      return {
+        id: sectionId,
+        centerlineWgs84,
+        bands,
+        ...(maxspeedKmh === undefined ? {} : { maxspeedKmh }),
+      };
+    });
+
+  const sourceOsmWayId = firstImportedOsmWayId(roadAreas);
+  const vertical = roadAreas.find((area) => area.vertical)?.vertical;
+  const isOsmDerived = roadAreas.some(
+    (area) => String(area.attributes.source ?? '').toLowerCase() === 'osm2streets'
+  );
+  return {
+    id: roadId,
+    name:
+      roadAreas
+        .map((area) => stringValue(area.attributes.roadName))
+        .find((value) => value !== undefined) ?? roadId,
+    source: isOsmDerived ? 'osm' : 'manual',
+    ...(sourceOsmWayId === undefined ? {} : { sourceOsmWayId }),
+    ...(vertical ? { vertical: { ...vertical } } : {}),
+    userVerified: false,
+    sections,
+  };
+}
+
+function minimumSurfaceIndex(areas: RoadArea[]): number {
+  return Math.min(...areas.map((area) => area.surfaceIndex));
+}
+
+function uniqueImportedBandAreas(areas: RoadArea[]): RoadArea[] {
+  const bands = new Map<string, RoadArea>();
+  for (const area of [...areas].sort(importedAreaOrder)) {
+    const laneIndex = finiteNumber(area.attributes.osm2streetsLaneIndex);
+    const key =
+      laneIndex !== null
+        ? `lane:${laneIndex}`
+        : area.bandId
+          ? `band:${area.bandId}`
+          : `surface:${area.surfaceIndex}`;
+    if (!bands.has(key)) bands.set(key, area);
+  }
+  return [...bands.values()];
+}
+
+function importedAreaOrder(a: RoadArea, b: RoadArea): number {
+  const aLane = finiteNumber(a.attributes.osm2streetsLaneIndex);
+  const bLane = finiteNumber(b.attributes.osm2streetsLaneIndex);
+  return (aLane ?? a.surfaceIndex) - (bLane ?? b.surfaceIndex);
+}
+
+function importedRoadBand(area: RoadArea, index: number): RoadBand {
+  const sourceProperties = importedOsm2StreetsProperties(area);
+  const sourceType = stringValue(area.attributes.sourceType) ?? stringValue(sourceProperties?.type);
+  const kind = importedRoadBandKind(area, sourceType);
+  const widthM =
+    finiteNumber(area.attributes.widthMeters) ??
+    finiteNumber(area.attributes.width) ??
+    finiteNumber(sourceProperties?.width) ??
+    DEFAULT_WIDTHS[kind];
+  const maxspeedKmh =
+    finiteNumber(area.attributes.maxspeed) ?? finiteNumber(sourceProperties?.speed_limit);
+  const allowedModes = stringArray(area.attributes.allowedModes);
+
+  return {
+    id: area.bandId || `imported-${kind}-${index}`,
+    kind,
+    ...(sourceType ? { sourceType } : {}),
+    widthM: Math.max(0.4, Math.min(12, widthM)),
+    direction: importedRoadDirection(area.attributes.trafficDirection),
+    ...(allowedModes.length > 0 ? { allowedModes } : {}),
+    ...(maxspeedKmh === null ? {} : { maxspeedKmh }),
+  };
+}
+
+function importedRoadBandKind(area: RoadArea, sourceType?: string): RoadBandKind {
+  const key = normalizeImportedRoadValue(
+    `${String(area.attributes.transportationUsage ?? '')} ${area.function} ${sourceType ?? ''}`
+  );
+  if (key.includes('bike') || key.includes('biking') || key.includes('cycle')) return 'bike_lane';
+  if (key.includes('sidewalk') || key.includes('foot') || key.includes('shoulder') || key.includes('shareduse')) {
+    return 'sidewalk';
+  }
+  if (key.includes('parking')) return 'parking';
+  if (key.includes('green') || key.includes('planter') || key.includes('verge')) return 'green';
+  if (key.includes('median') || key.includes('buffer') || key.includes('curb')) return 'median';
+  return area.surfaceType === 'AuxiliaryTrafficArea' ? 'median' : 'car_lane';
+}
+
+function importedRoadDirection(value: unknown): RoadDirection {
+  const direction = normalizeImportedRoadValue(String(value ?? ''));
+  if (direction === 'forward' || direction === 'backward' || direction === 'both') return direction;
+  if (direction === 'bidirectional') return 'both';
+  return 'none';
+}
+
+function importedOsm2StreetsProperties(area: RoadArea): Record<string, unknown> | null {
+  const value = area.attributes.osm2streetsPropertiesJson;
+  if (typeof value !== 'string') return null;
+  try {
+    return unknownRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function deriveCenterlineFromImportedAreas(areas: RoadArea[]): [number, number][] {
+  let best: [[number, number], [number, number]] | null = null;
+  let bestDistance = -Infinity;
+  for (const area of areas) {
+    const pair = farthestLngLatPair(area.polygon);
+    if (!pair) continue;
+    const distance = squaredLngLatDistance(pair[0], pair[1]);
+    if (distance > bestDistance) {
+      best = pair;
+      bestDistance = distance;
+    }
+  }
+  if (!best || bestDistance <= 0) {
+    throw new Error('Could not derive an editable centerline from the imported CityJSON road surfaces.');
+  }
+  return best;
+}
+
+function farthestLngLatPair(
+  polygon: [number, number][]
+): [[number, number], [number, number]] | null {
+  const first = polygon[0];
+  if (!first || polygon.length < 2) return null;
+  const endA = farthestPointFrom(first, polygon);
+  const endB = farthestPointFrom(endA, polygon);
+  return squaredLngLatDistance(endA, endB) > 0 ? [[...endA], [...endB]] : null;
+}
+
+function farthestPointFrom(
+  origin: [number, number],
+  points: [number, number][]
+): [number, number] {
+  let farthest = origin;
+  let distance = -Infinity;
+  for (const point of points) {
+    const candidate = squaredLngLatDistance(origin, point);
+    if (candidate > distance) {
+      farthest = point;
+      distance = candidate;
+    }
+  }
+  return farthest;
+}
+
+function squaredLngLatDistance(a: [number, number], b: [number, number]): number {
+  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+}
+
+function firstImportedOsmWayId(areas: RoadArea[]): string | number | undefined {
+  for (const area of areas) {
+    const value = area.attributes.osmWayIds;
+    if (Array.isArray(value)) {
+      const first = value.find((entry) => typeof entry === 'string' || typeof entry === 'number');
+      if (typeof first === 'string' || typeof first === 'number') return first;
+    }
+    if (typeof value === 'string' || typeof value === 'number') return value;
+  }
+  return undefined;
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function normalizeImportedRoadValue(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 export function buildRoadEditPayload(

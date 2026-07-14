@@ -50,6 +50,35 @@ Current implementation state:
   layer names, options, clipping workaround, and interpretation of
   `network_plain`.
 
+## Catalog Generation Versus CityJSON Editing
+
+For the precomputed Hamburg workflow, osm2streets is a
+**catalog-generation dependency**, not a requirement for normal editing. The
+optional live OSM fetch path still uses the browser WASM engine. A fresh clone
+can create the complete Hamburg road catalog with:
+
+```powershell
+cd D:\webcityeditor\prototype
+npm run data:hamburg-roads:prepare
+npm run data:hamburg-roads:serve
+```
+
+The preparation command initializes the Git submodule, downloads the Geofabrik
+Hamburg PBF when absent, builds the platform-native exporter with Cargo, runs the
+proven Hamburg tile/subdivision settings, validates each CityJSONSeq tile, and
+discards successful native/GeoJSON intermediates. It retains about 1.3 GiB of
+served `.city.jsonl` data under ignored `Data/`, so the full dataset is not
+committed. A complete zero-failure catalog is detected and skipped on later
+runs. `--dry-run` prints the resolved plan without creating files.
+
+Once generated, the editor and local catalog server load, modify, and save
+CityJSONSeq without calling osm2streets. Exact imported road surfaces can be
+turned into a `RoadDraft` by deriving a centerline and semantic lane bands.
+Cancel discards the draft without touching CityJSON; Save replaces the same
+Road id and compacts orphaned vertices. That save intentionally regenerates the
+changed road as editable ribbon surfaces, so an untouched exact polygon remains
+exact but a reshaped one does not.
+
 ## Why WASM Is Used
 
 osm2streets is a Rust project. The browser cannot execute Rust source or a
@@ -126,6 +155,15 @@ backend unless the project explicitly changes direction later.
 17. Ran the hosted-fixture and live Hamburg browser smoke: exact picking,
     semantic bus-lane red, draft creation, satellite/underground opacity,
     planning, and panel sizing all passed with no console errors.
+18. Added explicit road-edit cancellation and in-place save for existing Road
+    ids, including imported exact CityJSON roads that lack `_roadLayout`.
+19. Replaced the MapLibre-backed deck.gl drag gesture with a dedicated
+    mouse-down/move/up session, so road centerline handles remain attached until
+    mouse release.
+20. Added the portable `data:hamburg-roads:prepare` and
+    `data:hamburg-roads:serve` workflow; sequence-only output and successful-work
+    cleanup keep the generated catalog local instead of committing a large or
+    arbitrary area subset.
 
 ## What Is Still Left
 
@@ -158,6 +196,7 @@ npm ci
 npm outdated --json
 npm audit --json
 npm run osm2streets:compare
+npm run data:hamburg-roads:prepare -- --dry-run
 npm run build
 npm run test -- src/lib/osm2streets.test.ts src/lib/road-fit.test.ts
 npm test
@@ -175,6 +214,8 @@ Browser verification should include:
 - [x] confirm exact lane polygons and semantic colors survive selection/editing
 - [x] confirm the console has no red `console.error` lines
 - [x] inspect intersection/crosswalk markings and metadata
+- [x] confirm a dirty road edit exposes the explicit Cancel action (state preservation is unit-covered)
+- [x] drag a road endpoint continuously until mouseup
 
 ## Do Not Do
 

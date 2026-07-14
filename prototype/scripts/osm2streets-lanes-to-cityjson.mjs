@@ -13,6 +13,10 @@ if (!args.lanes || !args.output) {
 const lanesPath = resolve(String(args.lanes));
 const outputPath = resolve(String(args.output));
 const seqOutputPath = args['seq-output'] ? resolve(String(args['seq-output'])) : null;
+const seqOnly = args['seq-only'] === true || args['seq-only'] === 'true';
+if (seqOnly && !seqOutputPath) {
+  throw new Error('--seq-only requires --seq-output');
+}
 const generatedAt = String(args['generated-at'] ?? new Date().toISOString());
 const sourceLabel = String(args.source ?? 'osm2streets lane-polygons.geojson');
 const idPrefix = String(args['id-prefix'] ?? '');
@@ -25,8 +29,10 @@ const cityjson = convertLanePolygonsToCityJson(
   }
 );
 
-mkdirSync(dirname(outputPath), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(cityjson.doc)}\n`, 'utf8');
+if (!seqOnly) {
+  mkdirSync(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(cityjson.doc)}\n`, 'utf8');
+}
 
 if (seqOutputPath) {
   mkdirSync(dirname(seqOutputPath), { recursive: true });
@@ -37,7 +43,7 @@ console.log(
   `Converted ${cityjson.summary.roads} osm2streets road(s), ` +
     `${cityjson.summary.surfaces} surface(s), ${cityjson.summary.vertices} vertices`
 );
-console.log(`CityJSON: ${outputPath}`);
+if (!seqOnly) console.log(`CityJSON: ${outputPath}`);
 if (seqOutputPath) console.log(`CityJSONSeq: ${seqOutputPath}`);
 
 function convertLanePolygonsToCityJson(geojson, options) {
@@ -487,7 +493,7 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    'Usage: node scripts/osm2streets-lanes-to-cityjson.mjs --lanes lane-polygons.geojson --output roads.city.json [--seq-output roads.city.jsonl] [--id-prefix tile-001-]',
+    'Usage: node scripts/osm2streets-lanes-to-cityjson.mjs --lanes lane-polygons.geojson --output roads.city.json [--seq-output roads.city.jsonl] [--seq-only] [--id-prefix tile-001-]',
     '',
     'Converts osm2streets lane polygons into CityJSON 2.0 Road MultiSurfaces in EPSG:25832.',
   ].join('\n');

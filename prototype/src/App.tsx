@@ -511,11 +511,13 @@ export default function App() {
               osmRoads={roadEditor.osmRoads}
               selectedOsmRoadId={roadEditor.selectedOsmRoadId}
               draft={roadEditor.roadDraft}
+              draftDirty={roadEditor.roadDraftDirty}
+              editingRoadId={roadEditor.editingRoadId}
               status={roadEditor.roadStatus}
               basemap={roadEditor.basemap}
               drawMode={coreState.drawMode}
               backendUrl={roadEditor.roadBackendUrl}
-              insertedRoadId={roadEditor.lastInsertedRoadId}
+              insertedRoadId={roadEditor.editingRoadId ?? roadEditor.lastInsertedRoadId}
               onClose={() => roadEditor.setShowRoadEditor(false)}
               onFetchOsmRoads={() => void roadEditor.handleFetchOsmRoads()}
               onBasemapChange={roadEditor.setBasemap}
@@ -527,6 +529,7 @@ export default function App() {
                 buildingEditor.setPendingForm(null);
                 buildingEditor.setCreationError(null);
               }}
+              onCancelEdit={roadEditor.handleCancelRoadEdit}
               onDraftChange={roadEditor.handleRoadDraftChange}
               onSplitDraft={roadEditor.handleSplitRoadDraft}
               onInsertRoad={roadEditor.handleInsertRoad}

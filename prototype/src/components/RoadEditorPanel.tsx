@@ -40,6 +40,8 @@ interface Props {
   osmRoads: OsmRoadFeature[];
   selectedOsmRoadId: string | null;
   draft: RoadDraft | null;
+  draftDirty: boolean;
+  editingRoadId?: string | null;
   status: string | null;
   basemap: 'map' | 'satellite';
   drawMode: 'none' | 'polygon' | 'road-line';
@@ -54,6 +56,7 @@ interface Props {
   onStartManualDraw: () => void;
   onFinishManualDraw: () => void;
   onCancelDraw: () => void;
+  onCancelEdit: () => void;
   onDraftChange: (draft: RoadDraft) => void;
   onSplitDraft: (sectionId: string, fraction: number) => void;
   onInsertRoad: () => void;
@@ -90,6 +93,8 @@ export default function RoadEditorPanel({
   osmRoads,
   selectedOsmRoadId,
   draft,
+  draftDirty,
+  editingRoadId = null,
   status,
   basemap,
   drawMode,
@@ -104,6 +109,7 @@ export default function RoadEditorPanel({
   onStartManualDraw,
   onFinishManualDraw,
   onCancelDraw,
+  onCancelEdit,
   onDraftChange,
   onSplitDraft,
   onInsertRoad,
@@ -428,6 +434,25 @@ export default function RoadEditorPanel({
                 <span>{activeSection.maxspeedKmh ?? 'n/a'} km/h</span>
               </div>
             </div>
+            <div className="flex items-center justify-between gap-2 rounded-md border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.07)] px-2.5 py-2">
+              <span className="min-w-0 text-[10px] text-[var(--text-dim)]">
+                {editingRoadId
+                  ? draftDirty
+                    ? `Unsaved changes to ${editingRoadId}`
+                    : `Editing ${editingRoadId}`
+                  : 'New road draft'}
+              </span>
+              <Button
+                size="sm"
+                variant="warn"
+                onClick={onCancelEdit}
+                aria-label="Cancel road edit"
+                title="Discard this road draft and leave the saved CityJSON unchanged"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Cancel edit
+              </Button>
+            </div>
 
             <div className="grid grid-cols-2 gap-2">
               {draft.sections.length > 1 && (
@@ -681,15 +706,19 @@ export default function RoadEditorPanel({
                     size="sm"
                     variant="primary"
                     onClick={onInsertRoad}
-                    disabled={blockingFitConflicts.length > 0}
+                    disabled={
+                      blockingFitConflicts.length > 0 || (!!editingRoadId && !draftDirty)
+                    }
                     title={
                       blockingFitConflicts.length > 0
                         ? 'Resolve road-fit building overlaps before inserting.'
+                        : editingRoadId && !draftDirty
+                          ? 'Change the road layout before saving.'
                         : undefined
                     }
                   >
                     <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    Insert CityJSON Road
+                    {editingRoadId ? 'Save road changes' : 'Insert CityJSON Road'}
                   </Button>
                   <Button size="sm" onClick={onExportPayload}>
                     <Download className="h-3.5 w-3.5" aria-hidden="true" />
@@ -870,11 +899,15 @@ function SelectedRoadAreaCard({ area, onEdit }: { area: RoadArea; onEdit: (area:
         <dt className="text-[var(--text-dim)]">OSM ways</dt>
         <dd className="break-words">{osmWayIds}</dd>
       </dl>
-      {area.editableDraft && (
-        <Button size="sm" className="mt-2 w-full" onClick={() => onEdit(area)}>
-          <PencilLine className="h-3.5 w-3.5" aria-hidden="true" />
-          Edit saved layout
-        </Button>
+      <Button size="sm" className="mt-2 w-full" onClick={() => onEdit(area)}>
+        <PencilLine className="h-3.5 w-3.5" aria-hidden="true" />
+        {area.editableDraft ? 'Edit saved layout' : 'Create editable layout'}
+      </Button>
+      {!area.editableDraft && (
+        <p className="mt-1.5 text-[10px] leading-snug text-[var(--text-faint)]">
+          Derives a centerline and lane bands from this CityJSON road. Saving rebuilds the exact
+          polygons as editable road ribbons.
+        </p>
       )}
       {provenance && (
         <details className="mt-2">

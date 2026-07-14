@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseCityJson } from '../../src/lib/cityjson';
-import { extractTransportationAreas } from '../../src/lib/transportation';
+import {
+  deriveEditableRoadDraftFromAreas,
+  extractTransportationAreas,
+} from '../../src/lib/transportation';
 
 const prototypeRoot = resolve(__dirname, '../..');
 const scriptPath = resolve(prototypeRoot, 'scripts/osm2streets-lanes-to-cityjson.mjs');
@@ -156,10 +159,23 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
       const parsed = parseCityJson(JSON.stringify(doc));
       expect(parsed.ok).toBe(true);
       if (!parsed.ok) return;
-      const areasByKey = new Map(
-        extractTransportationAreas(parsed.doc).map((area) => [areaKey(area), area])
-      );
+      const importedAreas = extractTransportationAreas(parsed.doc);
+      const areasByKey = new Map(importedAreas.map((area) => [areaKey(area), area]));
       expect(areasByKey.size).toBe(source.features.length);
+
+      const editableRoad = deriveEditableRoadDraftFromAreas(
+        importedAreas,
+        'osm2streets-road-0'
+      );
+      expect(editableRoad.sections[0].centerlineWgs84).toHaveLength(2);
+      expect(editableRoad.sections[0].bands.map((band) => band.kind)).toEqual([
+        'sidewalk',
+        'median',
+        'car_lane',
+        'car_lane',
+        'median',
+        'sidewalk',
+      ]);
 
       for (const feature of source.features) {
         const key = featureKey(feature);
@@ -176,6 +192,36 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
         );
         expectPolygonToMatch(area.polygon, feature.geometry.coordinates[0]);
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('can emit only CityJSONSeq for a disk-efficient local catalog build', () => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'webcityeditor-osm2streets-seq-only-'));
+    try {
+      const input = resolve(dir, 'lane-polygons.geojson');
+      const skippedOutput = resolve(dir, 'roads.city.json');
+      const seqOutput = resolve(dir, 'roads.city.jsonl');
+      writeFileSync(input, `${JSON.stringify(lanePolygonsFixture())}\n`);
+
+      execFileSync(
+        process.execPath,
+        [
+          scriptPath,
+          '--lanes',
+          input,
+          '--output',
+          skippedOutput,
+          '--seq-output',
+          seqOutput,
+          '--seq-only',
+        ],
+        { cwd: prototypeRoot, stdio: 'pipe' }
+      );
+
+      expect(existsSync(skippedOutput)).toBe(false);
+      expect(readFileSync(seqOutput, 'utf8')).toContain('"type":"CityJSONFeature"');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

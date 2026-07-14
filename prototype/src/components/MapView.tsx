@@ -41,7 +41,6 @@ import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   insertRoadDraftPoint,
-  toLngLat,
   updateRoadDraftPoint,
   type RoadDraftHandle,
   type RoadDraftPath,
@@ -362,60 +361,6 @@ export default function MapView({
     [onRoadDraftChange]
   );
 
-  const handleRoadDraftHandleDragStart = useCallback(
-    (info: PickingInfo<RoadDraftHandle>) => {
-      if (!info.object || !onRoadDraftChange) return false;
-      const handle = info.object;
-      const draft = roadDraftRef.current;
-      if (!draft) return false;
-      const position = toLngLat(info.coordinate) ?? handle.position;
-      const map = mapRef.current;
-      map?.dragPan.disable();
-
-      if (handle.kind === 'midpoint') {
-        const next = insertRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position);
-        roadDraftDragRef.current = {
-          sectionId: handle.sectionId,
-          pointIndex: handle.pointIndex,
-        };
-        commitRoadDraft(next);
-        return true;
-      }
-
-      roadDraftDragRef.current = {
-        sectionId: handle.sectionId,
-        pointIndex: handle.pointIndex,
-      };
-      commitRoadDraft(updateRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position));
-      return true;
-    },
-    [commitRoadDraft, onRoadDraftChange]
-  );
-
-  const handleRoadDraftHandleDrag = useCallback(
-    (info: PickingInfo<RoadDraftHandle>) => {
-      const active = roadDraftDragRef.current;
-      const draft = roadDraftRef.current;
-      const position = toLngLat(info.coordinate);
-      if (!active || !draft || !position || !onRoadDraftChange) return false;
-      commitRoadDraft(
-        updateRoadDraftPoint(draft, active.sectionId, active.pointIndex, position)
-      );
-      return true;
-    },
-    [commitRoadDraft, onRoadDraftChange]
-  );
-
-  const handleRoadDraftHandleDragEnd = useCallback(
-    (info: PickingInfo<RoadDraftHandle>) => {
-      handleRoadDraftHandleDrag(info);
-      roadDraftDragRef.current = null;
-      mapRef.current?.dragPan.enable();
-      return true;
-    },
-    [handleRoadDraftHandleDrag]
-  );
-
   // Detect CRS support and surface a warning if unsupported
   useEffect(() => {
     const crs = detectCrs(cityjson);
@@ -512,6 +457,114 @@ export default function MapView({
       overlayRef.current = null;
     };
   }, []);
+
+  // Keep road-handle drags independent from MapLibre's pan gesture. The deck.gl
+  // Mapbox overlay forwards MapLibre drag events; disabling dragPan from a deck
+  // onDragStart callback therefore ends that same gesture immediately. Picking
+  // the handle on mousedown and tracking window mouse events keeps the selected
+  // point attached until mouseup, including when the cursor leaves the handle.
+  useEffect(() => {
+    const map = mapRef.current;
+    const overlay = overlayRef.current;
+    if (!map || !overlay) return;
+
+    const canvas = map.getCanvas();
+    let restoreDragPan = false;
+    let previousCursor = '';
+
+    const removeWindowListeners = () => {
+      window.removeEventListener('mousemove', onWindowMouseMove, true);
+      window.removeEventListener('mouseup', onWindowMouseUp, true);
+      window.removeEventListener('blur', finishDrag);
+    };
+
+    const finishDrag = () => {
+      if (!roadDraftDragRef.current) return;
+      roadDraftDragRef.current = null;
+      removeWindowListeners();
+      canvas.style.cursor = previousCursor;
+      if (restoreDragPan) map.dragPan.enable();
+      restoreDragPan = false;
+    };
+
+    const updateFromMouse = (event: MouseEvent) => {
+      const active = roadDraftDragRef.current;
+      const draft = roadDraftRef.current;
+      if (!active || !draft || !onRoadDraftChange) return;
+      const rect = canvas.getBoundingClientRect();
+      const lngLat = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
+      commitRoadDraft(
+        updateRoadDraftPoint(draft, active.sectionId, active.pointIndex, [lngLat.lng, lngLat.lat])
+      );
+    };
+
+    function onWindowMouseMove(event: MouseEvent) {
+      if (!roadDraftDragRef.current) return;
+      if (event.buttons === 0) {
+        finishDrag();
+        return;
+      }
+      event.preventDefault();
+      updateFromMouse(event);
+    }
+
+    function onWindowMouseUp(event: MouseEvent) {
+      if (!roadDraftDragRef.current) return;
+      updateFromMouse(event);
+      finishDrag();
+    }
+
+    const onMouseDown = (event: maplibregl.MapMouseEvent) => {
+      if (
+        event.originalEvent.button !== 0 ||
+        roadDraftDragRef.current ||
+        drawMode === 'road-line' ||
+        !onRoadDraftChange
+      ) {
+        return;
+      }
+      const draft = roadDraftRef.current;
+      if (!draft) return;
+
+      const picked = overlay.pickObject({
+        x: event.point.x,
+        y: event.point.y,
+        radius: 10,
+        layerIds: ['road-draft-centerline-handles'],
+      });
+      const handle = picked?.object as RoadDraftHandle | undefined;
+      if (!handle) return;
+
+      event.preventDefault();
+      event.originalEvent.preventDefault();
+      restoreDragPan = map.dragPan.isEnabled();
+      if (restoreDragPan) map.dragPan.disable();
+      previousCursor = canvas.style.cursor;
+      canvas.style.cursor = 'grabbing';
+
+      roadDraftDragRef.current = {
+        sectionId: handle.sectionId,
+        pointIndex: handle.pointIndex,
+      };
+      const position: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+      commitRoadDraft(
+        handle.kind === 'midpoint'
+          ? insertRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position)
+          : updateRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position)
+      );
+
+      window.addEventListener('mousemove', onWindowMouseMove, true);
+      window.addEventListener('mouseup', onWindowMouseUp, true);
+      window.addEventListener('blur', finishDrag);
+    };
+
+    map.on('mousedown', onMouseDown);
+    return () => {
+      map.off('mousedown', onMouseDown);
+      finishDrag();
+      removeWindowListeners();
+    };
+  }, [commitRoadDraft, drawMode, onRoadDraftChange]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -950,9 +1003,6 @@ export default function MapView({
           autoHighlight: true,
           highlightColor: [255, 255, 255, 90],
           parameters: { depthTest: false } as unknown as never,
-          onDragStart: handleRoadDraftHandleDragStart,
-          onDrag: handleRoadDraftHandleDrag,
-          onDragEnd: handleRoadDraftHandleDragEnd,
         })
       );
     }
@@ -1148,9 +1198,6 @@ export default function MapView({
     roadPreviewAreas,
     roadDraft,
     onRoadDraftChange,
-    handleRoadDraftHandleDragStart,
-    handleRoadDraftHandleDrag,
-    handleRoadDraftHandleDragEnd,
     drawMode,
     roadFitConflicts,
     selectedRoadAreaId,

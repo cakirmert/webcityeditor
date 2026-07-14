@@ -6,6 +6,7 @@ import {
   buildOverpassRoadQuery,
   buildRoadEditPayload,
   createManualRoadDraft,
+  deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   insertRoadIntoCityJson,
   parseOsmRoadsFromXml,
@@ -23,6 +24,7 @@ import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
+import { compactVertices } from '../lib/compact';
 
 interface FetchOsmRoadOptions {
   source?: 'viewport' | 'loaded-data';
@@ -150,6 +152,7 @@ export function useRoadEditor(
   const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
   const [roadDraftDirty, setRoadDraftDirty] = useState(false);
+  const [editingRoadId, setEditingRoadId] = useState<string | null>(null);
   const [roadStatus, setRoadStatus] = useState<string | null>(null);
   const [selectedRoadArea, setSelectedRoadArea] = useState<RoadArea | null>(null);
   const [lastInsertedRoadId, setLastInsertedRoadId] = useState<string | null>(null);
@@ -237,6 +240,9 @@ export function useRoadEditor(
     setOsm2streetsSelection(null);
     setHighlightedOsm2StreetsRoadIds(new Set());
     setSelectedOsmRoadId(road.id);
+    setSelectedRoadArea(null);
+    setEditingRoadId(null);
+    setLastInsertedRoadId(null);
     const inferred = cloneRoadDraft(road.inferredDraft);
     const ok = window.confirm(
       `OSM interpretation for ${road.tags.name ?? road.id}:\n\n` +
@@ -301,6 +307,9 @@ export function useRoadEditor(
       );
       setRoadDraft(draft);
       setRoadDraftDirty(false);
+      setEditingRoadId(null);
+      setLastInsertedRoadId(null);
+      setSelectedRoadArea(null);
       setSelectedOsmRoadId(matchedOsmRoad?.id ?? null);
       setRoadStatus(
         matchedOsmRoad
@@ -363,25 +372,53 @@ export function useRoadEditor(
   }, []);
 
   const handleEditSelectedRoadArea = useCallback((area: RoadArea) => {
-    if (!area.editableDraft) {
-      setRoadStatus(`${area.roadId} does not include editable _roadLayout metadata.`);
+    const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
+    let draft: RoadDraft;
+    try {
+      draft =
+        savedDraft ??
+        deriveEditableRoadDraftFromAreas(
+          cityjson ? extractTransportationAreas(cityjson) : [area],
+          area.roadId
+        );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRoadStatus(message);
+      alert(`CityJSON road editing failed: ${message}`);
       return;
     }
-    const draft = cloneRoadDraft(area.editableDraft);
     setRoadDraft({
       ...draft,
       id: draft.id ?? area.roadId,
     });
     setRoadDraftDirty(false);
     setSelectedRoadArea(area);
+    setEditingRoadId(area.roadId);
     setLastInsertedRoadId(area.roadId);
     setOsm2streetsSelection(null);
     setHighlightedOsm2StreetsRoadIds(new Set());
     setSelectedOsmRoadId(null);
     setRoadStatus(
-      `Loaded editable layout from ${area.roadId}. Review the draft, then export or insert the edited road.`
+      savedDraft
+        ? `Loaded editable layout from ${area.roadId}. Changes stay in the draft until you save them.`
+        : `Derived an editable layout from ${area.roadId}'s CityJSON surfaces. The exact polygons stay unchanged until you save; saving rebuilds them from the editable centerline and bands.`
     );
-  }, []);
+  }, [cityjson]);
+
+  const handleCancelRoadEdit = useCallback(() => {
+    if (roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
+    setDrawMode('none');
+    setSelection(null);
+    setRoadDraft(null);
+    setRoadDraftDirty(false);
+    setEditingRoadId(null);
+    setSelectedRoadArea(null);
+    setSelectedOsmRoadId(null);
+    setLastInsertedRoadId(null);
+    setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
+    setRoadStatus('Road edit canceled. No unsaved draft changes were applied to CityJSON.');
+  }, [roadDraftDirty, setDrawMode, setSelection]);
 
   const handleSplitRoadDraft = useCallback((sectionId: string, fraction: number) => {
     setRoadDraftDirty(true);
@@ -441,11 +478,20 @@ export function useRoadEditor(
       return;
     }
     try {
-      pushUndo('Insert CityJSON road');
+      const targetRoadId = editingRoadId;
+      pushUndo(targetRoadId ? 'Update CityJSON road' : 'Insert CityJSON road');
       const { value: result } = runStructurallyGuardedMutation(
         cityjson,
-        'Inserting CityJSON road',
-        () => insertRoadIntoCityJson(cityjson, roadDraft)
+        targetRoadId ? 'Updating CityJSON road' : 'Inserting CityJSON road',
+        () => {
+          const inserted = insertRoadIntoCityJson(
+            cityjson,
+            roadDraft,
+            targetRoadId ? { id: targetRoadId } : undefined
+          );
+          if (targetRoadId) compactVertices(cityjson);
+          return inserted;
+        }
       );
       setDirtyIds((prev) => {
         const next = new Set(prev);
@@ -455,10 +501,15 @@ export function useRoadEditor(
       setSelection({ objectId: result.id });
       setSelectedRoadArea(null);
       setLastInsertedRoadId(result.id);
+      setEditingRoadId(result.id);
       setRoadDraftDirty(false);
       setReloadToken((t) => t + 1);
       markGeometryChanged('Road geometry changed; run Check 3D before export.');
-      setRoadStatus(`Inserted ${result.id} with ${result.areas.length} transportation surfaces.`);
+      setRoadStatus(
+        targetRoadId
+          ? `Saved changes to ${result.id} with ${result.areas.length} transportation surfaces.`
+          : `Inserted ${result.id} with ${result.areas.length} transportation surfaces.`
+      );
     } catch (error) {
       console.error(error);
       alert(`Road insertion failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -466,6 +517,7 @@ export function useRoadEditor(
   }, [
     cityjson,
     roadDraft,
+    editingRoadId,
     roadFitConflicts,
     pushUndo,
     setDirtyIds,
@@ -550,19 +602,21 @@ export function useRoadEditor(
 
   const handleExportRoadPayload = useCallback(() => {
     if (!roadDraft) return;
+    const targetRoadId = editingRoadId ?? lastInsertedRoadId;
     downloadJson(
-      buildRoadEditPayload(roadDraft, lastInsertedRoadId ?? undefined),
-      `${lastInsertedRoadId ?? roadDraft.id ?? 'road-edit'}.payload.json`
+      buildRoadEditPayload(roadDraft, targetRoadId ?? undefined),
+      `${targetRoadId ?? roadDraft.id ?? 'road-edit'}.payload.json`
     );
-  }, [roadDraft, lastInsertedRoadId]);
+  }, [roadDraft, editingRoadId, lastInsertedRoadId]);
 
   const handlePostRoadPayload = useCallback(async () => {
     if (!roadDraft) return;
     try {
+      const targetRoadId = editingRoadId ?? lastInsertedRoadId;
       const response = await fetch(roadBackendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildRoadEditPayload(roadDraft, lastInsertedRoadId ?? undefined)),
+        body: JSON.stringify(buildRoadEditPayload(roadDraft, targetRoadId ?? undefined)),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
@@ -573,7 +627,7 @@ export function useRoadEditor(
       setRoadStatus(error instanceof Error ? error.message : String(error));
       alert(`Road backend POST failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [roadDraft, roadBackendUrl, lastInsertedRoadId]);
+  }, [roadDraft, roadBackendUrl, editingRoadId, lastInsertedRoadId]);
 
   const roadAreas = useMemo(() => {
     if (!cityjson) return [];
@@ -591,6 +645,8 @@ export function useRoadEditor(
     setSelectedOsmRoadId,
     roadDraft,
     setRoadDraft,
+    roadDraftDirty,
+    editingRoadId,
     roadStatus,
     setRoadStatus,
     selectedRoadArea,
@@ -619,6 +675,7 @@ export function useRoadEditor(
     handleRoadLineDrawn,
     handleRoadDraftChange,
     handleEditSelectedRoadArea,
+    handleCancelRoadEdit,
     handleSplitRoadDraft,
     handleInsertRoad,
     handleInsertOsm2StreetsSelection,

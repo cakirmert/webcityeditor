@@ -4,12 +4,14 @@ import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation'
 import {
   buildRoadEditPayload,
   createManualRoadDraft,
+  deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   inferRoadDraftFromOsmRoad,
   inferRoadVerticalProfileFromOsmTags,
   insertRoadIntoCityJson,
   parseOsmRoadsFromOverpass,
   splitRoadSectionAtFraction,
+  type RoadArea,
 } from '../../src/lib/transportation';
 
 const delftRoad: [number, number][] = [
@@ -176,6 +178,81 @@ describe('transportation roads', () => {
       allowedModes: ['bus'],
     });
     expect(areas.some((area) => area.attributes.sourceType === 'Bus')).toBe(true);
+  });
+
+  it('derives an editable draft from precomputed CityJSON road surfaces alone', () => {
+    const areas: RoadArea[] = [
+      {
+        id: 'road-precomputed-surface-0',
+        roadId: 'road-precomputed',
+        sectionId: 'section-1',
+        bandId: 'sidewalk-0',
+        surfaceIndex: 0,
+        surfaceType: 'TrafficArea',
+        function: 'sidewalk',
+        polygon: [
+          [9.99, 53.55],
+          [10, 53.55],
+          [10, 53.55001],
+          [9.99, 53.55001],
+          [9.99, 53.55],
+        ],
+        vertical: { placement: 'surface', source: 'cityjson_geometry', elevationM: 0 },
+        attributes: {
+          source: 'osm2streets',
+          roadName: 'Imported Rathausmarkt road',
+          sourceType: 'Sidewalk',
+          trafficDirection: 'backward',
+          allowedModes: ['pedestrian'],
+          osm2streetsLaneIndex: 0,
+          osmWayIds: ['3100'],
+          osm2streetsPropertiesJson: '{"type":"Sidewalk","width":1.5}',
+        },
+      },
+      {
+        id: 'road-precomputed-surface-1',
+        roadId: 'road-precomputed',
+        sectionId: 'section-1',
+        bandId: 'driving-1',
+        surfaceIndex: 1,
+        surfaceType: 'TrafficArea',
+        function: 'driving_lane',
+        polygon: [
+          [9.99, 53.54997],
+          [10, 53.54997],
+          [10, 53.55],
+          [9.99, 53.55],
+          [9.99, 53.54997],
+        ],
+        attributes: {
+          source: 'osm2streets',
+          sourceType: 'Driving',
+          trafficDirection: 'forward',
+          allowedModes: ['car'],
+          maxspeed: 30,
+          osm2streetsLaneIndex: 1,
+          osmWayIds: ['3100'],
+          osm2streetsPropertiesJson: '{"type":"Driving","width":3}',
+        },
+      },
+    ];
+
+    const draft = deriveEditableRoadDraftFromAreas(areas, 'road-precomputed');
+
+    expect(draft).toMatchObject({
+      id: 'road-precomputed',
+      name: 'Imported Rathausmarkt road',
+      source: 'osm',
+      sourceOsmWayId: '3100',
+      userVerified: false,
+    });
+    expect(draft.sections).toHaveLength(1);
+    expect(draft.sections[0].centerlineWgs84).toHaveLength(2);
+    expect(draft.sections[0].maxspeedKmh).toBe(30);
+    expect(draft.sections[0].bands).toEqual([
+      expect.objectContaining({ kind: 'sidewalk', widthM: 1.5, direction: 'backward' }),
+      expect.objectContaining({ kind: 'car_lane', widthM: 3, direction: 'forward' }),
+    ]);
   });
 
   it('uses a known draft elevation for geometry and preserves its vertical profile', () => {

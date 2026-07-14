@@ -538,6 +538,10 @@ async function serveTiles() {
   const port = numberOption('port') ?? 8787;
   const host = String(options.host ?? '127.0.0.1');
   const catalog = JSON.parse(await readFile(catalogPath, 'utf8'));
+  const datasetLabel =
+    catalog.type === 'HamburgOsm2StreetsRoadCityJSONSeqCatalog'
+      ? 'Hamburg osm2streets Road CityJSONSeq tiles'
+      : 'Hamburg LoD2 CityJSONSeq tiles';
   const writebackValidator = options['skip-writeback-geometry-validation']
     ? null
     : resolveVal3dity();
@@ -560,7 +564,7 @@ async function serveTiles() {
       if (url.pathname === '/' || url.pathname === '/health') {
         sendJson(response, {
           ok: true,
-          dataset: 'Hamburg LoD2 CityJSONSeq tiles',
+          dataset: datasetLabel,
           catalog: '/api/hamburg/catalog',
           query: '/api/hamburg/tiles?bbox=minX,minY,maxX,maxY',
           writeback: 'PUT or DELETE /api/hamburg/tiles/:id',
@@ -645,7 +649,7 @@ async function serveTiles() {
   });
 
   server.listen(port, host, () => {
-    console.log(`Hamburg LoD2 tile server listening on http://${host}:${port}`);
+    console.log(`${datasetLabel} server listening on http://${host}:${port}`);
     console.log(`Catalog: http://${host}:${port}/api/hamburg/catalog`);
     console.log(
       `Write-back: enabled with structural${writebackSchemaValidator ? ' + cjval' : ''}${

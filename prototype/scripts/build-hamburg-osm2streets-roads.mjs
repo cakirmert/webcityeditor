@@ -1,7 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import proj4 from 'proj4';
 
@@ -15,7 +24,7 @@ const outputDir = resolvePath(args['output-dir'] ?? '../Data/hamburg-roads-osm2s
 const workDir = resolvePath(args['work-dir'] ?? '../Data/hamburg-roads-osm2streets/osm2streets-tiles');
 const exporter = resolvePath(
   args.exporter ??
-    '../vendor/osm2streets/target/release/webcityeditor_native_export.exe'
+    `../vendor/osm2streets/target/release/webcityeditor_native_export${process.platform === 'win32' ? '.exe' : ''}`
 );
 const converter = resolve(prototypeRoot, 'scripts/osm2streets-lanes-to-cityjson.mjs');
 const validator = resolve(prototypeRoot, 'scripts/hamburg-lod2.mjs');
@@ -26,6 +35,8 @@ const maxLaneGeoJsonBytes = numberOption('max-lane-geojson-mb', 384) * 1024 * 10
 const generatedAt = String(args['generated-at'] ?? new Date().toISOString());
 const validate = args.validate !== false && args.validate !== 'false';
 const clean = args.clean === true || args.clean === 'true';
+const seqOnly = args['seq-only'] === true || args['seq-only'] === 'true';
+const discardWork = args['discard-work'] === true || args['discard-work'] === 'true';
 
 if (minDepth > maxDepth) {
   throw new Error('--min-depth cannot be greater than --max-depth');
@@ -64,7 +75,7 @@ while (pending.length > 0) {
     continue;
   }
   console.log(`Exporting ${tile.id} depth=${tile.depth} bbox=${tile.bbox.join(',')}`);
-  const result = runTile(tile);
+  const result = await runTile(tile);
   if (result.ok) {
     if (result.empty) {
       empty.push(result.tileSummary);
@@ -81,7 +92,7 @@ while (pending.length > 0) {
 
   console.log(`  failed ${tile.id}: ${result.error}`);
   if (tile.depth < maxDepth) {
-    if (result.cleanupWork) {
+    if (result.cleanupWork || discardWork) {
       rmSync(resolve(workDir, tile.id), { recursive: true, force: true });
     }
     pending.push(...splitBbox(tile.bbox, 2, 2, tile.id).map((child) => ({ ...child, depth: tile.depth + 1 })));
@@ -118,6 +129,10 @@ const summary = {
   minDepth,
   maxDepth,
   maxLaneGeoJsonMiB: maxLaneGeoJsonBytes / 1024 / 1024,
+  outputMode: {
+    cityjsonseqOnly: seqOnly,
+    discardSuccessfulWork: discardWork,
+  },
   tiles: successful,
   failed,
   totals: {
@@ -138,11 +153,13 @@ console.log(`Summary: ${summaryPath}`);
 console.log(`Catalog: ${catalogPath}`);
 if (failed.length > 0) process.exitCode = 2;
 
-function runTile(tile) {
+async function runTile(tile) {
   const tileWorkDir = resolve(workDir, tile.id);
   const tileOutJson = resolve(outputDir, `${tile.id}.city.json`);
   const tileOutSeq = resolve(outputDir, `${tile.id}.city.jsonl`);
   rmSync(tileWorkDir, { recursive: true, force: true });
+  rmSync(tileOutJson, { force: true });
+  rmSync(tileOutSeq, { force: true });
   mkdirSync(tileWorkDir, { recursive: true });
 
   const native = spawnSync(
@@ -182,7 +199,7 @@ function runTile(tile) {
   }
   const nativeSummary = JSON.parse(readFileSync(resolve(tileWorkDir, 'summary.json'), 'utf8'));
   if ((nativeSummary.counts?.lanes ?? 0) === 0) {
-    return {
+    const result = {
       ok: true,
       empty: true,
       tileSummary: {
@@ -195,6 +212,8 @@ function runTile(tile) {
         vertices: 0,
       },
     };
+    if (discardWork) rmSync(tileWorkDir, { recursive: true, force: true });
+    return result;
   }
   const laneGeoJsonBytes = statSync(lanes).size;
   if (laneGeoJsonBytes > maxLaneGeoJsonBytes) {
@@ -209,25 +228,27 @@ function runTile(tile) {
     };
   }
   const source = `Geofabrik Hamburg OSM PBF -> osm2streets tile ${tile.id}`;
-  const converted = spawnSync(
-    process.execPath,
-    [
-      converter,
-      '--lanes',
-      lanes,
-      '--output',
-      tileOutJson,
-      '--seq-output',
-      tileOutSeq,
-      '--generated-at',
-      generatedAt,
-      '--source',
-      source,
-      '--id-prefix',
-      `${tile.id}-`,
-    ],
-    { cwd: prototypeRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
-  );
+  const converterArgs = [
+    converter,
+    '--lanes',
+    lanes,
+    '--output',
+    tileOutJson,
+    '--seq-output',
+    tileOutSeq,
+    '--generated-at',
+    generatedAt,
+    '--source',
+    source,
+    '--id-prefix',
+    `${tile.id}-`,
+  ];
+  if (seqOnly) converterArgs.push('--seq-only');
+  const converted = spawnSync(process.execPath, converterArgs, {
+    cwd: prototypeRoot,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
   writeFileSync(resolve(tileWorkDir, 'cityjson-convert.log'), `${converted.stdout ?? ''}${converted.stderr ?? ''}`, 'utf8');
   if (converted.error || converted.status !== 0) {
     return {
@@ -255,13 +276,13 @@ function runTile(tile) {
     }
   }
 
-  const seqStats = readSeqStats(tileOutSeq);
-  return {
+  const seqStats = await readSeqStats(tileOutSeq);
+  const result = {
     ok: true,
     tileSummary: {
       id: tile.id,
       bbox: tile.bbox,
-      cityjson: tileOutJson,
+      ...(seqOnly ? {} : { cityjson: tileOutJson }),
       cityjsonseq: tileOutSeq,
       native: nativeSummary.counts,
       diagnostics: nativeSummary.diagnostics,
@@ -271,16 +292,24 @@ function runTile(tile) {
       vertices: seqStats.vertices,
     },
   };
+  if (seqOnly) rmSync(tileOutJson, { force: true });
+  if (discardWork) rmSync(tileWorkDir, { recursive: true, force: true });
+  return result;
 }
 
-function readSeqStats(file) {
-  const lines = readFileSync(file, 'utf8').trim().split(/\r?\n/);
-  const header = JSON.parse(lines[0]);
+async function readSeqStats(file) {
+  const input = createReadStream(file, { encoding: 'utf8' });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let header = null;
   let features = 0;
   let surfaces = 0;
   let vertices = 0;
-  for (const line of lines.slice(1)) {
+  for await (const line of lines) {
     if (!line.trim()) continue;
+    if (!header) {
+      header = JSON.parse(line);
+      continue;
+    }
     const feature = JSON.parse(line);
     features++;
     vertices += Array.isArray(feature.vertices) ? feature.vertices.length : 0;
@@ -290,6 +319,7 @@ function readSeqStats(file) {
       }
     }
   }
+  if (!header) throw new Error(`CityJSONSeq output is empty: ${file}`);
   return {
     features,
     surfaces,
