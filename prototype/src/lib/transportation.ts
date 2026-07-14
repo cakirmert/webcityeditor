@@ -31,6 +31,8 @@ export interface RoadVerticalProfile {
 export interface RoadBand {
   id?: string;
   kind: RoadBandKind;
+  /** Original semantic lane type (for example Bus, SharedUse, or LightRail). */
+  sourceType?: string;
   widthM: number;
   direction?: RoadDirection;
   surface?: string;
@@ -327,80 +329,90 @@ export function inferRoadDraftFromOsmRoad(
   const maxspeedKmh = parseMaxspeed(tags.maxspeed);
   const lanes = clampInt(parsePositiveNumber(tags.lanes) ?? (isOneway(tags) ? 1 : 2), 1, 8);
   const oneway = isOneway(tags);
-  const bands: RoadBand[] = [];
+  const dedicatedNonMotorBand = inferDedicatedNonMotorBand(tags);
+  const bands: RoadBand[] = dedicatedNonMotorBand ? [dedicatedNonMotorBand] : [];
 
-  if (hasSidewalk(tags, 'left')) {
-    bands.push({
-      id: 'osm-sidewalk-left',
-      kind: 'sidewalk',
-      widthM: DEFAULT_WIDTHS.sidewalk,
-      direction: 'none',
-      allowedModes: ['pedestrian'],
-    });
-  }
-  if (hasCycleway(tags, 'left')) {
-    bands.push({
-      id: 'osm-bike-left',
-      kind: 'bike_lane',
-      widthM: DEFAULT_WIDTHS.bike_lane,
-      direction: oneway ? 'forward' : 'backward',
-      allowedModes: ['bicycle'],
-    });
-  }
-
-  if (oneway) {
-    for (let i = 0; i < lanes; i++) {
+  if (!dedicatedNonMotorBand) {
+    if (hasSidewalk(tags, 'left')) {
       bands.push({
-        id: `osm-car-forward-${i + 1}`,
-        kind: 'car_lane',
-        widthM: DEFAULT_WIDTHS.car_lane,
+        id: 'osm-sidewalk-left',
+        kind: 'sidewalk',
+        sourceType: 'Sidewalk',
+        widthM: DEFAULT_WIDTHS.sidewalk,
+        direction: 'none',
+        allowedModes: ['pedestrian'],
+      });
+    }
+    if (hasCycleway(tags, 'left')) {
+      bands.push({
+        id: 'osm-bike-left',
+        kind: 'bike_lane',
+        sourceType: 'Biking',
+        widthM: DEFAULT_WIDTHS.bike_lane,
+        direction: oneway ? 'forward' : 'backward',
+        allowedModes: ['bicycle'],
+      });
+    }
+
+    if (oneway) {
+      for (let i = 0; i < lanes; i++) {
+        bands.push({
+          id: `osm-car-forward-${i + 1}`,
+          kind: 'car_lane',
+          sourceType: 'Driving',
+          widthM: DEFAULT_WIDTHS.car_lane,
+          direction: 'forward',
+          allowedModes: ['car'],
+          maxspeedKmh,
+        });
+      }
+    } else {
+      const backward = Math.floor(lanes / 2);
+      const forward = Math.max(1, lanes - backward);
+      for (let i = 0; i < backward; i++) {
+        bands.push({
+          id: `osm-car-backward-${i + 1}`,
+          kind: 'car_lane',
+          sourceType: 'Driving',
+          widthM: DEFAULT_WIDTHS.car_lane,
+          direction: 'backward',
+          allowedModes: ['car'],
+          maxspeedKmh,
+        });
+      }
+      for (let i = 0; i < forward; i++) {
+        bands.push({
+          id: `osm-car-forward-${i + 1}`,
+          kind: 'car_lane',
+          sourceType: 'Driving',
+          widthM: DEFAULT_WIDTHS.car_lane,
+          direction: 'forward',
+          allowedModes: ['car'],
+          maxspeedKmh,
+        });
+      }
+    }
+
+    if (hasCycleway(tags, 'right')) {
+      bands.push({
+        id: 'osm-bike-right',
+        kind: 'bike_lane',
+        sourceType: 'Biking',
+        widthM: DEFAULT_WIDTHS.bike_lane,
         direction: 'forward',
-        allowedModes: ['car'],
-        maxspeedKmh,
+        allowedModes: ['bicycle'],
       });
     }
-  } else {
-    const backward = Math.floor(lanes / 2);
-    const forward = Math.max(1, lanes - backward);
-    for (let i = 0; i < backward; i++) {
+    if (hasSidewalk(tags, 'right')) {
       bands.push({
-        id: `osm-car-backward-${i + 1}`,
-        kind: 'car_lane',
-        widthM: DEFAULT_WIDTHS.car_lane,
-        direction: 'backward',
-        allowedModes: ['car'],
-        maxspeedKmh,
+        id: 'osm-sidewalk-right',
+        kind: 'sidewalk',
+        sourceType: 'Sidewalk',
+        widthM: DEFAULT_WIDTHS.sidewalk,
+        direction: 'none',
+        allowedModes: ['pedestrian'],
       });
     }
-    for (let i = 0; i < forward; i++) {
-      bands.push({
-        id: `osm-car-forward-${i + 1}`,
-        kind: 'car_lane',
-        widthM: DEFAULT_WIDTHS.car_lane,
-        direction: 'forward',
-        allowedModes: ['car'],
-        maxspeedKmh,
-      });
-    }
-  }
-
-  if (hasCycleway(tags, 'right')) {
-    bands.push({
-      id: 'osm-bike-right',
-      kind: 'bike_lane',
-      widthM: DEFAULT_WIDTHS.bike_lane,
-      direction: 'forward',
-      allowedModes: ['bicycle'],
-    });
-  }
-  if (hasSidewalk(tags, 'right')) {
-    bands.push({
-      id: 'osm-sidewalk-right',
-      kind: 'sidewalk',
-      widthM: DEFAULT_WIDTHS.sidewalk,
-      direction: 'none',
-      allowedModes: ['pedestrian'],
-    });
   }
 
   if (bands.length === 0) bands.push(...defaultRoadBands(maxspeedKmh));
@@ -422,6 +434,62 @@ export function inferRoadDraftFromOsmRoad(
       },
     ],
   };
+}
+
+function inferDedicatedNonMotorBand(tags: Record<string, string>): RoadBand | null {
+  const highway = tags.highway?.trim().toLowerCase();
+  const widthM = Math.max(
+    0.4,
+    Math.min(12, parsePositiveNumber(tags.width) ?? DEFAULT_WIDTHS.sidewalk)
+  );
+  if (highway === 'cycleway') {
+    const shared = isAllowedAccess(tags.foot);
+    return {
+      id: 'osm-dedicated-cycleway',
+      kind: shared ? 'sidewalk' : 'bike_lane',
+      sourceType: shared ? 'SharedUse' : 'Biking',
+      widthM,
+      direction: shared ? 'none' : isOneway(tags) ? 'forward' : 'both',
+      allowedModes: shared ? ['pedestrian', 'bicycle'] : ['bicycle'],
+    };
+  }
+  if (highway === 'path' || highway === 'bridleway') {
+    const allowedModes = [
+      ...(tags.foot === 'no' ? [] : ['pedestrian']),
+      ...(tags.bicycle === 'no' ? [] : ['bicycle']),
+    ];
+    return {
+      id: 'osm-dedicated-shared-path',
+      kind: 'sidewalk',
+      sourceType: allowedModes.length > 1 ? 'SharedUse' : 'Footway',
+      widthM,
+      direction: 'none',
+      allowedModes: allowedModes.length > 0 ? allowedModes : ['pedestrian'],
+    };
+  }
+  if (
+    highway === 'footway' ||
+    highway === 'pedestrian' ||
+    highway === 'steps' ||
+    highway === 'corridor' ||
+    highway === 'platform'
+  ) {
+    return {
+      id: 'osm-dedicated-footway',
+      kind: 'sidewalk',
+      sourceType: isAllowedAccess(tags.bicycle) ? 'SharedUse' : 'Footway',
+      widthM,
+      direction: 'none',
+      allowedModes: isAllowedAccess(tags.bicycle)
+        ? ['pedestrian', 'bicycle']
+        : ['pedestrian'],
+    };
+  }
+  return null;
+}
+
+function isAllowedAccess(value: string | undefined): boolean {
+  return value === 'yes' || value === 'designated' || value === 'permissive';
 }
 
 export function inferRoadVerticalProfileFromOsmTags(
@@ -543,7 +611,9 @@ export function insertRoadIntoCityJson(
       type: area.surfaceType,
       function: area.function,
       usage: area.attributes.transportationUsage,
+      sourceType: area.attributes.sourceType ?? null,
       trafficDirection: area.attributes.trafficDirection,
+      allowedModes: area.attributes.allowedModes ?? null,
       surfaceMaterial: area.attributes.surfaceMaterial,
       maxspeed: area.attributes.maxspeed ?? null,
       verticalPlacement: vertical.placement,
@@ -703,13 +773,30 @@ export function buildRoadEditPayload(
 export function summarizeRoadDraft(draft: RoadDraft): string {
   const first = draft.sections[0];
   if (!first) return 'Empty road draft';
-  const lanes = first.bands.filter((band) => band.kind === 'car_lane').length;
+  const specialMotorTypes = new Set(['bus', 'buslane', 'lightrail', 'tram', 'construction']);
+  const lanes = first.bands.filter(
+    (band) =>
+      band.kind === 'car_lane' &&
+      !specialMotorTypes.has(normalizeSemanticType(band.sourceType ?? ''))
+  ).length;
+  const bus = first.bands.filter((band) =>
+    ['bus', 'buslane'].includes(normalizeSemanticType(band.sourceType ?? ''))
+  ).length;
+  const rail = first.bands.filter((band) =>
+    ['lightrail', 'tram'].includes(normalizeSemanticType(band.sourceType ?? ''))
+  ).length;
   const bike = first.bands.filter((band) => band.kind === 'bike_lane').length;
   const sidewalks = first.bands.filter((band) => band.kind === 'sidewalk').length;
   const speed = first.maxspeedKmh ? `, ${first.maxspeedKmh} km/h` : '';
+  const special = [
+    bus > 0 ? `${bus} bus lane${bus === 1 ? '' : 's'}` : null,
+    rail > 0 ? `${rail} light-rail lane${rail === 1 ? '' : 's'}` : null,
+  ].filter((label): label is string => !!label);
   return `${lanes} car lane${lanes === 1 ? '' : 's'}, ${bike} bike lane${
     bike === 1 ? '' : 's'
-  }, ${sidewalks} sidewalk${sidewalks === 1 ? '' : 's'}${speed}`;
+  }, ${sidewalks} sidewalk${sidewalks === 1 ? '' : 's'}${
+    special.length > 0 ? `, ${special.join(', ')}` : ''
+  }${speed}`;
 }
 
 function buildProjectedRoadAreas(
@@ -750,6 +837,7 @@ function buildProjectedRoadAreas(
         polygon,
         attributes: {
           transportationUsage: band.kind,
+          sourceType: band.sourceType ?? null,
           trafficDirection: band.direction ?? defaultDirectionForBand(band.kind),
           surfaceMaterial: band.surface ?? defaultSurfaceForBand(band.kind),
           allowedModes: band.allowedModes ?? defaultModesForBand(band.kind),
@@ -1096,6 +1184,10 @@ function defaultModesForBand(kind: RoadBandKind): string[] {
   return [];
 }
 
+function normalizeSemanticType(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function cloneBands(bands: RoadBand[]): RoadBand[] {
   return bands.map((band) => ({
     ...band,
@@ -1240,6 +1332,9 @@ function readRoadBand(value: unknown): RoadBand | null {
 
   const band: RoadBand = { kind, widthM };
   if (typeof record.id === 'string' && record.id.length > 0) band.id = record.id;
+  if (typeof record.sourceType === 'string' && record.sourceType.length > 0) {
+    band.sourceType = record.sourceType;
+  }
   if (directions.includes(record.direction as RoadDirection)) {
     band.direction = record.direction as RoadDirection;
   }

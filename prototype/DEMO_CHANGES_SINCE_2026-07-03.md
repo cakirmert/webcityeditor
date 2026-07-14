@@ -41,18 +41,12 @@ claimed as new below.
      `Edit saved layout`; exact imported surfaces without that metadata stay
      inspect-only.
 
-6. **Trusted road corridors**
-   - The Roads panel loads user-approved WGS84 GeoJSON Polygon/MultiPolygon
-     corridors, renders their boundary, and blocks road insertion outside the
-     corridor union.
-
-7. **Explicit, user-confirmed corridor fitting**
-   - `Fit draft widths to corridor` finds the largest projected width that fits
-     each section and shows exact before/after totals before changing the draft.
-   - It scales bands proportionally and preserves centerlines, order,
-     directions, and semantics.
-   - It refuses to move an off-corridor centerline or shrink any band below
-     0.40 m, leaving manual redraw/editing as the safe fallback.
+6. **Corridor algorithms retained, incomplete UI removed**
+   - WGS84 corridor normalization, fit validation, and proportional fitting
+     remain covered as pure infrastructure.
+   - The manual `Trusted road corridor` upload/blocking workflow was removed on
+     2026-07-14 because it was neither automatic nor backed by an authoritative
+     project source. It can return only with an automatic trusted dataset.
 
 8. **Cleaner advanced road workflow**
    - Insert, payload export, backend POST, and payload preview live in one closed
@@ -60,29 +54,21 @@ claimed as new below.
    - The main band/fit workflow stays visible without the backend controls
      crowding the demo.
 
-## Fastest demo: trusted corridor plus proportional fit
+## Fastest demo: stable semantic road rendering
 
-1. From `prototype`, run `npm run dev` and open the printed local URL.
+1. From `prototype`, run `npm run dev:frontend` and open the printed local URL.
 2. In **Data**, load **Hamburg osm2streets roads - real fixture**. This positions
    the map over the committed Hamburg intersection.
-3. Open **Roads** and load
-   `test-fixtures/road-corridors/hamburg-narrow-demo.geojson` under
-   **Trusted road corridor**. A narrow corridor boundary appears north-south
-   through the intersection.
-4. Choose the manual draw/redraw action and draw a north-south centerline inside
-   the corridor, roughly along longitude `9.994`.
-5. The default road bands are wider than the corridor, so the overflow is red
-   and **Insert CityJSON Road** is blocked.
-6. Click **Fit draft widths to corridor**. The confirmation lists every changed
-   section as `old width -> fitted width`.
-7. Confirm. Band widths shrink proportionally; the centerline and band meanings
-   do not change, and the corridor overflow clears.
-8. Open **CityJSON Export & Backend** and insert the road.
-
-Useful refusal demo: draw the centerline clearly outside the corridor and click
-fit. The editor refuses to translate it and tells you to redraw or edit it
-manually. You can also use an extremely narrow corridor to demonstrate the
-0.40 m per-band floor.
+3. Open **Roads**, pick a dark driving surface, and create its editable draft.
+   The exact polygon stays visible with the same semantic fill; only its outline
+   and centerline handles indicate selection/editing.
+4. Fetch/recalculate a central Hamburg view and pick a red lane. The inspector
+   identifies it as **Bus**, so red is semantic rather than a random car-lane
+   state.
+5. Toggle **Satellite** to show imagery beneath the translucent roads. Mark a
+   draft **Underground** to apply the additional half-opacity treatment.
+6. Click **Planning** once; both paginated sources load for the bounded current
+   view, after which the actions become **Refresh Planning** and **Hide**.
 
 ## Second demo: vertical and clearance decisions
 
@@ -108,6 +94,6 @@ manually. You can also use an extremely narrow corridor to demonstrate the
 
 ## Verification snapshot
 
-- `npm test`: 56 files, 497 tests passed.
-- `npm run build`: TypeScript and the Vite production build passed.
+- `npm test`: 56 files, 508 tests passed.
+- `npm run build:pages`: TypeScript and the Vite Pages production build passed.
 - `git diff --check`: clean.

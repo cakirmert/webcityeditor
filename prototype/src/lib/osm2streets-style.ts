@@ -119,6 +119,18 @@ export function withAlpha(color: Rgba, alpha: number): Rgba {
   return [color[0], color[1], color[2], alpha];
 }
 
+export function roadOverlayColor(
+  color: Rgba,
+  options: { basemap?: 'map' | 'satellite'; underground?: boolean } = {}
+): Rgba {
+  const satelliteFactor = options.basemap === 'satellite' ? 0.72 : 1;
+  const undergroundFactor = options.underground ? 0.5 : 1;
+  return withAlpha(
+    color,
+    Math.max(0, Math.min(255, Math.round(color[3] * satelliteFactor * undergroundFactor)))
+  );
+}
+
 function normalizeType(type: string): string {
   return type.toLowerCase().replace(/[^a-z0-9]/g, '');
 }

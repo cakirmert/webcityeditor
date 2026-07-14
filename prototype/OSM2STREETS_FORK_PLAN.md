@@ -1,8 +1,9 @@
 # osm2streets Fork & Road Editor Improvement Plan
 
-> **Status**: Rust/WASM fork, explorer layers, inspector, exact-surface export,
-> visual lane strip, drag reordering, and advanced-action collapse implemented;
-> live Hamburg viewport verification and optional UI polish remain
+> **Status**: Rust/WASM fork, panic hardening, seven-fixture native/WASM parity,
+> complete Hamburg batch, explorer layers, stable exact-surface editing,
+> semantic opacity, inspector, and compact lane UI implemented; targeted dual
+> carriageway work remains optional
 > **Author**: Auto-generated from investigation session (2026-06-08)  
 > **Target**: `webcityeditor/prototype` — Vite + React + MapLibre road editor
 
@@ -42,6 +43,7 @@ Implemented outcome:
 
 Current repo state:
 
+- `vendor/osm2streets` is pinned to hardened fork commit `00b484f868f89c2420d25410525faf2414dde3c5`.
 - `prototype/package.json` resolves `osm2streets-js` from
   `file:./vendor/osm2streets-js`.
 - `prototype/scripts/build-osm2streets-wasm.ps1` rebuilds the source package.
@@ -50,6 +52,11 @@ Current repo state:
   executable, then fails on count, diagnostics, or normalized-output
   differences.
 - The old `patch-package` npm-wrapper patch was removed.
+- `extract-osm-regression-fixture.py` and
+  `minimize-osm2streets-failures.mjs` keep panic reproduction offline and
+  deterministic; seven fixtures cover normal and former-panic paths.
+- The 2026-07-14 Hamburg batch completed with `failed: 0` and a road-specific
+  catalog: 344,265 roads, 913,927 surfaces, and 4,774,798 vertices.
 
 ### 1.1 Console Errors from WASM
 
@@ -452,10 +459,10 @@ After completing the fork setup:
 - [x] Fixture comparison confirms WASM and native outputs match for identical
       Hamburg OSM cuts
 - [x] Fixture comparison records warnings/errors and fails on any emitted error
-- [ ] `npm run dev` starts without errors
-- [ ] Browser console shows **zero red `console.error` lines** from non-fatal osm2streets diagnostics in a real Hamburg viewport
-- [ ] Lane geometry renders correctly on the map for real Hamburg Overpass data
-- [ ] Intersection markings / crosswalks appear at intersections where expected
+- [x] `npm run dev:frontend` starts without errors
+- [x] Browser console shows **zero red `console.error` lines** from non-fatal osm2streets diagnostics in a real Hamburg viewport
+- [x] Lane geometry and semantic colors render correctly for real Hamburg Overpass data and remain stable through selection/draft creation
+- [x] Intersection markings / crosswalks appear at intersections where expected
 - [ ] Dual carriageway merging works after targeted testing, if enabled
 - [x] Lane editor UI shows proportional visual lane boxes with direction arrows
 - [x] Lanes can be dragged to reorder, with focused component coverage
@@ -469,6 +476,9 @@ After completing the fork setup:
 | NEW     | `vendor/osm2streets/` | Git submodule (fork of a-b-street/osm2streets) |
 | NEW     | `prototype/scripts/build-osm2streets-wasm.ps1` | WASM build script |
 | NEW     | `prototype/scripts/compare-osm2streets-fixtures.mjs` | Hamburg fixture comparison script |
+| NEW     | `prototype/scripts/extract-osm-regression-fixture.py` | Offline reference-complete OSM fixture extraction |
+| NEW     | `prototype/scripts/minimize-osm2streets-failures.mjs` | Recursive failed-bbox minimizer and manifest writer |
+| NEW     | `prototype/scripts/build-hamburg-osm2streets-road-catalog.mjs` | Road-specific validated batch catalog generation |
 | NEW     | `prototype/test-fixtures/osm2streets/` | Committed Hamburg OSM fixture corpus |
 | NEW     | `prototype/vendor/osm2streets-js/` | Built WASM output directory |
 | MODIFY  | `prototype/package.json` | Change osm2streets-js to `file:` dependency |

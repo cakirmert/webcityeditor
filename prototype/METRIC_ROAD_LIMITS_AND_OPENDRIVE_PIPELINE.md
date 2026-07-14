@@ -1,8 +1,9 @@
 # Metric Road Limits and OpenDRIVE Pipeline Plan
 
-> **Status**: Road-fit baseline, metric clearance, query limiting, vertical
-> profiles, trusted visible GeoJSON corridor input, and explicit proportional
-> fitting are implemented; the OpenDRIVE importer remains
+> **Status**: Road-fit baseline, metric clearance, query limiting, and vertical
+> profiles are implemented. Corridor normalization/fitting remains tested as a
+> pure library, but its manual upload UI was removed pending an authoritative
+> automatic source; the OpenDRIVE importer remains.
 > **Date**: 2026-06-25  
 > **Scope**: `webcityeditor/prototype` road editor, Hamburg building/planning context, OpenDRIVE trial import path
 
@@ -35,11 +36,12 @@ The prototype already has the important pieces to build on:
 - `useRoadEditor()` blocks insertion for hard building-overlap conflicts and shows warning conflicts on the map.
 
 Road-fit overlap, difference, clearance, and corridor-fit geometry now runs in
-the active metric CRS and returns precise WGS84 highlight polygons.
-User-approved WGS84 GeoJSON Polygon/MultiPolygon files act as trusted visible
-corridors. The explicit fit action finds the largest safe proportional band
-width per editable section, asks for confirmation, and refuses to move a
-centerline or shrink a semantic band below 0.40 m.
+the active metric CRS and returns precise WGS84 highlight polygons. The pure
+corridor parser and fit algorithm still find the largest safe proportional band
+width and refuse to move a centerline or shrink a band below 0.40 m. The app no
+longer asks users to load a supposedly trusted file: those controls and their
+blocking behavior were removed on 2026-07-14 until a project-authoritative
+automatic corridor source is available.
 
 ## Metric Editing Principle
 
@@ -270,8 +272,10 @@ back to WGS84 for the existing deck.gl conflict layer.
 5. ✅ Split conflicts into hard blockers and warnings.
 6. ✅ Add metric building-clearance warnings plus the separate 0.5 m hard buffer.
 7. ✅ Add OSM/manual vertical profiles, known-z separation, and `vertical_uncertainty` handling.
-8. ✅ Connect an optional trusted corridor source to the editor and render its boundary.
-9. ✅ Add explicit, confirmation-gated proportional "fit to corridor" with centerline and minimum-width refusal rules.
+8. ✅ Implement and test corridor import/fit algorithms, then remove the manual
+   editor workflow when no authoritative automatic source was available.
+9. ✅ Preserve proportional fit, centerline, and minimum-width refusal rules as
+   dormant pure infrastructure for a future trusted source.
 
 ## OpenDRIVE / r:trån Trial Pipeline
 

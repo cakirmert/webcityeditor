@@ -5,6 +5,7 @@ import {
   osm2streetsLaneFillColor,
   osm2streetsLaneMarkingFillColor,
   roadBandFillColor,
+  roadOverlayColor,
 } from '../../src/lib/osm2streets-style';
 
 describe('osm2streets style helpers', () => {
@@ -38,6 +39,15 @@ describe('osm2streets style helpers', () => {
     expect(roadBandFillColor('parking_lane')).toEqual(
       osm2streetsLaneFillColor('Parking(Parallel)')
     );
+  });
+
+  it('dims satellite overlays and renders underground roads at half opacity', () => {
+    const driving = osm2streetsLaneFillColor('Driving');
+    expect(roadOverlayColor(driving, { basemap: 'satellite' })).toEqual([55, 56, 62, 173]);
+    expect(roadOverlayColor(driving, { underground: true })).toEqual([55, 56, 62, 120]);
+    expect(
+      roadOverlayColor(driving, { basemap: 'satellite', underground: true })
+    ).toEqual([55, 56, 62, 86]);
   });
 
   it('styles intersection polygons by osm2streets intersection kind', () => {

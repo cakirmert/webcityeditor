@@ -1,9 +1,11 @@
 # CityGML Transportation & OpenDRIVE Integration Plan
 
-> **Status**: Partially implemented; exact osm2streets surfaces, metric polygon
-> assets, CityGML bridge, road-fit baseline, clearance, vertical hints, a
-> trusted visible GeoJSON corridor source, and explicit proportional corridor
-> fitting are delivered, while `muv-osm` and OpenDRIVE import remain
+> **Status**: Partially implemented; hardened exact osm2streets surfaces,
+> complete Hamburg CityJSONSeq output, metric polygon assets, CityGML bridge,
+> road-fit baseline, clearance, vertical hints, stable semantic rendering, and
+> focused browser verification are delivered. The manual trusted-corridor UI
+> was removed pending an authoritative automatic source; `muv-osm` and
+> OpenDRIVE import remain.
 > **Author**: Codex documentation pass from transport-module discussion (2026-06-09)  
 > **Target**: `webcityeditor/prototype` road editor, CityJSON Transportation output, future backend importer
 
@@ -355,7 +357,7 @@ inside their limited space.
 - [x] Patch Rust source so selected non-fatal `error!` diagnostics do not
       become browser `console.error` failures
 - [x] Fork/rebuild osm2streets and patch Hamburg sidewalk tag handling at source
-- [ ] Run real Hamburg viewport checks against the source-built fork output
+- [x] Run real Hamburg viewport checks against the source-built fork output
 - [x] Normalize selected osm2streets roads into `RoadDraft` and verify they
       export as JSON/CityJSON with lane, bike-lane, sidewalk, and road
       provenance intact
@@ -377,12 +379,12 @@ inside their limited space.
 - [x] Add a batch converter for osm2streets `lane-polygons.geojson`:
       `scripts/osm2streets-lanes-to-cityjson.mjs` emits monolithic CityJSON
       and CityJSONSeq `Road` features with tile-prefixed ids for large exports
-- [ ] Complete the whole-Hamburg road CityJSONSeq export after hardening the
-      native fork. The 2026-07-03 tiled run produced 10 validated road tiles
-      (182,396 `Road` features, 497,421 surfaces, 2,641,099 vertices) but three
-      small bboxes still panic in native osm2streets and are quarantined in
-      `Data/hamburg-roads-osm2streets/cityjsonseq/hamburg-osm2streets-roads-current-summary.json`.
-      The executable handoff is [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md).
+- [x] Complete the whole-Hamburg road CityJSONSeq export after hardening the
+      native fork. The 2026-07-14 run emitted 20 validated non-empty tiles and
+      47 true empty/water tiles with `failed: 0`: 344,265 `Road` features,
+      913,927 surfaces, and 4,774,798 vertices. The exact fork/exporter/PBF
+      hashes and repaired-bbox evidence are recorded in
+      [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md).
 
 ### 7.4 OpenDRIVE/r:trån pipeline
 
@@ -419,14 +421,10 @@ inside their limited space.
   - tunnel/bridge overlaps without metric elevation become
     `vertical_uncertainty` warnings
   - known vertical separation suppresses overlap and clearance conflicts
-- [x] Connect a trusted corridor source to editor state and add visible
-      corridor-aware editing controls. The road panel imports/clears user-approved
-      WGS84 GeoJSON Polygon/MultiPolygon files, the map renders the boundary,
-      and preview/exact-surface fit checks receive the active corridors.
-- [x] Add `fit to corridor` as an explicit user action: compute the largest
-      safe proportional width per editable section in projected geometry,
-      preview exact before/after totals for confirmation, preserve centerlines
-      and semantics, and refuse bands below the 0.40 m editor minimum.
+- [x] Remove the manual `Trusted road corridor` upload/blocking controls because
+      they were neither automatic nor backed by a project authority. Retain the
+      pure WGS84 corridor normalization and proportional-fit helpers/tests as
+      dormant infrastructure for a future authoritative automatic source.
 
 ---
 
@@ -443,8 +441,8 @@ inside their limited space.
       used by the app; manual/editable drafts intentionally use ribbon geometry
 - [ ] `muv-osm` semantic output is compared against current inference before it
       replaces any TypeScript heuristic
-- [x] The committed real Hamburg fixture and exact-surface sample are checked in
-      the browser; a fresh live Overpass viewport pass remains pending
+- [x] The committed real Hamburg fixture, exact-surface sample, and a fresh live
+      Overpass viewport are checked in the browser with zero console errors
 - [ ] r:trån conversion produces CityGML 3 Transportation that can be imported
       without losing lane topology
 - [ ] Imported OpenDRIVE-derived roads can be previewed on the same deck.gl map

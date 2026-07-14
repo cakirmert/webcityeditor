@@ -1,6 +1,6 @@
 # osm2streets Implementation Handoff
 
-> Last updated: 2026-06-24
+> Last updated: 2026-07-14
 > Purpose: give the next model the current osm2streets-only decision, the reason
 > WASM is used, and the remaining non-fallback work.
 
@@ -17,6 +17,10 @@ Hamburg regression fixtures.
 Current implementation state:
 
 - `vendor/osm2streets` is a Git submodule pointing at the project fork.
+- The hardened fork revision is `00b484f868f89c2420d25410525faf2414dde3c5`.
+  It turns explicit non-positive widths into semantic defaults with warnings and
+  makes road-edge, lane, sidewalk, crosswalk, and marking polygon generation
+  fallible with OSM road/intersection context.
 - The fork patches Rust diagnostics so non-fatal geometry cases are warnings,
   not browser `console.error` failures.
 - The fork normalizes Hamburg-style separately mapped sidewalk tags before
@@ -38,6 +42,8 @@ Current implementation state:
   source-built WASM package and native executable, writes both output sets to
   `prototype/test-output/osm2streets-comparison/`, and fails on count,
   diagnostics, or normalized-output differences.
+- Seven committed fixtures now include the three former Hamburg panic paths;
+  native and WASM outputs match with zero error diagnostics.
 - `prototype/OSM2STREETS_LANE_VALIDATION_NOTES.md` records an external
   Python-binding validation spike from
   `C:\Users\dmz-admin\Downloads\lane_validation`, including web-tool-style
@@ -105,20 +111,33 @@ backend unless the project explicitly changes direction later.
 9. Added Hamburg OSM regression fixtures and a comparison script.
 10. Updated tests to load the local WASM package.
 11. Added native Rust executable comparison for the same Hamburg fixtures.
+12. Added offline OSM reference-complete extraction and recursive failure
+    minimization helpers plus three focused panic-regression fixtures.
+13. Rebuilt WASM from fork commit `00b484f` and repaired all three recorded
+    Hamburg bboxes.
+14. Completed the whole-Hamburg CityJSONSeq road export with 20 non-empty
+    validated tiles, 47 true empty tiles, 344,265 roads, 913,927 surfaces,
+    4,774,798 vertices, and `failed: 0`.
+15. Stabilized semantic rendering across fetched, selected, editable, and
+    re-imported roads; added underground/satellite opacity; removed false car
+    lanes for pedestrian paths; and removed the dormant trusted-corridor UI.
+16. Made planning explicitly click-driven but complete for the bounded viewport
+    by paginating both XPlan and FNP, deduplicating, and rejecting partial loads.
+17. Ran the hosted-fixture and live Hamburg browser smoke: exact picking,
+    semantic bus-lane red, draft creation, satellite/underground opacity,
+    planning, and panel sizing all passed with no console errors.
 
 ## What Is Still Left
 
-- Run real browser verification on Hamburg viewports, not only committed
-  fixtures.
+- Run the short user visual-acceptance checklist on the published build.
 - Compare fixture and viewport output against the upstream osm2streets demo for
   the same areas when crosswalk/intersection marking quality matters.
 - Test `dual_carriageway_experiment` on representative divided Hamburg roads
   before enabling it by default.
 - Keep road-fit validation separate. The delivered baseline validates editable
   and exact road surfaces against buildings/planning data, including metric
-  clearance and vertical uncertainty. Robust projected difference geometry and
-  trusted corridor plumbing remain; road-fit must not become a second
-  lane-geometry generator.
+  clearance and vertical uncertainty. Pure corridor geometry remains dormant;
+  only restore its UI after an authoritative automatic data source exists.
 - If a fixture exposes wrong geometry, patch the Rust source and add or tighten
   the fixture expectation in the same commit.
 
@@ -130,11 +149,12 @@ Run these after osm2streets changes:
 cd D:\webcityeditor\vendor\osm2streets
 cargo fmt
 cargo test -p osm2lanes
+cargo test -p osm2streets
 cargo test -p osm2streets-js
 
 cd D:\webcityeditor\prototype
 .\scripts\build-osm2streets-wasm.ps1
-npm install
+npm ci
 npm outdated --json
 npm audit --json
 npm run osm2streets:compare
@@ -143,19 +163,18 @@ npm run test -- src/lib/osm2streets.test.ts src/lib/road-fit.test.ts
 npm test
 ```
 
-Known full-suite caveat: `npm test` can fail if
-`prototype/public/fzk-haus.ifc` is absent. That fixture issue is unrelated to
-osm2streets.
+Known Rust workspace caveat: on Windows, the upstream generated fixture tests
+currently emit paths such as `src\arizona_highways` as invalid Rust string
+escapes. The three focused modified-crate test suites above pass.
 
 Browser verification should include:
 
-- start `npm run dev`
-- load the app
-- fetch OSM roads for a Hamburg viewport
-- confirm lane polygons render
-- confirm the console has no red `console.error` lines from non-fatal
-  osm2streets diagnostics
-- inspect whether intersection/crosswalk markings are empty or present
+- [x] start `npm run dev:frontend`
+- [x] load the hosted exact-surface fixture
+- [x] fetch OSM roads for a Hamburg viewport
+- [x] confirm exact lane polygons and semantic colors survive selection/editing
+- [x] confirm the console has no red `console.error` lines
+- [x] inspect intersection/crosswalk markings and metadata
 
 ## Do Not Do
 

@@ -34,10 +34,6 @@ function renderPanel(
     onCreateDraftFromOsm2StreetsSelection?: () => void;
     onInsertOsm2StreetsSelection?: () => void;
     onHighlightConnectedOsm2StreetsRoads?: () => void;
-    allowedCorridors?: ComponentProps<typeof RoadEditorPanel>['allowedCorridors'];
-    onLoadCorridorFile?: (file: File) => void;
-    onClearCorridors?: () => void;
-    onFitDraftToCorridors?: () => void;
   } = {}
 ) {
   const onCreateDraftFromOsm2StreetsSelection =
@@ -73,10 +69,6 @@ function renderPanel(
       onInsertOsm2StreetsSelection={onInsertOsm2StreetsSelection}
       onHighlightConnectedOsm2StreetsRoads={onHighlightConnectedOsm2StreetsRoads}
       onClearOsm2StreetsSelection={() => {}}
-      allowedCorridors={options.allowedCorridors}
-      onLoadCorridorFile={options.onLoadCorridorFile ?? vi.fn()}
-      onClearCorridors={options.onClearCorridors ?? vi.fn()}
-      onFitDraftToCorridors={options.onFitDraftToCorridors ?? vi.fn()}
     />
   );
   return {
@@ -132,43 +124,11 @@ describe('<RoadEditorPanel />', () => {
     });
   });
 
-  it('loads and clears a trusted corridor GeoJSON file', () => {
-    const onLoadCorridorFile = vi.fn();
-    const onClearCorridors = vi.fn();
-    renderPanel(vi.fn(), {
-      allowedCorridors: [{
-        id: 'corridor-1',
-        label: 'Approved road reserve',
-        polygon: [[10, 53], [10.01, 53], [10.01, 53.01], [10, 53]],
-      }],
-      onLoadCorridorFile,
-      onClearCorridors,
-    });
-    const file = new File(['{}'], 'corridor.geojson', { type: 'application/geo+json' });
+  it('does not expose the inactive trusted-corridor workflow', () => {
+    renderPanel();
 
-    fireEvent.change(screen.getByLabelText('Load trusted corridor GeoJSON'), {
-      target: { files: [file] },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-
-    expect(screen.getByText('1 polygon')).toBeInTheDocument();
-    expect(onLoadCorridorFile).toHaveBeenCalledWith(file);
-    expect(onClearCorridors).toHaveBeenCalledTimes(1);
-  });
-
-  it('offers the explicit corridor-fit action for an editable draft', () => {
-    const onFitDraftToCorridors = vi.fn();
-    renderPanel(vi.fn(), {
-      allowedCorridors: [{
-        id: 'corridor-1',
-        polygon: [[10, 53], [10.01, 53], [10.01, 53.01], [10, 53]],
-      }],
-      onFitDraftToCorridors,
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Fit draft widths to corridor' }));
-
-    expect(onFitDraftToCorridors).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Trusted road corridor')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Load trusted corridor GeoJSON')).not.toBeInTheDocument();
   });
 
   it('reorders band indices when a band box is dropped onto another', () => {

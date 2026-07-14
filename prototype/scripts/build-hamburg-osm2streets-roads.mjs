@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import proj4 from 'proj4';
 
@@ -19,10 +20,16 @@ const exporter = resolvePath(
 const converter = resolve(prototypeRoot, 'scripts/osm2streets-lanes-to-cityjson.mjs');
 const validator = resolve(prototypeRoot, 'scripts/hamburg-lod2.mjs');
 const grid = numberOption('grid', 2);
+const minDepth = numberOption('min-depth', 0);
 const maxDepth = numberOption('max-depth', 1);
+const maxLaneGeoJsonBytes = numberOption('max-lane-geojson-mb', 384) * 1024 * 1024;
 const generatedAt = String(args['generated-at'] ?? new Date().toISOString());
 const validate = args.validate !== false && args.validate !== 'false';
 const clean = args.clean === true || args.clean === 'true';
+
+if (minDepth > maxDepth) {
+  throw new Error('--min-depth cannot be greater than --max-depth');
+}
 
 if (!existsSync(osmPath)) {
   throw new Error(`Missing OSM PBF: ${osmPath}`);
@@ -47,6 +54,15 @@ const failed = [];
 
 while (pending.length > 0) {
   const tile = pending.shift();
+  if (tile.depth < minDepth) {
+    pending.push(
+      ...splitBbox(tile.bbox, 2, 2, tile.id).map((child) => ({
+        ...child,
+        depth: tile.depth + 1,
+      }))
+    );
+    continue;
+  }
   console.log(`Exporting ${tile.id} depth=${tile.depth} bbox=${tile.bbox.join(',')}`);
   const result = runTile(tile);
   if (result.ok) {
@@ -65,6 +81,9 @@ while (pending.length > 0) {
 
   console.log(`  failed ${tile.id}: ${result.error}`);
   if (tile.depth < maxDepth) {
+    if (result.cleanupWork) {
+      rmSync(resolve(workDir, tile.id), { recursive: true, force: true });
+    }
     pending.push(...splitBbox(tile.bbox, 2, 2, tile.id).map((child) => ({ ...child, depth: tile.depth + 1 })));
   } else {
     failed.push({
@@ -73,20 +92,32 @@ while (pending.length > 0) {
       depth: tile.depth,
       error: result.error,
       log: result.log,
+      stage: result.stage,
+      panicSignature: result.panicSignature ?? null,
     });
   }
 }
+
+const forkRevision = readGitRevision(resolve(repoRoot, 'vendor/osm2streets'));
+const osmSha256 = sha256File(osmPath);
+const exporterSha256 = sha256File(exporter);
 
 const summary = {
   type: 'HamburgOsm2StreetsRoadCityJsonSeqBuild',
   generatedAt,
   source: {
     osm: osmPath,
+    osmSha256,
     exporter,
+    exporterSha256,
+    exporterBuiltAt: statSync(exporter).mtime.toISOString(),
+    forkRevision,
   },
   bbox,
   grid,
+  minDepth,
   maxDepth,
+  maxLaneGeoJsonMiB: maxLaneGeoJsonBytes / 1024 / 1024,
   tiles: successful,
   failed,
   totals: {
@@ -101,8 +132,10 @@ const summary = {
 };
 const summaryPath = resolve(outputDir, 'hamburg-osm2streets-roads-summary.json');
 writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+const catalogPath = writeRoadCatalog(outputDir, summary);
 console.log(JSON.stringify(summary.totals, null, 2));
 console.log(`Summary: ${summaryPath}`);
+console.log(`Catalog: ${catalogPath}`);
 if (failed.length > 0) process.exitCode = 2;
 
 function runTile(tile) {
@@ -133,12 +166,19 @@ function runTile(tile) {
       ok: false,
       error: native.error?.message ?? `native exporter exited ${native.status}`,
       log: logPath,
+      stage: 'native_export',
+      panicSignature: panicSignature(`${native.stdout ?? ''}\n${native.stderr ?? ''}`),
     };
   }
 
   const lanes = resolve(tileWorkDir, 'lane-polygons.geojson');
   if (!existsSync(lanes)) {
-    return { ok: false, error: 'native exporter did not write lane-polygons.geojson', log: logPath };
+    return {
+      ok: false,
+      error: 'native exporter did not write lane-polygons.geojson',
+      log: logPath,
+      stage: 'lane_polygons',
+    };
   }
   const nativeSummary = JSON.parse(readFileSync(resolve(tileWorkDir, 'summary.json'), 'utf8'));
   if ((nativeSummary.counts?.lanes ?? 0) === 0) {
@@ -154,6 +194,18 @@ function runTile(tile) {
         surfaces: 0,
         vertices: 0,
       },
+    };
+  }
+  const laneGeoJsonBytes = statSync(lanes).size;
+  if (laneGeoJsonBytes > maxLaneGeoJsonBytes) {
+    return {
+      ok: false,
+      error:
+        `lane-polygons.geojson is ${(laneGeoJsonBytes / 1024 / 1024).toFixed(1)} MiB; ` +
+        `subdivide before CityJSON conversion (limit ${(maxLaneGeoJsonBytes / 1024 / 1024).toFixed(0)} MiB)`,
+      log: logPath,
+      stage: 'subdivide_before_cityjson_conversion',
+      cleanupWork: true,
     };
   }
   const source = `Geofabrik Hamburg OSM PBF -> osm2streets tile ${tile.id}`;
@@ -182,6 +234,7 @@ function runTile(tile) {
       ok: false,
       error: converted.error?.message ?? `CityJSON converter exited ${converted.status}`,
       log: resolve(tileWorkDir, 'cityjson-convert.log'),
+      stage: 'cityjson_conversion',
     };
   }
 
@@ -197,6 +250,7 @@ function runTile(tile) {
         ok: false,
         error: checked.error?.message ?? `CityJSONSeq validation exited ${checked.status}`,
         log: resolve(tileWorkDir, 'cityjsonseq-validate.log'),
+        stage: 'cityjsonseq_validation',
       };
     }
   }
@@ -211,6 +265,7 @@ function runTile(tile) {
       cityjsonseq: tileOutSeq,
       native: nativeSummary.counts,
       diagnostics: nativeSummary.diagnostics,
+      extent: seqStats.extent,
       roads: seqStats.features,
       surfaces: seqStats.surfaces,
       vertices: seqStats.vertices,
@@ -220,6 +275,7 @@ function runTile(tile) {
 
 function readSeqStats(file) {
   const lines = readFileSync(file, 'utf8').trim().split(/\r?\n/);
+  const header = JSON.parse(lines[0]);
   let features = 0;
   let surfaces = 0;
   let vertices = 0;
@@ -234,7 +290,64 @@ function readSeqStats(file) {
       }
     }
   }
-  return { features, surfaces, vertices };
+  return {
+    features,
+    surfaces,
+    vertices,
+    extent: header.metadata?.geographicalExtent ?? null,
+  };
+}
+
+function writeRoadCatalog(directory, summary) {
+  const tiles = summary.tiles
+    .map((tile) => ({
+      id: tile.id,
+      file: basename(tile.cityjsonseq),
+      url: `/tiles/${basename(tile.cityjsonseq)}`,
+      bbox: tile.bbox,
+      extent: tile.extent,
+      features: tile.roads,
+      cityObjects: tile.roads,
+      surfaces: tile.surfaces,
+      vertices: tile.vertices,
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const catalog = {
+    type: 'HamburgOsm2StreetsRoadCityJSONSeqCatalog',
+    generatedAt: summary.generatedAt,
+    source: summary.source,
+    crs: 'EPSG:25832',
+    summary: {
+      tiles: tiles.length,
+      empty: summary.totals.empty,
+      failed: summary.totals.failed,
+      features: summary.totals.roads,
+      cityObjects: summary.totals.roads,
+      surfaces: summary.totals.surfaces,
+      vertices: summary.totals.vertices,
+    },
+    tiles,
+  };
+  const catalogPath = resolve(directory, 'catalog.json');
+  writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
+  return catalogPath;
+}
+
+function sha256File(file) {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
+function readGitRevision(cwd) {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' });
+  if (result.status !== 0) return null;
+  return result.stdout.trim();
+}
+
+function panicSignature(log) {
+  const line = log
+    .split(/\r?\n/)
+    .find((candidate) => /panicked at|thread .* panicked|called `Result::unwrap/i.test(candidate));
+  return line?.trim() ?? null;
 }
 
 function readHamburgBboxFromLod2Catalog() {
@@ -314,7 +427,7 @@ function numberOption(name, fallback) {
   const raw = args[name];
   if (raw === undefined) return fallback;
   const value = Number(raw);
-  const min = name === 'max-depth' ? 0 : 1;
+  const min = name.endsWith('depth') ? 0 : 1;
   if (!Number.isInteger(value) || value < min) {
     throw new Error(`--${name} must be an integer >= ${min}`);
   }

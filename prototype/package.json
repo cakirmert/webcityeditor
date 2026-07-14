@@ -16,9 +16,11 @@
     "data:hamburg-lod2": "node scripts/hamburg-lod2.mjs",
     "data:hamburg-lod2:serve": "node scripts/hamburg-lod2.mjs serve",
     "data:hamburg-roads": "node scripts/build-hamburg-osm2streets-roads.mjs",
+    "data:hamburg-roads:catalog": "node scripts/build-hamburg-osm2streets-road-catalog.mjs",
     "cityjson:to-citygml": "node scripts/cityjson-to-citygml.mjs",
     "osm2streets:cityjson": "node scripts/osm2streets-lanes-to-cityjson.mjs",
-    "osm2streets:compare": "node scripts/compare-osm2streets-fixtures.mjs"
+    "osm2streets:compare": "node scripts/compare-osm2streets-fixtures.mjs",
+    "osm2streets:minimize": "node scripts/minimize-osm2streets-failures.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.4",

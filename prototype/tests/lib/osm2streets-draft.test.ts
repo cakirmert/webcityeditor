@@ -56,6 +56,12 @@ describe('buildRoadDraftFromOsm2StreetsSelection', () => {
       'sidewalk',
       'parking',
     ]);
+    expect(draft.sections[0].bands.map((band) => band.sourceType)).toEqual([
+      'Driving',
+      'Biking',
+      'Sidewalk',
+      'Parking(Parallel)',
+    ]);
     expect(draft.sections[0].bands.map((band) => band.widthM)).toEqual([3.25, 1.75, 2, 2.1]);
     expect(draft.sections[0].bands[0]).toMatchObject({
       direction: 'forward',

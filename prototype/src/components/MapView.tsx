@@ -26,7 +26,6 @@ import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
-import type { RoadAllowedCorridor } from '../lib/road-corridor';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import {
   osm2streetsIntersectionFillColor,
@@ -34,6 +33,7 @@ import {
   osm2streetsLaneFillColor,
   osm2streetsLaneMarkingFillColor,
   roadBandFillColor,
+  roadOverlayColor,
   withAlpha,
   type Rgba,
 } from '../lib/osm2streets-style';
@@ -73,19 +73,74 @@ function roadAreaSourceType(area: RoadArea): string | undefined {
   return typeof sourceType === 'string' ? sourceType : undefined;
 }
 
-function roadAreaFillColor(area: RoadArea, selected = false, preview = false): Rgba {
-  if (selected) return [255, 170, 40, 230];
+function roadAreaFillColor(
+  area: RoadArea,
+  basemap: 'map' | 'satellite',
+  preview = false
+): Rgba {
   const base = roadBandFillColor(roadAreaKind(area), roadAreaSourceType(area));
-  return preview ? withAlpha(base, 218) : base;
+  return roadOverlayColor(preview ? withAlpha(base, Math.min(base[3], 218)) : base, {
+    basemap,
+    underground: area.vertical?.placement === 'underground',
+  });
 }
 
-function roadAreaLineColor(area: RoadArea, selected = false, preview = false): Rgba {
-  if (selected) return [255, 224, 130, 255];
-  if (preview) return [245, 248, 255, 185];
-  const kind = roadAreaKind(area);
-  return kind === 'green' || kind === 'green_verge' || kind === 'verge'
-    ? [116, 190, 142, 165]
-    : [238, 242, 255, 130];
+function roadAreaLineColor(
+  area: RoadArea,
+  basemap: 'map' | 'satellite',
+  selected = false,
+  preview = false
+): Rgba {
+  const color: Rgba = selected
+    ? [255, 224, 130, 255]
+    : preview
+      ? [245, 248, 255, 185]
+      : roadAreaKind(area) === 'green' ||
+          roadAreaKind(area) === 'green_verge' ||
+          roadAreaKind(area) === 'verge'
+        ? [116, 190, 142, 165]
+        : [238, 242, 255, 130];
+  return roadOverlayColor(color, {
+    basemap,
+    underground: area.vertical?.placement === 'underground',
+  });
+}
+
+function osm2streetsFeatureIsUnderground(feature: any): boolean {
+  const props = feature?.properties ?? {};
+  const layer = typeof props.layer === 'number' ? props.layer : Number(props.layer);
+  return (Number.isFinite(layer) && layer < 0) || props.tunnel === true || props.tunnel === 'yes';
+}
+
+function osm2streetsDisplayColor(
+  color: Rgba,
+  feature: any,
+  basemap: 'map' | 'satellite'
+): Rgba {
+  return roadOverlayColor(color, {
+    basemap,
+    underground: osm2streetsFeatureIsUnderground(feature),
+  });
+}
+
+function osm2streetsSelectionLineColor(
+  feature: any,
+  selection: Osm2StreetsSelection,
+  kind: 'lane' | 'intersection',
+  highlighted = false
+): Rgba {
+  if (isSelectedOsm2StreetsFeature(feature, selection, kind)) return [255, 224, 130, 255];
+  if (highlighted) return [255, 210, 92, 245];
+  return [0, 0, 0, 0];
+}
+
+function osm2streetsSelectionLineWidth(
+  feature: any,
+  selection: Osm2StreetsSelection,
+  kind: 'lane' | 'intersection',
+  highlighted = false
+): number {
+  return isSelectedOsm2StreetsFeature(feature, selection, kind) || highlighted ? 2 : 0;
 }
 
 function isSelectedOsm2StreetsFeature(
@@ -181,7 +236,6 @@ interface Props {
   roadAreas?: RoadArea[];
   roadPreviewAreas?: RoadArea[];
   roadFitConflicts?: RoadFitConflict[];
-  allowedRoadCorridors?: RoadAllowedCorridor[];
   selectedRoadAreaId?: string | null;
   onRoadAreaSelect?: (area: RoadArea) => void;
   roadDraft?: RoadDraft | null;
@@ -244,7 +298,6 @@ export default function MapView({
   roadAreas = [],
   roadPreviewAreas = [],
   roadFitConflicts = [],
-  allowedRoadCorridors = [],
   selectedRoadAreaId = null,
   onRoadAreaSelect,
   roadDraft = null,
@@ -649,25 +702,43 @@ export default function MapView({
           id: 'osm2streets-lanes',
           data: osm2streetsResult.lanes as any,
           filled: true,
-          stroked: false,
+          stroked: true,
           pickable: !!onOsm2StreetsSelect,
-          getFillColor: (feature: any) => {
-            if (isSelectedOsm2StreetsFeature(feature, osm2streetsSelection, 'lane')) {
-              return [255, 170, 40, 235];
-            }
-            if (highlightedOsm2StreetsRoadIds.has(feature?.properties?.road)) {
-              return [255, 210, 92, 218];
-            }
-            return osm2streetsLaneFillColor(
-              feature?.properties?.lane_type ?? feature?.properties?.type ?? ''
-            );
-          },
+          getFillColor: (feature: any) =>
+            osm2streetsDisplayColor(
+              osm2streetsLaneFillColor(
+                feature?.properties?.lane_type ?? feature?.properties?.type ?? ''
+              ),
+              feature,
+              basemap
+            ),
+          getLineColor: (feature: any) =>
+            osm2streetsSelectionLineColor(
+              feature,
+              osm2streetsSelection,
+              'lane',
+              highlightedOsm2StreetsRoadIds.has(feature?.properties?.road)
+            ),
+          getLineWidth: (feature: any) =>
+            osm2streetsSelectionLineWidth(
+              feature,
+              osm2streetsSelection,
+              'lane',
+              highlightedOsm2StreetsRoadIds.has(feature?.properties?.road)
+            ),
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 0,
           onClick: (info: PickingInfo<any>) => {
             if (info.object) {
               onOsm2StreetsSelect?.({ kind: 'lane', feature: info.object });
             }
           },
           parameters: { depthTest: false } as unknown as never,
+          updateTriggers: {
+            getFillColor: [basemap],
+            getLineColor: [osm2streetsSelection, highlightedOsm2StreetsRoadIds],
+            getLineWidth: [osm2streetsSelection, highlightedOsm2StreetsRoadIds],
+          },
         })
       );
     }
@@ -685,22 +756,41 @@ export default function MapView({
               features: intersections,
             } as any,
             filled: true,
-            stroked: false,
+            stroked: true,
             pickable: !!onOsm2StreetsSelect,
-            getFillColor: (feature: any) => {
-              if (isSelectedOsm2StreetsFeature(feature, osm2streetsSelection, 'intersection')) {
-                return [255, 184, 72, 205];
-              }
-              return osm2streetsIntersectionFillColor(
-                feature?.properties?.intersection_kind ?? feature?.properties?.kind ?? ''
-              );
-            },
+            getFillColor: (feature: any) =>
+              osm2streetsDisplayColor(
+                osm2streetsIntersectionFillColor(
+                  feature?.properties?.intersection_kind ?? feature?.properties?.kind ?? ''
+                ),
+                feature,
+                basemap
+              ),
+            getLineColor: (feature: any) =>
+              osm2streetsSelectionLineColor(
+                feature,
+                osm2streetsSelection,
+                'intersection'
+              ),
+            getLineWidth: (feature: any) =>
+              osm2streetsSelectionLineWidth(
+                feature,
+                osm2streetsSelection,
+                'intersection'
+              ),
+            lineWidthUnits: 'pixels',
+            lineWidthMinPixels: 0,
             onClick: (info: PickingInfo<any>) => {
               if (info.object) {
                 onOsm2StreetsSelect?.({ kind: 'intersection', feature: info.object });
               }
             },
             parameters: { depthTest: false } as unknown as never,
+            updateTriggers: {
+              getFillColor: [basemap],
+              getLineColor: [osm2streetsSelection],
+              getLineWidth: [osm2streetsSelection],
+            },
           })
         );
       }
@@ -742,8 +832,12 @@ export default function MapView({
           stroked: false,
           pickable: false,
           getFillColor: (feature: any) =>
-            osm2streetsLaneMarkingFillColor(
-              feature?.properties?.type ?? feature?.properties?.marking_type ?? ''
+            osm2streetsDisplayColor(
+              osm2streetsLaneMarkingFillColor(
+                feature?.properties?.type ?? feature?.properties?.marking_type ?? ''
+              ),
+              feature,
+              basemap
             ),
           parameters: { depthTest: false } as unknown as never,
         })
@@ -759,8 +853,12 @@ export default function MapView({
           stroked: false,
           pickable: false,
           getFillColor: (feature: any) =>
-            osm2streetsIntersectionMarkingFillColor(
-              feature?.properties?.type ?? feature?.properties?.marking_type ?? ''
+            osm2streetsDisplayColor(
+              osm2streetsIntersectionMarkingFillColor(
+                feature?.properties?.type ?? feature?.properties?.marking_type ?? ''
+              ),
+              feature,
+              basemap
             ),
           parameters: { depthTest: false } as unknown as never,
         })
@@ -773,9 +871,9 @@ export default function MapView({
           id: 'cityjson-road-areas',
           data: roadAreas,
           getPolygon: (d) => d.polygon,
-          getFillColor: (d) => roadAreaFillColor(d, d.id === selectedRoadAreaId),
-          getLineColor: (d) => roadAreaLineColor(d, d.id === selectedRoadAreaId),
-          getLineWidth: 1,
+          getFillColor: (d) => roadAreaFillColor(d, basemap),
+          getLineColor: (d) => roadAreaLineColor(d, basemap, d.id === selectedRoadAreaId),
+          getLineWidth: (d) => (d.id === selectedRoadAreaId ? 2 : 1),
           lineWidthMinPixels: 1,
           stroked: true,
           filled: true,
@@ -783,8 +881,9 @@ export default function MapView({
           extruded: false,
           parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
-            getFillColor: [selectedRoadAreaId],
-            getLineColor: [selectedRoadAreaId],
+            getFillColor: [basemap],
+            getLineColor: [selectedRoadAreaId, basemap],
+            getLineWidth: [selectedRoadAreaId],
           },
           onClick: (info: PickingInfo<RoadArea>) => {
             if (info.object) onRoadAreaSelect?.(info.object);
@@ -799,29 +898,10 @@ export default function MapView({
           id: 'road-draft-preview',
           data: roadPreviewAreas,
           getPolygon: (d) => d.polygon,
-          getFillColor: (d) => roadAreaFillColor(d, false, true),
-          getLineColor: (d) => roadAreaLineColor(d, false, true),
+          getFillColor: (d) => roadAreaFillColor(d, basemap, true),
+          getLineColor: (d) => roadAreaLineColor(d, basemap, false, true),
           getLineWidth: 1,
           lineWidthMinPixels: 1,
-          stroked: true,
-          filled: true,
-          pickable: false,
-          extruded: false,
-          parameters: { depthTest: false } as unknown as never,
-        })
-      );
-    }
-
-    if (allowedRoadCorridors.length > 0) {
-      layers.push(
-        new PolygonLayer<RoadAllowedCorridor>({
-          id: 'road-editing-corridors',
-          data: allowedRoadCorridors,
-          getPolygon: (d) => d.polygon,
-          getFillColor: [45, 212, 191, 22],
-          getLineColor: [94, 234, 212, 255],
-          getLineWidth: 2,
-          lineWidthMinPixels: 2,
           stroked: true,
           filled: true,
           pickable: false,
@@ -922,7 +1002,10 @@ export default function MapView({
       );
     }
 
-    if (osmRoads.length > 0) {
+    // Exact osm2streets polygons own picking whenever they are present. The
+    // generic OSM centerline hit target previously sat above them and replaced
+    // an exact selected road with a guessed constant-width draft.
+    if (osmRoads.length > 0 && !osm2streetsResult?.lanes.features.length) {
       const handleOsmRoadClick = (info: PickingInfo<OsmRoadFeature>) => {
         if (info.object) onOsmRoadSelect?.(info.object);
       };
@@ -933,7 +1016,15 @@ export default function MapView({
           data: osmRoads,
           getPath: (d) => d.path,
           getColor: (d) =>
-            d.id === selectedOsmRoadId ? [255, 170, 40, 255] : [250, 210, 80, 220],
+            roadOverlayColor(
+              d.id === selectedOsmRoadId
+                ? [255, 170, 40, 255]
+                : [250, 210, 80, 220],
+              {
+                basemap,
+                underground: d.inferredDraft.vertical?.placement === 'underground',
+              }
+            ),
           getWidth: (d) => (d.id === selectedOsmRoadId ? 6 : 3),
           widthUnits: 'pixels',
           widthMinPixels: 2,
@@ -942,7 +1033,7 @@ export default function MapView({
           pickable: false,
           parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
-            getColor: [selectedOsmRoadId],
+            getColor: [selectedOsmRoadId, basemap],
             getWidth: [selectedOsmRoadId],
           },
         }),
@@ -1062,7 +1153,6 @@ export default function MapView({
     handleRoadDraftHandleDragEnd,
     drawMode,
     roadFitConflicts,
-    allowedRoadCorridors,
     selectedRoadAreaId,
     onRoadAreaSelect,
     osmRoads,
@@ -1073,6 +1163,7 @@ export default function MapView({
     osm2streetsSelection,
     highlightedOsm2StreetsRoadIds,
     onOsm2StreetsSelect,
+    basemap,
     mapColorMode,
   ]);
 

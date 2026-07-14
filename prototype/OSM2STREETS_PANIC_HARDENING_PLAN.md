@@ -1,11 +1,61 @@
 # osm2streets Panic Hardening and Visual-Correctness Plan
 
-**Status:** ready for a dedicated high-reasoning implementation thread
+**Status:** implemented 2026-07-14; automated gates and focused browser pass
+complete, with the short user visual-acceptance checklist retained below
 **Scope:** eliminate the three quarantined Hamburg native-export panics, retain
 native/WASM parity, complete the Hamburg road export, and finish with a focused
 browser correctness pass plus the user's manual acceptance test.
 **Starting fork revision:** `vendor/osm2streets` at `5eb60ba` (`Fix degenerate
 intersection geometry handling`).
+
+## Final implementation evidence (2026-07-14)
+
+- The fork is hardened and pushed at `00b484f868f89c2420d25410525faf2414dde3c5`.
+  Explicit zero-width lanes now receive their semantic default width with a
+  diagnostic, and road edges, lane polygons, sidewalks, crosswalks, and
+  markings use fallible geometry paths with stable OSM road/intersection
+  context instead of aborting the network.
+- Three offline Hamburg regression fixtures cover the two zero-width paths and
+  the degenerate road-edge/marking path. They were extracted with referenced
+  OSM objects intact; live Overpass is not part of the regression gate.
+- `npm run osm2streets:compare` passes all seven committed fixtures with
+  normalized native/WASM parity and zero error diagnostics. The rebuilt WASM
+  comes from the same fork revision.
+- All three original WGS84 failure bboxes now complete with validation enabled:
+
+  | Failure | Road features | Surfaces | Vertices | Failed |
+  |---|---:|---:|---:|---:|
+  | repeat-point west | 34,026 | 82,244 | 476,090 | 0 |
+  | repeat-point east | 26,945 | 67,857 | 357,357 | 0 |
+  | degenerate edge | 101,344 | 267,360 | 1,303,730 | 0 |
+
+- The clean whole-Hamburg run at
+  `Data/hamburg-roads-osm2streets/cityjsonseq-2026-07-14-hardening/`
+  emitted 20 validated non-empty tiles and 47 true empty/water tiles with
+  `failed: 0`: 344,265 `Road` features, 913,927 surfaces, and 4,774,798
+  vertices. One 514.5 MiB parent lane file was deterministically subdivided
+  into four valid children rather than retained in memory indefinitely.
+- The run records fork revision `00b484f`, PBF SHA-256
+  `ee5398fbe5c05c9ef5cf4ddbc80f1e90047498280402c7633b5e2d8e2d71510a`,
+  and exporter SHA-256
+  `eab582032cd343ca2001dcf5380db8756e60ec11605f1d92af1c9c78c95cb74c`.
+  `build-hamburg-osm2streets-road-catalog.mjs` regenerates the road-specific
+  catalog without replacing it with LoD2 building metadata.
+- The focused browser pass covered the hosted exact fixture and a fresh central
+  Hamburg Overpass fetch. Exact selection keeps the same polygons and semantic
+  colors when an editable draft opens; red surfaces identify as bus lanes;
+  underground and satellite overlays use reduced opacity; the compact draft UI
+  does not clip; planning loads both paginated sources for the current view;
+  and the console contained no errors.
+- The manual `Trusted road corridor` upload/blocking workflow was removed. The
+  pure geometry helpers remain dormant for a future authoritative automatic
+  corridor source, but an unloaded optional file can no longer block or clutter
+  ordinary road editing.
+- Focused Rust tests pass (`osm2lanes`, `osm2streets`, and the exporter crate).
+  The upstream workspace-wide test command still has a Windows-only generated
+  fixture-path issue (`src\arizona_highways` is emitted as an invalid Rust
+  string escape); it is outside the modified crates and does not affect the
+  focused gates above.
 
 ## New-thread starter prompt
 
@@ -23,7 +73,7 @@ intersection geometry handling`).
 
 - The deployed GitHub Pages editor is client-side. It does not need the local
   Hamburg catalog server for hosted samples, OSM/Overpass road inspection,
-  manual road editing, trusted-corridor fitting, CityJSON export, or the hosted
+  manual road editing, road-fit checks, CityJSON export, or the hosted
   exact-surface road fixture.
 - The local server is only for prepared whole-city Hamburg CityJSONSeq building
   tile streaming and validated source-tile write-back.
@@ -249,3 +299,21 @@ Do not mark this plan complete merely because smaller bboxes avoid the panic.
 Completion means root-cause hardening, deterministic native/WASM coverage,
 `failed: 0` for the Hamburg batch, valid CityJSONSeq output, and the focused
 display/manual acceptance gates above.
+
+## Five-minute published-build acceptance checklist
+
+1. Open **Data → Advanced → Hamburg osm2streets roads - real fixture**, then
+   open **Roads**. Pick a dark driving lane and create its editable draft; the
+   exact polygon and fill must not turn black, disappear, or change width.
+2. Pick a red surface near the live central-Hamburg fetch. Its inspector and
+   draft must say **Bus**, not car. Sidewalks should remain grey, bicycle/shared
+   paths distinct, and intersection/crosswalk markings visible.
+3. Toggle **Satellite** and confirm imagery remains readable beneath all road
+   surfaces. Set a draft to **Underground** and confirm its road overlay becomes
+   more transparent without changing its semantic color.
+4. Click **Planning** once at a normal Hamburg zoom. Wait for both sources to
+   finish, then confirm the button says **Refresh Planning**, **Hide** is
+   available, and no partial/sample warning appears.
+5. Inspect the three repaired areas using the bboxes in **Current evidence** if
+   desired; fetch/recalculate must finish without a red error or missing-road
+   fallback. The `Trusted road corridor` card must not appear.

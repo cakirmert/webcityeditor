@@ -66,15 +66,11 @@ export default function App() {
   const [selectedZone, setSelectedZone] = useState<ParcelZone | null>(null);
   const [zoningEnabled, setZoningEnabled] = useState(false);
   const [zoningLoading, setZoningLoading] = useState(false);
+  const planningAbortRef = useRef<AbortController | null>(null);
+  const planningRequestIdRef = useRef(0);
 
   const handleToggleZoning = useCallback(async () => {
     if (!coreState.cityjson || zoningLoading) return;
-    if (zoningEnabled) {
-      setZoningEnabled(false);
-      setZones([]);
-      setSelectedZone(null);
-      return;
-    }
 
     const queryBbox = choosePlanningQueryBbox({
       viewportBbox: coreState.mapBboxRef.current,
@@ -94,9 +90,24 @@ export default function App() {
       return;
     }
 
+    planningAbortRef.current?.abort();
+    const controller = new AbortController();
+    planningAbortRef.current = controller;
+    const requestId = planningRequestIdRef.current + 1;
+    planningRequestIdRef.current = requestId;
+    const sourceCityJson = coreState.cityjson;
+    const fetchWithSignal: typeof fetch = (input, init) =>
+      fetch(input, { ...init, signal: controller.signal });
+
     setZoningLoading(true);
     try {
-      const nextZones = await fetchPlanningZones(queryBbox);
+      const nextZones = await fetchPlanningZones(queryBbox, fetchWithSignal);
+      if (
+        planningRequestIdRef.current !== requestId ||
+        coreState.cityjsonRef.current !== sourceCityJson
+      ) {
+        return;
+      }
       if (nextZones.length === 0) {
         alert('No planning polygons returned for this viewport.');
         return;
@@ -105,12 +116,34 @@ export default function App() {
       setSelectedZone(null);
       setZoningEnabled(true);
     } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return;
       console.error(e);
       alert(`Planning layer failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setZoningLoading(false);
+      if (planningRequestIdRef.current === requestId) {
+        planningAbortRef.current = null;
+        setZoningLoading(false);
+      }
     }
-  }, [coreState.cityjson, coreState.mapBboxRef, zoningEnabled, zoningLoading]);
+  }, [coreState.cityjson, coreState.cityjsonRef, coreState.mapBboxRef, zoningLoading]);
+
+  const handleHideZoning = useCallback(() => {
+    planningRequestIdRef.current += 1;
+    planningAbortRef.current?.abort();
+    planningAbortRef.current = null;
+    setZoningLoading(false);
+    setZoningEnabled(false);
+    setZones([]);
+    setSelectedZone(null);
+  }, []);
+
+  useEffect(
+    () => () => {
+      planningRequestIdRef.current += 1;
+      planningAbortRef.current?.abort();
+    },
+    []
+  );
 
   const handleZoneSelect = useCallback((zone: ParcelZone) => {
     setSelectedZone(zone);
@@ -470,6 +503,7 @@ export default function App() {
               selectedZone={selectedZone}
               onSelectZone={setSelectedZone}
               onClearSelected={() => setSelectedZone(null)}
+              onHide={handleHideZoning}
             />
           )}
           {roadEditor.showRoadEditor && (
@@ -500,7 +534,6 @@ export default function App() {
               onPostPayload={() => void roadEditor.handlePostRoadPayload()}
               onBackendUrlChange={roadEditor.setRoadBackendUrl}
               roadFitConflicts={roadEditor.roadFitConflicts}
-              allowedCorridors={roadEditor.allowedCorridors}
               selectedRoadArea={roadEditor.selectedRoadArea}
               onEditSelectedRoadArea={roadEditor.handleEditSelectedRoadArea}
               osm2streetsSelection={roadEditor.osm2streetsSelection}
@@ -512,9 +545,6 @@ export default function App() {
                 roadEditor.handleHighlightConnectedOsm2StreetsRoads
               }
               onClearOsm2StreetsSelection={roadEditor.handleClearOsm2StreetsSelection}
-              onLoadCorridorFile={roadEditor.handleLoadRoadCorridorFile}
-              onClearCorridors={roadEditor.handleClearRoadCorridors}
-              onFitDraftToCorridors={roadEditor.handleFitRoadDraftToCorridors}
             />
           )}
           {coreState.cityjson ? (
@@ -555,7 +585,6 @@ export default function App() {
               roadAreas={roadEditor.roadAreas}
               roadPreviewAreas={roadEditor.roadPreviewAreas}
               roadFitConflicts={roadEditor.roadFitConflicts}
-              allowedRoadCorridors={roadEditor.allowedCorridors}
               selectedRoadAreaId={roadEditor.selectedRoadArea?.id ?? null}
               onRoadAreaSelect={(area) => {
                 roadEditor.setSelectedRoadArea(area);
@@ -920,13 +949,16 @@ function ZoneLegend({
   selectedZone,
   onSelectZone,
   onClearSelected,
+  onHide,
 }: {
   zones: ParcelZone[];
   selectedZone: ParcelZone | null;
   onSelectZone: (zone: ParcelZone) => void;
   onClearSelected: () => void;
+  onHide: () => void;
 }) {
-  const visibleZones = uniqueZonesByLabel(zones).slice(0, 6);
+  const legendZones = uniqueZonesByLabel(zones);
+  const visibleZones = legendZones.slice(0, 6);
   return (
     <div
       style={{
@@ -947,17 +979,42 @@ function ZoneLegend({
     >
       <div
         style={{
-          fontSize: 10,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          color: 'rgba(255,255,255,0.55)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
           marginBottom: 6,
         }}
       >
-        Planning
+        <span
+          style={{
+            fontSize: 10,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            color: 'rgba(255,255,255,0.55)',
+          }}
+        >
+          Planning
+        </span>
+        <button
+          type="button"
+          onClick={onHide}
+          aria-label="Hide planning overlay"
+          style={{
+            border: 0,
+            borderRadius: 4,
+            background: 'rgba(255,255,255,0.12)',
+            color: 'rgba(255,255,255,0.82)',
+            padding: '1px 6px',
+            fontSize: 10,
+            cursor: 'pointer',
+          }}
+        >
+          Hide
+        </button>
       </div>
       <div style={{ marginBottom: 4, color: 'rgba(255,255,255,0.75)' }}>
-        {zones.length} polygons loaded
+        {zones.length} polygons loaded for this view
       </div>
       {visibleZones.map((z) => (
         <div
@@ -1000,9 +1057,9 @@ function ZoneLegend({
           <span>{z.label}</span>
         </div>
       ))}
-      {zones.length > visibleZones.length && (
+      {legendZones.length > visibleZones.length && (
         <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.5)' }}>
-          +{zones.length - visibleZones.length} more
+          +{legendZones.length - visibleZones.length} more planning categories
         </div>
       )}
       {selectedZone && (

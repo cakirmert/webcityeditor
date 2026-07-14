@@ -253,7 +253,8 @@ function collectOsm2StreetsRoadSourceAssets(
 
 export function roadBandFromLaneFeature(feature: Osm2StreetsFeature, index: number): RoadBand | null {
   const props = feature.properties ?? {};
-  const kind = roadBandKindFromLaneType(String(props.type ?? ''));
+  const sourceType = String(props.type ?? '');
+  const kind = roadBandKindFromLaneType(sourceType);
   if (!kind) return null;
   const widthM = typeof props.width === 'number' && Number.isFinite(props.width) ? props.width : 1;
   const maxspeedKmh = parseSpeedKmh(props.speed_limit);
@@ -261,6 +262,7 @@ export function roadBandFromLaneFeature(feature: Osm2StreetsFeature, index: numb
   return {
     id: `osm2streets-${kind}-${index}`,
     kind,
+    sourceType,
     widthM: Math.max(0.4, widthM),
     direction: roadDirectionFromLaneDirection(String(props.direction ?? '')),
     allowedModes: allowedModesForLaneType(String(props.type ?? '')),
@@ -314,7 +316,8 @@ function allowedModesForLaneType(type: string): string[] {
   if (key === 'shareduse') return ['pedestrian', 'bicycle'];
   if (key === 'bus') return ['bus'];
   if (key.includes('parking')) return ['car'];
-  if (key === 'driving' || key === 'lightrail' || key === 'construction') return ['car'];
+  if (key === 'lightrail' || key === 'tram') return ['rail'];
+  if (key === 'driving') return ['car'];
   return [];
 }
 

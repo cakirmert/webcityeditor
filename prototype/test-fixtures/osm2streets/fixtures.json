@@ -38,5 +38,50 @@
       "laneMarkings": 904,
       "intersectionMarkings": 0
     }
+  },
+  {
+    "id": "hamburg-zero-width-shared-use",
+    "file": "hamburg-zero-width-shared-use.osm",
+    "bbox": [10.009232058852133, 53.51609590502985, 10.011276341147866, 53.51686519497015],
+    "minimum": {
+      "lanes": 60,
+      "laneMarkings": 900,
+      "intersectionMarkings": 1
+    },
+    "requiredLaneWayIds": [961333640],
+    "requiredDiagnosticIncludes": [
+      "Ignoring non-positive explicit width for SharedUse lane on highway=path"
+    ],
+    "forbiddenDiagnosticIncludes": ["Skipping lane polygon"]
+  },
+  {
+    "id": "hamburg-zero-width-driving",
+    "file": "hamburg-zero-width-driving.osm",
+    "bbox": [10.175136619311923, 53.47281960502985, 10.176286080688078, 53.47393799497015],
+    "minimum": {
+      "lanes": 28,
+      "laneMarkings": 250,
+      "intersectionMarkings": 0
+    },
+    "requiredLaneWayIds": [174787668],
+    "requiredDiagnosticIncludes": [
+      "Ignoring non-positive explicit width for Driving lane on highway=track"
+    ],
+    "forbiddenDiagnosticIncludes": ["Skipping lane polygon"]
+  },
+  {
+    "id": "hamburg-degenerate-road-edge",
+    "file": "hamburg-degenerate-road-edge.osm",
+    "bbox": [9.988728281653865, 53.56075120502985, 9.989669018346135, 53.56131199497015],
+    "minimum": {
+      "lanes": 34,
+      "laneMarkings": 200,
+      "intersectionMarkings": 0
+    },
+    "requiredLaneWayIds": [399844143],
+    "requiredDiagnosticIncludes": [
+      "failed to calculate left edge for Road",
+      "https://www.openstreetmap.org/way/399844143"
+    ]
   }
 ]

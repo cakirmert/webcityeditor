@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-07-14. **Test suite**: 497 passing across 56 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
+**Last updated**: 2026-07-14. **Test suite**: 508 passing across 56 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -26,8 +26,8 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 ### Display
 - **MapLibre** basemap (CARTO light raster tiles with OSM attribution; switched away from `tile.openstreetmap.org` after Hamburg tiles returned 404)
 - **deck.gl** context layer — LoD by zoom: outlined footprints below 14.5, extruded blocks above
-- **Hamburg planning overlay** — toolbar fetches real Hamburg XPlan `BP_BaugebietsTeilFlaeche` polygons for the current viewport, falls back to FNP land-use GeoJSON when XPlan has no polygons, and renders the result as a semi-transparent planning layer. Clicking a planning polygon opens an info card with source, label, mapped compatible building types, and available plan attributes. This is a planning-data aid, not a legal compliance decision.
-- **Road editor overlay** — toolbar `Roads` opens OSM reference roads, satellite basemap checking, manual road redraw, lane/speed controls, and CityJSON Transportation insertion without expanding the main toolbar.
+- **Hamburg planning overlay** — the click-driven toolbar action loads both Hamburg XPlan `BP_BaugebietsTeilFlaeche` detail and FNP land-use coverage for the current viewport, follows every advertised page/offset, deduplicates stable feature ids, and gives XPlan priority where both sources overlap. The UI reports incomplete-source failures instead of silently showing a sample, caps oversized viewports, and provides explicit Refresh/Hide actions. Clicking a polygon opens its source, label, mapped building types, and available plan attributes. This is a planning-data aid, not a legal compliance decision.
+- **Road editor overlay** — toolbar `Roads` opens exact osm2streets lane/intersection surfaces, OSM reference roads only where exact output is unavailable, satellite checking, manual road redraw, lane/speed controls, and CityJSON Transportation insertion without expanding the main toolbar. Exact selection uses an outline and does not replace the rendered surface with a guessed constant-width ribbon.
 - **Satellite basemap** — road mode can switch the MapLibre raster source from CARTO/OSM to Esri World Imagery so OSM lane assumptions can be checked against aerial imagery.
 - Click a building → side panel with a per-building Three.js scene
 - **Auto-fit on load**: bbox of footprints → imported road-area bounds → `metadata.geographicalExtent` → `transform.translate` as centre — fallbacks so building datasets and roads-only CityJSON both open focused.
@@ -48,7 +48,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 
 ### Transportation / road editing
 - **Source-of-truth decision for v1**: edited roads are stored as CityJSON 2.0 Transportation `Road` objects. OSM is used only as a reference/seed layer; the editor does not write back to OSM.
-- **OSM reference fetch**: Road editor fetches `highway=*` ways from Overpass for the current viewport, renders them as selectable yellow deck.gl paths, and infers lane count, one-way/two-way direction, sidewalks, cycle lanes, and speed limit from OSM tags. Large query caps are computed in the active metric CRS (Hamburg fallback: EPSG:25832) before converting back to the WGS84 Overpass bbox, so the road query window is no longer sized with meters-per-degree estimates.
+- **OSM reference fetch**: Road editor fetches `highway=*` ways from Overpass for the current viewport and runs them through the forked osm2streets engine. Exact lane, intersection, and marking surfaces retain semantic colors while picking/editing; the generic OSM path/hit layer is suppressed wherever exact output exists. Direct pedestrian/path/cycleway features no longer invent underground car lanes. Large query caps are computed in the active metric CRS (Hamburg fallback: EPSG:25832) before converting back to the WGS84 Overpass bbox.
 - **User verification step**: clicking an OSM road prompts the user to confirm whether the inferred layout matches reality. Accept uses the OSM-derived draft; cancel keeps it as an editable seed for redraw/manual correction.
 - **Manual correction scene**: Terra Draw LineString mode lets the user draw or redraw the road centerline over the basemap/satellite image. The current draft previews as transportation surface polygons before insertion.
 - **Lane/band editor**: per-section bands are editable left-to-right as car lane, bike lane, sidewalk, parking, median, or green verge. A proportional colored strip shows width and direction arrows, supports drag-to-reorder, and keeps detailed width/direction/speed controls below it.
@@ -57,14 +57,14 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **Editable reopened road layouts**: Road surfaces created by the editor expose valid `_roadLayout` metadata as an edit action when the exported CityJSON is reloaded; exact imported surfaces without draft layout remain inspect-only.
 - **Exact osm2streets polygon output**: selected osm2streets lane polygons can also be inserted directly as CityJSON Transportation `Road` surfaces, preserving the computed lane/bike/auxiliary polygons instead of regenerating ribbons from a centerline. Before insertion, each lane becomes a full `TrafficAreaPolygonAsset` with a closed active-CRS metric surface, metric centerline, CRS URI, width, direction, function/usage semantics, ids, lane type, and OSM/osm2streets provenance. The re-import/render path is tested against real native Hamburg polygons and semantic colors.
 - **Hosted real road sample**: the Data loader exposes `osm2streets-hamburg-short-intersection.city.json`, generated from the committed native `hamburg-short-intersection` osm2streets lane-polygons fixture, for browser inspection of roads-only CityJSON.
-- **Batch osm2streets road CityJSONSeq output**: `npm run data:hamburg-roads` runs the native osm2streets exporter over clipped Hamburg OSM tiles, converts lane polygons to CityJSON `Road` features with unique tile-prefixed ids, validates each `.city.jsonl`, and records empty/no-road tiles separately from exporter crashes. The 2026-07-03 run emitted 10 validated road tiles under `Data/hamburg-roads-osm2streets/cityjsonseq/` (182,396 `Road` features, 497,421 surfaces, 2,641,099 vertices, ~664 MB) but is not a complete citywide road export yet: three small bboxes still hit native osm2streets panics and are listed in `hamburg-osm2streets-roads-current-summary.json`.
+- **Complete batch osm2streets road CityJSONSeq output**: `npm run data:hamburg-roads` runs the native exporter over clipped Hamburg OSM tiles, deterministically subdivides oversized lane output, converts polygons to tile-prefixed CityJSON `Road` features, validates every `.city.jsonl`, and records true empty/no-road tiles separately. The 2026-07-14 hardened run under `Data/hamburg-roads-osm2streets/cityjsonseq-2026-07-14-hardening/` completed with `failed: 0`: 20 validated non-empty tiles, 47 empty/water tiles, 344,265 roads, 913,927 surfaces, and 4,774,798 vertices. Its road-specific catalog and summary record the exact PBF, exporter, and fork hashes.
 - **CityGML bridge**: `npm run cityjson:to-citygml -- INPUT.city.json --require-road` converts exported CityJSON roads to CityGML 3.0 Transportation XML with `citygml-tools from-cityjson`, then validates the generated `.gml`.
 - **Backend-ready payload**: the same draft can be exported or POSTed as `webcityeditor-road-edit-v1` JSON. Insert/export/backend actions and payload preview live in one closed `CityJSON Export & Backend` disclosure so they do not crowd the main editing flow.
 - **Local diff artifacts**: road/building edits can be summarized as a deterministic `webcityeditor-local-change-report-v1` JSON report plus a GeoJSON visual-diff overlay while the prototype remains frontend/local-file based.
 - **osm2streets forked-WASM path**: OSM-derived reference and exact-surface lane geometry is generated through the vendored `vendor/osm2streets` Rust fork, rebuilt into `prototype/vendor/osm2streets-js` with `wasm-pack`. Manual/editable `RoadDraft` previews intentionally use the TypeScript ribbon generator; the old npm-wrapper `patch-package` path is removed.
 - **Hamburg osm2streets fixtures**: `npm run osm2streets:compare` runs committed Hamburg OSM snippets through both the forked WASM package and the native Rust exporter, checks minimum lane/marking counts, records warnings/errors, writes both outputs to `prototype/test-output/osm2streets-comparison/`, and fails if normalized outputs or diagnostics diverge.
 - **OpenDRIVE boundary**: Hamburg OpenDRIVE / Road2CityGML-style import is not implemented in-browser yet. The intended path is a converter that maps OpenDRIVE lanes/roads into the same `RoadDraft` model, then reuses the existing CityJSON Transportation generator and preview. The broader plan is documented in [`CITYGML_TRANSPORTATION_PLAN.md`](CITYGML_TRANSPORTATION_PLAN.md); the metric road-limit and r:trån trial pipeline is detailed in [`METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md`](METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md); osm2streets-specific fork and UI work is tracked in [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md).
-- **Road-fit validation and corridor fitting**: generated road preview polygons are checked against loaded building footprints and planning/land polygons. Surface or known-z building collisions block insertion; OSM tunnel/bridge/layer hints without metric elevation become `vertical_uncertainty` warnings; known vertical separation suppresses both overlap and horizontal-clearance conflicts. Near-building clearances are measured in metric CRS: under 0.5 m blocks insertion, and under 1 m warns. Building, affected-land, and corridor conflicts use projected polygon boolean operations so the map highlights the actual overlap/overflow polygon instead of the whole affected feature. The road panel can load and clear user-approved WGS84 GeoJSON Polygon/MultiPolygon corridors, renders their boundary, and blocks insertion outside them. Its explicit `Fit draft widths to corridor` action finds the largest safe proportional width per section, shows before/after widths for confirmation, preserves centerlines/order/semantics, and refuses any result requiring a band below 0.40 m.
+- **Road-fit validation**: generated road preview polygons are checked against loaded building footprints and planning/land polygons. Surface or known-z building collisions block insertion; OSM tunnel/bridge/layer hints without metric elevation become `vertical_uncertainty` warnings; known vertical separation suppresses overlap and horizontal-clearance conflicts. Near-building clearances are measured in metric CRS: under 0.5 m blocks insertion, and under 1 m warns. Projected polygon operations highlight the actual overlap geometry. The incomplete manual `Trusted road corridor` file workflow has been removed from the app; its pure helpers stay dormant until an authoritative corridor source can be loaded automatically.
 
 ### Edit existing buildings
 - Attribute editor with priority-sorted rows, type coercion (number/string/boolean)
@@ -245,12 +245,15 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 ## 8. What's left — roadmap (priority order)
 
 **Done in the current transportation integration window (2026-06-24 → 2026-07-14):**
+- ✅ **osm2streets panic hardening and complete Hamburg export** — root-fixed the zero-width and degenerate polygon paths in the Rust fork, added three offline regression fixtures, rebuilt matching WASM, passed seven-fixture native/browser parity with zero errors, repaired the three quarantined bboxes, and completed a validated 344,265-road Hamburg batch with `failed: 0`.
+- ✅ **Stable semantic road rendering** — exact lane/intersection surfaces keep their polygons and colors between normal display, picking, and draft creation; bus lanes remain visibly red and identify as bus lanes; underground overlays use 50% opacity; satellite mode applies a further 72% opacity factor; and generic OSM hit paths no longer mask exact surfaces.
+- ✅ **Planning completeness and road-panel cleanup** — XPlan and FNP now paginate to completion for a bounded clicked viewport with stale-request cancellation and explicit partial-load failures. Removed the non-automatic trusted-corridor upload gate and fixed draft-panel control sizing/text clipping.
 - ✅ **Street Explorer parity baseline** — added full plain/lane/marking output, explorer-ordered layers, shared semantic styling, intersection polygons, lane/intersection inspection, connected-road highlighting, and real Hamburg regression fixtures.
 - ✅ **Exact road-surface export chain** — added metric `TrafficAreaPolygonAsset` normalization, direct osm2streets lane-polygon CityJSON insertion, re-import/picking metadata, batch CityJSONSeq conversion, and the validated CityJSON → CityGML bridge.
 - ✅ **Metric road-query and fit slices** — moved Overpass caps into the active projected CRS, added metric 0.5 m hard and 1 m warning building-clearance checks, and added vertical road profiles with z-aware collision decisions for editable and exact-surface paths.
 - ✅ **Road editor integration cleanup** — added the visual draggable lane strip with direction arrows, restored the single closed `CityJSON Export & Backend` disclosure, and exposed vertical placement plus optional road elevation controls.
-- ✅ **Projected road constraints and explicit fitting** — robust metric intersection/difference geometry now highlights actual building, land, and corridor conflicts; trusted GeoJSON corridors render and hard-block overflow; a user-confirmed fit action proportionally narrows editable sections without moving their centerlines or silently changing semantics.
-- ✅ **Plan reconciliation** — qualified osm2streets as the OSM-derived reference/exact engine while retaining intentional manual `RoadDraft` ribbons, and aligned all transportation plans on the delivered vertical, clearance, projected-geometry, trusted-corridor, and explicit-fit baseline.
+- ✅ **Projected road constraints** — robust metric intersection/difference geometry highlights actual building and planning conflicts; the reusable corridor/fitting algorithms remain tested but are intentionally not exposed until an authoritative automatic corridor source exists.
+- ✅ **Plan reconciliation** — qualified osm2streets as the OSM-derived reference/exact engine while retaining intentional manual `RoadDraft` ribbons, and aligned the transportation plans with the delivered vertical, clearance, projected-geometry, rendering, and panic-hardening baseline.
 
 **Done since the last status update (2026-06-01 → 2026-06-08):**
 - ✅ **Transportation road-editing v1** — added Road editor overlay, OSM Overpass road fetch, satellite basemap toggle, OSM lane/speed inference and user confirmation, manual road centerline redraw, lane/band width and direction controls, percentage section split, CityJSON Transportation `Road` insertion, map preview/picking, and backend-ready JSON export/POST.
@@ -317,7 +320,7 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 1. **IFC → CityJSON import polish** — Route #2 (`web-ifc` WASM in-browser) is working and covered by unit tests, but should be exercised against known real IFC files for error reporting, IFC-version quirks, and complex storey layouts. Lower priority — current quality is "demo-able but rough."
 2. **Finish Hamburg external validation and quarantine repair** — Install official `cjval` and run it across the generated CityJSONSeq tiles. The source XML schema gate, repository structural gate, and `val3dity` primitive audit are green for the strict editing catalog. Repair and re-audit the 3,387 quarantined originals if the handoff requires lossless full-building coverage.
 3. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-4. **Transportation module next phase** — Execute [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md) to root-fix the three quarantined whole-city bboxes, prove native/WASM parity, finish the Hamburg road export, and run a focused display/manual acceptance pass. Then evaluate `muv-osm` and prototype an r:trån-backed OpenDRIVE → CityGML importer. The road-fit/clearance/vertical/projected-conflict baseline, trusted visible GeoJSON corridor source, explicit proportional corridor fitting, and full metric exact-surface asset contract are already delivered.
+4. **Transportation module next phase** — The [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md) implementation and automated/browser gates are complete; retain its five-minute user acceptance checklist for deployment sign-off. Next, evaluate `muv-osm`, choose an authoritative automatic corridor/parcel source before restoring corridor controls, and prototype an r:trån-backed OpenDRIVE → CityGML importer.
 5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Add authentication, shared-user history, and incremental published-tile regeneration. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 **Deferred (good ROI not obvious right now):**
@@ -402,7 +405,7 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (497 tests across 56 files)
+## 10. Test suite (508 tests across 56 files)
 
 | File | Tests | Coverage |
 |---|---|---|
@@ -431,7 +434,8 @@ webcityeditor/
 | `lib/osm2streets-cityjson.test.ts` | 4 | Exact metric osm2streets lane assets become CityJSON Road MultiSurface surfaces; re-import preserves geometry, semantics, colors, and tunnel/layer vertical hints |
 | `lib/osm2streets-cityjson-cli.test.ts` | 2 | Batch converter turns osm2streets lane-polygons GeoJSON into monolithic CityJSON and CityJSONSeq Road features with importable semantics; real Hamburg native osm2streets polygons round-trip without geometry drift |
 | `lib/osm2streets-draft.test.ts` | 3 | osm2streets lane selection seeds editable RoadDrafts and normalized polygon assets |
-| `lib/transportation.test.ts` | 16 | OSM parsing/inference, manual and exact road insertion, vertical profiles/elevation persistence, reopened `_roadLayout` drafts, section splits, payloads, and geometry guards |
+| `lib/transportation.test.ts` | 20 | OSM parsing/inference including pedestrian/shared/cycle paths, semantic source types, manual and exact road insertion, vertical profiles/elevation persistence, reopened `_roadLayout` drafts, section splits, payloads, and geometry guards |
+| `lib/osm2streets-style.test.ts` | 6 | Semantic lane/intersection/marking colors plus satellite and underground alpha composition |
 | `lib/road-fit.test.ts` | 16 | Building/planning/corridor conflicts, trusted-corridor blocking, projected overlap/overflow polygons, metric hard/warning clearance, vertical uncertainty/separation, known-z collision, and per-area conflict identity |
 | `lib/road-corridor.test.ts` | 3 | Trusted WGS84 Polygon/MultiPolygon corridor import, ring closing, part expansion, and invalid CRS/geometry rejection |
 | `lib/road-corridor-fit.test.ts` | 4 | Largest safe proportional section width, unchanged fits, off-corridor centerline refusal, and 0.40 m semantic-band floor |
@@ -452,10 +456,10 @@ webcityeditor/
 | `lib/merge.test.ts` | 12 | Merge/import id conflicts, parent/child rewiring, exact transform normalization, precision-loss refusal |
 | `lib/clipboard.test.ts` | 8 | Multi-select copy/paste cloning, offsets, and hierarchy rewiring |
 | `lib/delete.test.ts` | 6 | Cascading deletion and surviving parent child-list cleanup |
-| `lib/zoning.test.ts` | 19 | Hamburg XPlan/FNP URL builders, GeoJSON-to-planning-zone mapping, fetch fallback, point-in-polygon and nearest-zone checks, and allow-list validation |
-| `components/Toolbar.test.tsx` | 9 | Title, stats, dirty counter, catalog tile counter, sequence persistence, wiring |
+| `lib/zoning.test.ts` | 28 | Hamburg XPlan/FNP URL builders, full pagination and deduplication, combined-source priority, viewport/feature caps, explicit partial-load failures, GeoJSON mapping, point-in-polygon and allow-list validation |
+| `components/Toolbar.test.tsx` | 10 | Title, stats, dirty counter, catalog tile counter, sequence persistence, and Planning refresh wiring |
 | `components/FileLoader.test.tsx` | 6 | Sample button, fetch errors, non-CityJSON rejection, strict local catalog connection, malformed sequence-line reporting |
-| `components/RoadEditorPanel.test.tsx` | 10 | Visual band strip/reordering, closed advanced disclosure, vertical placement, trusted corridor load/clear/fit controls, osm2streets inspection actions, imported road metadata, and saved-layout edit action |
+| `components/RoadEditorPanel.test.tsx` | 9 | Responsive semantic band strip/reordering, closed advanced disclosure, vertical placement, absence of the inactive corridor workflow, osm2streets inspection actions, imported road metadata, and saved-layout edit action |
 | `components/AttributePanel.test.tsx` | 13 | Attribute rendering, priority sort, numeric/string/boolean coercion, revert gating, terrain move controls, shared and independent floor-plan controls |
 
 ---
@@ -468,8 +472,8 @@ Prerequisites: Node.js 20+, npm, Git. (Java 17+ and Docker are optional, for the
 git clone https://github.com/cakirmert/webcityeditor.git
 cd webcityeditor
 cd prototype
-npm install
-npm run dev        # http://localhost:5173
+npm ci
+npm run dev:frontend  # http://localhost:5173
 npm test
 ```
 

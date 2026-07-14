@@ -78,6 +78,28 @@ describe('transportation roads', () => {
   });
 
   it.each([
+    ['footway', 'Footway', 'sidewalk'],
+    ['pedestrian', 'Footway', 'sidewalk'],
+    ['path', 'SharedUse', 'sidewalk'],
+    ['cycleway', 'Biking', 'bike_lane'],
+  ] as const)(
+    'does not invent underground car lanes for highway=%s',
+    (highway, sourceType, kind) => {
+      const draft = inferRoadDraftFromOsmRoad({
+        osmWayId: `underground-${highway}`,
+        path: delftRoad,
+        tags: { highway, tunnel: 'yes', layer: '-1' },
+      });
+
+      expect(draft.vertical?.placement).toBe('underground');
+      expect(draft.sections[0].bands).toEqual([
+        expect.objectContaining({ kind, sourceType }),
+      ]);
+      expect(draft.sections[0].bands.some((band) => band.kind === 'car_lane')).toBe(false);
+    }
+  );
+
+  it.each([
     [{ tunnel: 'yes' }, 'underground'],
     [{ covered: 'yes' }, 'underground'],
     [{ layer: '-1' }, 'underground'],
@@ -126,6 +148,8 @@ describe('transportation roads', () => {
   it('reopens inserted Road objects with editable _roadLayout metadata', () => {
     const doc = buildSampleCube();
     const draft = createManualRoadDraft(delftRoad, { name: 'Reopened road', maxspeedKmh: 30 });
+    draft.sections[0].bands[1].sourceType = 'Bus';
+    draft.sections[0].bands[1].allowedModes = ['bus'];
     draft.vertical = { placement: 'underground', source: 'user', elevationM: -4 };
     insertRoadIntoCityJson(doc, draft, { id: 'road-test' });
 
@@ -147,6 +171,11 @@ describe('transportation roads', () => {
     expect(areas[0].editableDraft?.sections[0].bands.map((band) => band.kind)).toEqual(
       draft.sections[0].bands.map((band) => band.kind)
     );
+    expect(areas[0].editableDraft?.sections[0].bands[1]).toMatchObject({
+      sourceType: 'Bus',
+      allowedModes: ['bus'],
+    });
+    expect(areas.some((area) => area.attributes.sourceType === 'Bus')).toBe(true);
   });
 
   it('uses a known draft elevation for geometry and preserves its vertical profile', () => {

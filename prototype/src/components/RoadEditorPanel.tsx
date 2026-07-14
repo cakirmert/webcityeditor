@@ -15,7 +15,6 @@ import {
   Scissors,
   Send,
   Trash2,
-  Upload,
   X,
 } from 'lucide-react';
 import {
@@ -31,7 +30,6 @@ import {
   type RoadVerticalPlacement,
 } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
-import type { RoadAllowedCorridor } from '../lib/road-corridor';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import Osm2StreetsInspector from './Osm2StreetsInspector';
 import { Button } from './ui/button';
@@ -48,7 +46,6 @@ interface Props {
   backendUrl: string;
   insertedRoadId?: string | null;
   roadFitConflicts?: RoadFitConflict[];
-  allowedCorridors?: RoadAllowedCorridor[];
   selectedRoadArea?: RoadArea | null;
   osm2streetsSelection?: Osm2StreetsSelection;
   onClose: () => void;
@@ -68,9 +65,6 @@ interface Props {
   onInsertOsm2StreetsSelection: () => void;
   onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
-  onLoadCorridorFile: (file: File) => void | Promise<void>;
-  onClearCorridors: () => void;
-  onFitDraftToCorridors: () => void;
 }
 
 const BAND_KINDS: RoadBandKind[] = [
@@ -102,7 +96,6 @@ export default function RoadEditorPanel({
   backendUrl,
   insertedRoadId,
   roadFitConflicts = [],
-  allowedCorridors = [],
   selectedRoadArea = null,
   osm2streetsSelection = null,
   onClose,
@@ -122,9 +115,6 @@ export default function RoadEditorPanel({
   onInsertOsm2StreetsSelection,
   onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
-  onLoadCorridorFile,
-  onClearCorridors,
-  onFitDraftToCorridors,
 }: Props) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [splitPercent, setSplitPercent] = useState(50);
@@ -405,53 +395,6 @@ export default function RoadEditorPanel({
           {status && <StatusCard>{status}</StatusCard>}
         </section>
 
-        <section className="space-y-2 rounded-md border border-[rgba(45,212,191,0.24)] bg-[rgba(20,184,166,0.06)] p-2.5">
-          <PanelSectionHeader
-            icon={<Footprints className="h-3.5 w-3.5" aria-hidden="true" />}
-            title="Trusted road corridor"
-            meta={allowedCorridors.length > 0 ? `${allowedCorridors.length} polygon${allowedCorridors.length === 1 ? '' : 's'}` : 'not loaded'}
-          />
-          <p className="m-0 text-[10px] leading-snug text-[var(--text-faint)]">
-            Load user-approved WGS84 GeoJSON. Road surfaces outside its boundary are highlighted and blocked.
-          </p>
-          <div className="grid grid-cols-[1fr_auto] gap-1.5">
-            <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 text-[11px] font-medium hover:bg-[var(--surface-3)]">
-              <Upload className="h-3.5 w-3.5" aria-hidden="true" />
-              Load corridor GeoJSON
-              <input
-                className="sr-only"
-                type="file"
-                accept=".geojson,.json,application/geo+json,application/json"
-                aria-label="Load trusted corridor GeoJSON"
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  if (file) void onLoadCorridorFile(file);
-                  event.currentTarget.value = '';
-                }}
-              />
-            </label>
-            {allowedCorridors.length > 0 && (
-              <Button size="sm" variant="outline" onClick={onClearCorridors}>
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Clear
-              </Button>
-            )}
-          </div>
-          {allowedCorridors.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={onFitDraftToCorridors}
-              disabled={!draft}
-              title={draft ? 'Proportionally reduce band widths without moving the centerline.' : 'Create or select an editable road draft first.'}
-            >
-              <Route className="h-3.5 w-3.5" aria-hidden="true" />
-              Fit draft widths to corridor
-            </Button>
-          )}
-        </section>
-
         {roadFitConflicts.length > 0 && (
           <FitConflictCard
             conflicts={roadFitConflicts}
@@ -493,7 +436,7 @@ export default function RoadEditorPanel({
                   <select
                     value={activeSection.id}
                     onChange={(event) => setActiveSectionId(event.target.value)}
-                    className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
+                    className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
                   >
                     {draft.sections.map((section, index) => (
                       <option key={section.id} value={section.id}>
@@ -545,7 +488,7 @@ export default function RoadEditorPanel({
                       },
                     });
                   }}
-                  className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
+                  className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
                 >
                   <option value="surface">Surface</option>
                   <option value="underground">Underground</option>
@@ -618,17 +561,17 @@ export default function RoadEditorPanel({
                     }`}
                     style={{
                       flexGrow: Math.max(0.8, band.widthM),
-                      background: bandBoxBackground(band.kind),
-                      color: bandBoxTextColor(band.kind),
+                      background: bandBoxBackground(band.kind, band.sourceType),
+                      color: bandBoxTextColor(band.kind, band.sourceType),
                     }}
-                    title={`Band ${index + 1}: ${labelBand(band.kind)} (${band.widthM} m)`}
-                    aria-label={`Band ${index + 1}: ${labelBand(band.kind)}, ${band.widthM} metres`}
+                    title={`Band ${index + 1}: ${labelBand(band.kind, band.sourceType)} (${band.widthM} m)`}
+                    aria-label={`Band ${index + 1}: ${labelBand(band.kind, band.sourceType)}, ${band.widthM} metres`}
                   >
                     <span className="flex items-center gap-1 text-[9px] opacity-80">
                       <GripVertical className="h-3 w-3" aria-hidden="true" />
                       #{index + 1}
                     </span>
-                    <span className="mt-0.5 block truncate">{labelBand(band.kind)}</span>
+                    <span className="mt-0.5 block truncate">{labelBand(band.kind, band.sourceType)}</span>
                     <span className="flex items-center justify-between gap-1 text-[9px] opacity-80">
                       <span>{band.widthM} m</span>
                       <span aria-hidden="true">{directionArrow(band.direction)}</span>
@@ -640,14 +583,15 @@ export default function RoadEditorPanel({
                 {activeSection.bands.map((band, index) => (
                   <div
                     key={`${band.id ?? band.kind}-${index}`}
-                    className="grid grid-cols-[1fr_64px_86px_30px] items-center gap-1"
+                    className="grid grid-cols-[minmax(112px,1fr)_minmax(70px,82px)_minmax(92px,108px)_36px] items-center gap-1.5"
                   >
                     <select
-                      value={band.kind}
+                      value={band.sourceType ? '__source__' : band.kind}
                       onChange={(event) => {
                         const kind = event.target.value as RoadBandKind;
                         updateBand(index, {
                           kind,
+                          sourceType: undefined,
                           widthM: DEFAULT_WIDTH[kind],
                           direction:
                             kind === 'car_lane' || kind === 'bike_lane'
@@ -656,8 +600,13 @@ export default function RoadEditorPanel({
                           allowedModes: defaultModes(kind),
                         });
                       }}
-                      className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
+                      className="h-8 min-w-0 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
                     >
+                      {band.sourceType && (
+                        <option value="__source__" disabled>
+                          {labelBand(band.kind, band.sourceType)} (source)
+                        </option>
+                      )}
                       {BAND_KINDS.map((kind) => (
                         <option key={kind} value={kind}>
                           {labelBand(kind)}
@@ -665,6 +614,7 @@ export default function RoadEditorPanel({
                       ))}
                     </select>
                     <Input
+                      className="min-w-0"
                       type="number"
                       min={0.4}
                       max={12}
@@ -681,7 +631,7 @@ export default function RoadEditorPanel({
                       onChange={(event) =>
                         updateBand(index, { direction: event.target.value as RoadDirection })
                       }
-                      className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
+                      className="h-8 min-w-0 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-xs"
                     >
                       {DIRECTIONS.map((direction) => (
                         <option key={direction} value={direction}>
@@ -694,8 +644,8 @@ export default function RoadEditorPanel({
                       onClick={() => removeBand(index)}
                       disabled={activeSection.bands.length <= 1}
                       title="Remove band"
-                      aria-label={`Remove ${labelBand(band.kind)} band`}
-                      className="inline-flex h-7 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text-dim)] transition hover:bg-[var(--surface-2)] hover:text-[var(--text)] disabled:opacity-40"
+                      aria-label={`Remove ${labelBand(band.kind, band.sourceType)} band`}
+                      className="inline-flex h-8 min-w-0 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text-dim)] transition hover:bg-[var(--surface-2)] hover:text-[var(--text)] disabled:opacity-40"
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -961,11 +911,47 @@ function directionArrow(direction: RoadDirection | undefined): string {
   return '•';
 }
 
-function labelBand(kind: RoadBandKind): string {
+function labelBand(kind: RoadBandKind, sourceType?: string): string {
+  switch (normalizeLaneType(sourceType)) {
+    case 'bus':
+    case 'buslane':
+      return 'bus lane';
+    case 'lightrail':
+    case 'tram':
+      return 'light rail';
+    case 'construction':
+      return 'construction';
+    case 'footway':
+      return 'footway';
+    case 'shareduse':
+    case 'shared':
+      return 'shared path';
+    case 'shoulder':
+      return 'shoulder';
+    default:
+      break;
+  }
   return kind.replaceAll('_', ' ');
 }
 
-function bandBoxBackground(kind: RoadBandKind): string {
+function bandBoxBackground(kind: RoadBandKind, sourceType?: string): string {
+  switch (normalizeLaneType(sourceType)) {
+    case 'bus':
+    case 'buslane':
+      return 'linear-gradient(180deg, #ac3a3a 0%, #7d2929 100%)';
+    case 'lightrail':
+    case 'tram':
+      return 'linear-gradient(180deg, #805634 0%, #603f26 100%)';
+    case 'construction':
+      return 'linear-gradient(180deg, #da8434 0%, #aa6124 100%)';
+    case 'shareduse':
+    case 'shared':
+      return 'linear-gradient(180deg, #909a52 0%, #6e773d 100%)';
+    case 'footway':
+      return 'linear-gradient(180deg, #d7dae1 0%, #b9bec8 100%)';
+    default:
+      break;
+  }
   switch (kind) {
     case 'car_lane':
       return 'linear-gradient(180deg, #4a4d57 0%, #343741 100%)';
@@ -984,6 +970,13 @@ function bandBoxBackground(kind: RoadBandKind): string {
   }
 }
 
-function bandBoxTextColor(kind: RoadBandKind): string {
-  return kind === 'sidewalk' ? '#111827' : '#ffffff';
+function bandBoxTextColor(kind: RoadBandKind, sourceType?: string): string {
+  const semantic = normalizeLaneType(sourceType);
+  return kind === 'sidewalk' && semantic !== 'shareduse' && semantic !== 'shared'
+    ? '#111827'
+    : '#ffffff';
+}
+
+function normalizeLaneType(value?: string): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }

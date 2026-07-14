@@ -29,12 +29,26 @@ export const HAMBURG_XPLAN_BAUGEBIET_URL =
 export const HAMBURG_FNP_WFS_URL = 'https://geodienste.hamburg.de/HH_WFS_FNP';
 
 const HAMBURG_WGS84_BBOX: Wgs84Bbox = [8.1, 53.35, 10.4, 54.05];
+export const PLANNING_PAGE_SIZE = 250;
+export const MAX_PLANNING_VIEWPORT_SPAN_METERS = 4_500;
+export const MAX_PLANNING_FEATURES_PER_SOURCE = 20_000;
+
+export interface PlanningFetchOptions {
+  pageSize?: number;
+  maxFeatures?: number;
+}
 
 const ALL_BUILDING_TYPES = ['residential', 'commercial', 'industrial', 'mixed', 'public'];
 
 interface GeoJsonFeatureCollection {
   type: 'FeatureCollection';
   features: GeoJsonFeature[];
+  links?: Array<{
+    rel?: unknown;
+    href?: unknown;
+  }>;
+  numberMatched?: unknown;
+  numberReturned?: unknown;
 }
 
 interface GeoJsonFeature {
@@ -56,19 +70,22 @@ type GeoJsonGeometry =
 
 export function buildHamburgXPlanBaugebietUrl(
   bbox: Wgs84Bbox,
-  limit = 250
+  limit = PLANNING_PAGE_SIZE,
+  offset = 0
 ): string {
   const params = new URLSearchParams({
     f: 'json',
     bbox: bbox.join(','),
     limit: String(limit),
   });
+  if (offset > 0) params.set('offset', String(offset));
   return `${HAMBURG_XPLAN_BAUGEBIET_URL}?${params.toString()}`;
 }
 
 export function buildHamburgFnpNutzungUrl(
   bbox: Wgs84Bbox,
-  count = 250
+  count = PLANNING_PAGE_SIZE,
+  startIndex = 0
 ): string {
   const params = new URLSearchParams({
     SERVICE: 'WFS',
@@ -80,6 +97,7 @@ export function buildHamburgFnpNutzungUrl(
     BBOX: `${bbox.join(',')},EPSG:4326`,
     COUNT: String(count),
   });
+  if (startIndex > 0) params.set('STARTINDEX', String(startIndex));
   return `${HAMBURG_FNP_WFS_URL}?${params.toString()}`;
 }
 
@@ -87,6 +105,37 @@ export function isBboxNearHamburg(bbox: Wgs84Bbox): boolean {
   const [w, s, e, n] = bbox;
   const [hw, hs, he, hn] = HAMBURG_WGS84_BBOX;
   return w <= he && e >= hw && s <= hn && n >= hs;
+}
+
+export function planningBboxSizeMeters(
+  bbox: Wgs84Bbox
+): { widthMeters: number; heightMeters: number } {
+  const [west, south, east, north] = bbox;
+  const latitude = (south + north) / 2;
+  const metersPerDegreeLatitude = 111_320;
+  const metersPerDegreeLongitude =
+    metersPerDegreeLatitude * Math.cos((latitude * Math.PI) / 180);
+  return {
+    widthMeters: Math.abs(east - west) * Math.abs(metersPerDegreeLongitude),
+    heightMeters: Math.abs(north - south) * metersPerDegreeLatitude,
+  };
+}
+
+export function isPlanningBboxLoadable(
+  bbox: Wgs84Bbox,
+  maxSpanMeters = MAX_PLANNING_VIEWPORT_SPAN_METERS
+): boolean {
+  const { widthMeters, heightMeters } = planningBboxSizeMeters(bbox);
+  return widthMeters <= maxSpanMeters && heightMeters <= maxSpanMeters;
+}
+
+function assertPlanningBboxLoadable(bbox: Wgs84Bbox): void {
+  if (isPlanningBboxLoadable(bbox)) return;
+  const { widthMeters, heightMeters } = planningBboxSizeMeters(bbox);
+  throw new Error(
+    `Planning view is ${(widthMeters / 1_000).toFixed(1)} x ${(heightMeters / 1_000).toFixed(1)} km. ` +
+      `Zoom in below ${(MAX_PLANNING_VIEWPORT_SPAN_METERS / 1_000).toFixed(1)} km per side and click Planning again.`
+  );
 }
 
 /**
@@ -125,6 +174,12 @@ export function planningSourceLabel(source?: string): string {
   return source ?? 'Unknown';
 }
 
+function planningSourcePriority(source?: string): number {
+  if (source === 'hamburg-xplan-baugebiet') return 2;
+  if (source === 'hamburg-fnp-nutzung') return 1;
+  return 0;
+}
+
 export async function fetchPlanningZones(
   bbox: Wgs84Bbox,
   fetchImpl: typeof fetch = fetch
@@ -133,6 +188,7 @@ export async function fetchPlanningZones(
   if (!provider) {
     throw new Error('No planning provider is available for this area.');
   }
+  assertPlanningBboxLoadable(bbox);
   return provider.fetchZones(bbox, fetchImpl);
 }
 
@@ -140,44 +196,209 @@ export async function fetchHamburgPlanningZones(
   bbox: Wgs84Bbox,
   fetchImpl: typeof fetch = fetch
 ): Promise<ParcelZone[]> {
-  let firstError: unknown;
+  const [xplanZones, fnpZones] = await Promise.all([
+    fetchHamburgXPlanZones(bbox, fetchImpl),
+    fetchHamburgFnpZones(bbox, fetchImpl),
+  ]);
 
-  // Ask the detailed XPlan layer first. It has the most specific zoning
-  // features when a viewport intersects a published plan.
-  try {
-    const zones = await fetchPlanningSource(
-      buildHamburgXPlanBaugebietUrl(bbox),
-      'hamburg-xplan-baugebiet',
-      fetchImpl
-    );
-    if (zones.length > 0) return zones;
-  } catch (e) {
-    firstError = e;
-  }
-
-  // Fall back to the broader FNP land-use layer so the overlay still gives
-  // useful guidance in areas without an XPlan feature.
-  try {
-    return await fetchPlanningSource(
-      buildHamburgFnpNutzungUrl(bbox),
-      'hamburg-fnp-nutzung',
-      fetchImpl
-    );
-  } catch (e) {
-    if (firstError) throw firstError;
-    throw e;
-  }
+  // Draw broad FNP coverage first and detailed XPlan polygons last. Point
+  // queries apply their own source priority, so XPlan remains authoritative
+  // wherever both sources overlap.
+  return [...fnpZones, ...xplanZones];
 }
 
-async function fetchPlanningSource(
-  url: string,
-  source: HamburgPlanningSource,
-  fetchImpl: typeof fetch
+export async function fetchHamburgXPlanZones(
+  bbox: Wgs84Bbox,
+  fetchImpl: typeof fetch = fetch,
+  options: PlanningFetchOptions = {}
 ): Promise<ParcelZone[]> {
+  const { pageSize, maxFeatures } = normalizePlanningFetchOptions(options);
+  let nextUrl: string | null = buildHamburgXPlanBaugebietUrl(bbox, pageSize);
+  const features: GeoJsonFeature[] = [];
+  const seenUrls = new Set<string>();
+  const seenPageSignatures = new Set<string>();
+
+  while (nextUrl) {
+    if (seenUrls.has(nextUrl)) {
+      throw planningPaginationError('XPlan returned a repeated next-page URL');
+    }
+    seenUrls.add(nextUrl);
+
+    const page = await fetchPlanningPage(nextUrl, 'XPlan', fetchImpl);
+    assertPlanningPageProgress(page.features, 'hamburg-xplan-baugebiet', seenPageSignatures);
+    appendPlanningFeatures(features, page.features, maxFeatures, 'XPlan');
+
+    const linkedNext = nextPlanningLink(page, nextUrl);
+    const numberMatched = finiteCount(page.numberMatched);
+    const hasMoreByCount = numberMatched !== null && features.length < numberMatched;
+    const hasPossiblyFullPage = numberMatched === null && page.features.length >= pageSize;
+    if (linkedNext) {
+      nextUrl = linkedNext;
+    } else if (hasMoreByCount || hasPossiblyFullPage) {
+      if (page.features.length === 0) {
+        throw planningPaginationError('XPlan reported more features but returned an empty page');
+      }
+      nextUrl = buildHamburgXPlanBaugebietUrl(bbox, pageSize, features.length);
+    } else {
+      nextUrl = null;
+    }
+  }
+
+  return zonesFromPlanningGeoJson(
+    { type: 'FeatureCollection', features: dedupePlanningFeatures(features, 'hamburg-xplan-baugebiet') },
+    'hamburg-xplan-baugebiet'
+  );
+}
+
+export async function fetchHamburgFnpZones(
+  bbox: Wgs84Bbox,
+  fetchImpl: typeof fetch = fetch,
+  options: PlanningFetchOptions = {}
+): Promise<ParcelZone[]> {
+  const { pageSize, maxFeatures } = normalizePlanningFetchOptions(options);
+  const features: GeoJsonFeature[] = [];
+  const seenPageSignatures = new Set<string>();
+  let startIndex = 0;
+
+  while (true) {
+    const url = buildHamburgFnpNutzungUrl(bbox, pageSize, startIndex);
+    const page = await fetchPlanningPage(url, 'FNP', fetchImpl);
+    assertPlanningPageProgress(page.features, 'hamburg-fnp-nutzung', seenPageSignatures);
+    appendPlanningFeatures(features, page.features, maxFeatures, 'FNP');
+    if (page.features.length < pageSize) break;
+    startIndex += page.features.length;
+  }
+
+  return zonesFromPlanningGeoJson(
+    { type: 'FeatureCollection', features: dedupePlanningFeatures(features, 'hamburg-fnp-nutzung') },
+    'hamburg-fnp-nutzung'
+  );
+}
+
+async function fetchPlanningPage(
+  url: string,
+  label: string,
+  fetchImpl: typeof fetch
+): Promise<GeoJsonFeatureCollection> {
   const resp = await fetchImpl(url);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+  if (!resp.ok) throw new Error(`${label} planning request failed: HTTP ${resp.status} ${resp.statusText}`);
   const json = (await resp.json()) as unknown;
-  return zonesFromPlanningGeoJson(json, source);
+  if (!isFeatureCollection(json)) {
+    throw new Error(`${label} planning response was not a GeoJSON FeatureCollection.`);
+  }
+  return json;
+}
+
+function normalizePlanningFetchOptions(
+  options: PlanningFetchOptions
+): { pageSize: number; maxFeatures: number } {
+  const pageSize = Math.floor(options.pageSize ?? PLANNING_PAGE_SIZE);
+  const maxFeatures = Math.floor(options.maxFeatures ?? MAX_PLANNING_FEATURES_PER_SOURCE);
+  if (!Number.isFinite(pageSize) || pageSize < 1) {
+    throw new Error('Planning page size must be a positive integer.');
+  }
+  if (!Number.isFinite(maxFeatures) || maxFeatures < 1) {
+    throw new Error('Planning feature limit must be a positive integer.');
+  }
+  return { pageSize, maxFeatures };
+}
+
+function appendPlanningFeatures(
+  target: GeoJsonFeature[],
+  page: GeoJsonFeature[],
+  maxFeatures: number,
+  label: string
+): void {
+  if (target.length + page.length > maxFeatures) {
+    throw planningPaginationError(
+      `${label} matched more than ${maxFeatures.toLocaleString()} features`
+    );
+  }
+  target.push(...page);
+}
+
+function planningPaginationError(reason: string): Error {
+  return new Error(`${reason}. Zoom in and click Planning again; no partial planning layer was loaded.`);
+}
+
+function assertPlanningPageProgress(
+  features: GeoJsonFeature[],
+  source: HamburgPlanningSource,
+  seenPageSignatures: Set<string>
+): void {
+  if (features.length === 0) return;
+  const identities = features.map((feature) => planningFeatureIdentity(feature)).join('\u001f');
+  const signature = `${features.length}:${hashString(`${source}:${identities}`)}`;
+  if (seenPageSignatures.has(signature)) {
+    throw planningPaginationError(`${planningSourceLabel(source)} returned a repeated page`);
+  }
+  seenPageSignatures.add(signature);
+}
+
+function nextPlanningLink(page: GeoJsonFeatureCollection, currentUrl: string): string | null {
+  const link = page.links?.find(
+    (candidate) => typeof candidate.rel === 'string' && candidate.rel.toLowerCase() === 'next'
+  );
+  return typeof link?.href === 'string' && link.href.trim()
+    ? new URL(link.href, currentUrl).toString()
+    : null;
+}
+
+function finiteCount(value: unknown): number | null {
+  const count = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+
+function dedupePlanningFeatures(
+  features: GeoJsonFeature[],
+  source: HamburgPlanningSource
+): GeoJsonFeature[] {
+  const seen = new Set<string>();
+  const unique: GeoJsonFeature[] = [];
+  for (const feature of features) {
+    const key = `${source}:${planningFeatureIdentity(feature)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(feature);
+  }
+  return unique;
+}
+
+function planningFeatureIdentity(feature: GeoJsonFeature): string {
+  if (typeof feature.id === 'string' || typeof feature.id === 'number') {
+    return String(feature.id);
+  }
+  const props = feature.properties ?? {};
+  for (const key of ['gml_id', 'gml:id', 'fid', 'id', 'objectid', 'OBJECTID', 'uuid', 'UUID']) {
+    const value = props[key];
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+  }
+  return `anonymous-${hashString(stableSerialize({ geometry: feature.geometry, properties: props }))}`;
+}
+
+function hashString(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableSerialize(object[key])}`)
+      .join(',')}}`;
+  }
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return 'null';
 }
 
 export function zonesFromPlanningGeoJson(
@@ -186,12 +407,18 @@ export function zonesFromPlanningGeoJson(
 ): ParcelZone[] {
   if (!isFeatureCollection(input)) return [];
   const zones: ParcelZone[] = [];
+  const seenFeatures = new Set<string>();
 
-  input.features.forEach((feature, featureIndex) => {
+  input.features.forEach((feature) => {
+    const featureIdentity = planningFeatureIdentity(feature);
+    if (seenFeatures.has(featureIdentity)) return;
+    seenFeatures.add(featureIdentity);
     const rings = ringsFromGeometry(feature.geometry);
     rings.forEach((polygon, ringIndex) => {
       if (polygon.length < 4) return;
-      zones.push(zoneFromFeature(feature, polygon, source, featureIndex, ringIndex));
+      zones.push(
+        zoneFromFeature(feature, polygon, source, featureIdentity, ringIndex, rings.length)
+      );
     });
   });
 
@@ -202,10 +429,14 @@ export function findZoneForPoint(
   zones: ParcelZone[],
   point: [number, number]
 ): ParcelZone | null {
+  let bestZone: ParcelZone | null = null;
   for (const zone of zones) {
-    if (pointInPolygon(point, zone.polygon)) return zone;
+    if (!pointInPolygon(point, zone.polygon)) continue;
+    if (!bestZone || planningSourcePriority(zone.source) > planningSourcePriority(bestZone.source)) {
+      bestZone = zone;
+    }
   }
-  return null;
+  return bestZone;
 }
 
 export function findNearestZoneForPoint(
@@ -218,7 +449,11 @@ export function findNearestZoneForPoint(
 
   for (const zone of zones) {
     const distance = distanceToPolygonMeters(point, zone.polygon);
-    if (distance < bestDistance) {
+    if (
+      distance < bestDistance - 1e-6 ||
+      (Math.abs(distance - bestDistance) <= 1e-6 &&
+        planningSourcePriority(zone.source) > planningSourcePriority(bestZone?.source))
+    ) {
       bestDistance = distance;
       bestZone = zone;
     }
@@ -245,14 +480,15 @@ function zoneFromFeature(
   feature: GeoJsonFeature,
   polygon: [number, number][],
   source: HamburgPlanningSource,
-  featureIndex: number,
-  ringIndex: number
+  featureIdentity: string,
+  ringIndex: number,
+  ringCount: number
 ): ParcelZone {
   const props = feature.properties ?? {};
   const label = labelFromProperties(props, source);
   const allowedTypes = allowedTypesFromProperties(props);
   return {
-    id: String(feature.id ?? `${source}-${featureIndex}-${ringIndex}`),
+    id: `${source}:${featureIdentity}${ringCount > 1 ? `:polygon-${ringIndex + 1}` : ''}`,
     polygon,
     allowedTypes,
     label,

@@ -77,6 +77,8 @@ for (const fixture of fixtures) {
   checkMinimums(fixture, 'native', nativeResult);
   checkDiagnostics(fixture, 'wasm', wasmResult);
   checkDiagnostics(fixture, 'native', nativeResult);
+  checkFixtureEvidence(fixture, 'wasm', wasmResult);
+  checkFixtureEvidence(fixture, 'native', nativeResult);
 
   const outputMatches = compareOutputs(fixture.id, wasmResult.outputs, nativeResult.outputs);
   const diagnosticsMatch = compareDiagnostics(
@@ -306,6 +308,34 @@ function checkMinimums(fixture, runner, result) {
 function checkDiagnostics(fixture, runner, result) {
   if (result.diagnostics.errors) {
     failures.push(`${fixture.id}/${runner}: emitted ${result.diagnostics.errors} error(s)`);
+  }
+}
+
+function checkFixtureEvidence(fixture, runner, result) {
+  const messages = result.diagnostics.messages.map(({ message }) => message);
+  for (const expected of fixture.requiredDiagnosticIncludes ?? []) {
+    if (!messages.some((message) => message.includes(expected))) {
+      failures.push(`${fixture.id}/${runner}: missing diagnostic containing ${JSON.stringify(expected)}`);
+    }
+  }
+  for (const forbidden of fixture.forbiddenDiagnosticIncludes ?? []) {
+    if (messages.some((message) => message.includes(forbidden))) {
+      failures.push(`${fixture.id}/${runner}: emitted forbidden diagnostic containing ${JSON.stringify(forbidden)}`);
+    }
+  }
+
+  const lanes = JSON.parse(result.outputs.lanes.normalized);
+  const renderedWayIds = new Set(
+    (lanes.features ?? []).flatMap((feature) =>
+      Array.isArray(feature.properties?.osm_way_ids)
+        ? feature.properties.osm_way_ids.map(String)
+        : []
+    )
+  );
+  for (const wayId of fixture.requiredLaneWayIds ?? []) {
+    if (!renderedWayIds.has(String(wayId))) {
+      failures.push(`${fixture.id}/${runner}: required OSM way ${wayId} has no rendered lane polygon`);
+    }
   }
 }
 

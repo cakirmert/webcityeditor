@@ -115,6 +115,28 @@ describe('<Toolbar />', () => {
     expect(onReloadView).toHaveBeenCalledTimes(1);
   });
 
+  it('turns an enabled Planning action into an explicit current-view refresh', async () => {
+    const onToggleZoning = vi.fn();
+    render(
+      <Toolbar
+        fileName="x"
+        stats={defaultStats}
+        dirtyCount={0}
+        hasData={true}
+        onExport={() => {}}
+        onReloadView={() => {}}
+        onOpenLoader={() => {}}
+        zoningEnabled
+        onToggleZoning={onToggleZoning}
+      />
+    );
+
+    const refresh = screen.getByRole('button', { name: 'Refresh Planning' });
+    expect(refresh).toHaveAttribute('title', 'Refresh planning overlay for the current map view');
+    await userEvent.click(refresh);
+    expect(onToggleZoning).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the connected CityJSONSeq tile count and reloads the viewport on request', async () => {
     const onLoadCatalogViewport = vi.fn();
     render(

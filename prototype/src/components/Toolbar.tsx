@@ -255,11 +255,11 @@ export default function Toolbar({
               disabled={zoningLoading}
               title={
                 zoningEnabled
-                  ? 'Disable planning overlay'
+                  ? 'Refresh planning overlay for the current map view'
                   : 'Load planning overlay for the current map view'
               }
             >
-              {zoningLoading ? 'Planning...' : zoningEnabled ? 'Planning ON' : 'Planning'}
+              {zoningLoading ? 'Planning...' : zoningEnabled ? 'Refresh Planning' : 'Planning'}
             </Button>
           )}
 

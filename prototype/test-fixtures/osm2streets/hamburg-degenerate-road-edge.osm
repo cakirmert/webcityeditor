@@ -1,0 +1,2761 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="libosmium/2.23.1">
+  <node id="31161199" version="7" timestamp="2015-09-14T16:41:33Z" lat="53.5583499" lon="9.993379"/>
+  <node id="31161211" version="8" timestamp="2016-02-25T07:23:35Z" lat="53.5604779" lon="9.9903281"/>
+  <node id="52102992" version="5" timestamp="2016-04-10T19:23:34Z" lat="53.5617034" lon="9.9881544"/>
+  <node id="52102994" version="4" timestamp="2016-04-10T19:23:34Z" lat="53.56142" lon="9.988593"/>
+  <node id="52102999" version="9" timestamp="2016-02-25T10:47:10Z" lat="53.5602488" lon="9.9900886"/>
+  <node id="52103888" version="6" timestamp="2015-09-14T16:41:33Z" lat="53.558277" lon="9.9933318"/>
+  <node id="53120073" version="8" timestamp="2016-04-10T19:23:34Z" lat="53.5629212" lon="9.9860152"/>
+  <node id="53120076" version="5" timestamp="2016-04-10T19:23:35Z" lat="53.5621807" lon="9.9873162"/>
+  <node id="53120385" version="12" timestamp="2016-04-10T19:23:35Z" lat="53.5613374" lon="9.9892774"/>
+  <node id="53120388" version="11" timestamp="2016-04-10T19:23:35Z" lat="53.5611557" lon="9.9888623"/>
+  <node id="53120390" version="13" timestamp="2016-02-25T10:47:10Z" lat="53.5603302" lon="9.9899099"/>
+  <node id="53120391" version="15" timestamp="2020-05-27T12:33:12Z" lat="53.5605144" lon="9.9903201"/>
+  <node id="246519593" version="11" timestamp="2022-05-07T18:03:33Z" lat="53.561566" lon="9.9881067"/>
+  <node id="246519613" version="18" timestamp="2026-03-30T11:40:07Z" lat="53.5616155" lon="9.9882112">
+    <tag k="entrance" v="yes"/>
+    <tag k="entrance_marker:s-train" v="yes"/>
+    <tag k="entrance_marker:train" v="yes"/>
+    <tag k="foot" v="yes"/>
+    <tag k="name" v="Messe / CCH"/>
+    <tag k="public_transport" v="entrance"/>
+    <tag k="ref" v="D"/>
+  </node>
+  <node id="301624865" version="6" timestamp="2015-09-14T16:40:24Z" lat="53.5582367" lon="9.9933058"/>
+  <node id="301624868" version="5" timestamp="2015-09-14T16:40:24Z" lat="53.5585729" lon="9.9926214"/>
+  <node id="412507763" version="7" timestamp="2022-02-01T20:22:11Z" lat="53.5601167" lon="9.990134"/>
+  <node id="412860483" version="16" timestamp="2022-03-03T18:39:03Z" lat="53.5609197" lon="9.9898858">
+    <tag k="entrance" v="yes"/>
+    <tag k="entrance_marker:s-train" v="yes"/>
+    <tag k="entrance_marker:train" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="local_ref" v="B"/>
+    <tag k="public_transport" v="entrance"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="412862845" version="7" timestamp="2016-02-25T07:36:21Z" lat="53.560666" lon="9.9892859"/>
+  <node id="412862846" version="16" timestamp="2022-03-03T18:39:03Z" lat="53.5606977" lon="9.9893643">
+    <tag k="entrance" v="yes"/>
+    <tag k="entrance_marker:s-train" v="yes"/>
+    <tag k="entrance_marker:train" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="local_ref" v="A"/>
+    <tag k="public_transport" v="entrance"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="418854691" version="10" timestamp="2016-02-25T07:36:21Z" lat="53.5609443" lon="9.989937"/>
+  <node id="418854693" version="17" timestamp="2022-03-03T18:39:03Z" lat="53.5607463" lon="9.9893026">
+    <tag k="entrance" v="yes"/>
+    <tag k="entrance_marker:s-train" v="yes"/>
+    <tag k="entrance_marker:train" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="local_ref" v="A"/>
+    <tag k="public_transport" v="entrance"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="418854694" version="7" timestamp="2016-02-25T07:36:21Z" lat="53.5607139" lon="9.9892271"/>
+  <node id="418854695" version="12" timestamp="2016-08-29T14:43:05Z" lat="53.560823" lon="9.9894759"/>
+  <node id="418854697" version="6" timestamp="2016-04-10T19:23:34Z" lat="53.5604942" lon="9.9902837"/>
+  <node id="418854699" version="5" timestamp="2016-04-10T19:23:34Z" lat="53.5618965" lon="9.9883459"/>
+  <node id="418854700" version="11" timestamp="2016-08-29T14:43:05Z" lat="53.5609199" lon="9.9896939"/>
+  <node id="418854707" version="4" timestamp="2016-04-10T19:23:34Z" lat="53.5611945" lon="9.9888928"/>
+  <node id="418854708" version="5" timestamp="2016-04-10T19:23:34Z" lat="53.5603284" lon="9.9901912"/>
+  <node id="418854711" version="6" timestamp="2016-04-10T19:23:34Z" lat="53.5620261" lon="9.9878174"/>
+  <node id="418854712" version="8" timestamp="2016-04-10T19:23:34Z" lat="53.5629655" lon="9.9861227"/>
+  <node id="420290336" version="16" timestamp="2022-03-03T18:39:03Z" lat="53.5609711" lon="9.9898204">
+    <tag k="entrance" v="yes"/>
+    <tag k="entrance_marker:s-train" v="yes"/>
+    <tag k="entrance_marker:train" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="local_ref" v="B"/>
+    <tag k="public_transport" v="entrance"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="430578613" version="4" timestamp="2014-01-11T17:53:14Z" lat="53.5640112" lon="9.9768772"/>
+  <node id="430578615" version="4" timestamp="2014-10-14T17:24:32Z" lat="53.5639494" lon="9.9789628"/>
+  <node id="430578616" version="2" timestamp="2014-01-11T17:53:14Z" lat="53.5638404" lon="9.982882"/>
+  <node id="430578617" version="4" timestamp="2014-10-14T17:24:32Z" lat="53.5639439" lon="9.9768302"/>
+  <node id="430578619" version="3" timestamp="2014-01-11T17:53:15Z" lat="53.5640202" lon="9.9829246"/>
+  <node id="430578620" version="3" timestamp="2014-01-11T17:53:15Z" lat="53.5639983" lon="9.9834042"/>
+  <node id="430578621" version="3" timestamp="2014-01-11T17:53:15Z" lat="53.563915" lon="9.9840417"/>
+  <node id="430578622" version="3" timestamp="2013-01-29T13:38:28Z" lat="53.5637586" lon="9.9847329"/>
+  <node id="430578623" version="2" timestamp="2011-04-09T13:06:19Z" lat="53.5635024" lon="9.9854231"/>
+  <node id="430578624" version="1" timestamp="2009-06-29T05:54:18Z" lat="53.5628958" lon="9.986605"/>
+  <node id="430578625" version="2" timestamp="2009-09-09T11:15:26Z" lat="53.5618533" lon="9.9885081"/>
+  <node id="430578626" version="3" timestamp="2014-01-11T17:53:15Z" lat="53.5638261" lon="9.9831353"/>
+  <node id="430578627" version="2" timestamp="2012-12-29T01:29:44Z" lat="53.5637941" lon="9.9834837"/>
+  <node id="430578628" version="3" timestamp="2014-01-11T17:53:15Z" lat="53.5635747" lon="9.9845196"/>
+  <node id="430578629" version="2" timestamp="2012-12-29T01:29:45Z" lat="53.5633306" lon="9.9851948"/>
+  <node id="430578630" version="3" timestamp="2014-01-11T17:53:15Z" lat="53.562848" lon="9.9860944"/>
+  <node id="430578631" version="4" timestamp="2012-03-24T00:22:03Z" lat="53.5621665" lon="9.9872786"/>
+  <node id="430592022" version="2" timestamp="2013-04-28T07:32:24Z" lat="53.5594682" lon="9.9910393"/>
+  <node id="430592023" version="2" timestamp="2013-04-28T07:32:24Z" lat="53.5590361" lon="9.9913124"/>
+  <node id="430592026" version="5" timestamp="2015-09-14T16:40:24Z" lat="53.5584128" lon="9.9934196"/>
+  <node id="430592028" version="3" timestamp="2015-09-14T16:40:24Z" lat="53.5588152" lon="9.9926016"/>
+  <node id="430592029" version="2" timestamp="2013-04-28T07:32:24Z" lat="53.5591877" lon="9.9918564"/>
+  <node id="430592031" version="3" timestamp="2019-07-29T10:40:12Z" lat="53.5595687" lon="9.9912608"/>
+  <node id="490762713" version="3" timestamp="2011-04-09T13:06:16Z" lat="53.5614814" lon="9.9891357"/>
+  <node id="552952154" version="2" timestamp="2013-04-28T07:32:25Z" lat="53.559141" lon="9.9915304"/>
+  <node id="552952155" version="7" timestamp="2024-08-15T12:39:50Z" lat="53.5600634" lon="9.989539">
+    <tag k="barrier" v="kerb"/>
+    <tag k="kerb" v="lowered"/>
+    <tag k="tactile_paving" v="no"/>
+  </node>
+  <node id="552952162" version="5" timestamp="2022-02-01T20:22:11Z" lat="53.559922" lon="9.989917"/>
+  <node id="552952163" version="5" timestamp="2022-02-01T20:22:11Z" lat="53.5599282" lon="9.989998"/>
+  <node id="561148475" version="2" timestamp="2013-04-28T07:32:25Z" lat="53.5588621" lon="9.9916853"/>
+  <node id="561148476" version="2" timestamp="2013-04-28T07:32:25Z" lat="53.5589376" lon="9.9915393"/>
+  <node id="561148477" version="2" timestamp="2013-04-28T07:32:25Z" lat="53.5590235" lon="9.9913703"/>
+  <node id="561148480" version="2" timestamp="2013-04-28T07:32:26Z" lat="53.559175" lon="9.9918812"/>
+  <node id="561148481" version="2" timestamp="2013-04-28T07:32:26Z" lat="53.5592462" lon="9.9917411"/>
+  <node id="561148482" version="2" timestamp="2013-04-28T07:32:26Z" lat="53.559319" lon="9.9916216"/>
+  <node id="561148486" version="2" timestamp="2013-04-28T07:32:26Z" lat="53.5593975" lon="9.9914974"/>
+  <node id="561148487" version="2" timestamp="2013-04-28T07:32:26Z" lat="53.5594787" lon="9.9913773"/>
+  <node id="561148488" version="3" timestamp="2013-04-28T07:32:26Z" lat="53.5590165" lon="9.9921666"/>
+  <node id="561148489" version="3" timestamp="2013-04-28T07:32:26Z" lat="53.5590852" lon="9.9920451"/>
+  <node id="571230944" version="9" timestamp="2016-04-10T19:23:35Z" lat="53.56038" lon="9.9902362"/>
+  <node id="571230953" version="11" timestamp="2022-03-15T22:20:28Z" lat="53.5617432" lon="9.9883393">
+    <tag k="description" v="Vr-Vorsignalwiederholer in nordwestlicher Richtung"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:vr"/>
+    <tag k="railway:signal:distant:form" v="light"/>
+    <tag k="railway:signal:distant:height" v="normal"/>
+    <tag k="railway:signal:distant:repeated" v="yes"/>
+    <tag k="railway:signal:distant:shape" v="compact"/>
+    <tag k="railway:signal:distant:states" v="?;DE-ESO:vr0;DE-ESO:vr1"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="source" v="estimation; survey"/>
+  </node>
+  <node id="571230954" version="5" timestamp="2016-04-10T19:23:35Z" lat="53.5614121" lon="9.9888246"/>
+  <node id="571230955" version="5" timestamp="2016-04-10T19:23:35Z" lat="53.5612548" lon="9.9890319"/>
+  <node id="571230957" version="9" timestamp="2016-04-10T19:23:35Z" lat="53.560337" lon="9.990206"/>
+  <node id="583561146" version="6" timestamp="2016-04-11T07:32:34Z" lat="53.5600878" lon="9.9902322"/>
+  <node id="653125303" version="4" timestamp="2020-06-19T13:25:58Z" lat="53.5611729" lon="9.9896924"/>
+  <node id="653125304" version="4" timestamp="2020-06-19T13:25:58Z" lat="53.5611608" lon="9.9896589"/>
+  <node id="653125343" version="4" timestamp="2020-06-19T13:25:58Z" lat="53.5613234" lon="9.9894875"/>
+  <node id="653125344" version="4" timestamp="2020-06-19T13:25:58Z" lat="53.5613487" lon="9.9895091"/>
+  <node id="654204196" version="9" timestamp="2016-02-25T07:36:22Z" lat="53.5609945" lon="9.9898723"/>
+  <node id="654204197" version="7" timestamp="2020-06-19T13:25:58Z" lat="53.5606668" lon="9.9902022"/>
+  <node id="654204199" version="4" timestamp="2022-03-29T10:46:45Z" lat="53.5613935" lon="9.9893792"/>
+  <node id="676107628" version="3" timestamp="2012-03-24T00:22:15Z" lat="53.5617114" lon="9.9884971"/>
+  <node id="676107674" version="2" timestamp="2016-04-08T11:02:33Z" lat="53.5615636" lon="9.9884973">
+    <tag k="level" v="1"/>
+  </node>
+  <node id="830954930" version="2" timestamp="2018-09-24T07:41:30Z" lat="53.5611886" lon="9.9886904"/>
+  <node id="1238528543" version="5" timestamp="2015-09-14T16:41:33Z" lat="53.55838" lon="9.9933984"/>
+  <node id="1238528564" version="5" timestamp="2015-09-14T16:41:33Z" lat="53.5583086" lon="9.9933522"/>
+  <node id="1238543746" version="1" timestamp="2011-04-09T13:06:13Z" lat="53.5632679" lon="9.9859309"/>
+  <node id="1238550765" version="3" timestamp="2016-09-13T08:20:32Z" lat="53.5640224" lon="9.980246"/>
+  <node id="1412279569" version="10" timestamp="2024-06-18T12:07:02Z" lat="53.561127" lon="9.9892898">
+    <tag k="alt_name" v="Messe- u. Kongreßbahnhof"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="local_ref" v="2"/>
+    <tag k="name" v="Dammtor (Messe/CCH)"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="public_transport" v="stop_position"/>
+    <tag k="railway" v="stop"/>
+    <tag k="railway:ref" v="ADST"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="1502029243" version="4" timestamp="2018-03-19T09:26:48Z" lat="53.5600495" lon="9.9902942"/>
+  <node id="1502029251" version="25" timestamp="2026-05-27T22:22:16Z" lat="53.5607851" lon="9.9892945">
+    <tag k="amenity" v="post_box"/>
+    <tag k="brand" v="Deutsche Post"/>
+    <tag k="check_date" v="2026-05-28"/>
+    <tag k="check_date:collection_times" v="2026-05-28"/>
+    <tag k="collection_times" v="Mo-Fr 15:00; Sa 12:00"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="Deutsche Post"/>
+    <tag k="operator:wikidata" v="Q157645"/>
+    <tag k="ref" v="Bahnhof Dammtor (Südseite), 20146 Hamburg"/>
+  </node>
+  <node id="1502029343" version="9" timestamp="2024-12-28T07:24:50Z" lat="53.5607981" lon="9.9893329">
+    <tag k="amenity" v="atm"/>
+    <tag k="brand" v="Reisebank"/>
+    <tag k="brand:wikidata" v="Q1421107"/>
+    <tag k="cash_in" v="no"/>
+    <tag k="check_date" v="2024-12-28"/>
+    <tag k="currency:EUR" v="yes"/>
+    <tag k="drive_through" v="no"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="operator" v="Reisebank"/>
+    <tag k="operator:wikidata" v="Q1421107"/>
+    <tag k="ref" v="145"/>
+    <tag k="wheelchair" v="yes"/>
+  </node>
+  <node id="1687916258" version="4" timestamp="2022-02-01T20:06:04Z" lat="53.5602826" lon="9.9895016"/>
+  <node id="1687916267" version="7" timestamp="2024-11-02T18:19:07Z" lat="53.5604566" lon="9.9904277"/>
+  <node id="1687916285" version="9" timestamp="2024-06-18T12:07:02Z" lat="53.5611925" lon="9.9894336">
+    <tag k="alt_name" v="Messe- u. Kongreßbahnhof"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="local_ref" v="1"/>
+    <tag k="name" v="Dammtor (Messe/CCH)"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="public_transport" v="stop_position"/>
+    <tag k="railway" v="stop"/>
+    <tag k="railway:ref" v="ADST"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="1687916289" version="10" timestamp="2024-06-18T12:07:02Z" lat="53.5611501" lon="9.988944">
+    <tag k="alt_name" v="Messe- u. Kongreßbahnhof"/>
+    <tag k="local_ref" v="4"/>
+    <tag k="name" v="Hamburg Dammtor / Universität"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="public_transport" v="stop_position"/>
+    <tag k="railway" v="stop"/>
+    <tag k="railway:ref" v="ADF"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="1687916295" version="9" timestamp="2024-06-18T12:07:02Z" lat="53.5612092" lon="9.9890896">
+    <tag k="alt_name" v="Messe- u. Kongreßbahnhof"/>
+    <tag k="local_ref" v="3"/>
+    <tag k="name" v="Hamburg Dammtor / Universität"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="public_transport" v="stop_position"/>
+    <tag k="railway" v="stop"/>
+    <tag k="railway:ref" v="ADF"/>
+    <tag k="train" v="yes"/>
+  </node>
+  <node id="1687916298" version="1" timestamp="2012-03-24T00:13:06Z" lat="53.5613061" lon="9.9890641"/>
+  <node id="1687916301" version="3" timestamp="2016-04-10T19:23:30Z" lat="53.5613671" lon="9.9892156"/>
+  <node id="1687916311" version="2" timestamp="2013-01-25T17:08:09Z" lat="53.5619448" lon="9.9883453"/>
+  <node id="1687916316" version="5" timestamp="2016-04-10T19:23:30Z" lat="53.5629788" lon="9.9861299"/>
+  <node id="1687916318" version="3" timestamp="2014-01-11T17:53:07Z" lat="53.5630081" lon="9.9861708"/>
+  <node id="2086574609" version="1" timestamp="2012-12-29T01:29:36Z" lat="53.5632171" lon="9.9854327"/>
+  <node id="2086574614" version="1" timestamp="2012-12-29T01:29:37Z" lat="53.5629603" lon="9.985904"/>
+  <node id="2086574616" version="1" timestamp="2012-12-29T01:29:37Z" lat="53.5637497" lon="9.983769"/>
+  <node id="2086574635" version="1" timestamp="2012-12-29T01:29:37Z" lat="53.5636734" lon="9.9841226"/>
+  <node id="2086574638" version="2" timestamp="2014-01-11T17:53:07Z" lat="53.5634424" lon="9.9849195"/>
+  <node id="2127784100" version="9" timestamp="2025-11-12T13:46:50Z" lat="53.5619369" lon="9.988122">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:combined" v="DE-ESO:sv"/>
+    <tag k="railway:signal:combined:form" v="light"/>
+    <tag k="railway:signal:combined:function" v="automatic_block"/>
+    <tag k="railway:signal:combined:height" v="normal"/>
+    <tag k="railway:signal:combined:states" v="DE-ESO:sv1;DE-ESO:sv2;DE-ESO:sv0"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:distant:shortened" v="no"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="ref" v="137"/>
+  </node>
+  <node id="2127784116" version="6" timestamp="2022-03-15T22:20:28Z" lat="53.5612792" lon="9.9887875">
+    <tag k="description" v="Vr-Vorsignalwiederholer in südöstlicher Richtung"/>
+    <tag k="operator" v="DB Netz AG"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:vr"/>
+    <tag k="railway:signal:distant:form" v="light"/>
+    <tag k="railway:signal:distant:height" v="normal"/>
+    <tag k="railway:signal:distant:repeated" v="yes"/>
+    <tag k="railway:signal:distant:shape" v="compact"/>
+    <tag k="railway:signal:distant:states" v="?;DE-ESO:vr0;DE-ESO:vr1"/>
+    <tag k="railway:signal:position" v="right"/>
+  </node>
+  <node id="2127784129" version="4" timestamp="2016-04-10T19:23:31Z" lat="53.5612671" lon="9.9890162">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:vr"/>
+    <tag k="railway:signal:distant:form" v="light"/>
+    <tag k="railway:signal:distant:repeated" v="yes"/>
+    <tag k="ref" v="WV 1104 II"/>
+  </node>
+  <node id="2127784134" version="10" timestamp="2023-05-29T16:36:23Z" lat="53.5604675" lon="9.9901263">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:combined" v="DE-ESO:sv"/>
+    <tag k="railway:signal:combined:deactivated" v="no"/>
+    <tag k="railway:signal:combined:form" v="light"/>
+    <tag k="railway:signal:combined:function" v="block"/>
+    <tag k="railway:signal:combined:height" v="normal"/>
+    <tag k="railway:signal:combined:marker_light" v="no"/>
+    <tag k="railway:signal:combined:states" v="DE-ESO:sv0;DE-ESO:sv1;DE-ESO:sv2"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:distant:shortened" v="no"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:traversable" v="DE-ESO:mastschild_gelb-weiss"/>
+    <tag k="railway:signal:traversable:type" v="on_no_contact_on_sight;written_default_speed;dictated_default_speed"/>
+    <tag k="ref" v="139"/>
+  </node>
+  <node id="2133689097" version="1" timestamp="2013-01-29T13:38:28Z" lat="53.5638475" lon="9.9843915"/>
+  <node id="2226374216" version="6" timestamp="2016-08-29T14:43:03Z" lat="53.5610964" lon="9.9894693">
+    <tag k="level" v="0"/>
+  </node>
+  <node id="2226374219" version="4" timestamp="2016-02-25T07:36:20Z" lat="53.5609729" lon="9.9898993"/>
+  <node id="2226385608" version="4" timestamp="2024-12-28T06:16:27Z" lat="53.560752" lon="9.9894078">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="check_date" v="2024-12-28"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="operator:wikidata" v="Q1152124"/>
+    <tag k="payment:cash" v="yes"/>
+    <tag k="payment:cryptocurrencies" v="no"/>
+    <tag k="payment:electronic_purses" v="no"/>
+    <tag k="payment:girocard" v="yes"/>
+    <tag k="ref" v="B81249"/>
+    <tag k="vending" v="public_transport_tickets"/>
+  </node>
+  <node id="2226385609" version="8" timestamp="2025-05-15T16:22:18Z" lat="53.5610441" lon="9.989312">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="check_date" v="2025-05-15"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="operator:wikidata" v="Q1152124"/>
+    <tag k="payment:cash" v="yes"/>
+    <tag k="payment:cryptocurrencies" v="no"/>
+    <tag k="payment:electronic_purses" v="no"/>
+    <tag k="payment:girocard" v="yes"/>
+    <tag k="ref" v="B81248"/>
+    <tag k="vending" v="public_transport_tickets"/>
+  </node>
+  <node id="2226385610" version="8" timestamp="2025-05-15T16:22:18Z" lat="53.5610318" lon="9.989282">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="check_date" v="2025-05-15"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="operator:wikidata" v="Q1152124"/>
+    <tag k="payment:cash" v="yes"/>
+    <tag k="payment:cryptocurrencies" v="no"/>
+    <tag k="payment:electronic_purses" v="no"/>
+    <tag k="payment:girocard" v="yes"/>
+    <tag k="ref" v="B81246"/>
+    <tag k="vending" v="public_transport_tickets"/>
+  </node>
+  <node id="2283871534" version="2" timestamp="2015-09-14T16:40:24Z" lat="53.5583032" lon="9.9931454"/>
+  <node id="2283871560" version="2" timestamp="2015-09-14T16:40:24Z" lat="53.5588603" lon="9.9920033"/>
+  <node id="2283871563" version="1" timestamp="2013-04-28T07:32:16Z" lat="53.5587706" lon="9.9918596"/>
+  <node id="2283871584" version="1" timestamp="2013-04-28T07:32:17Z" lat="53.5591184" lon="9.9914305"/>
+  <node id="2292314158" version="6" timestamp="2020-08-06T13:32:40Z" lat="53.5600136" lon="9.9903221"/>
+  <node id="2878985118" version="4" timestamp="2022-02-01T20:22:11Z" lat="53.560144" lon="9.9901529"/>
+  <node id="3002837382" version="5" timestamp="2016-04-10T19:23:31Z" lat="53.5605368" lon="9.9902594">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:db:ne2"/>
+    <tag k="railway:signal:distant:deactivated" v="no"/>
+    <tag k="railway:signal:distant:form" v="sign"/>
+    <tag k="railway:signal:distant:shortened" v="no"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:deactivated" v="no"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+  </node>
+  <node id="3038826850" version="5" timestamp="2022-03-08T22:10:10Z" lat="53.5603102" lon="9.9900117">
+    <tag k="description" v="von einem Masten abgehangener Fahrtanzeiger"/>
+    <tag k="operator" v="DB Netz AG"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:deactivated" v="no"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3038826857" version="3" timestamp="2016-04-10T19:23:32Z" lat="53.5618572" lon="9.9881161"/>
+  <node id="3038826859" version="5" timestamp="2017-08-19T08:19:30Z" lat="53.5618663" lon="9.9881315">
+    <tag k="description" v="Vr-Vorsignalwiederholer in nordwestlicher Richtung"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:vr"/>
+    <tag k="railway:signal:distant:form" v="light"/>
+    <tag k="railway:signal:distant:height" v="normal"/>
+    <tag k="railway:signal:distant:repeated" v="yes"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="source" v="estimation; survey"/>
+  </node>
+  <node id="3038826862" version="3" timestamp="2016-02-25T07:36:20Z" lat="53.5620702" lon="9.987769">
+    <tag k="description" v="Fahrtanzeiger"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:deactivated" v="no"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="ref" v="105 I"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3038826866" version="5" timestamp="2025-08-26T09:44:21Z" lat="53.5623727" lon="9.9872265"/>
+  <node id="3038826868" version="5" timestamp="2022-03-15T22:20:28Z" lat="53.5626684" lon="9.9864496">
+    <tag k="description" v="einfache Hektometertafel"/>
+    <tag k="railway" v="milestone"/>
+    <tag k="railway:milestone:catenary_mast" v="no"/>
+    <tag k="railway:milestone:emergency_brake_override" v="no"/>
+    <tag k="railway:position" v="288.4"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3038826869" version="7" timestamp="2022-03-15T22:20:28Z" lat="53.562693" lon="9.9864066">
+    <tag k="description" v="Vr-Vorsignalwiederholer in nordwestlicher Richtung"/>
+    <tag k="operator" v="DB Netz AG"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:vr"/>
+    <tag k="railway:signal:distant:form" v="light"/>
+    <tag k="railway:signal:distant:height" v="normal"/>
+    <tag k="railway:signal:distant:repeated" v="yes"/>
+    <tag k="railway:signal:distant:shape" v="compact"/>
+    <tag k="railway:signal:distant:states" v="?;DE-ESO:vr0;DE-ESO:vr1"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="ref" v="WV 1105"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3038826934" version="4" timestamp="2016-04-10T19:23:32Z" lat="53.5612878" lon="9.9889627"/>
+  <node id="3038826935" version="3" timestamp="2016-04-10T19:23:32Z" lat="53.5613292" lon="9.9887204">
+    <tag k="description" v="einfache Hektometertafel"/>
+    <tag k="railway" v="milestone"/>
+    <tag k="railway:milestone:catenary_mast" v="no"/>
+    <tag k="railway:milestone:emergency_brake_override" v="no"/>
+    <tag k="railway:position" v="288.2"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3053970796" version="2" timestamp="2014-10-14T17:24:32Z" lat="53.5637884" lon="9.9789735"/>
+  <node id="3105692072" version="5" timestamp="2026-03-01T23:59:56Z" lat="53.5603278" lon="9.9905394"/>
+  <node id="3255988846" version="3" timestamp="2016-04-10T19:23:32Z" lat="53.5602795" lon="9.9900803"/>
+  <node id="3255988848" version="3" timestamp="2016-04-10T19:23:32Z" lat="53.5604476" lon="9.9901781"/>
+  <node id="3255988858" version="3" timestamp="2024-09-20T13:28:17Z" lat="53.5607839" lon="9.9895322">
+    <tag k="amenity" v="bench"/>
+    <tag k="backrest" v="yes"/>
+    <tag k="check_date" v="2024-09-20"/>
+    <tag k="seats" v="12"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3255988859" version="6" timestamp="2024-09-20T13:28:18Z" lat="53.5608554" lon="9.9894387">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="check_date" v="2024-09-20"/>
+    <tag k="description" v="Vier Automaten"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="source" v="survey"/>
+    <tag k="vending" v="drinks; soups; sweets"/>
+  </node>
+  <node id="3255988860" version="4" timestamp="2016-04-10T19:23:32Z" lat="53.5611854" lon="9.9889303"/>
+  <node id="3255989064" version="4" timestamp="2016-04-10T19:23:32Z" lat="53.5611365" lon="9.9893061"/>
+  <node id="3255989065" version="4" timestamp="2016-04-10T19:23:32Z" lat="53.5611875" lon="9.989416"/>
+  <node id="3255989066" version="4" timestamp="2016-04-10T19:23:32Z" lat="53.5612739" lon="9.989132"/>
+  <node id="3255989067" version="5" timestamp="2025-07-20T17:35:51Z" lat="53.5611369" lon="9.9890785">
+    <tag k="amenity" v="bench"/>
+    <tag k="backrest" v="yes"/>
+    <tag k="check_date" v="2025-06-22"/>
+    <tag k="level" v="1"/>
+    <tag k="material" v="wood"/>
+    <tag k="seats" v="5"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3255989068" version="5" timestamp="2025-07-20T17:35:45Z" lat="53.5612764" lon="9.9888882">
+    <tag k="amenity" v="bench"/>
+    <tag k="backrest" v="yes"/>
+    <tag k="check_date" v="2025-06-22"/>
+    <tag k="level" v="1"/>
+    <tag k="material" v="wood"/>
+    <tag k="seats" v="5"/>
+    <tag k="source" v="survey"/>
+  </node>
+  <node id="3255989069" version="3" timestamp="2016-04-10T19:23:32Z" lat="53.5613364" lon="9.9887379"/>
+  <node id="3255989071" version="2" timestamp="2016-04-10T19:23:32Z" lat="53.5614513" lon="9.9889003"/>
+  <node id="3255989072" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5614532" lon="9.9890781"/>
+  <node id="3255989075" version="4" timestamp="2016-04-10T19:23:33Z" lat="53.5615385" lon="9.9884492"/>
+  <node id="3255989076" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5616357" lon="9.9886422"/>
+  <node id="3255989077" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5615893" lon="9.9885517"/>
+  <node id="3255989079" version="2" timestamp="2016-04-08T11:02:33Z" lat="53.5616598" lon="9.9886934">
+    <tag k="level" v="1"/>
+  </node>
+  <node id="3255989081" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5616827" lon="9.9887332"/>
+  <node id="3255989082" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5617347" lon="9.9883228"/>
+  <node id="3255989084" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5617202" lon="9.988513"/>
+  <node id="3255989085" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5617775" lon="9.9885685"/>
+  <node id="3255989087" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5618587" lon="9.988284"/>
+  <node id="3255989088" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5619718" lon="9.9877147"/>
+  <node id="3255989092" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5629191" lon="9.986049"/>
+  <node id="3255993296" version="23" timestamp="2025-03-26T10:10:45Z" lat="53.5611136" lon="9.9894307">
+    <tag k="alt_name" v="Messe- u. Kongreßbahnhof"/>
+    <tag k="hha_ref" v="ADST"/>
+    <tag k="hvv:psv_type" v="S"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="name" v="Hamburg Dammtor"/>
+    <tag k="official_name" v="Hamburg Dammtor (S-Bahn)"/>
+    <tag k="operator" v="S-Bahn Hamburg GmbH"/>
+    <tag k="public_transport" v="station"/>
+    <tag k="railway" v="halt"/>
+    <tag k="railway:note" v="Dammtor hat keine Weichen und ist daher ein Haltepunkt und eigenständig von der Betriebsstelle auf der Fernbahn!"/>
+    <tag k="railway:ref" v="ADST"/>
+    <tag k="railway:station_category" v="2"/>
+    <tag k="ref:station" v="2513"/>
+    <tag k="short_name" v="Hamburg Dammtor (S-Bahn)"/>
+    <tag k="station" v="light_rail"/>
+    <tag k="uic_name" v="Hamburg Dammtor"/>
+    <tag k="wheelchair" v="yes"/>
+  </node>
+  <node id="3255993297" version="16" timestamp="2024-06-18T12:07:02Z" lat="53.5611812" lon="9.9890232">
+    <tag k="alt_name" v="Messe- u. Kongreßbahnhof"/>
+    <tag k="hvv:barrier_free" v="yes"/>
+    <tag k="light_rail" v="yes"/>
+    <tag k="name" v="Hamburg Dammtor"/>
+    <tag k="official_name" v="Hamburg Dammtor"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="public_transport" v="station"/>
+    <tag k="railway" v="halt"/>
+    <tag k="railway:note" v="Dammtor hat keine Weichen und ist daher ein Haltepunkt und eigenständig von der Betriebsstelle auf der S-Bahn!"/>
+    <tag k="railway:ref" v="ADF"/>
+    <tag k="railway:station_category" v="2"/>
+    <tag k="ref:station" v="2513"/>
+    <tag k="short_name" v="Hamburg Dammtor"/>
+    <tag k="train" v="yes"/>
+    <tag k="uic_name" v="Hamburg Dammtor"/>
+    <tag k="uic_ref" v="8002548"/>
+    <tag k="wheelchair" v="yes"/>
+    <tag k="wikidata" v="Q634142"/>
+    <tag k="wikipedia" v="de:Bahnhof Hamburg Dammtor"/>
+  </node>
+  <node id="3391735105" version="6" timestamp="2025-02-12T14:47:45Z" lat="53.5610004" lon="9.989257">
+    <tag k="level" v="0"/>
+    <tag k="operator" v="Deutsche Post AG"/>
+  </node>
+  <node id="3478684820" version="3" timestamp="2022-03-08T22:10:10Z" lat="53.5602763" lon="9.9900577">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="390 m"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="normal"/>
+  </node>
+  <node id="3478684821" version="3" timestamp="2022-03-08T22:10:10Z" lat="53.5603829" lon="9.9901475">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:distant" v="DE-ESO:vr"/>
+    <tag k="railway:signal:distant:form" v="light"/>
+    <tag k="railway:signal:distant:height" v="normal"/>
+    <tag k="railway:signal:distant:repeated" v="yes"/>
+    <tag k="railway:signal:distant:shape" v="compact"/>
+    <tag k="railway:signal:distant:states" v="?;DE-ESO:vr0"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+  </node>
+  <node id="3478684827" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5604994" lon="9.9900897">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684828" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5605709" lon="9.99022">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="Vollzug"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684830" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5606255" lon="9.9901511">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="Kurzzug"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684832" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5612412" lon="9.9893743">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="Kurzzug"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684833" version="3" timestamp="2024-12-21T17:47:08Z" lat="53.5612237" lon="9.9893008">
+    <tag k="camera:angle" v="30"/>
+    <tag k="camera:direction" v="318"/>
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="3478684834" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5612679" lon="9.9893407">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="AKN"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684837" version="1" timestamp="2015-04-26T12:31:28Z" lat="53.5612984" lon="9.9890743">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="Kurzzug"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684838" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5613229" lon="9.9892439"/>
+  <node id="3478684844" version="2" timestamp="2016-04-10T19:23:33Z" lat="53.5615303" lon="9.9889732"/>
+  <node id="3478684846" version="2" timestamp="2016-02-25T07:23:36Z" lat="53.5615786" lon="9.9886983">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:caption" v="Vollzug"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684847" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5615853" lon="9.9887154"/>
+  <node id="3478684848" version="3" timestamp="2025-11-12T13:46:50Z" lat="53.5615976" lon="9.9885667"/>
+  <node id="3478684849" version="3" timestamp="2016-04-10T19:23:33Z" lat="53.5616149" lon="9.9888447"/>
+  <node id="3478684851" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5616844" lon="9.9885679"/>
+  <node id="3478684852" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5617303" lon="9.9886511"/>
+  <node id="3478684854" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.561795" lon="9.9883612">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="backward"/>
+    <tag k="railway:signal:position" v="right"/>
+    <tag k="railway:signal:stop" v="DE-ESO:ne5"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+    <tag k="railway:signal:stop:height" v="dwarf"/>
+  </node>
+  <node id="3478684855" version="4" timestamp="2025-08-26T09:44:21Z" lat="53.5619925" lon="9.987909"/>
+  <node id="3671389354" version="1" timestamp="2015-07-29T08:09:15Z" lat="53.5610652" lon="9.9897818"/>
+  <node id="3671389355" version="2" timestamp="2020-06-19T13:25:58Z" lat="53.5611266" lon="9.9896387"/>
+  <node id="3671389356" version="1" timestamp="2015-07-29T08:09:15Z" lat="53.5609141" lon="9.9899768"/>
+  <node id="3671389357" version="2" timestamp="2020-06-19T13:25:58Z" lat="53.5608243" lon="9.9900315"/>
+  <node id="3743039313" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584257" lon="9.993434"/>
+  <node id="3743039314" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584353" lon="9.9934141"/>
+  <node id="3743039315" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584263" lon="9.993401"/>
+  <node id="3743039316" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584352" lon="9.9933831"/>
+  <node id="3743039317" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584402" lon="9.9933893"/>
+  <node id="3743039318" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584459" lon="9.9933908"/>
+  <node id="3743039319" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.558452" lon="9.9933893"/>
+  <node id="3743039320" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.558458" lon="9.9933847"/>
+  <node id="3743039321" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584607" lon="9.9933771"/>
+  <node id="3743039322" version="1" timestamp="2015-09-14T16:40:22Z" lat="53.5584607" lon="9.9933639"/>
+  <node id="3743039323" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5584583" lon="9.9933532"/>
+  <node id="3743039324" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5584459" lon="9.9933365"/>
+  <node id="3743039525" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5583267" lon="9.9930895"/>
+  <node id="3743039526" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582245" lon="9.9932877"/>
+  <node id="3743039527" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.558235" lon="9.9932646"/>
+  <node id="3743039528" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582415" lon="9.9932737"/>
+  <node id="3743039529" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582533" lon="9.9932489"/>
+  <node id="3743039530" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582721" lon="9.9932089"/>
+  <node id="3743039531" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582658" lon="9.9932071"/>
+  <node id="3743039532" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582571" lon="9.9932077"/>
+  <node id="3743039533" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582519" lon="9.993217"/>
+  <node id="3743039534" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582488" lon="9.9932293"/>
+  <node id="3743039535" version="1" timestamp="2015-09-14T16:40:23Z" lat="53.5582496" lon="9.9932401"/>
+  <node id="4025211814" version="2" timestamp="2016-02-25T10:47:08Z" lat="53.5604735" lon="9.9898318"/>
+  <node id="4025211821" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5605233" lon="9.9899419"/>
+  <node id="4025211829" version="2" timestamp="2016-02-25T10:47:08Z" lat="53.5605701" lon="9.9897682">
+    <tag k="level" v="0"/>
+  </node>
+  <node id="4025211831" version="1" timestamp="2016-02-25T07:21:37Z" lat="53.5605254" lon="9.9903464"/>
+  <node id="4025211833" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5605642" lon="9.990033"/>
+  <node id="4025211835" version="2" timestamp="2016-02-25T10:47:08Z" lat="53.5605902" lon="9.9898136"/>
+  <node id="4025211843" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.560615" lon="9.9901382"/>
+  <node id="4025211844" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5606222" lon="9.9900681"/>
+  <node id="4025211848" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5606365" lon="9.9900498"/>
+  <node id="4025211850" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5606438" lon="9.9899394"/>
+  <node id="4025211851" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.560656" lon="9.989968">
+    <tag k="level" v="0"/>
+  </node>
+  <node id="4025211855" version="2" timestamp="2016-02-25T07:36:21Z" lat="53.5607646" lon="9.9895202"/>
+  <node id="4025211856" version="3" timestamp="2016-02-25T10:47:09Z" lat="53.56085" lon="9.9897187"/>
+  <node id="4025211857" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5609814" lon="9.989225"/>
+  <node id="4025211858" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5609869" lon="9.989237">
+    <tag k="level" v="1"/>
+  </node>
+  <node id="4025211859" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5609923" lon="9.989249"/>
+  <node id="4025211860" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610172" lon="9.9891792"/>
+  <node id="4025211862" version="3" timestamp="2016-08-29T14:43:05Z" lat="53.5610226" lon="9.9891912">
+    <tag k="level" v="0.5"/>
+  </node>
+  <node id="4025211863" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.561028" lon="9.9892032"/>
+  <node id="4025211864" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610298" lon="9.989182"/>
+  <node id="4025211865" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610315" lon="9.9891608"/>
+  <node id="4025211866" version="3" timestamp="2016-08-29T14:43:05Z" lat="53.5610335" lon="9.9892153">
+    <tag k="level" v="0.5"/>
+  </node>
+  <node id="4025211867" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610389" lon="9.9892273"/>
+  <node id="4025211868" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610406" lon="9.9892061"/>
+  <node id="4025211869" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610532" lon="9.989209"/>
+  <node id="4025267194" version="3" timestamp="2020-05-27T12:33:12Z" lat="53.560607" lon="9.9894791"/>
+  <node id="4025267195" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5606299" lon="9.9895296"/>
+  <node id="4025267196" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5608029" lon="9.9899539"/>
+  <node id="4025267197" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5608368" lon="9.9891876"/>
+  <node id="4025267198" version="3" timestamp="2020-05-27T12:33:12Z" lat="53.5608252" lon="9.990006"/>
+  <node id="4025267199" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5608595" lon="9.9892383"/>
+  <node id="4025267200" version="2" timestamp="2016-02-25T10:47:09Z" lat="53.5610325" lon="9.9896627"/>
+  <node id="4025267201" version="3" timestamp="2016-04-10T19:23:34Z" lat="53.5610552" lon="9.9897134"/>
+  <node id="4025683495" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5599139" lon="9.990454"/>
+  <node id="4025683496" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5599185" lon="9.9909079"/>
+  <node id="4025683500" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5603718" lon="9.9898571"/>
+  <node id="4025683501" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5603994" lon="9.9900636"/>
+  <node id="4025683502" version="3" timestamp="2022-02-01T20:06:04Z" lat="53.5604447" lon="9.9893993"/>
+  <node id="4025683504" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5604471" lon="9.9897616"/>
+  <node id="4025683505" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5604686" lon="9.9898477"/>
+  <node id="4025683506" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5604794" lon="9.989834"/>
+  <node id="4025683509" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605064" lon="9.9899322"/>
+  <node id="4025683510" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5605082" lon="9.9896841"/>
+  <node id="4025683515" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605403" lon="9.9897567"/>
+  <node id="4025683516" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605497" lon="9.9900289"/>
+  <node id="4025683517" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605689" lon="9.9896069"/>
+  <node id="4025683518" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605782" lon="9.9898412"/>
+  <node id="4025683520" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605875" lon="9.9901134"/>
+  <node id="4025683523" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5605983" lon="9.9900998"/>
+  <node id="4025683524" version="2" timestamp="2020-05-27T12:33:13Z" lat="53.5606001" lon="9.9896814"/>
+  <node id="4025683526" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5606214" lon="9.9899379"/>
+  <node id="4025683528" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5606307" lon="9.9901723"/>
+  <node id="4025683530" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5606502" lon="9.9894242"/>
+  <node id="4025683531" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5606557" lon="9.990027"/>
+  <node id="4025683532" version="2" timestamp="2020-05-27T12:33:13Z" lat="53.5606602" lon="9.9896048"/>
+  <node id="4025683534" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5606881" lon="9.9900995"/>
+  <node id="4025683536" version="2" timestamp="2020-05-27T12:33:13Z" lat="53.5607033" lon="9.9895502"/>
+  <node id="4025683537" version="2" timestamp="2020-05-27T12:33:14Z" lat="53.5607148" lon="9.9899528"/>
+  <node id="4025683540" version="1" timestamp="2016-02-25T10:46:58Z" lat="53.5607455" lon="9.9900267"/>
+  <node id="4025683541" version="2" timestamp="2020-05-27T12:33:14Z" lat="53.5607722" lon="9.98988"/>
+  <node id="4025683543" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5607937" lon="9.9892422"/>
+  <node id="4025683545" version="2" timestamp="2020-05-27T12:33:14Z" lat="53.5608168" lon="9.989824"/>
+  <node id="4025683547" version="2" timestamp="2020-05-27T12:33:15Z" lat="53.560846" lon="9.9893682"/>
+  <node id="4025683548" version="3" timestamp="2020-05-27T19:04:45Z" lat="53.5608701" lon="9.9899483"/>
+  <node id="4025683549" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.560877" lon="9.9894533"/>
+  <node id="4025683550" version="2" timestamp="2020-05-27T12:33:15Z" lat="53.560889" lon="9.9893136"/>
+  <node id="4025683551" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5609026" lon="9.9891837"/>
+  <node id="4025683552" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5609203" lon="9.9895498"/>
+  <node id="4025683554" version="2" timestamp="2020-05-27T12:33:16Z" lat="53.5609338" lon="9.9892576"/>
+  <node id="4025683555" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.56096" lon="9.9891109"/>
+  <node id="4025683556" version="2" timestamp="2020-05-27T12:33:16Z" lat="53.5609645" lon="9.9896539"/>
+  <node id="4025683558" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5609846" lon="9.9893166"/>
+  <node id="4025683559" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5609924" lon="9.9891834"/>
+  <node id="4025683560" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610033" lon="9.9892076"/>
+  <node id="4025683561" version="2" timestamp="2020-05-27T12:33:16Z" lat="53.5610076" lon="9.9895993"/>
+  <node id="4025683562" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610122" lon="9.989768"/>
+  <node id="4025683563" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610209" lon="9.9890336"/>
+  <node id="4025683564" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610276" lon="9.9892619"/>
+  <node id="4025683565" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610279" lon="9.9894132"/>
+  <node id="4025683566" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610284" lon="9.9891757"/>
+  <node id="4025683567" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610527" lon="9.9892301"/>
+  <node id="4025683569" version="2" timestamp="2019-10-03T06:11:50Z" lat="53.5610629" lon="9.9895295"/>
+  <node id="4025683570" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610639" lon="9.9889789"/>
+  <node id="4025683571" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610642" lon="9.9891302"/>
+  <node id="4025683572" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610709" lon="9.9893585"/>
+  <node id="4025683573" version="2" timestamp="2016-08-29T14:43:05Z" lat="53.5610865" lon="9.9894472">
+    <tag k="level" v="0"/>
+  </node>
+  <node id="4025683574" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5610886" lon="9.9891845"/>
+  <node id="4025683575" version="3" timestamp="2019-10-03T06:11:50Z" lat="53.56109" lon="9.98959"/>
+  <node id="4025683576" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611185" lon="9.9893879"/>
+  <node id="4025683577" version="2" timestamp="2019-10-03T06:11:50Z" lat="53.5611203" lon="9.9894567"/>
+  <node id="4025683578" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611318" lon="9.9892811"/>
+  <node id="4025683579" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611384" lon="9.9894308"/>
+  <node id="4025683580" version="2" timestamp="2019-10-03T06:11:50Z" lat="53.5611473" lon="9.9895171"/>
+  <node id="4025683581" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611539" lon="9.9893414"/>
+  <node id="4025683582" version="2" timestamp="2016-08-29T14:43:05Z" lat="53.5611589" lon="9.9893521">
+    <tag k="level" v="1"/>
+  </node>
+  <node id="4025683583" version="2" timestamp="2016-08-29T14:43:05Z" lat="53.5611688" lon="9.9893735">
+    <tag k="level" v="1"/>
+  </node>
+  <node id="4025683584" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611725" lon="9.9888693"/>
+  <node id="4025683585" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611738" lon="9.9893843"/>
+  <node id="4025683586" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611749" lon="9.9892264"/>
+  <node id="4025683587" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5611777" lon="9.9893839"/>
+  <node id="4025683588" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5612047" lon="9.9894443"/>
+  <node id="4025683689" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5612351" lon="9.9893111"/>
+  <node id="4025683690" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5612621" lon="9.9893715"/>
+  <node id="4025683691" version="1" timestamp="2016-02-25T10:46:59Z" lat="53.5616694" lon="9.9881313"/>
+  <node id="4027232206" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.5607862" lon="9.9895396"/>
+  <node id="4027232207" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.5608132" lon="9.9896"/>
+  <node id="4027232208" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.5608149" lon="9.9895032"/>
+  <node id="4027232209" version="2" timestamp="2017-03-02T16:20:58Z" lat="53.5608403" lon="9.9896605"/>
+  <node id="4027232211" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.5608419" lon="9.9895637"/>
+  <node id="4027232212" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.5608673" lon="9.9897208"/>
+  <node id="4027232213" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.5608689" lon="9.9896241"/>
+  <node id="4027232215" version="1" timestamp="2016-02-26T05:27:30Z" lat="53.560896" lon="9.9896844"/>
+  <node id="4039515581" version="2" timestamp="2020-08-06T13:32:40Z" lat="53.5604154" lon="9.9904549"/>
+  <node id="4107329046" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5605549" lon="9.9897292"/>
+  <node id="4107329050" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5606028" lon="9.9898394"/>
+  <node id="4107329052" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5606426" lon="9.989935"/>
+  <node id="4107329053" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5606906" lon="9.9900429"/>
+  <node id="4107329054" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5609698" lon="9.9892036"/>
+  <node id="4107329055" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5610182" lon="9.9893077"/>
+  <node id="4107486824" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5612317" lon="9.9890356"/>
+  <node id="4107486844" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.562859" lon="9.9861545"/>
+  <node id="4107486845" version="2" timestamp="2016-04-10T19:23:34Z" lat="53.5629058" lon="9.9862307"/>
+  <node id="4107506102" version="2" timestamp="2023-09-02T13:21:58Z" lat="53.5615939" lon="9.9882458"/>
+  <node id="4107506103" version="2" timestamp="2023-09-02T13:21:58Z" lat="53.5616317" lon="9.9881851"/>
+  <node id="4112332616" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5603452" lon="9.9899432"/>
+  <node id="4112332619" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5609626" lon="9.9891862"/>
+  <node id="4112332620" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5609805" lon="9.9893571"/>
+  <node id="4112332621" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5611721" lon="9.9889004"/>
+  <node id="4112332622" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5612664" lon="9.989115"/>
+  <node id="4112332624" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.561295" lon="9.9889793"/>
+  <node id="4112332625" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5613305" lon="9.9892616"/>
+  <node id="4112332626" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5613885" lon="9.9891625"/>
+  <node id="4112332629" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5614052" lon="9.9888074"/>
+  <node id="4112332631" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5614273" lon="9.9886109"/>
+  <node id="4112332632" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5614442" lon="9.9888834"/>
+  <node id="4112332635" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5615307" lon="9.9884324"/>
+  <node id="4112332638" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5615904" lon="9.9883395"/>
+  <node id="4112332639" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5615979" lon="9.9883556"/>
+  <node id="4112332642" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5616772" lon="9.9885514"/>
+  <node id="4112332645" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.561712" lon="9.9881698"/>
+  <node id="4112332648" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5618502" lon="9.988269"/>
+  <node id="4112332651" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5619634" lon="9.9876991"/>
+  <node id="4112332654" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5621895" lon="9.9873315"/>
+  <node id="4112332655" version="1" timestamp="2016-04-10T19:23:11Z" lat="53.5623631" lon="9.987213"/>
+  <node id="4112332658" version="1" timestamp="2016-04-10T19:23:12Z" lat="53.5625915" lon="9.986624"/>
+  <node id="4112332659" version="1" timestamp="2016-04-10T19:23:12Z" lat="53.5628964" lon="9.9860123"/>
+  <node id="4112332660" version="1" timestamp="2016-04-10T19:23:12Z" lat="53.5629146" lon="9.986246"/>
+  <node id="4577196621" version="2" timestamp="2023-09-02T13:21:58Z" lat="53.5613419" lon="9.9893123"/>
+  <node id="4862309119" version="1" timestamp="2017-05-18T17:45:09Z" lat="53.5615852" lon="9.988233"/>
+  <node id="4862309120" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5615703" lon="9.9882113"/>
+  <node id="4862309821" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5615258" lon="9.9882021"/>
+  <node id="4862309822" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5615105" lon="9.9882141"/>
+  <node id="4862309823" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.561476" lon="9.9882567"/>
+  <node id="4862309828" version="3" timestamp="2022-02-01T20:19:03Z" lat="53.5611417" lon="9.9887496"/>
+  <node id="4862309829" version="1" timestamp="2017-05-18T17:45:09Z" lat="53.5611838" lon="9.9888526"/>
+  <node id="5210755742" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5601104" lon="9.9895065"/>
+  <node id="5210756376" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5601924" lon="9.9895319"/>
+  <node id="5210756723" version="4" timestamp="2022-02-01T20:19:03Z" lat="53.5610822" lon="9.9886312"/>
+  <node id="5925976858" version="1" timestamp="2018-09-24T07:41:25Z" lat="53.5606393" lon="9.9895306"/>
+  <node id="5925976859" version="1" timestamp="2018-09-24T07:41:25Z" lat="53.560617" lon="9.9894729"/>
+  <node id="5925976860" version="1" timestamp="2018-09-24T07:41:25Z" lat="53.5608441" lon="9.9891779"/>
+  <node id="5925976861" version="1" timestamp="2018-09-24T07:41:25Z" lat="53.5608705" lon="9.9892363"/>
+  <node id="5925976862" version="1" timestamp="2018-09-24T07:41:25Z" lat="53.5611565" lon="9.9888521"/>
+  <node id="5925976863" version="1" timestamp="2018-09-24T07:41:25Z" lat="53.5611519" lon="9.9887434"/>
+  <node id="6063198521" version="1" timestamp="2018-11-15T10:19:48Z" lat="53.56402" lon="9.979512"/>
+  <node id="6210485138" version="1" timestamp="2019-01-15T15:04:49Z" lat="53.5640129" lon="9.977386"/>
+  <node id="6657309014" version="1" timestamp="2019-07-29T10:40:12Z" lat="53.5597073" lon="9.9911033"/>
+  <node id="6779941148" version="3" timestamp="2022-02-01T20:19:03Z" lat="53.5609596" lon="9.9886459"/>
+  <node id="6779941149" version="3" timestamp="2022-02-01T20:19:03Z" lat="53.5609837" lon="9.9887133"/>
+  <node id="6779941150" version="1" timestamp="2019-09-07T21:15:12Z" lat="53.5609319" lon="9.9891465">
+    <tag k="entrance" v="emergency"/>
+  </node>
+  <node id="6779941151" version="1" timestamp="2019-09-07T21:15:12Z" lat="53.56088" lon="9.9892122">
+    <tag k="entrance" v="emergency"/>
+  </node>
+  <node id="6779941152" version="1" timestamp="2019-09-07T21:15:12Z" lat="53.5608462" lon="9.9892086">
+    <tag k="entrance" v="emergency"/>
+  </node>
+  <node id="6779941153" version="1" timestamp="2019-09-07T21:15:12Z" lat="53.5604151" lon="9.9898022">
+    <tag k="entrance" v="yes"/>
+  </node>
+  <node id="6846268906" version="7" timestamp="2025-06-06T10:51:20Z" lat="53.5609983" lon="9.9896247">
+    <tag k="check_date" v="2025-06-06"/>
+    <tag k="check_date:opening_hours" v="2025-06-06"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="HVV Service Bf. Dammtor"/>
+    <tag k="opening_hours" v="Mo-Fr 06:00-21:00; Sa 07:00-20:00; Su 08:00-20:00"/>
+    <tag k="shop" v="ticket"/>
+    <tag k="wheelchair" v="yes"/>
+  </node>
+  <node id="6846268907" version="3" timestamp="2025-05-15T16:22:18Z" lat="53.5610219" lon="9.9893877">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="check_date" v="2025-05-15"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="operator:wikidata" v="Q1152124"/>
+    <tag k="payment:cash" v="yes"/>
+    <tag k="payment:cryptocurrencies" v="no"/>
+    <tag k="payment:electronic_purses" v="no"/>
+    <tag k="payment:girocard" v="yes"/>
+    <tag k="ref" v="B81773"/>
+    <tag k="vending" v="public_transport_tickets"/>
+  </node>
+  <node id="6846268908" version="3" timestamp="2025-05-15T16:22:18Z" lat="53.5610258" lon="9.9893978">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="check_date" v="2025-05-15"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="operator:wikidata" v="Q1152124"/>
+    <tag k="payment:cash" v="yes"/>
+    <tag k="payment:cryptocurrencies" v="no"/>
+    <tag k="payment:electronic_purses" v="no"/>
+    <tag k="payment:girocard" v="yes"/>
+    <tag k="ref" v="B81772"/>
+    <tag k="vending" v="public_transport_tickets"/>
+  </node>
+  <node id="6846268909" version="3" timestamp="2025-05-15T16:22:18Z" lat="53.5610386" lon="9.9892945">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="check_date" v="2025-05-15"/>
+    <tag k="level" v="0"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="operator:wikidata" v="Q1152124"/>
+    <tag k="payment:cash" v="yes"/>
+    <tag k="payment:cryptocurrencies" v="no"/>
+    <tag k="payment:electronic_purses" v="no"/>
+    <tag k="payment:girocard" v="yes"/>
+    <tag k="ref" v="B81247"/>
+    <tag k="vending" v="public_transport_tickets"/>
+  </node>
+  <node id="6915753871" version="3" timestamp="2023-05-13T19:04:09Z" lat="53.5607834" lon="9.989243">
+    <tag k="amenity" v="waste_basket"/>
+    <tag k="check_date" v="2023-05-13"/>
+    <tag k="waste" v="trash"/>
+  </node>
+  <node id="7562802585" version="1" timestamp="2020-05-27T12:33:09Z" lat="53.5606516" lon="9.9894225"/>
+  <node id="7635570252" version="1" timestamp="2020-06-19T13:25:58Z" lat="53.5607891" lon="9.9900605"/>
+  <node id="7635570253" version="1" timestamp="2020-06-19T13:25:58Z" lat="53.5608676" lon="9.9900142"/>
+  <node id="7635570254" version="1" timestamp="2020-06-19T13:25:58Z" lat="53.5611529" lon="9.989667"/>
+  <node id="7635570255" version="1" timestamp="2020-06-19T13:25:58Z" lat="53.5611126" lon="9.989712"/>
+  <node id="7635570256" version="1" timestamp="2020-06-19T13:25:58Z" lat="53.561122" lon="9.9897358"/>
+  <node id="7635570257" version="1" timestamp="2020-06-19T13:25:58Z" lat="53.5611623" lon="9.9896908"/>
+  <node id="7815320956" version="3" timestamp="2022-02-01T20:06:04Z" lat="53.5606931" lon="9.9892542"/>
+  <node id="8587501608" version="2" timestamp="2022-02-01T20:19:03Z" lat="53.5611314" lon="9.9885327"/>
+  <node id="8587501610" version="2" timestamp="2022-02-01T20:19:03Z" lat="53.5610725" lon="9.9886013"/>
+  <node id="8587501612" version="2" timestamp="2022-02-01T20:19:03Z" lat="53.5611856" lon="9.9885368"/>
+  <node id="8587806232" version="2" timestamp="2022-02-01T20:19:03Z" lat="53.5610595" lon="9.9885623"/>
+  <node id="8587806233" version="2" timestamp="2022-02-01T20:19:03Z" lat="53.5611399" lon="9.9884205"/>
+  <node id="9141494158" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5600327" lon="9.9895805"/>
+  <node id="9141494159" version="2" timestamp="2022-02-01T20:06:04Z" lat="53.5599927" lon="9.9896777"/>
+  <node id="9427914861" version="1" timestamp="2022-01-18T10:41:20Z" lat="53.5639662" lon="9.9837042"/>
+  <node id="9466989139" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5609166" lon="9.9887981">
+    <tag k="highway" v="street_lamp"/>
+  </node>
+  <node id="9466989140" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5609269" lon="9.9887634"/>
+  <node id="9466989141" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5609329" lon="9.9887014"/>
+  <node id="9466989142" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5607071" lon="9.9890744"/>
+  <node id="9466989143" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5606752" lon="9.9890658"/>
+  <node id="9466989155" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5599548" lon="9.9897956"/>
+  <node id="9466989156" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5600093" lon="9.9896271"/>
+  <node id="9466989170" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5606349" lon="9.9891241"/>
+  <node id="9466989189" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5605717" lon="9.9892667"/>
+  <node id="9466989190" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5605231" lon="9.9893239"/>
+  <node id="9466989191" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5605921" lon="9.9891857"/>
+  <node id="9466989192" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5603622" lon="9.9894596"/>
+  <node id="9466989193" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5601726" lon="9.9895318"/>
+  <node id="9466989194" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.560151" lon="9.9895243"/>
+  <node id="9466989195" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5601232" lon="9.9895087"/>
+  <node id="9466989196" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5600934" lon="9.9895157"/>
+  <node id="9466989197" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5600548" lon="9.9895499"/>
+  <node id="9466999577" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5615424" lon="9.9881977"/>
+  <node id="9466999578" version="1" timestamp="2022-02-01T20:06:04Z" lat="53.5615554" lon="9.9882"/>
+  <node id="9467017283" version="1" timestamp="2022-02-01T20:22:11Z" lat="53.5599173" lon="9.9899513"/>
+  <node id="9467017284" version="1" timestamp="2022-02-01T20:22:11Z" lat="53.5599169" lon="9.9899671"/>
+  <node id="9467017285" version="1" timestamp="2022-02-01T20:22:11Z" lat="53.5599189" lon="9.9899801"/>
+  <node id="9467017286" version="1" timestamp="2022-02-01T20:22:11Z" lat="53.5599224" lon="9.9899895"/>
+  <node id="9467017287" version="1" timestamp="2022-02-01T20:22:11Z" lat="53.5599193" lon="9.9899322"/>
+  <node id="9467020151" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5610884" lon="9.9886695"/>
+  <node id="9467020152" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5611256" lon="9.9887743"/>
+  <node id="9467020153" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.561054" lon="9.988765"/>
+  <node id="9467020154" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5608029" lon="9.9890858"/>
+  <node id="9467020155" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5607983" lon="9.9890761"/>
+  <node id="9467020156" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5611093" lon="9.9886402"/>
+  <node id="9467020157" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5612087" lon="9.988646"/>
+  <node id="9467020158" version="3" timestamp="2023-12-04T16:26:06Z" lat="53.5610782" lon="9.988822">
+    <tag k="circumference" v="0.35"/>
+    <tag k="diameter_crown" v="3"/>
+    <tag k="genus" v="Liquidambar"/>
+    <tag k="genus:de" v="Amberbaum"/>
+    <tag k="natural" v="tree"/>
+    <tag k="ref:bukea" v="100914160"/>
+    <tag k="species" v="Liquidambar styraciflua"/>
+    <tag k="species:de" v="Amerikanischer Amberbaum"/>
+    <tag k="start_date" v="2021"/>
+  </node>
+  <node id="9467020160" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5608094" lon="9.9891304"/>
+  <node id="9467020161" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5610898" lon="9.9887696"/>
+  <node id="9467020162" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.561159" lon="9.9886431"/>
+  <node id="9467020163" version="2" timestamp="2023-09-02T13:21:58Z" lat="53.5607951" lon="9.9890151"/>
+  <node id="9467020166" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5607622" lon="9.9891636"/>
+  <node id="9467020170" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609887" lon="9.9884515"/>
+  <node id="9467020171" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.561004" lon="9.9884262"/>
+  <node id="9467020172" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.560976" lon="9.9884801"/>
+  <node id="9467020173" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609739" lon="9.9884914"/>
+  <node id="9467020174" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.561044" lon="9.9883865"/>
+  <node id="9467020175" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5610664" lon="9.9883757"/>
+  <node id="9467020176" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5610866" lon="9.9883714"/>
+  <node id="9467020177" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5610232" lon="9.9884034"/>
+  <node id="9467020178" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609738" lon="9.9885893"/>
+  <node id="9467020179" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609702" lon="9.9886097"/>
+  <node id="9467020180" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609758" lon="9.9885701"/>
+  <node id="9467020181" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609767" lon="9.9885478"/>
+  <node id="9467020182" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609652" lon="9.9886292"/>
+  <node id="9467020183" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609802" lon="9.9887043"/>
+  <node id="9467020185" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609758" lon="9.9885252"/>
+  <node id="9467020186" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5611762" lon="9.988834"/>
+  <node id="9467020187" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5612747" lon="9.9885444"/>
+  <node id="9467020188" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5613426" lon="9.9884386"/>
+  <node id="9467020189" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5611078" lon="9.9883723"/>
+  <node id="9467020190" version="1" timestamp="2022-02-01T20:19:03Z" lat="53.5609734" lon="9.9885029"/>
+  <node id="9581760725" version="1" timestamp="2022-03-15T22:20:28Z" lat="53.5612468" lon="9.9888278">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="both"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+  </node>
+  <node id="9581760726" version="1" timestamp="2022-03-15T22:20:28Z" lat="53.5616097" lon="9.9883079">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="both"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+  </node>
+  <node id="9581760728" version="2" timestamp="2025-11-12T13:46:50Z" lat="53.561633" lon="9.9885114">
+    <tag k="check_date" v="2025-11-12"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:stop" v="DE-ESO:zuglänge"/>
+    <tag k="railway:signal:stop:caption" v="110 m"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+  </node>
+  <node id="9581760729" version="1" timestamp="2022-03-15T22:20:28Z" lat="53.5614325" lon="9.9887962">
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="both"/>
+    <tag k="railway:signal:main_repeated" v="DE-ESO:fahrtanzeiger"/>
+    <tag k="railway:signal:main_repeated:form" v="light"/>
+    <tag k="railway:signal:position" v="left"/>
+  </node>
+  <node id="9620605934" version="1" timestamp="2022-03-29T10:46:45Z" lat="53.5613301" lon="9.9893961"/>
+  <node id="9957988326" version="1" timestamp="2022-08-16T21:58:01Z" lat="53.5613829" lon="9.9887533"/>
+  <node id="9957988327" version="1" timestamp="2022-08-16T21:58:01Z" lat="53.5614951" lon="9.9889359"/>
+  <node id="9957988328" version="1" timestamp="2022-08-16T21:58:01Z" lat="53.5611642" lon="9.9893635"/>
+  <node id="9957988329" version="1" timestamp="2022-08-16T21:58:01Z" lat="53.5610352" lon="9.989194"/>
+  <node id="10702255507" version="11" timestamp="2026-05-25T23:53:13Z" lat="53.5612392" lon="9.9892883">
+    <tag k="amenity" v="parcel_locker"/>
+    <tag k="brand" v="DHL Packstation;Smart City DB"/>
+    <tag k="brand:wikidata" v="Q1766703"/>
+    <tag k="check_date" v="2026-05-26"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="note" v="Eine Kooperation von DHL und Deutsche Bahn, in diesem Fall in nur einer gemeinsamen Packstation .."/>
+    <tag k="operator" v="DHL"/>
+    <tag k="operator:wikidata" v="Q489815"/>
+    <tag k="parcel_locker:type" v="cabinet"/>
+    <tag k="parcel_mail_in" v="yes"/>
+    <tag k="parcel_pickup" v="yes"/>
+    <tag k="postal_code" v="20354"/>
+    <tag k="ref" v="465"/>
+    <tag k="surveillance" v="indoor"/>
+    <tag k="website" v="https://www.packstation.de"/>
+  </node>
+  <node id="11162813995" version="1" timestamp="2023-09-02T13:21:58Z" lat="53.5607796" lon="9.989062"/>
+  <node id="11431999329" version="1" timestamp="2023-12-19T12:15:18Z" lat="53.5608336" lon="9.9890803">
+    <tag k="advertising" v="column"/>
+  </node>
+  <node id="11584371233" version="3" timestamp="2026-05-25T23:05:15Z" lat="53.5608356" lon="9.9896312">
+    <tag k="artwork_type" v="painting"/>
+    <tag k="tourism" v="artwork"/>
+  </node>
+  <node id="11933598309" version="3" timestamp="2024-08-15T12:40:55Z" lat="53.5599184" lon="9.9899409">
+    <tag k="barrier" v="kerb"/>
+    <tag k="kerb" v="flush"/>
+    <tag k="tactile_paving" v="yes"/>
+  </node>
+  <node id="11933598324" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5613553" lon="9.9883871"/>
+  <node id="11933598325" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5612174" lon="9.9883999"/>
+  <node id="11933598326" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5611215" lon="9.9883928"/>
+  <node id="11933598327" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5610349" lon="9.988545"/>
+  <node id="11933598328" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5609692" lon="9.9886879"/>
+  <node id="11933598329" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5609696" lon="9.9887818"/>
+  <node id="11933598330" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5609645" lon="9.9887325"/>
+  <node id="11933598331" version="1" timestamp="2024-05-25T18:40:01Z" lat="53.5613333" lon="9.9883994"/>
+  <node id="12307687808" version="1" timestamp="2024-11-02T18:19:07Z" lat="53.560485" lon="9.9903975"/>
+  <node id="12307687816" version="1" timestamp="2024-11-02T18:19:07Z" lat="53.5605081" lon="9.9903729"/>
+  <node id="12438996134" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5609795" lon="9.9892766">
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.8"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996135" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5609038" lon="9.9896226">
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="0"/>
+    <tag k="level" v="0"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport"/>
+  </node>
+  <node id="12438996137" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5607907" lon="9.9896327">
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="0"/>
+    <tag k="level" v="0"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport"/>
+  </node>
+  <node id="12438996142" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5609532" lon="9.9893098">
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="0"/>
+    <tag k="level" v="0"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport"/>
+  </node>
+  <node id="12438996145" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5607744" lon="9.9893641">
+    <tag k="camera:angle" v="30"/>
+    <tag k="camera:direction" v="235"/>
+    <tag k="camera:mount" v="wall"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="0"/>
+    <tag k="level" v="0"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="entrance"/>
+  </node>
+  <node id="12438996151" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.560765" lon="9.9893413">
+    <tag k="camera:angle" v="30"/>
+    <tag k="camera:direction" v="55"/>
+    <tag k="camera:mount" v="wall"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="0"/>
+    <tag k="level" v="0"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="entrance"/>
+  </node>
+  <node id="12438996155" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.560999" lon="9.9893138">
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996156" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5609638" lon="9.989238">
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996175" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5610456" lon="9.9895649">
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996176" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5610233" lon="9.9894751">
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996178" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5610964" lon="9.9894791">
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="0"/>
+    <tag k="level" v="0"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport"/>
+  </node>
+  <node id="12438996179" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5611201" lon="9.9893839">
+    <tag k="camera:angle" v="15"/>
+    <tag k="camera:direction" v="144"/>
+    <tag k="camera:mount" v="wall"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996180" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5611344" lon="9.9894342">
+    <tag k="camera:angle" v="15"/>
+    <tag k="camera:direction" v="144"/>
+    <tag k="camera:mount" v="wall"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996181" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5611615" lon="9.9894275">
+    <tag k="camera:angle" v="15"/>
+    <tag k="camera:direction" v="318"/>
+    <tag k="camera:mount" v="pole"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996183" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5611591" lon="9.9893872">
+    <tag k="camera:angle" v="45"/>
+    <tag k="camera:direction" v="144"/>
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport"/>
+  </node>
+  <node id="12438996184" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5611484" lon="9.9893685">
+    <tag k="camera:angle" v="45"/>
+    <tag k="camera:direction" v="144"/>
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport"/>
+  </node>
+  <node id="12438996185" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5612193" lon="9.9892867">
+    <tag k="camera:angle" v="30"/>
+    <tag k="camera:direction" v="144"/>
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="fixed"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="3"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12438996186" version="1" timestamp="2024-12-21T17:47:08Z" lat="53.5612921" lon="9.9891304">
+    <tag k="camera:mount" v="ceiling"/>
+    <tag k="camera:type" v="dome"/>
+    <tag k="check_date" v="2024-12-20"/>
+    <tag k="height" v="2.5"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="man_made" v="surveillance"/>
+    <tag k="surveillance" v="public"/>
+    <tag k="surveillance:type" v="camera"/>
+    <tag k="surveillance:zone" v="public_transport_platform"/>
+  </node>
+  <node id="12944075318" version="1" timestamp="2025-06-22T04:27:56Z" lat="53.5612024" lon="9.9889982">
+    <tag k="amenity" v="waste_basket"/>
+  </node>
+  <node id="12977689561" version="1" timestamp="2025-07-04T14:42:19Z" lat="53.5610078" lon="9.9895624">
+    <tag k="amenity" v="vending_machine"/>
+    <tag k="level" v="1"/>
+    <tag k="vending" v="drinks;sweets"/>
+  </node>
+  <node id="13097987925" version="1" timestamp="2025-08-26T09:44:21Z" lat="53.5626516" lon="9.9867219">
+    <tag k="check_date" v="2025-08-26"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:catenary_mast" v="no"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:stop" v="DE-ESO:zuglänge"/>
+    <tag k="railway:signal:stop:caption" v="310 m"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+  </node>
+  <node id="13097987926" version="1" timestamp="2025-08-26T09:44:21Z" lat="53.5620887" lon="9.9877358">
+    <tag k="check_date" v="2025-08-26"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:catenary_mast" v="no"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:stop" v="DE-ESO:zuglänge"/>
+    <tag k="railway:signal:stop:caption" v="220 m"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+  </node>
+  <node id="13299613603" version="1" timestamp="2025-11-12T13:46:50Z" lat="53.5619132" lon="9.9880488">
+    <tag k="check_date" v="2025-11-12"/>
+    <tag k="railway" v="signal"/>
+    <tag k="railway:signal:direction" v="forward"/>
+    <tag k="railway:signal:position" v="left"/>
+    <tag k="railway:signal:stop" v="DE-ESO:zuglänge"/>
+    <tag k="railway:signal:stop:caption" v="190 m"/>
+    <tag k="railway:signal:stop:form" v="sign"/>
+  </node>
+  <node id="13608217830" version="1" timestamp="2026-02-28T20:04:33Z" lat="53.5601696" lon="9.9901195"/>
+  <node id="13879283479" version="1" timestamp="2026-05-25T23:53:13Z" lat="53.5606073" lon="9.9899063">
+    <tag k="access" v="customers"/>
+    <tag k="entrance" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="note" v="WC"/>
+  </node>
+  <way id="6376590" version="31" timestamp="2025-12-27T21:04:51Z">
+    <nd ref="53120385"/>
+    <nd ref="4112332625"/>
+    <nd ref="3478684838"/>
+    <nd ref="3255989066"/>
+    <nd ref="4112332622"/>
+    <nd ref="4107486824"/>
+    <nd ref="3255988860"/>
+    <nd ref="4112332621"/>
+    <nd ref="53120388"/>
+    <nd ref="4025683570"/>
+    <nd ref="4025683563"/>
+    <nd ref="4025683555"/>
+    <nd ref="6779941150"/>
+    <nd ref="4025683551"/>
+    <nd ref="6779941151"/>
+    <nd ref="4025267199"/>
+    <nd ref="6779941152"/>
+    <nd ref="4025267197"/>
+    <nd ref="4025683543"/>
+    <nd ref="418854693"/>
+    <nd ref="412862846"/>
+    <nd ref="4025683530"/>
+    <nd ref="4025267194"/>
+    <nd ref="4025267195"/>
+    <nd ref="4025683517"/>
+    <nd ref="4025683510"/>
+    <nd ref="4025683504"/>
+    <nd ref="6779941153"/>
+    <nd ref="4025683500"/>
+    <nd ref="53120390"/>
+    <nd ref="4112332616"/>
+    <nd ref="4025683501"/>
+    <nd ref="53120391"/>
+    <nd ref="4025683528"/>
+    <nd ref="4025683534"/>
+    <nd ref="4025683540"/>
+    <nd ref="4025267196"/>
+    <nd ref="4025267198"/>
+    <nd ref="4025683548"/>
+    <nd ref="412860483"/>
+    <nd ref="420290336"/>
+    <nd ref="4025683562"/>
+    <nd ref="4025267201"/>
+    <nd ref="4025267200"/>
+    <nd ref="4025683575"/>
+    <nd ref="53120385"/>
+    <tag k="addr:city" v="Hamburg"/>
+    <tag k="addr:housenumber" v="1"/>
+    <tag k="addr:postcode" v="20354"/>
+    <tag k="addr:street" v="Theodor-Heuss-Platz"/>
+    <tag k="building" v="public"/>
+    <tag k="building:levels" v="2"/>
+    <tag k="name" v="Hamburg Dammtor Bahnhof"/>
+    <tag k="note" v="height is only estimated."/>
+    <tag k="roof:levels" v="1"/>
+    <tag k="roof:shape" v="round"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="22898309" version="20" timestamp="2024-12-27T20:05:02Z">
+    <nd ref="9467020151"/>
+    <nd ref="5210756723"/>
+    <nd ref="11933598329"/>
+    <nd ref="9467020163"/>
+    <nd ref="11162813995"/>
+    <nd ref="9467020166"/>
+    <nd ref="418854694"/>
+    <nd ref="7815320956"/>
+    <nd ref="412862845"/>
+    <tag k="bicycle" v="yes"/>
+    <tag k="highway" v="footway"/>
+    <tag k="lit" v="yes"/>
+    <tag k="smoothness" v="excellent"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="35827402" version="17" timestamp="2016-04-10T19:23:22Z">
+    <nd ref="418854697"/>
+    <nd ref="4025211843"/>
+    <nd ref="4107329053"/>
+    <nd ref="3255989065"/>
+    <nd ref="3478684838"/>
+    <nd ref="4112332626"/>
+    <nd ref="3255989072"/>
+    <nd ref="3478684844"/>
+    <nd ref="3478684849"/>
+    <nd ref="3255989081"/>
+    <nd ref="3478684852"/>
+    <nd ref="3255989085"/>
+    <nd ref="418854699"/>
+    <nd ref="3255989087"/>
+    <nd ref="3255989084"/>
+    <nd ref="3478684851"/>
+    <nd ref="3255989076"/>
+    <nd ref="3478684847"/>
+    <nd ref="3255989071"/>
+    <nd ref="3255989066"/>
+    <nd ref="3255989064"/>
+    <nd ref="4107329052"/>
+    <nd ref="4025211833"/>
+    <nd ref="3255988848"/>
+    <nd ref="418854697"/>
+  </way>
+  <way id="35827406" version="15" timestamp="2016-04-10T19:23:22Z">
+    <nd ref="418854712"/>
+    <nd ref="3255989092"/>
+    <nd ref="4107486844"/>
+    <nd ref="4112332658"/>
+    <nd ref="4112332654"/>
+    <nd ref="3255989088"/>
+    <nd ref="4112332645"/>
+    <nd ref="4112332639"/>
+    <nd ref="3255989075"/>
+    <nd ref="4112332631"/>
+    <nd ref="3255989069"/>
+    <nd ref="3255988860"/>
+    <nd ref="4107329054"/>
+    <nd ref="4107329046"/>
+    <nd ref="4025211814"/>
+    <nd ref="3255988846"/>
+    <nd ref="418854708"/>
+    <nd ref="4025211821"/>
+    <nd ref="4107329050"/>
+    <nd ref="4112332620"/>
+    <nd ref="4107329055"/>
+    <nd ref="4107486824"/>
+    <nd ref="3038826934"/>
+    <nd ref="4112332629"/>
+    <nd ref="3255989077"/>
+    <nd ref="3255989082"/>
+    <nd ref="3038826857"/>
+    <nd ref="418854711"/>
+    <nd ref="4112332655"/>
+    <nd ref="4107486845"/>
+    <nd ref="418854712"/>
+  </way>
+  <way id="35954763" version="12" timestamp="2024-01-22T20:01:02Z">
+    <nd ref="412862846"/>
+    <nd ref="4025211855"/>
+    <nd ref="4025211856"/>
+    <nd ref="412860483"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="lit" v="yes"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="35954766" version="9" timestamp="2024-01-22T20:00:58Z">
+    <nd ref="420290336"/>
+    <nd ref="418854700"/>
+    <nd ref="418854695"/>
+    <nd ref="418854693"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="lit" v="yes"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="36721516" version="20" timestamp="2024-11-02T18:19:07Z">
+    <nd ref="654204199"/>
+    <nd ref="9620605934"/>
+    <nd ref="3671389355"/>
+    <nd ref="3671389354"/>
+    <nd ref="654204196"/>
+    <nd ref="2226374219"/>
+    <nd ref="418854691"/>
+    <nd ref="3671389356"/>
+    <nd ref="7635570253"/>
+    <nd ref="3671389357"/>
+    <nd ref="7635570252"/>
+    <nd ref="654204197"/>
+    <nd ref="12307687816"/>
+    <nd ref="12307687808"/>
+    <nd ref="1687916267"/>
+    <tag k="footway" v="sidewalk"/>
+    <tag k="highway" v="footway"/>
+    <tag k="lit" v="yes"/>
+    <tag k="smoothness" v="good"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="37021978" version="22" timestamp="2023-09-02T13:21:58Z">
+    <nd ref="430578625"/>
+    <nd ref="1687916311"/>
+    <nd ref="430578624"/>
+    <nd ref="1238543746"/>
+    <nd ref="430578623"/>
+    <nd ref="430578622"/>
+    <nd ref="2133689097"/>
+    <nd ref="430578621"/>
+    <nd ref="9427914861"/>
+    <nd ref="430578620"/>
+    <nd ref="430578619"/>
+    <nd ref="1238550765"/>
+    <nd ref="6063198521"/>
+    <nd ref="6210485138"/>
+    <nd ref="430578613"/>
+    <nd ref="430578617"/>
+    <nd ref="430578615"/>
+    <nd ref="3053970796"/>
+    <nd ref="430578616"/>
+    <nd ref="430578626"/>
+    <nd ref="430578627"/>
+    <nd ref="2086574616"/>
+    <nd ref="2086574635"/>
+    <nd ref="430578628"/>
+    <nd ref="2086574638"/>
+    <nd ref="430578629"/>
+    <nd ref="2086574609"/>
+    <nd ref="2086574614"/>
+    <nd ref="4112332659"/>
+    <nd ref="430578630"/>
+    <nd ref="430578631"/>
+    <nd ref="4025683691"/>
+    <nd ref="4107506103"/>
+    <nd ref="246519613"/>
+    <nd ref="4107506102"/>
+    <nd ref="4862309829"/>
+    <nd ref="4025683584"/>
+    <nd ref="583561146"/>
+    <nd ref="2292314158"/>
+    <nd ref="4025683495"/>
+    <nd ref="430592022"/>
+    <nd ref="552952154"/>
+    <nd ref="2283871584"/>
+    <nd ref="430592023"/>
+    <nd ref="561148477"/>
+    <nd ref="561148476"/>
+    <nd ref="561148475"/>
+    <nd ref="2283871563"/>
+    <nd ref="2283871560"/>
+    <nd ref="301624868"/>
+    <nd ref="3743039525"/>
+    <nd ref="2283871534"/>
+    <nd ref="3743039530"/>
+    <nd ref="3743039531"/>
+    <nd ref="3743039532"/>
+    <nd ref="3743039533"/>
+    <nd ref="3743039534"/>
+    <nd ref="3743039535"/>
+    <nd ref="3743039529"/>
+    <nd ref="3743039528"/>
+    <nd ref="3743039527"/>
+    <nd ref="3743039526"/>
+    <nd ref="301624865"/>
+    <nd ref="52103888"/>
+    <nd ref="1238528564"/>
+    <nd ref="31161199"/>
+    <nd ref="1238528543"/>
+    <nd ref="430592026"/>
+    <nd ref="3743039313"/>
+    <nd ref="3743039314"/>
+    <nd ref="3743039315"/>
+    <nd ref="3743039316"/>
+    <nd ref="3743039317"/>
+    <nd ref="3743039318"/>
+    <nd ref="3743039319"/>
+    <nd ref="3743039320"/>
+    <nd ref="3743039321"/>
+    <nd ref="3743039322"/>
+    <nd ref="3743039323"/>
+    <nd ref="3743039324"/>
+    <nd ref="430592028"/>
+    <nd ref="561148488"/>
+    <nd ref="561148489"/>
+    <nd ref="561148480"/>
+    <nd ref="430592029"/>
+    <nd ref="561148481"/>
+    <nd ref="561148482"/>
+    <nd ref="561148486"/>
+    <nd ref="561148487"/>
+    <nd ref="430592031"/>
+    <nd ref="6657309014"/>
+    <nd ref="4025683496"/>
+    <nd ref="3105692072"/>
+    <nd ref="4039515581"/>
+    <nd ref="4025211831"/>
+    <nd ref="4577196621"/>
+    <nd ref="490762713"/>
+    <nd ref="430578625"/>
+    <tag k="landuse" v="railway"/>
+  </way>
+  <way id="44171933" version="28" timestamp="2024-05-25T18:40:01Z">
+    <nd ref="9467020155"/>
+    <nd ref="9467020151"/>
+    <nd ref="9467020156"/>
+    <nd ref="9467020162"/>
+    <nd ref="9467020157"/>
+    <nd ref="9467020187"/>
+    <nd ref="8587501612"/>
+    <nd ref="8587501608"/>
+    <nd ref="8587501610"/>
+    <nd ref="6779941149"/>
+    <nd ref="9467020183"/>
+    <nd ref="8587806232"/>
+    <nd ref="8587806233"/>
+    <nd ref="11933598326"/>
+    <nd ref="9467020189"/>
+    <nd ref="9467020176"/>
+    <nd ref="9467020175"/>
+    <nd ref="9467020174"/>
+    <nd ref="9467020177"/>
+    <nd ref="9467020171"/>
+    <nd ref="9467020170"/>
+    <nd ref="9467020172"/>
+    <nd ref="9467020173"/>
+    <nd ref="9467020190"/>
+    <nd ref="9467020185"/>
+    <nd ref="9467020181"/>
+    <nd ref="9467020180"/>
+    <nd ref="9467020178"/>
+    <nd ref="9467020179"/>
+    <nd ref="9467020182"/>
+    <nd ref="6779941148"/>
+    <nd ref="9466989141"/>
+    <nd ref="9466989140"/>
+    <nd ref="9466989142"/>
+    <nd ref="9466989143"/>
+    <nd ref="9466989170"/>
+    <nd ref="9466989191"/>
+    <nd ref="9466989189"/>
+    <nd ref="9466989190"/>
+    <nd ref="4025683502"/>
+    <nd ref="9466989192"/>
+    <nd ref="1687916258"/>
+    <nd ref="5210756376"/>
+    <nd ref="9466989193"/>
+    <nd ref="9466989194"/>
+    <nd ref="9466989195"/>
+    <nd ref="5210755742"/>
+    <nd ref="9466989196"/>
+    <nd ref="552952155"/>
+    <nd ref="9466989197"/>
+    <nd ref="9141494158"/>
+    <nd ref="9466989156"/>
+    <nd ref="9141494159"/>
+    <nd ref="9466989155"/>
+    <nd ref="552952162"/>
+    <nd ref="9467017287"/>
+    <nd ref="11933598309"/>
+  </way>
+  <way id="45046057" version="24" timestamp="2026-01-14T18:01:55Z">
+    <nd ref="571230957"/>
+    <nd ref="3478684821"/>
+    <nd ref="1687916295"/>
+    <nd ref="571230955"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="contact_line"/>
+    <tag k="frequency" v="16.7"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="highspeed" v="no"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="maxspeed" v="60"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="passenger_lines" v="2"/>
+    <tag k="rack" v="no"/>
+    <tag k="railway" v="rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:etcs" v="no"/>
+    <tag k="railway:gnt" v="no"/>
+    <tag k="railway:lzb" v="no"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="3"/>
+    <tag k="railway:traffic_mode" v="mixed"/>
+    <tag k="ref" v="6100"/>
+    <tag k="source:maxspeed" v="Laut Anlage 13.2.1, Anhang 2, der Leistungs- und Finanzierungsvereinbarung von 2008 ist die Strecke 6100 zwischen den Kilometern 287,4 und 291,7 mit 60 km/h befahrbar; dazu GPS-gestützte Geschwindigkeitsmessung auf mehreren unbehindert fahrenden Zügen"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="15000"/>
+    <tag k="workrules" v="DE:EBO"/>
+  </way>
+  <way id="46897226" version="24" timestamp="2025-06-26T17:39:26Z">
+    <nd ref="53120073"/>
+    <nd ref="3038826869"/>
+    <nd ref="3038826868"/>
+    <nd ref="53120076"/>
+    <nd ref="4112332651"/>
+    <nd ref="52102992"/>
+    <nd ref="9581760726"/>
+    <nd ref="4112332638"/>
+    <nd ref="4112332635"/>
+    <nd ref="52102994"/>
+    <nd ref="3038826935"/>
+    <nd ref="2127784116"/>
+    <nd ref="9581760725"/>
+    <nd ref="418854707"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="contact_line"/>
+    <tag k="frequency" v="16.7"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="highspeed" v="no"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="maxspeed" v="60"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="passenger_lines" v="2"/>
+    <tag k="rack" v="no"/>
+    <tag k="railway" v="rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:bidirectional" v="regular"/>
+    <tag k="railway:etcs" v="no"/>
+    <tag k="railway:gnt" v="no"/>
+    <tag k="railway:lzb" v="no"/>
+    <tag k="railway:preferred_direction" v="forward"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="4"/>
+    <tag k="railway:traffic_mode" v="mixed"/>
+    <tag k="ref" v="6100"/>
+    <tag k="source:maxspeed" v="Laut Anlage 13.2.1, Anhang 2, der Leistungs- und Finanzierungsvereinbarung von 2008 ist die Strecke 6100 zwischen den Kilometern 287,4 und 291,7 mit 60 km/h befahrbar; dazu GPS-gestützte Geschwindigkeitsmessung auf mehreren unbehindert fahrenden Zügen"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="15000"/>
+    <tag k="workrules" v="DE:EBO"/>
+  </way>
+  <way id="51190985" version="6" timestamp="2025-03-31T15:12:28Z">
+    <nd ref="653125344"/>
+    <nd ref="653125303"/>
+    <nd ref="653125304"/>
+    <nd ref="653125343"/>
+    <nd ref="653125344"/>
+    <tag k="access" v="yes"/>
+    <tag k="amenity" v="parking"/>
+    <tag k="fee" v="no"/>
+    <tag k="lit" v="yes"/>
+    <tag k="opening_hours" v="24/7"/>
+    <tag k="orientation" v="parallel"/>
+    <tag k="parking" v="street_side"/>
+    <tag k="restriction" v="no_parking"/>
+    <tag k="smoothness" v="excellent"/>
+    <tag k="supervised" v="no"/>
+    <tag k="surface" v="paving_stones"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="69343870" version="4" timestamp="2019-11-17T21:44:29Z">
+    <nd ref="830954930"/>
+    <nd ref="5925976863"/>
+    <nd ref="5925976862"/>
+    <nd ref="5925976861"/>
+    <nd ref="5925976860"/>
+    <nd ref="5925976859"/>
+    <nd ref="5925976858"/>
+    <nd ref="1502029243"/>
+    <tag k="admin_level" v="9"/>
+    <tag k="boundary" v="administrative"/>
+  </way>
+  <way id="139084182" version="20" timestamp="2023-12-09T11:33:10Z">
+    <nd ref="31161211"/>
+    <nd ref="3002837382"/>
+    <nd ref="3478684828"/>
+    <nd ref="3478684830"/>
+    <nd ref="1687916285"/>
+    <nd ref="3478684832"/>
+    <nd ref="3478684834"/>
+    <nd ref="4112332625"/>
+    <nd ref="1687916301"/>
+    <tag k="commuting" v="yes"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="rail"/>
+    <tag k="embankment" v="no"/>
+    <tag k="frequency" v="0"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="network" v="Hamburger Verkehrsverbund"/>
+    <tag k="operator" v="S-Bahn Hamburg GmbH"/>
+    <tag k="operator:wikidata" v="Q99869216"/>
+    <tag k="railway" v="light_rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:bidirectional" v="regular"/>
+    <tag k="railway:preferred_direction" v="forward"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:radio" v="gsm-r"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="1"/>
+    <tag k="railway:traffic_mode" v="passenger"/>
+    <tag k="ref" v="1240"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="1200"/>
+  </way>
+  <way id="164248385" version="19" timestamp="2023-12-09T11:33:10Z">
+    <nd ref="1687916298"/>
+    <nd ref="3478684837"/>
+    <nd ref="4112332622"/>
+    <nd ref="1412279569"/>
+    <nd ref="3478684827"/>
+    <nd ref="2127784134"/>
+    <nd ref="571230944"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="rail"/>
+    <tag k="embankment" v="no"/>
+    <tag k="frequency" v="0"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="highspeed" v="no"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="network" v="Hamburger Verkehrsverbund"/>
+    <tag k="operator" v="S-Bahn Hamburg GmbH"/>
+    <tag k="operator:wikidata" v="Q99869216"/>
+    <tag k="railway" v="light_rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:bidirectional" v="regular"/>
+    <tag k="railway:etcs" v="no"/>
+    <tag k="railway:gnt" v="no"/>
+    <tag k="railway:lzb" v="no"/>
+    <tag k="railway:preferred_direction" v="forward"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:radio" v="gsm-r"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="2"/>
+    <tag k="railway:traffic_mode" v="passenger"/>
+    <tag k="ref" v="1240"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="1200"/>
+  </way>
+  <way id="164248386" version="15" timestamp="2026-01-14T18:01:55Z">
+    <nd ref="418854707"/>
+    <nd ref="1687916289"/>
+    <nd ref="4112332619"/>
+    <nd ref="3038826850"/>
+    <nd ref="3478684820"/>
+    <nd ref="52102999"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="contact_line"/>
+    <tag k="frequency" v="16.7"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="highspeed" v="no"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="maxspeed" v="60"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="passenger_lines" v="2"/>
+    <tag k="rack" v="no"/>
+    <tag k="railway" v="rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:etcs" v="no"/>
+    <tag k="railway:gnt" v="no"/>
+    <tag k="railway:lzb" v="no"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="4"/>
+    <tag k="railway:traffic_mode" v="mixed"/>
+    <tag k="ref" v="6100"/>
+    <tag k="source:maxspeed" v="Laut Anlage 13.2.1, Anhang 2, der Leistungs- und Finanzierungsvereinbarung von 2008 ist die Strecke 6100 zwischen den Kilometern 287,4 und 291,7 mit 60 km/h befahrbar; dazu GPS-gestützte Geschwindigkeitsmessung auf mehreren unbehindert fahrenden Zügen"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="15000"/>
+    <tag k="workrules" v="DE:EBO"/>
+  </way>
+  <way id="319188365" version="6" timestamp="2024-01-22T20:01:02Z">
+    <nd ref="3255989064"/>
+    <nd ref="4025683582"/>
+    <nd ref="9957988328"/>
+    <nd ref="4025683583"/>
+    <nd ref="3255989065"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="1"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="335127316" version="7" timestamp="2024-01-22T20:00:58Z">
+    <nd ref="418854695"/>
+    <nd ref="3391735105"/>
+    <nd ref="4025683573"/>
+    <nd ref="2226374216"/>
+    <nd ref="418854700"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="lit" v="yes"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="340623594" version="2" timestamp="2016-04-10T19:23:24Z">
+    <nd ref="3255989066"/>
+    <nd ref="3478684838"/>
+    <nd ref="4112332626"/>
+    <nd ref="3255989072"/>
+    <nd ref="3478684844"/>
+    <nd ref="3478684849"/>
+    <nd ref="3255989081"/>
+    <nd ref="3478684852"/>
+    <nd ref="3478684851"/>
+    <nd ref="3255989076"/>
+    <nd ref="3478684847"/>
+    <nd ref="3255989071"/>
+    <nd ref="3255989066"/>
+    <tag k="building" v="roof"/>
+    <tag k="layer" v="2"/>
+  </way>
+  <way id="399844115" version="2" timestamp="2016-05-26T14:05:11Z">
+    <nd ref="4025211859"/>
+    <nd ref="4025211858"/>
+    <nd ref="4025211857"/>
+    <nd ref="4025211860"/>
+    <nd ref="4025211863"/>
+    <nd ref="4025211859"/>
+  </way>
+  <way id="399844118" version="3" timestamp="2017-02-27T18:34:50Z">
+    <nd ref="4025211867"/>
+    <nd ref="4025211866"/>
+    <nd ref="4025211862"/>
+    <nd ref="4025211860"/>
+    <nd ref="4025211865"/>
+    <nd ref="4025211869"/>
+    <nd ref="4025211867"/>
+    <tag k="area" v="yes"/>
+    <tag k="building:part" v="yes"/>
+    <tag k="description" v="Treppenabsatz"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0,5"/>
+    <tag k="stairwell" v="stair_landing"/>
+  </way>
+  <way id="399844121" version="12" timestamp="2025-11-12T13:46:50Z">
+    <nd ref="571230955"/>
+    <nd ref="2127784129"/>
+    <nd ref="4112332624"/>
+    <nd ref="571230954"/>
+    <nd ref="9581760729"/>
+    <nd ref="3478684848"/>
+    <nd ref="9581760728"/>
+    <nd ref="571230953"/>
+    <nd ref="3038826859"/>
+    <nd ref="13299613603"/>
+    <nd ref="3478684855"/>
+    <nd ref="3038826862"/>
+    <nd ref="13097987926"/>
+    <nd ref="3038826866"/>
+    <nd ref="13097987925"/>
+    <nd ref="4112332660"/>
+    <nd ref="1687916316"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="contact_line"/>
+    <tag k="frequency" v="16.7"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="highspeed" v="no"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="maxspeed" v="60"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="passenger_lines" v="2"/>
+    <tag k="rack" v="no"/>
+    <tag k="railway" v="rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:bidirectional" v="regular"/>
+    <tag k="railway:etcs" v="no"/>
+    <tag k="railway:gnt" v="no"/>
+    <tag k="railway:lzb" v="no"/>
+    <tag k="railway:preferred_direction" v="forward"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="3"/>
+    <tag k="railway:traffic_mode" v="mixed"/>
+    <tag k="ref" v="6100"/>
+    <tag k="source:maxspeed" v="Laut Anlage 13.2.1, Anhang 2, der Leistungs- und Finanzierungsvereinbarung von 2008 ist die Strecke 6100 zwischen den Kilometern 287,4 und 291,7 mit 60 km/h befahrbar; dazu GPS-gestützte Geschwindigkeitsmessung auf mehreren unbehindert fahrenden Zügen"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="15000"/>
+    <tag k="workrules" v="DE:EBO"/>
+  </way>
+  <way id="399844123" version="9" timestamp="2023-12-09T11:33:10Z">
+    <nd ref="1687916318"/>
+    <nd ref="2127784100"/>
+    <nd ref="4112332648"/>
+    <nd ref="3478684854"/>
+    <nd ref="676107628"/>
+    <nd ref="4112332642"/>
+    <nd ref="3478684846"/>
+    <nd ref="4112332632"/>
+    <nd ref="1687916298"/>
+    <tag k="cutting" v="no"/>
+    <tag k="electrified" v="rail"/>
+    <tag k="embankment" v="no"/>
+    <tag k="frequency" v="0"/>
+    <tag k="gauge" v="1435"/>
+    <tag k="highspeed" v="no"/>
+    <tag k="layer" v="1"/>
+    <tag k="level" v="1"/>
+    <tag k="network" v="Hamburger Verkehrsverbund"/>
+    <tag k="operator" v="S-Bahn Hamburg GmbH"/>
+    <tag k="operator:wikidata" v="Q99869216"/>
+    <tag k="railway" v="light_rail"/>
+    <tag k="railway:ballastless" v="no"/>
+    <tag k="railway:bidirectional" v="regular"/>
+    <tag k="railway:etcs" v="no"/>
+    <tag k="railway:gnt" v="no"/>
+    <tag k="railway:lzb" v="no"/>
+    <tag k="railway:preferred_direction" v="forward"/>
+    <tag k="railway:pzb" v="yes"/>
+    <tag k="railway:radio" v="gsm-r"/>
+    <tag k="railway:tilting" v="no"/>
+    <tag k="railway:track_ref" v="2"/>
+    <tag k="railway:traffic_mode" v="passenger"/>
+    <tag k="ref" v="1240"/>
+    <tag k="usage" v="main"/>
+    <tag k="voltage" v="1200"/>
+  </way>
+  <way id="399844125" version="6" timestamp="2024-01-22T20:01:01Z">
+    <nd ref="3391735105"/>
+    <nd ref="4025211866"/>
+    <tag k="handrail" v="yes"/>
+    <tag k="highway" v="steps"/>
+    <tag k="incline" v="up"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0;0.5"/>
+    <tag k="step_count" v="18"/>
+    <tag k="surface" v="paving_stones"/>
+    <tag k="tactile_paving" v="no"/>
+  </way>
+  <way id="399844127" version="8" timestamp="2024-01-22T20:01:01Z">
+    <nd ref="4025211862"/>
+    <nd ref="4025211858"/>
+    <tag k="handrail" v="yes"/>
+    <tag k="highway" v="steps"/>
+    <tag k="incline" v="up"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0.5;1"/>
+    <tag k="lit" v="yes"/>
+    <tag k="step_count" v="18"/>
+    <tag k="surface" v="paving_stones"/>
+    <tag k="tactile_paving" v="partial"/>
+  </way>
+  <way id="399844143" version="5" timestamp="2024-01-22T20:01:02Z">
+    <nd ref="4025211866"/>
+    <nd ref="4025211868"/>
+    <nd ref="9957988329"/>
+    <nd ref="4025211864"/>
+    <nd ref="4025211862"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0.5"/>
+    <tag k="lit" v="yes"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="399844145" version="3" timestamp="2024-01-22T20:01:03Z">
+    <nd ref="4025211855"/>
+    <nd ref="4025211829"/>
+    <nd ref="4025211835"/>
+    <nd ref="4025211850"/>
+    <nd ref="4025211851"/>
+    <nd ref="4025211856"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="399899270" version="14" timestamp="2026-05-01T15:57:19Z">
+    <nd ref="4025683561"/>
+    <nd ref="4025683569"/>
+    <nd ref="4025683575"/>
+    <nd ref="4025267200"/>
+    <nd ref="4025683561"/>
+    <tag k="check_date" v="2026-05-01"/>
+    <tag k="check_date:opening_hours" v="2026-05-01"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="T.H. Kleen"/>
+    <tag k="opening_hours" v="Mo-Fr 06:00-20:00; Sa 10:00-18:00; Su 10:00-18:00"/>
+    <tag k="payment:credit_cards" v="yes"/>
+    <tag k="payment:debit_cards" v="yes"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="tobacco"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="399899274" version="4" timestamp="2025-12-27T21:04:50Z">
+    <nd ref="4025683555"/>
+    <nd ref="4025683563"/>
+    <nd ref="4025683571"/>
+    <nd ref="4025683566"/>
+    <nd ref="4025683560"/>
+    <nd ref="4025683559"/>
+    <nd ref="4025683555"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="room" v="shop"/>
+  </way>
+  <way id="399899275" version="3" timestamp="2017-02-27T18:38:56Z">
+    <nd ref="4025683578"/>
+    <nd ref="4025683572"/>
+    <nd ref="4025683564"/>
+    <nd ref="4025683567"/>
+    <nd ref="4025683574"/>
+    <nd ref="4025683578"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="room" v="shop"/>
+  </way>
+  <way id="399899276" version="2" timestamp="2022-08-16T21:58:01Z">
+    <nd ref="4025683585"/>
+    <nd ref="4025683579"/>
+    <nd ref="4025683576"/>
+    <nd ref="4025683581"/>
+    <nd ref="4025683582"/>
+    <nd ref="9957988328"/>
+    <nd ref="4025683583"/>
+    <nd ref="4025683585"/>
+  </way>
+  <way id="399899278" version="14" timestamp="2026-05-25T17:30:01Z">
+    <nd ref="4025683551"/>
+    <nd ref="6779941150"/>
+    <nd ref="4025683555"/>
+    <nd ref="4025683559"/>
+    <nd ref="4025683554"/>
+    <nd ref="4025683551"/>
+    <tag k="check_date:opening_hours" v="2026-05-25"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Hanse Blumen"/>
+    <tag k="opening_hours:signed" v="no"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="florist"/>
+  </way>
+  <way id="399899282" version="17" timestamp="2026-05-01T15:57:19Z">
+    <nd ref="4025683556"/>
+    <nd ref="4025683561"/>
+    <nd ref="4025267201"/>
+    <nd ref="4025683562"/>
+    <nd ref="4025683556"/>
+    <tag k="brand" v="Deutsche Bahn"/>
+    <tag k="brand:wikidata" v="Q9322"/>
+    <tag k="brand:wikipedia" v="de:Reisezentrum"/>
+    <tag k="check_date:opening_hours" v="2026-05-01"/>
+    <tag k="hvv_service" v="yes"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="DB Reisezentrum"/>
+    <tag k="opening_hours" v="Mo-Fr 06:00-21:00; Sa 07:00-20:00; Su,PH 08:00-20:00"/>
+    <tag k="operator" v="DB Vertrieb GmbH"/>
+    <tag k="public_transport" v="service_center"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="ticket"/>
+    <tag k="tickets:public_transport" v="yes"/>
+    <tag k="wheelchair" v="limited"/>
+  </way>
+  <way id="399899283" version="4" timestamp="2017-02-27T18:38:57Z">
+    <nd ref="4025683571"/>
+    <nd ref="4025683563"/>
+    <nd ref="4025683570"/>
+    <nd ref="4025683586"/>
+    <nd ref="4025683578"/>
+    <nd ref="4025683574"/>
+    <nd ref="4025683567"/>
+    <nd ref="4025683566"/>
+    <nd ref="4025683571"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="room" v="shop"/>
+  </way>
+  <way id="399899285" version="10" timestamp="2025-06-20T14:46:57Z">
+    <nd ref="4025683587"/>
+    <nd ref="4025683689"/>
+    <nd ref="4025683690"/>
+    <nd ref="4025683588"/>
+    <nd ref="4025683587"/>
+    <tag k="check_date" v="2025-06-20"/>
+    <tag k="disused:shop" v="yes"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="room" v="shop"/>
+  </way>
+  <way id="399899290" version="14" timestamp="2025-12-30T15:43:41Z">
+    <nd ref="4025683554"/>
+    <nd ref="4025683550"/>
+    <nd ref="4025267199"/>
+    <nd ref="6779941151"/>
+    <nd ref="4025683551"/>
+    <nd ref="4025683554"/>
+    <tag k="addr:housenumber" v="15"/>
+    <tag k="addr:street" v="Dag-Hammarskjöld-Platz"/>
+    <tag k="check_date:opening_hours" v="2025-12-30"/>
+    <tag k="fee" v="no"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Nancy Tilitz Galerie"/>
+    <tag k="opening_hours:signed" v="no"/>
+    <tag k="room" v="shop"/>
+    <tag k="tourism" v="gallery"/>
+  </way>
+  <way id="399899293" version="8" timestamp="2024-06-18T12:07:02Z">
+    <nd ref="4025683573"/>
+    <nd ref="4025683582"/>
+    <tag k="conveying" v="backward"/>
+    <tag k="description" v="Bahnsteig / Schalterhalle"/>
+    <tag k="handrail" v="yes"/>
+    <tag k="highway" v="steps"/>
+    <tag k="incline" v="up"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="1;0"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="ref" v="HF 056"/>
+    <tag k="ref:operator_inventory" v="10562639"/>
+    <tag k="surface" v="metal"/>
+    <tag k="time" v="33 sec"/>
+    <tag k="width" v="100 cm"/>
+  </way>
+  <way id="399899294" version="8" timestamp="2024-06-18T12:07:02Z">
+    <nd ref="2226374216"/>
+    <nd ref="4025683583"/>
+    <tag k="conveying" v="forward"/>
+    <tag k="description" v="Schalterhalle / Bahnsteig"/>
+    <tag k="handrail" v="yes"/>
+    <tag k="highway" v="steps"/>
+    <tag k="incline" v="up"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0;1"/>
+    <tag k="operator" v="DB InfraGO AG"/>
+    <tag k="ref" v="HF 057"/>
+    <tag k="ref:operator_inventory" v="10562638"/>
+    <tag k="surface" v="metal"/>
+    <tag k="time" v="33 sec"/>
+    <tag k="width" v="100 cm"/>
+  </way>
+  <way id="399899295" version="12" timestamp="2026-05-25T17:30:01Z">
+    <nd ref="4025683569"/>
+    <nd ref="4025683577"/>
+    <nd ref="4025683580"/>
+    <nd ref="4025683575"/>
+    <nd ref="4025683569"/>
+    <tag k="check_date:opening_hours" v="2026-05-25"/>
+    <tag k="craft" v="photographer"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Pass- und Bewrbungsfotos"/>
+    <tag k="opening_hours:signed" v="no"/>
+    <tag k="room" v="shop"/>
+  </way>
+  <way id="399899296" version="13" timestamp="2026-05-10T08:11:32Z">
+    <nd ref="4025267197"/>
+    <nd ref="4025683543"/>
+    <nd ref="4025683547"/>
+    <nd ref="4025683550"/>
+    <nd ref="4025267199"/>
+    <nd ref="6779941152"/>
+    <nd ref="4025267197"/>
+    <tag k="amenity" v="cafe"/>
+    <tag k="brand" v="Starbucks"/>
+    <tag k="brand:wikidata" v="Q37158"/>
+    <tag k="check_date:opening_hours" v="2025-12-28"/>
+    <tag k="cuisine" v="coffee_shop"/>
+    <tag k="indoor" v="room"/>
+    <tag k="indoor_seating" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Starbucks"/>
+    <tag k="official_name" v="Starbucks Coffee"/>
+    <tag k="opening_hours:signed" v="no"/>
+    <tag k="outdoor_seating" v="no"/>
+    <tag k="room" v="shop"/>
+    <tag k="takeaway" v="yes"/>
+  </way>
+  <way id="399899297" version="11" timestamp="2026-05-01T15:57:20Z">
+    <nd ref="4025683565"/>
+    <nd ref="4025683552"/>
+    <nd ref="4025683549"/>
+    <nd ref="4025683558"/>
+    <nd ref="4025683565"/>
+    <tag k="brand" v="Press &amp; Books"/>
+    <tag k="brand:wikidata" v="Q100407277"/>
+    <tag k="check_date" v="2026-05-01"/>
+    <tag k="check_date:opening_hours" v="2026-05-01"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Press &amp; Books"/>
+    <tag k="opening_hours" v="Mo-Fr 05:30-21:00; Sa 08:00-20:00; Su 08:00-20:00"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="books"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="399899298" version="16" timestamp="2025-12-29T20:09:33Z">
+    <nd ref="4025683577"/>
+    <nd ref="4025683587"/>
+    <nd ref="4025683588"/>
+    <nd ref="4025683580"/>
+    <nd ref="4025683577"/>
+    <tag k="beauty" v="nails"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="new-nails"/>
+    <tag k="opening_hours" v="Mo-Fr 10:00-19:30; Sa 10:00-18:00"/>
+    <tag k="payment:credit_cards" v="no"/>
+    <tag k="payment:debit_cards" v="no"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="beauty"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="400097083" version="8" timestamp="2026-05-25T23:05:15Z">
+    <nd ref="4027232207"/>
+    <nd ref="4027232211"/>
+    <nd ref="4027232213"/>
+    <nd ref="4027232209"/>
+    <nd ref="4027232207"/>
+    <tag k="check_date" v="2026-05-26"/>
+    <tag k="indoor" v="room"/>
+    <tag k="level" v="0"/>
+  </way>
+  <way id="400097084" version="18" timestamp="2025-12-30T01:06:22Z">
+    <nd ref="4027232209"/>
+    <nd ref="4027232213"/>
+    <nd ref="4027232215"/>
+    <nd ref="4027232212"/>
+    <nd ref="4027232209"/>
+    <tag k="check_date:opening_hours" v="2025-12-30"/>
+    <tag k="indoor" v="room"/>
+    <tag k="indoor_seating" v="no"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Laugenhaus"/>
+    <tag k="opening_hours:signed" v="no"/>
+    <tag k="outdoor_seating" v="no"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="bakery"/>
+    <tag k="takeaway" v="only"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="400097085" version="12" timestamp="2025-12-30T01:08:24Z">
+    <nd ref="4027232206"/>
+    <nd ref="4027232208"/>
+    <nd ref="4027232211"/>
+    <nd ref="4027232207"/>
+    <nd ref="4027232206"/>
+    <tag k="check_date:opening_hours" v="2025-12-28"/>
+    <tag k="indoor" v="room"/>
+    <tag k="indoor_seating" v="no"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Brügmann"/>
+    <tag k="opening_hours:signed" v="no"/>
+    <tag k="outdoor_seating" v="no"/>
+    <tag k="room" v="shop"/>
+    <tag k="shop" v="bakery"/>
+    <tag k="takeaway" v="only"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="408827559" version="3" timestamp="2024-01-22T20:01:02Z">
+    <nd ref="4107329054"/>
+    <nd ref="4025211858"/>
+    <nd ref="4107329055"/>
+    <tag k="highway" v="footway"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="1"/>
+    <tag k="lit" v="yes"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="408841091" version="2" timestamp="2016-04-10T19:23:25Z">
+    <nd ref="4107486844"/>
+    <nd ref="4107486845"/>
+    <nd ref="4112332655"/>
+    <nd ref="418854711"/>
+    <nd ref="3038826857"/>
+    <nd ref="3255989082"/>
+    <nd ref="3255989077"/>
+    <nd ref="4112332629"/>
+    <nd ref="3038826934"/>
+    <nd ref="4107486824"/>
+    <nd ref="3255988860"/>
+    <nd ref="3255989069"/>
+    <nd ref="4112332631"/>
+    <nd ref="3255989075"/>
+    <nd ref="4112332639"/>
+    <nd ref="4112332645"/>
+    <nd ref="3255989088"/>
+    <nd ref="4112332654"/>
+    <nd ref="4112332658"/>
+    <nd ref="4107486844"/>
+    <tag k="building" v="roof"/>
+    <tag k="layer" v="1"/>
+  </way>
+  <way id="408841092" version="8" timestamp="2025-12-27T21:04:53Z">
+    <nd ref="53120385"/>
+    <nd ref="4112332625"/>
+    <nd ref="3478684838"/>
+    <nd ref="3255989066"/>
+    <nd ref="4112332622"/>
+    <nd ref="4107486824"/>
+    <nd ref="3255988860"/>
+    <nd ref="4112332621"/>
+    <nd ref="53120388"/>
+    <nd ref="4025683570"/>
+    <nd ref="4025683563"/>
+    <nd ref="4025683555"/>
+    <nd ref="6779941150"/>
+    <nd ref="4025683551"/>
+    <nd ref="6779941151"/>
+    <nd ref="4025267199"/>
+    <nd ref="6779941152"/>
+    <nd ref="4025267197"/>
+    <nd ref="4025683543"/>
+    <nd ref="418854693"/>
+    <nd ref="412862846"/>
+    <nd ref="4025683530"/>
+    <nd ref="4025267194"/>
+    <nd ref="4025267195"/>
+    <nd ref="4025683517"/>
+    <nd ref="4025683510"/>
+    <nd ref="4025683504"/>
+    <nd ref="6779941153"/>
+    <nd ref="4025683500"/>
+    <nd ref="53120390"/>
+    <nd ref="4112332616"/>
+    <nd ref="4025683501"/>
+    <nd ref="53120391"/>
+    <nd ref="4025683528"/>
+    <nd ref="4025683534"/>
+    <nd ref="4025683540"/>
+    <nd ref="4025267196"/>
+    <nd ref="4025267198"/>
+    <nd ref="4025683548"/>
+    <nd ref="412860483"/>
+    <nd ref="420290336"/>
+    <nd ref="4025683562"/>
+    <nd ref="4025267201"/>
+    <nd ref="4025267200"/>
+    <nd ref="4025683575"/>
+    <nd ref="4025683580"/>
+    <nd ref="53120385"/>
+    <tag k="building:part" v="yes"/>
+    <tag k="indoor" v="yes"/>
+    <tag k="level" v="0"/>
+    <tag k="name" v="Hamburg Dammtor Bahnhof"/>
+    <tag k="wheelchair" v="yes"/>
+  </way>
+  <way id="439728934" version="1" timestamp="2016-08-29T14:43:02Z">
+    <nd ref="4025683581"/>
+    <nd ref="4025683576"/>
+    <nd ref="4025683579"/>
+    <nd ref="4025683585"/>
+    <tag k="barrier" v="fence"/>
+  </way>
+  <way id="477540695" version="2" timestamp="2026-05-25T23:53:13Z">
+    <nd ref="412862846"/>
+    <nd ref="4025683530"/>
+    <nd ref="4025683536"/>
+    <nd ref="4025683532"/>
+    <nd ref="4025683524"/>
+    <nd ref="4025683515"/>
+    <nd ref="4025683506"/>
+    <nd ref="4025683505"/>
+    <nd ref="4025683509"/>
+    <nd ref="4025683518"/>
+    <nd ref="13879283479"/>
+    <nd ref="4025683526"/>
+    <nd ref="4025683516"/>
+    <nd ref="4025683520"/>
+    <nd ref="4025683523"/>
+    <nd ref="4025211844"/>
+    <nd ref="4025211848"/>
+    <nd ref="4025683531"/>
+    <nd ref="4025683537"/>
+    <nd ref="4025683541"/>
+    <nd ref="4025683545"/>
+    <nd ref="4025683548"/>
+    <nd ref="412860483"/>
+    <nd ref="420290336"/>
+    <nd ref="4025683562"/>
+    <nd ref="4025683556"/>
+    <nd ref="4025683561"/>
+    <nd ref="4025683569"/>
+    <nd ref="4025683577"/>
+    <nd ref="4025683587"/>
+    <nd ref="4025683689"/>
+    <nd ref="4025683690"/>
+    <nd ref="53120385"/>
+    <nd ref="4112332625"/>
+    <nd ref="3478684838"/>
+    <nd ref="3255989066"/>
+    <nd ref="4112332622"/>
+    <nd ref="4107486824"/>
+    <nd ref="3255988860"/>
+    <nd ref="4112332621"/>
+    <nd ref="53120388"/>
+    <nd ref="4025683570"/>
+    <nd ref="4025683586"/>
+    <nd ref="4025683578"/>
+    <nd ref="4025683572"/>
+    <nd ref="4025683564"/>
+    <nd ref="4025683567"/>
+    <nd ref="4025683566"/>
+    <nd ref="4025683560"/>
+    <nd ref="4025683559"/>
+    <nd ref="4025683554"/>
+    <nd ref="4025683550"/>
+    <nd ref="4025683547"/>
+    <nd ref="4025683543"/>
+    <nd ref="418854693"/>
+    <nd ref="412862846"/>
+  </way>
+  <way id="494471156" version="5" timestamp="2023-09-02T13:21:58Z">
+    <nd ref="4107506102"/>
+    <nd ref="4862309119"/>
+    <nd ref="4862309120"/>
+    <nd ref="9466999578"/>
+    <nd ref="9466999577"/>
+    <nd ref="4862309821"/>
+    <nd ref="4862309822"/>
+    <nd ref="4862309823"/>
+    <nd ref="9467020188"/>
+    <nd ref="9467020187"/>
+    <nd ref="9467020157"/>
+    <nd ref="4862309828"/>
+    <nd ref="9467020186"/>
+    <nd ref="4862309829"/>
+    <nd ref="4107506102"/>
+    <tag k="natural" v="scrub"/>
+  </way>
+  <way id="808775728" version="3" timestamp="2025-12-27T21:04:47Z">
+    <nd ref="4025683543"/>
+    <nd ref="4025683547"/>
+    <nd ref="4025683562"/>
+    <nd ref="420290336"/>
+    <nd ref="412860483"/>
+    <nd ref="4025683548"/>
+    <nd ref="7562802585"/>
+    <nd ref="412862846"/>
+    <nd ref="418854693"/>
+    <nd ref="4025683543"/>
+    <tag k="building:colour" v="#c2b280"/>
+    <tag k="building:material" v="brick"/>
+    <tag k="building:part" v="yes"/>
+    <tag k="height" v="20"/>
+    <tag k="min_height" v="6"/>
+    <tag k="roof:height" v="4"/>
+    <tag k="roof:material" v="metal"/>
+    <tag k="roof:shape" v="round"/>
+  </way>
+  <way id="808775732" version="3" timestamp="2025-12-27T21:04:48Z">
+    <nd ref="4025267201"/>
+    <nd ref="4025683562"/>
+    <nd ref="420290336"/>
+    <nd ref="412860483"/>
+    <nd ref="4025267198"/>
+    <nd ref="4025267194"/>
+    <nd ref="4025683530"/>
+    <nd ref="412862846"/>
+    <nd ref="418854693"/>
+    <nd ref="4025683543"/>
+    <nd ref="4025267197"/>
+    <nd ref="4025683550"/>
+    <nd ref="4025683561"/>
+    <nd ref="4025267201"/>
+    <tag k="building:colour" v="#c2b280"/>
+    <tag k="building:material" v="brick"/>
+    <tag k="building:part" v="yes"/>
+    <tag k="height" v="6"/>
+    <tag k="roof:material" v="metal"/>
+  </way>
+  <way id="808775733" version="3" timestamp="2025-12-27T21:04:49Z">
+    <nd ref="53120385"/>
+    <nd ref="53120391"/>
+    <nd ref="4025683501"/>
+    <nd ref="53120390"/>
+    <nd ref="4025683500"/>
+    <nd ref="6779941153"/>
+    <nd ref="4025683504"/>
+    <nd ref="4025683510"/>
+    <nd ref="4025683517"/>
+    <nd ref="4025267195"/>
+    <nd ref="4025267199"/>
+    <nd ref="6779941151"/>
+    <nd ref="4025683551"/>
+    <nd ref="6779941150"/>
+    <nd ref="4025683555"/>
+    <nd ref="4025683563"/>
+    <nd ref="4025683570"/>
+    <nd ref="53120388"/>
+    <nd ref="53120385"/>
+    <tag k="building:colour" v="#c2b280"/>
+    <tag k="building:material" v="brick"/>
+    <tag k="building:part" v="yes"/>
+    <tag k="height" v="23"/>
+    <tag k="roof:height" v="7"/>
+    <tag k="roof:material" v="metal"/>
+    <tag k="roof:shape" v="round"/>
+  </way>
+  <way id="817572327" version="4" timestamp="2025-03-31T15:12:28Z">
+    <nd ref="7635570257"/>
+    <nd ref="7635570256"/>
+    <nd ref="7635570255"/>
+    <nd ref="7635570254"/>
+    <nd ref="7635570257"/>
+    <tag k="access" v="yes"/>
+    <tag k="amenity" v="bicycle_parking"/>
+    <tag k="bicycle_parking" v="stands"/>
+    <tag k="capacity" v="12"/>
+    <tag k="check_date:capacity" v="2023-05-21"/>
+    <tag k="covered" v="no"/>
+    <tag k="fee" v="no"/>
+    <tag k="lit" v="yes"/>
+    <tag k="opening_hours" v="24/7"/>
+    <tag k="smoothness" v="good"/>
+    <tag k="supervised" v="no"/>
+    <tag k="surface" v="sett"/>
+  </way>
+  <way id="1026823747" version="5" timestamp="2023-05-21T15:10:55Z">
+    <nd ref="9467020151"/>
+    <nd ref="9467020161"/>
+    <tag k="handrail" v="yes"/>
+    <tag k="highway" v="steps"/>
+    <tag k="incline" v="down"/>
+    <tag k="lit" v="yes"/>
+    <tag k="ramp" v="no"/>
+    <tag k="step_count" v="9"/>
+    <tag k="surface" v="paving_stones"/>
+    <tag k="tactile_paving" v="partial"/>
+  </way>
+  <way id="1026823748" version="8" timestamp="2024-05-25T18:40:01Z">
+    <nd ref="9467020157"/>
+    <nd ref="9467020162"/>
+    <nd ref="9467020156"/>
+    <nd ref="9467020151"/>
+    <nd ref="9467020155"/>
+    <nd ref="9467020154"/>
+    <nd ref="9467020153"/>
+    <nd ref="9467020161"/>
+    <nd ref="9467020152"/>
+    <nd ref="4862309828"/>
+    <nd ref="9467020157"/>
+    <tag k="area:highway" v="steps"/>
+    <tag k="handrail" v="no"/>
+    <tag k="lit" v="yes"/>
+    <tag k="ramp" v="separate"/>
+    <tag k="ramp:wheelchair" v="separate"/>
+    <tag k="step_count" v="9"/>
+    <tag k="surface" v="paving_stones"/>
+    <tag k="tactile_paving" v="partial"/>
+  </way>
+  <way id="1026823749" version="5" timestamp="2023-05-21T15:10:56Z">
+    <nd ref="9467020162"/>
+    <nd ref="9467020161"/>
+    <tag k="handrail" v="yes"/>
+    <tag k="highway" v="steps"/>
+    <tag k="incline" v="down"/>
+    <tag k="lit" v="yes"/>
+    <tag k="ramp" v="no"/>
+    <tag k="step_count" v="5"/>
+    <tag k="surface" v="paving_stones"/>
+    <tag k="tactile_paving" v="partial"/>
+  </way>
+  <way id="1026823751" version="1" timestamp="2022-02-01T20:19:03Z">
+    <nd ref="9467020161"/>
+    <nd ref="9467020160"/>
+    <nd ref="9467020166"/>
+    <tag k="bicycle" v="yes"/>
+    <tag k="highway" v="footway"/>
+    <tag k="lit" v="no"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="1086809746" version="3" timestamp="2025-04-14T05:44:50Z">
+    <nd ref="3255989079"/>
+    <nd ref="9957988327"/>
+    <nd ref="9957988328"/>
+    <tag k="highway" v="footway"/>
+    <tag k="lit" v="yes"/>
+    <tag k="smoothness" v="excellent"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="1086809747" version="3" timestamp="2025-06-22T04:26:55Z">
+    <nd ref="676107674"/>
+    <nd ref="9957988326"/>
+    <nd ref="9957988329"/>
+    <tag k="highway" v="footway"/>
+    <tag k="lit" v="yes"/>
+    <tag k="smoothness" v="excellent"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+  <way id="1286645418" version="2" timestamp="2026-02-28T20:04:33Z">
+    <nd ref="11933598309"/>
+    <nd ref="9467017283"/>
+    <nd ref="9467017284"/>
+    <nd ref="9467017285"/>
+    <nd ref="9467017286"/>
+    <nd ref="552952163"/>
+    <nd ref="412507763"/>
+    <nd ref="2878985118"/>
+    <nd ref="13608217830"/>
+    <nd ref="53120390"/>
+    <nd ref="4025683500"/>
+    <nd ref="6779941153"/>
+    <nd ref="4025683504"/>
+    <nd ref="4025683510"/>
+    <nd ref="4025683517"/>
+    <nd ref="4025267195"/>
+    <nd ref="4025267194"/>
+    <nd ref="412862846"/>
+    <nd ref="418854693"/>
+    <nd ref="4025267197"/>
+    <nd ref="6779941152"/>
+    <nd ref="4025267199"/>
+    <nd ref="6779941151"/>
+    <nd ref="6779941150"/>
+    <nd ref="53120388"/>
+    <nd ref="9467020186"/>
+    <nd ref="4862309828"/>
+    <nd ref="9467020152"/>
+    <nd ref="9467020161"/>
+    <nd ref="9467020153"/>
+    <nd ref="9467020154"/>
+    <nd ref="9467020155"/>
+  </way>
+  <way id="1286645427" version="3" timestamp="2024-05-25T18:41:59Z">
+    <nd ref="246519593"/>
+    <nd ref="11933598324"/>
+    <nd ref="11933598331"/>
+    <nd ref="11933598325"/>
+    <nd ref="11933598326"/>
+    <nd ref="11933598327"/>
+    <nd ref="11933598328"/>
+    <nd ref="11933598330"/>
+    <nd ref="11933598329"/>
+    <tag k="highway" v="footway"/>
+    <tag k="lit" v="yes"/>
+    <tag k="surface" v="paving_stones"/>
+  </way>
+</osm>
