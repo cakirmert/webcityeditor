@@ -1,12 +1,12 @@
 {
   "cityjsonSamples": [
     {
-      "label": "Hamburg center - official ALKIS footprints",
-      "description": "Same-origin CityJSONSeq sample from official Hamburg ALKIS building footprints; demo heights and roofs are derived from storey count and dachform.",
-      "url": "data/hamburg/hamburg-center-alkis.city.jsonl",
+      "label": "Hamburg city center - official LoD2 buildings",
+      "description": "Same-origin CityJSONSeq building showcase from the Elbe waterfront through Rathaus to Jungfernstieg. The default demo also processes the committed matching OSM road crop through browser osm2streets.",
+      "url": "data/hamburg/hamburg-city-center-buildings.city.jsonl",
       "enabled": true,
       "checkAvailability": true,
-      "source": "https://www.arcgis.com/home/item.html?id=1ef87c53adff4c07b9b3010e9d8264fb"
+      "source": "https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg2"
     },
     {
       "label": "Hamburg osm2streets roads - real fixture",
