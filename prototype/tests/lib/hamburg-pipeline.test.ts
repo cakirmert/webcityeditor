@@ -10,12 +10,12 @@ describe('Hamburg LoD2 whole-city pipeline CLI', () => {
         path.resolve('scripts/hamburg-lod2.mjs'),
         'validate',
         '--input',
-        path.resolve('public/data/hamburg/hamburg-center-alkis.city.jsonl'),
+        path.resolve('public/data/hamburg/hamburg-city-center-buildings.city.jsonl'),
       ],
       { cwd: process.cwd(), encoding: 'utf8' }
     );
 
-    expect(output).toContain('valid hamburg-center-alkis.city.jsonl');
-    expect(output).toContain('180 features');
+    expect(output).toContain('valid hamburg-city-center-buildings.city.jsonl');
+    expect(output).toContain('1353 features');
   });
 });

@@ -31,6 +31,12 @@ interface FetchOsmRoadOptions {
   allowLargeQuery?: boolean;
 }
 
+interface LoadOsmRoadXmlOptions {
+  sourceLabel?: string;
+  showBoundary?: boolean;
+  echoDiagnostics?: boolean;
+}
+
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
@@ -163,6 +169,69 @@ export function useRoadEditor(
   const [osm2streetsSelection, setOsm2streetsSelection] = useState<Osm2StreetsSelection>(null);
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
 
+  const clearOsmRoadData = useCallback(() => {
+    setOsmRoads([]);
+    setSelectedOsmRoadId(null);
+    setOsm2streetsResult(null);
+    setOsm2streetsBbox(null);
+    setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
+  }, []);
+
+  const loadOsmRoadXml = useCallback(
+    async (
+      xmlText: string,
+      queryBbox: Wgs84Bbox,
+      options: LoadOsmRoadXmlOptions = {}
+    ) => {
+      setOsm2streetsSelection(null);
+      setHighlightedOsm2StreetsRoadIds(new Set());
+      const roads = parseOsmRoadsFromXml(xmlText);
+      setOsmRoads(roads);
+      setRoadStatus('Computing detailed lane-level 2D visualization (osm2streets)...');
+
+      try {
+        const result = await processOsmXml(xmlText, queryBbox, {
+          echoDiagnostics: options.echoDiagnostics,
+        });
+        setOsm2streetsResult(result);
+        setOsm2streetsBbox(options.showBoundary === false ? null : queryBbox);
+        const warningCount = result.diagnostics.filter(
+          (diagnostic) => diagnostic.level === 'warn'
+        ).length;
+        const errorCount = result.diagnostics.filter(
+          (diagnostic) => diagnostic.level === 'error'
+        ).length;
+        const diagnosticSuffix =
+          warningCount > 0 || errorCount > 0
+            ? ` osm2streets reported ${warningCount} warning${
+                warningCount === 1 ? '' : 's'
+              } and ${errorCount} error${errorCount === 1 ? '' : 's'}; first diagnostic: ${
+                result.diagnostics[0]?.message ?? 'none'
+              }.`
+            : '';
+        const sourceSuffix = options.sourceLabel ? ` from ${options.sourceLabel}` : '';
+        setRoadStatus(
+          roads.length > 0
+            ? `Loaded ${roads.length} OSM road segment${
+                roads.length === 1 ? '' : 's'
+              }${sourceSuffix} and computed 2D lane layout with osm2streets.${diagnosticSuffix} Click a road on the map to edit.`
+            : 'No OSM roads returned for this viewport.'
+        );
+        return { roads, result };
+      } catch (error) {
+        console.error('osm2streets Wasm generation failed:', error);
+        setRoadStatus(
+          `Loaded ${roads.length} roads, but detailed visualization failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        throw error;
+      }
+    },
+    []
+  );
+
   const handleFetchOsmRoads = useCallback(async (fetchOptions: FetchOsmRoadOptions = {}) => {
     if (!cityjson) return;
     setShowRoadEditor(true);
@@ -200,30 +269,13 @@ export function useRoadEditor(
       // queries. Rotate through known public instances and keep the editor open
       // so manual drawing remains available when the network path is unhappy.
       const { xmlText, endpoint } = await fetchOsmRoadXml(queryBbox, timeoutMs);
-      const roads = parseOsmRoadsFromXml(xmlText);
-      setOsmRoads(roads);
-
-      setRoadStatus('Computing detailed lane-level 2D visualization (osm2streets)...');
       try {
-        const result = await processOsmXml(xmlText, queryBbox);
-        setOsm2streetsResult(result);
-        setOsm2streetsBbox(queryBbox);
-        const warningCount = result.diagnostics.filter((diagnostic) => diagnostic.level === 'warn').length;
-        const errorCount = result.diagnostics.filter((diagnostic) => diagnostic.level === 'error').length;
-        const diagnosticSuffix =
-          warningCount > 0 || errorCount > 0
-            ? ` osm2streets reported ${warningCount} warning${warningCount === 1 ? '' : 's'} and ${errorCount} error${errorCount === 1 ? '' : 's'}; first diagnostic: ${result.diagnostics[0]?.message ?? 'none'}.`
-            : '';
-        setRoadStatus(
-          roads.length > 0
-            ? `Loaded ${roads.length} OSM road segment${roads.length === 1 ? '' : 's'} from ${shortEndpointName(endpoint)} and computed 2D lane layout with osm2streets.${diagnosticSuffix} Click a road on the map to edit.`
-            : 'No OSM roads returned for this viewport.'
-        );
-      } catch (wasmError) {
-        console.error('osm2streets Wasm generation failed:', wasmError);
-        setRoadStatus(
-          `Loaded ${roads.length} roads, but detailed visualization failed: ${wasmError instanceof Error ? wasmError.message : String(wasmError)}`
-        );
+        await loadOsmRoadXml(xmlText, queryBbox, {
+          sourceLabel: shortEndpointName(endpoint),
+        });
+      } catch {
+        // loadOsmRoadXml already reports the detailed WASM failure and keeps
+        // the parsed OSM centerlines available for manual editing.
       }
     } catch (error) {
       console.error(error);
@@ -233,7 +285,7 @@ export function useRoadEditor(
         }`
       );
     }
-  }, [cityjson, coreState.mapBboxRef]);
+  }, [cityjson, coreState.mapBboxRef, loadOsmRoadXml]);
 
   const handleOsmRoadSelect = useCallback((road: OsmRoadFeature) => {
     setShowRoadEditor(true);
@@ -665,7 +717,9 @@ export function useRoadEditor(
     setOsm2streetsSelection,
     highlightedOsm2StreetsRoadIds,
     setHighlightedOsm2StreetsRoadIds,
+    clearOsmRoadData,
     handleFetchOsmRoads,
+    loadOsmRoadXml,
     handleOsmRoadSelect,
     handleOsm2StreetsSelect,
     handleHighlightConnectedOsm2StreetsRoads,

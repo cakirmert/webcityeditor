@@ -42,6 +42,8 @@ desktop.ini
 *.log
 *.tmp
 *.tsbuildinfo
+__pycache__/
+*.pyc
 ~$*.docx
 ~$*.xlsx
 
@@ -58,7 +60,8 @@ data/
 !prototype/public/data/hamburg/
 !prototype/public/data/hamburg/README.md
 !prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl
-!prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl
+!prototype/public/data/hamburg/hamburg-city-center-buildings.city.jsonl
+!prototype/public/data/hamburg/hamburg-city-center-roads.osm
 !prototype/public/data/transportation/
 !prototype/public/data/transportation/osm2streets-hamburg-short-intersection.city.json
 !prototype/public/data/transportation/osm2streets-hamburg-short-intersection.city.jsonl

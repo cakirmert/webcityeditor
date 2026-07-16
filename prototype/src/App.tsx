@@ -25,11 +25,10 @@ import { buildPreviewMesh } from './lib/preview-mesh';
 import { computeTransformedFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
 import {
-  DEFAULT_HAMBURG_CATALOG_URL,
-  DEFAULT_HAMBURG_VIEWPORT_BBOX,
-  fetchCityJsonSeqViewport,
+  parseCityJsonSeqStrict,
   type CityJsonSeqViewportLoad,
 } from './lib/cityjsonseq-catalog';
+import { publicAssetUrl } from './lib/public-assets';
 import {
   fetchPlanningZones,
   getPlanningProviderForBbox,
@@ -47,6 +46,11 @@ import type { PendingTransform } from './lib/transform-preview';
 
 const HAMBURG_CITY_CENTER: [number, number] = [9.9937, 53.5511];
 const HAMBURG_OVERVIEW_ZOOM = 9.75;
+const HAMBURG_CITY_CENTER_DEMO_URL =
+  'data/hamburg/hamburg-city-center-buildings.city.jsonl';
+const HAMBURG_CITY_CENTER_DEMO_NAME = 'hamburg-city-center-buildings.city.jsonl';
+const HAMBURG_CITY_CENTER_OSM_URL = 'data/hamburg/hamburg-city-center-roads.osm';
+const HAMBURG_CITY_CENTER_DEMO_BBOX: Wgs84Bbox = [9.978, 53.5395, 10.0035, 53.5545];
 
 export default function App() {
   const coreState = useCoreState();
@@ -157,9 +161,10 @@ export default function App() {
   const handleLoadedForApp = useCallback(
     (doc: CityJsonDocument, fileName: string, rawText: string | null) => {
       setAutoHamburgStatus(null);
+      roadEditor.clearOsmRoadData();
       importExport.handleLoaded(doc, fileName, rawText);
     },
-    [importExport.handleLoaded]
+    [importExport.handleLoaded, roadEditor.clearOsmRoadData]
   );
 
   const handleCatalogLoadedForApp = useCallback(
@@ -169,6 +174,7 @@ export default function App() {
       options: { loadMode?: 'viewport' | 'all' } = {}
     ) => {
       setAutoHamburgStatus(null);
+      roadEditor.clearOsmRoadData();
       importExport.handleCatalogLoaded(loaded, catalogUrl, options);
       if (options.loadMode === 'all' && loaded.doc) {
         roadEditor.setRoadStatus(
@@ -176,7 +182,11 @@ export default function App() {
         );
       }
     },
-    [importExport.handleCatalogLoaded, roadEditor.setRoadStatus]
+    [
+      importExport.handleCatalogLoaded,
+      roadEditor.clearOsmRoadData,
+      roadEditor.setRoadStatus,
+    ]
   );
 
   useEffect(() => {
@@ -184,42 +194,77 @@ export default function App() {
     autoHamburgLoadStartedRef.current = true;
     setAutoHamburgStatus({
       kind: 'loading',
-      message: 'Loading Hamburg buildings for the initial map view...',
+      message: 'Loading the Hamburg city-center buildings and roads demo...',
     });
     catalog.setCatalogStatus({
       kind: 'loading',
-      message: 'Loading Hamburg buildings for the initial map view...',
+      message: 'Loading the committed Hamburg city-center demo...',
     });
     importExport.setLoadModalOpen(false);
 
     void (async () => {
       try {
-        const loaded = await fetchCityJsonSeqViewport(
-          DEFAULT_HAMBURG_CATALOG_URL,
-          DEFAULT_HAMBURG_VIEWPORT_BBOX
-        );
-        if (!loaded.doc || loaded.tiles.length === 0) {
-          throw new Error('The local Hamburg catalog returned no CityJSONSeq tiles for the initial map view.');
+        const [buildingResult, osmResult] = await Promise.allSettled([
+          fetch(publicAssetUrl(HAMBURG_CITY_CENTER_DEMO_URL)),
+          fetch(publicAssetUrl(HAMBURG_CITY_CENTER_OSM_URL)),
+        ]);
+        if (buildingResult.status === 'rejected') throw buildingResult.reason;
+        const response = buildingResult.value;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`);
         }
-        handleCatalogLoadedForApp(loaded, DEFAULT_HAMBURG_CATALOG_URL, {
-          loadMode: 'viewport',
+        const text = await response.text();
+        const doc = parseCityJsonSeqStrict(text, HAMBURG_CITY_CENTER_DEMO_NAME);
+        handleLoadedForApp(doc, HAMBURG_CITY_CENTER_DEMO_NAME, text);
+        coreState.setPrimitiveValidation({
+          kind: 'valid',
+          message:
+            'The committed Hamburg building demo was generated from the validated LoD2 catalog.',
         });
+
+        try {
+          if (osmResult.status === 'rejected') throw osmResult.reason;
+          const osmResponse = osmResult.value;
+          if (!osmResponse.ok) {
+            throw new Error(`HTTP ${osmResponse.status} ${osmResponse.statusText}`);
+          }
+          await roadEditor.loadOsmRoadXml(
+            await osmResponse.text(),
+            HAMBURG_CITY_CENTER_DEMO_BBOX,
+            {
+              sourceLabel: 'the committed Hamburg center OSM crop',
+              showBoundary: false,
+              echoDiagnostics: false,
+            }
+          );
+        } catch (roadError) {
+          roadEditor.setRoadStatus(
+            `The committed demo roads could not be processed: ${
+              roadError instanceof Error ? roadError.message : String(roadError)
+            }. Use Fetch Roads to retry.`
+          );
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         catalog.setCatalogStatus({
           kind: 'error',
-          message: `Hamburg auto-load failed: ${message}`,
+          message: `Hamburg demo auto-load failed: ${message}`,
         });
         setAutoHamburgStatus({
           kind: 'error',
-          message:
-            `Hamburg auto-load failed: ${message}. Start the local catalog server at ` +
-            `${DEFAULT_HAMBURG_CATALOG_URL} and reconnect.`,
+          message: `Hamburg demo auto-load failed: ${message}. Use Data to load another CityJSON file.`,
         });
         importExport.setLoadModalOpen(true);
       }
     })();
-  }, [catalog, coreState.cityjson, handleCatalogLoadedForApp, importExport]);
+  }, [
+    catalog,
+    coreState,
+    handleLoadedForApp,
+    importExport,
+    roadEditor.loadOsmRoadXml,
+    roadEditor.setRoadStatus,
+  ]);
 
   const handleMapViewportChange = useCallback(
     (bbox: Wgs84Bbox) => {
@@ -327,6 +372,19 @@ export default function App() {
     if (!coreState.cityjson || !coreState.selection) return null;
     return filterToBuilding(coreState.cityjson, coreState.selection.objectId);
   }, [coreState.cityjson, coreState.selection, coreState.reloadToken]);
+
+  const initialMapView = useMemo(
+    () =>
+      readInitialMapView(coreState.cityjson) ??
+      (catalog.catalogConnection
+        ? {
+            center: HAMBURG_CITY_CENTER,
+            zoom: HAMBURG_OVERVIEW_ZOOM,
+            disableDataFit: true,
+          }
+        : undefined),
+    [catalog.catalogConnection, coreState.cityjson]
+  );
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
@@ -557,15 +615,7 @@ export default function App() {
               onSelect={handleSelect}
               reloadToken={coreState.reloadToken}
               precomputedFootprints={footprintsForFilter}
-              initialView={
-                catalog.catalogConnection
-                  ? {
-                      center: HAMBURG_CITY_CENTER,
-                      zoom: HAMBURG_OVERVIEW_ZOOM,
-                      disableDataFit: true,
-                    }
-                  : undefined
-              }
+              initialView={initialMapView}
               drawMode={coreState.drawMode}
               onFootprintDrawn={buildingEditor.setPendingFootprint}
               onRoadLineDrawn={roadEditor.handleRoadLineDrawn}
@@ -797,6 +847,40 @@ function computeFootprintBbox(
     }
   }
   return any ? [west, south, east, north] : null;
+}
+
+function readInitialMapView(doc: CityJsonDocument | null):
+  | {
+      center: [number, number];
+      zoom: number;
+      pitch?: number;
+      bearing?: number;
+      disableDataFit: true;
+    }
+  | undefined {
+  const value = doc?.metadata?.webcityeditorInitialView;
+  if (!value || typeof value !== 'object') return undefined;
+  const view = value as Record<string, unknown>;
+  const center = view.center;
+  const zoom = view.zoom;
+  const pitch = view.pitch;
+  const bearing = view.bearing;
+  if (
+    !Array.isArray(center) ||
+    center.length !== 2 ||
+    !center.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate)) ||
+    typeof zoom !== 'number' ||
+    !Number.isFinite(zoom)
+  ) {
+    return undefined;
+  }
+  return {
+    center: [center[0], center[1]],
+    zoom,
+    ...(typeof pitch === 'number' && Number.isFinite(pitch) ? { pitch } : {}),
+    ...(typeof bearing === 'number' && Number.isFinite(bearing) ? { bearing } : {}),
+    disableDataFit: true,
+  };
 }
 
 /**

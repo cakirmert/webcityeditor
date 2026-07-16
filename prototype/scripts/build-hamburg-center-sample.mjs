@@ -1,516 +1,326 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import {
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import readline from 'node:readline';
 import proj4 from 'proj4';
 
 proj4.defs('EPSG:25832', '+proj=utm +zone=32 +ellps=GRS80 +units=m +no_defs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const outPath = path.resolve(
+const repoRoot = path.resolve(__dirname, '../..');
+const outputPath = path.resolve(
   __dirname,
-  '../public/data/hamburg/hamburg-center-alkis.city.jsonl'
+  '../public/data/hamburg/hamburg-city-center-buildings.city.jsonl'
+);
+const buildingCatalogPath = path.resolve(
+  repoRoot,
+  'Data/hamburg-lod2/cityjsonseq/catalog.json'
 );
 
-const BBOX_WGS84 = [9.985, 53.548, 10.005, 53.558];
-const SOURCE_URL =
-  'https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Geb%C3%A4ude_Hamburg/FeatureServer/0/query';
-const SOURCE_ITEM_URL =
-  'https://www.arcgis.com/home/item.html?id=1ef87c53adff4c07b9b3010e9d8264fb';
-
-// AdV/ALKIS roofType codelist values used by German 3D building models.
-const ROOF_TYPES = {
-  1000: { label: 'Flachdach', kind: 'flat' },
-  2100: { label: 'Pultdach', kind: 'shed' },
-  2200: { label: 'Versetztes Pultdach', kind: 'shed' },
-  3100: { label: 'Satteldach', kind: 'gable' },
-  3200: { label: 'Walmdach', kind: 'hip' },
-  3300: { label: 'Krueppelwalmdach', kind: 'hip' },
-  3400: { label: 'Mansardendach', kind: 'mansard' },
-  3500: { label: 'Zeltdach', kind: 'pyramid' },
-  3600: { label: 'Kegeldach', kind: 'pyramid' },
-  3700: { label: 'Kuppeldach', kind: 'pyramid' },
-  3800: { label: 'Sheddach', kind: 'shed' },
-  3900: { label: 'Bogendach', kind: 'mansard' },
-  4000: { label: 'Turmdach', kind: 'pyramid' },
-  5000: { label: 'Mischform', kind: 'pyramid' },
-  9999: { label: 'Sonstiges', kind: 'flat' },
+// Elbe waterfront / HafenCity through Rathaus and Jungfernstieg.
+const DEMO_BBOX_WGS84 = [9.978, 53.5395, 10.0035, 53.5545];
+const DEMO_INITIAL_VIEW = {
+  center: [9.991, 53.547],
+  zoom: 15.1,
+  pitch: 48,
+  bearing: -12,
+};
+const OUTPUT_TRANSFORM = {
+  scale: [0.001, 0.001, 0.001],
+  translate: [564000, 5932000, 0],
 };
 
-const url = new URL(SOURCE_URL);
-url.search = new URLSearchParams({
-  f: 'geojson',
-  where: '1=1',
-  outFields: '*',
-  geometry: BBOX_WGS84.join(','),
-  geometryType: 'esriGeometryEnvelope',
-  inSR: '4326',
-  outSR: '4326',
-  spatialRel: 'esriSpatialRelIntersects',
-  resultRecordCount: '180',
-}).toString();
+const projectedSouthWest = proj4(
+  'EPSG:4326',
+  'EPSG:25832',
+  DEMO_BBOX_WGS84.slice(0, 2)
+);
+const projectedNorthEast = proj4(
+  'EPSG:4326',
+  'EPSG:25832',
+  DEMO_BBOX_WGS84.slice(2, 4)
+);
+const demoBbox = [
+  projectedSouthWest[0],
+  projectedSouthWest[1],
+  projectedNorthEast[0],
+  projectedNorthEast[1],
+];
 
-const resp = await fetch(url);
-if (!resp.ok) {
-  throw new Error(`ArcGIS query failed: HTTP ${resp.status} ${resp.statusText}`);
+const buildingCatalog = await readCatalog(buildingCatalogPath, 'Hamburg LoD2 building');
+const sourceGroups = [
+  {
+    kind: 'building',
+    catalog: buildingCatalog,
+    directory: path.dirname(buildingCatalogPath),
+  },
+];
+
+const selectedSources = sourceGroups.flatMap(({ kind, catalog, directory }) =>
+  catalog.tiles
+    .filter((tile) => extentsIntersect(tile.extent, demoBbox))
+    .map((tile) => ({
+      kind,
+      file: path.join(directory, tile.file),
+    }))
+);
+
+if (selectedSources.length === 0) {
+  throw new Error('No source catalog tiles intersect the Hamburg city-center demo bbox.');
 }
-const geojson = await resp.json();
-if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
-  throw new Error('ArcGIS query did not return a GeoJSON FeatureCollection');
-}
 
-const prepared = [];
-let minX = Infinity;
-let minY = Infinity;
-let maxX = -Infinity;
-let maxY = -Infinity;
+await mkdir(path.dirname(outputPath), { recursive: true });
+const bodyPath = `${outputPath}.body.tmp`;
+const finalPath = `${outputPath}.tmp`;
+await rm(bodyPath, { force: true });
+await rm(finalPath, { force: true });
 
-for (const feature of geojson.features) {
-  const ring = firstOuterRing(feature.geometry);
-  if (!ring || ring.length < 4) continue;
+const summary = {
+  buildings: 0,
+  features: 0,
+  cityObjects: 0,
+  surfaces: 0,
+  vertices: 0,
+  sourceTiles: selectedSources.length,
+};
+const extent = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+const seenFeatureIds = new Set();
+const bodyStream = createWriteStream(bodyPath, { encoding: 'utf8' });
 
-  const projected = ring
-    .map(([lng, lat]) => {
-      const [x, y] = proj4('EPSG:4326', 'EPSG:25832', [lng, lat]);
-      return [x, y];
-    })
-    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-  if (projected.length < 4) continue;
-
-  for (const [x, y] of projected) {
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
+try {
+  for (const source of selectedSources) {
+    await appendSelectedFeatures(source, bodyStream, {
+      bbox: demoBbox,
+      extent,
+      seenFeatureIds,
+      summary,
+    });
   }
-  prepared.push({ feature, projected });
+} finally {
+  await endStream(bodyStream);
 }
 
-if (prepared.length === 0) {
-  throw new Error('No usable Hamburg building footprints returned for the center bbox');
+if (summary.features === 0 || summary.buildings === 0) {
+  throw new Error(
+    `Demo generation was incomplete: ${summary.features} features and ` +
+      `${summary.buildings} buildings.`
+  );
 }
 
-const transform = {
-  scale: [0.01, 0.01, 0.01],
-  translate: [Math.floor(minX), Math.floor(minY), 0],
-};
-
-const maxHeight = Math.max(
-  ...prepared.map(({ feature, projected }) =>
-    roofProfileFromProperties(feature.properties ?? {}, stripClosingPoint(projected)).totalHeight
-  )
-);
+const generatedAt = latestCatalogTimestamp(buildingCatalog);
 const header = {
   type: 'CityJSON',
   version: '2.0',
-  metadata: {
-    title: 'Hamburg center ALKIS building footprints with procedural roofs demo',
-    referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832',
-    geographicalExtent: [minX, minY, 0, maxX, maxY, maxHeight],
-    source: SOURCE_ITEM_URL,
-    sourceDescription:
-      'Official Hamburg ALKIS building footprints via ArcGIS FeatureServer. Heights and LoD2-style roofs are procedural demo geometry derived from storey count and ALKIS dachform where present.',
-  },
-  transform,
   CityObjects: {},
   vertices: [],
+  transform: OUTPUT_TRANSFORM,
+  metadata: {
+    title: 'Hamburg city center buildings — Elbe to Jungfernstieg demo',
+    referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832',
+    geographicalExtent: extent.map(round3),
+    sourceDescription:
+      'Committed showcase of official Hamburg LoD2 buildings. The matching ' +
+      'committed OSM crop is processed by browser osm2streets at startup.',
+    sources: [
+      {
+        name: 'Freie und Hansestadt Hamburg LoD2-DE buildings',
+        url: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg2',
+      },
+    ],
+    generatedAt,
+    demoBboxWgs84: DEMO_BBOX_WGS84,
+    webcityeditorInitialView: DEMO_INITIAL_VIEW,
+    featureCount: summary.features,
+    buildingCount: summary.buildings,
+  },
 };
 
-const lines = [JSON.stringify(header)];
-for (const { feature, projected } of prepared) {
-  const id = `hamburg-alkis-${feature.properties?.OBJECTID ?? feature.id}`;
-  lines.push(JSON.stringify(featureToCityJsonFeature(id, feature, projected, transform)));
-}
+await writeFile(finalPath, `${JSON.stringify(header)}\n`, 'utf8');
+await pipeline(
+  createReadStream(bodyPath),
+  createWriteStream(finalPath, { flags: 'a' })
+);
+await rm(outputPath, { force: true });
+await rename(finalPath, outputPath);
+await rm(bodyPath, { force: true });
 
-await mkdir(path.dirname(outPath), { recursive: true });
-await writeFile(outPath, `${lines.join('\n')}\n`, 'utf8');
-console.log(`Wrote ${prepared.length} Hamburg buildings to ${outPath}`);
-
-function firstOuterRing(geometry) {
-  if (!geometry || typeof geometry !== 'object') return null;
-  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates?.[0])) {
-    return closeRing(geometry.coordinates[0]);
-  }
-  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates?.[0]?.[0])) {
-    return closeRing(geometry.coordinates[0][0]);
-  }
-  return null;
-}
-
-function closeRing(ring) {
-  const coords = ring
-    .filter((p) => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number')
-    .map(([lng, lat]) => [lng, lat]);
-  if (coords.length < 3) return null;
-  const first = coords[0];
-  const last = coords[coords.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) coords.push([...first]);
-  return coords;
-}
-
-function featureToCityJsonFeature(id, feature, projectedRing, transform) {
-  const props = feature.properties ?? {};
-  const openRing = ensureCounterClockwise(stripClosingPoint(projectedRing));
-  const roofProfile = roofProfileFromProperties(props, openRing);
-  const model = buildRoofedSolid(openRing, roofProfile, transform);
-
-  return {
-    type: 'CityJSONFeature',
-    id,
-    CityObjects: {
-      [id]: {
-        type: 'Building',
-        attributes: {
-          source: 'Freie und Hansestadt Hamburg, LGV / ALKIS',
-          sourceUrl: SOURCE_ITEM_URL,
-          objectId: props.OBJECTID,
-          function: normalizeFunction(props.gebaeudefunktion),
-          buildingFunctionCode: props.gebaeudefunktion,
-          roofType: props.dachform,
-          roofTypeLabel: roofProfile.label,
-          storeysAboveGround: props.anzahlDerOberirdischenGeschosse,
-          groundArea: props.grundflaeche,
-          measuredHeight: Number(roofProfile.totalHeight.toFixed(2)),
-          estimatedHeight: Number(roofProfile.totalHeight.toFixed(2)),
-          eaveHeight: Number(roofProfile.eaveHeight.toFixed(2)),
-          roofRise: Number((roofProfile.totalHeight - roofProfile.eaveHeight).toFixed(2)),
-          heightSource:
-            'storeysAboveGround * 3.2m plus procedural roof rise from ALKIS dachform; fallback 12m',
-          roofGeometrySource:
-            'Procedural demo roof from ALKIS dachform; not surveyed Hamburg LoD2 roof geometry',
-        },
-        geometry: [
-          {
-            type: 'Solid',
-            lod: '2.0',
-            boundaries: [model.shell],
-            semantics: {
-              surfaces: [
-                { type: 'GroundSurface' },
-                { type: 'RoofSurface' },
-                { type: 'WallSurface' },
-              ],
-              values: [model.semanticValues],
-            },
-          },
-        ],
-      },
+const outputBytes = (await stat(outputPath)).size;
+console.log(
+  JSON.stringify(
+    {
+      type: 'HamburgCityCenterDemo',
+      output: outputPath,
+      bboxWgs84: DEMO_BBOX_WGS84,
+      projectedBbox: demoBbox.map(round3),
+      outputMiB: round3(outputBytes / 1024 / 1024),
+      ...summary,
     },
-    vertices: model.vertices,
-  };
-}
+    null,
+    2
+  )
+);
 
-function stripClosingPoint(ring) {
-  const last = ring[ring.length - 1];
-  const first = ring[0];
-  if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
-  return ring;
-}
-
-function addVertex(vertices, vertex) {
-  vertices.push(vertex);
-  return vertices.length - 1;
-}
-
-function encodeVertex(x, y, z, transform) {
-  return [
-    Math.round((x - transform.translate[0]) / transform.scale[0]),
-    Math.round((y - transform.translate[1]) / transform.scale[1]),
-    Math.round((z - transform.translate[2]) / transform.scale[2]),
-  ];
-}
-
-function roofProfileFromProperties(props, ring) {
-  const storeys = storeysFromProperties(props);
-  const roof = roofTypeFromCode(props.dachform);
-  const wallHeight = storeys
-    ? Math.max(3.2, Math.min(82, Number((storeys * 3.2).toFixed(2))))
-    : 12;
-
-  if (roof.kind === 'flat') {
-    return {
-      ...roof,
-      eaveHeight: wallHeight,
-      totalHeight: wallHeight,
-    };
-  }
-
-  const rise = roofRiseForRing(ring, roof.kind);
-  return {
-    ...roof,
-    eaveHeight: wallHeight,
-    totalHeight: Math.min(90, Number((wallHeight + rise).toFixed(2))),
-  };
-}
-
-function storeysFromProperties(props) {
-  const storeys = Number(props.anzahlDerOberirdischenGeschosse);
-  if (Number.isFinite(storeys) && storeys > 0) {
-    return storeys;
-  }
-  return null;
-}
-
-function roofTypeFromCode(value) {
-  const code = String(value ?? '');
-  return ROOF_TYPES[code] ?? { label: 'Unbekannt', kind: 'flat' };
-}
-
-function roofRiseForRing(ring, roofKind) {
-  const { width, height } = bounds2d(ring);
-  const shortSpan = Math.max(4, Math.min(width, height));
-  const factor =
-    roofKind === 'mansard'
-      ? 0.28
-      : roofKind === 'shed'
-        ? 0.16
-        : roofKind === 'hip'
-          ? 0.2
-          : 0.24;
-  return Math.max(1.8, Math.min(8, Number((shortSpan * factor).toFixed(2))));
-}
-
-function buildRoofedSolid(ring, roofProfile, transform) {
-  const vertices = [];
-  const add = (x, y, z) => addVertex(vertices, encodeVertex(x, y, z, transform));
-
-  const ground = ring.map(([x, y]) => add(x, y, 0));
-  const eaves = ring.map(([x, y]) => add(x, y, roofProfile.eaveHeight));
-  const groundFace = [...ground].reverse();
-  const walls = [];
-
-  for (let i = 0; i < ring.length; i++) {
-    const j = (i + 1) % ring.length;
-    walls.push([ground[i], ground[j], eaves[j], eaves[i]]);
-  }
-
-  let roofFaces = [];
-  let extraWallFaces = [];
-
-  if (roofProfile.kind === 'flat') {
-    roofFaces = [[...eaves]];
-  } else if (roofProfile.kind === 'gable' && ring.length === 4) {
-    ({ roofFaces, extraWallFaces } = buildGableRoof(ring, eaves, roofProfile.totalHeight, add));
-  } else if (roofProfile.kind === 'hip' && ring.length === 4) {
-    roofFaces = buildHipRoof(ring, eaves, roofProfile.totalHeight, add);
-  } else if (roofProfile.kind === 'shed') {
-    roofFaces = buildShedRoof(ring, eaves, roofProfile.eaveHeight, roofProfile.totalHeight, add);
-  } else if (roofProfile.kind === 'mansard') {
-    roofFaces = buildMansardRoof(ring, eaves, roofProfile.eaveHeight, roofProfile.totalHeight, add);
-  } else {
-    roofFaces = buildPyramidRoof(ring, eaves, roofProfile.totalHeight, add);
-  }
-
-  const shell = [
-    [groundFace],
-    ...roofFaces.map((face) => [face]),
-    ...walls.map((face) => [face]),
-    ...extraWallFaces.map((face) => [face]),
-  ];
-
-  const semanticValues = [
-    0,
-    ...new Array(roofFaces.length).fill(1),
-    ...new Array(walls.length + extraWallFaces.length).fill(2),
-  ];
-
-  return { vertices, shell, semanticValues };
-}
-
-function buildPyramidRoof(ring, eaves, topZ, add) {
-  const [cx, cy] = polygonCentroid(ring);
-  const apex = add(cx, cy, topZ);
-  const faces = [];
-  for (let i = 0; i < ring.length; i++) {
-    const j = (i + 1) % ring.length;
-    faces.push([eaves[i], eaves[j], apex]);
-  }
-  return faces;
-}
-
-function buildGableRoof(ring, eaves, ridgeZ, add) {
-  const [v0, v1, v2, v3] = ring;
-  const e0 = distSq(v0, v1);
-  const e1 = distSq(v1, v2);
-  const e2 = distSq(v2, v3);
-  const e3 = distSq(v3, v0);
-  const ridgeOnE0 = e0 + e2 >= e1 + e3;
-
-  if (ridgeOnE0) {
-    const rAxy = midpoint(v1, v2);
-    const rBxy = midpoint(v3, v0);
-    const rA = add(rAxy[0], rAxy[1], ridgeZ);
-    const rB = add(rBxy[0], rBxy[1], ridgeZ);
-    return {
-      roofFaces: [
-        [eaves[0], eaves[1], rA, rB],
-        [eaves[2], eaves[3], rB, rA],
-      ],
-      extraWallFaces: [
-        [eaves[1], eaves[2], rA],
-        [eaves[3], eaves[0], rB],
-      ],
-    };
-  }
-
-  const rAxy = midpoint(v0, v1);
-  const rBxy = midpoint(v2, v3);
-  const rA = add(rAxy[0], rAxy[1], ridgeZ);
-  const rB = add(rBxy[0], rBxy[1], ridgeZ);
-  return {
-    roofFaces: [
-      [eaves[1], eaves[2], rB, rA],
-      [eaves[3], eaves[0], rA, rB],
-    ],
-    extraWallFaces: [
-      [eaves[0], eaves[1], rA],
-      [eaves[2], eaves[3], rB],
-    ],
-  };
-}
-
-function buildHipRoof(ring, eaves, ridgeZ, add) {
-  const [v0, v1, v2, v3] = ring;
-  const e0 = distSq(v0, v1);
-  const e1 = distSq(v1, v2);
-  const e2 = distSq(v2, v3);
-  const e3 = distSq(v3, v0);
-  const ridgeOnE0 = e0 + e2 >= e1 + e3;
-  const longLen = Math.sqrt(ridgeOnE0 ? Math.min(e0, e2) : Math.min(e1, e3));
-  const shortLen = Math.sqrt(ridgeOnE0 ? Math.min(e1, e3) : Math.min(e0, e2));
-  const ridgeLen = Math.max(0, longLen - shortLen);
-  const [cx, cy] = polygonCentroid(ring);
-  const [pa, pb] = ridgeOnE0 ? [v0, v1] : [v1, v2];
-  const dx = pb[0] - pa[0];
-  const dy = pb[1] - pa[1];
-  const norm = Math.hypot(dx, dy) || 1;
-  const ux = dx / norm;
-  const uy = dy / norm;
-  const rA = add(cx - ux * ridgeLen * 0.5, cy - uy * ridgeLen * 0.5, ridgeZ);
-  const rB = add(cx + ux * ridgeLen * 0.5, cy + uy * ridgeLen * 0.5, ridgeZ);
-
-  if (ridgeOnE0) {
-    return [
-      [eaves[0], eaves[1], rB, rA],
-      [eaves[2], eaves[3], rA, rB],
-      [eaves[1], eaves[2], rB],
-      [eaves[3], eaves[0], rA],
-    ];
-  }
-  return [
-    [eaves[1], eaves[2], rB, rA],
-    [eaves[3], eaves[0], rA, rB],
-    [eaves[0], eaves[1], rA],
-    [eaves[2], eaves[3], rB],
-  ];
-}
-
-function buildShedRoof(ring, eaves, eaveZ, ridgeZ, add) {
-  const { axisX, axisY } = mainAxis(ring);
-  let minCross = Infinity;
-  let maxCross = -Infinity;
-  const crosses = ring.map(([x, y]) => {
-    const c = x * -axisY + y * axisX;
-    minCross = Math.min(minCross, c);
-    maxCross = Math.max(maxCross, c);
-    return c;
+async function appendSelectedFeatures(source, output, context) {
+  const lines = readline.createInterface({
+    input: createReadStream(source.file, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
   });
-  const span = maxCross - minCross || 1;
-  const top = ring.map(([x, y], i) => {
-    const t = (crosses[i] - minCross) / span;
-    return add(x, y, eaveZ + (ridgeZ - eaveZ) * t);
+  let header = null;
+
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    if (!header) {
+      header = JSON.parse(line);
+      validateTransform(header.transform, source.file);
+      continue;
+    }
+
+    const feature = JSON.parse(line);
+    if (feature.type !== 'CityJSONFeature' || !Array.isArray(feature.vertices)) continue;
+    if (context.seenFeatureIds.has(feature.id)) continue;
+
+    const decodedVertices = feature.vertices.map((vertex) =>
+      decodeVertex(vertex, header.transform)
+    );
+    const featureExtent = verticesExtent(decodedVertices);
+    if (!extentsIntersect(featureExtent, context.bbox)) continue;
+
+    context.seenFeatureIds.add(feature.id);
+    feature.vertices = decodedVertices.map(encodeVertex);
+    updateExtent(context.extent, featureExtent);
+    updateSummary(context.summary, feature);
+    await writeLine(output, `${JSON.stringify(feature)}\n`);
+  }
+}
+
+function updateSummary(summaryValue, feature) {
+  summaryValue.features += 1;
+  summaryValue.vertices += feature.vertices.length;
+  for (const object of Object.values(feature.CityObjects ?? {})) {
+    summaryValue.cityObjects += 1;
+    if (object.type === 'Building') summaryValue.buildings += 1;
+    for (const geometry of object.geometry ?? []) {
+      if (Array.isArray(geometry.boundaries)) {
+        summaryValue.surfaces += geometry.boundaries.length;
+      }
+    }
+  }
+}
+
+function validateTransform(transform, file) {
+  if (
+    !transform ||
+    !Array.isArray(transform.scale) ||
+    !Array.isArray(transform.translate) ||
+    transform.scale.length !== 3 ||
+    transform.translate.length !== 3
+  ) {
+    throw new Error(`Missing CityJSON transform in ${file}`);
+  }
+}
+
+function decodeVertex(vertex, transform) {
+  return [
+    vertex[0] * transform.scale[0] + transform.translate[0],
+    vertex[1] * transform.scale[1] + transform.translate[1],
+    vertex[2] * transform.scale[2] + transform.translate[2],
+  ];
+}
+
+function encodeVertex(vertex) {
+  return [
+    Math.round((vertex[0] - OUTPUT_TRANSFORM.translate[0]) / OUTPUT_TRANSFORM.scale[0]),
+    Math.round((vertex[1] - OUTPUT_TRANSFORM.translate[1]) / OUTPUT_TRANSFORM.scale[1]),
+    Math.round((vertex[2] - OUTPUT_TRANSFORM.translate[2]) / OUTPUT_TRANSFORM.scale[2]),
+  ];
+}
+
+function verticesExtent(vertices) {
+  const result = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+  for (const [x, y, z] of vertices) {
+    result[0] = Math.min(result[0], x);
+    result[1] = Math.min(result[1], y);
+    result[2] = Math.min(result[2], z);
+    result[3] = Math.max(result[3], x);
+    result[4] = Math.max(result[4], y);
+    result[5] = Math.max(result[5], z);
+  }
+  return result;
+}
+
+function updateExtent(target, incoming) {
+  target[0] = Math.min(target[0], incoming[0]);
+  target[1] = Math.min(target[1], incoming[1]);
+  target[2] = Math.min(target[2], incoming[2]);
+  target[3] = Math.max(target[3], incoming[3]);
+  target[4] = Math.max(target[4], incoming[4]);
+  target[5] = Math.max(target[5], incoming[5]);
+}
+
+function extentsIntersect(extentValue, bbox) {
+  return (
+    Array.isArray(extentValue) &&
+    extentValue[0] <= bbox[2] &&
+    extentValue[3] >= bbox[0] &&
+    extentValue[1] <= bbox[3] &&
+    extentValue[4] >= bbox[1]
+  );
+}
+
+async function readCatalog(file, label) {
+  try {
+    const catalog = JSON.parse(await readFile(file, 'utf8'));
+    if (!Array.isArray(catalog.tiles)) throw new Error('missing tiles array');
+    return catalog;
+  } catch (error) {
+    throw new Error(
+      `${label} catalog is required at ${file}. Prepare the local Hamburg catalogs first. ` +
+        `(${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+}
+
+function latestCatalogTimestamp(...catalogs) {
+  const timestamps = catalogs
+    .map((catalog) => Date.parse(catalog.generatedAt))
+    .filter(Number.isFinite);
+  return timestamps.length > 0
+    ? new Date(Math.max(...timestamps)).toISOString()
+    : undefined;
+}
+
+function round3(value) {
+  return Number(value.toFixed(3));
+}
+
+function writeLine(stream, line) {
+  if (stream.write(line)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onDrain = () => {
+      stream.off('error', onError);
+      resolve();
+    };
+    const onError = (error) => {
+      stream.off('drain', onDrain);
+      reject(error);
+    };
+    stream.once('drain', onDrain);
+    stream.once('error', onError);
   });
-  return [[...top]];
 }
 
-function buildMansardRoof(ring, eaves, eaveZ, ridgeZ, add) {
-  const [cx, cy] = polygonCentroid(ring);
-  const midZ = eaveZ + (ridgeZ - eaveZ) * 0.62;
-  const mid = ring.map(([x, y]) => add(cx + (x - cx) * 0.72, cy + (y - cy) * 0.72, midZ));
-  const cap = ring.map(([x, y]) => add(cx + (x - cx) * 0.38, cy + (y - cy) * 0.38, ridgeZ));
-  const faces = [];
-  for (let i = 0; i < ring.length; i++) {
-    const j = (i + 1) % ring.length;
-    faces.push([eaves[i], eaves[j], mid[j], mid[i]]);
-    faces.push([mid[i], mid[j], cap[j], cap[i]]);
-  }
-  faces.push([...cap]);
-  return faces;
-}
-
-function ensureCounterClockwise(ring) {
-  return signedArea(ring) < 0 ? [...ring].reverse() : ring;
-}
-
-function signedArea(ring) {
-  let area = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const [x1, y1] = ring[i];
-    const [x2, y2] = ring[(i + 1) % ring.length];
-    area += x1 * y2 - x2 * y1;
-  }
-  return area * 0.5;
-}
-
-function polygonCentroid(ring) {
-  let area2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const [x0, y0] = ring[i];
-    const [x1, y1] = ring[(i + 1) % ring.length];
-    const cross = x0 * y1 - x1 * y0;
-    area2 += cross;
-    cx += (x0 + x1) * cross;
-    cy += (y0 + y1) * cross;
-  }
-  if (Math.abs(area2) < 1e-6) {
-    return averagePoint(ring);
-  }
-  return [cx / (3 * area2), cy / (3 * area2)];
-}
-
-function averagePoint(ring) {
-  let x = 0;
-  let y = 0;
-  for (const p of ring) {
-    x += p[0];
-    y += p[1];
-  }
-  return [x / ring.length, y / ring.length];
-}
-
-function bounds2d(ring) {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const [x, y] of ring) {
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
-  }
-  return { width: maxX - minX, height: maxY - minY };
-}
-
-function mainAxis(ring) {
-  const { width, height } = bounds2d(ring);
-  if (width >= height) return { axisX: 1, axisY: 0 };
-  return { axisX: 0, axisY: 1 };
-}
-
-function distSq(a, b) {
-  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
-}
-
-function midpoint(a, b) {
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-}
-
-function normalizeFunction(value) {
-  const code = String(value ?? '');
-  if (/^1/.test(code)) return 'residential';
-  if (/^(2|3)/.test(code)) return 'commercial';
-  if (/^(4|5)/.test(code)) return 'industrial';
-  return 'public';
+function endStream(stream) {
+  return new Promise((resolve, reject) => {
+    stream.once('error', reject);
+    stream.end(resolve);
+  });
 }

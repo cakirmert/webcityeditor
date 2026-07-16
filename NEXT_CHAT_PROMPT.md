@@ -7,24 +7,20 @@ Last updated: 2026-07-16.
 ```powershell
 git clone --recurse-submodules https://github.com/cakirmert/webcityeditor.git
 cd webcityeditor
-.\PREPARE_HAMBURG_ROADS.cmd -Serve
+cd prototype
+npm ci
+npm run dev
 ```
 
-Open `http://localhost:5173` and connect the road catalog with:
+Open `http://localhost:5173`. The committed Hamburg city-center CityJSONSeq
+buildings load automatically, and the committed matching OSM crop runs through
+the same browser osm2streets path as **Fetch Roads** for lane, intersection,
+and marking rendering from the Elbe waterfront through Rathaus to
+Jungfernstieg.
 
-```text
-http://127.0.0.1:8788
-```
-
-The first run is long because it creates the complete Hamburg road CityJSONSeq
-catalog locally. It needs Git, Node.js 20+, npm, Rust/Cargo, and at least 10 GiB
-of free working space. The helper checks these before the large conversion. It
-then initializes the submodule, installs dependencies, downloads the current
-Hamburg PBF, builds the patched osm2streets exporter, converts and validates the
-road tiles, and starts the catalog plus frontend. The retained complete catalog
-is about 2.3 GiB. A completed zero-failure preferred catalog, or the newest
-complete sibling `cityjsonseq-*` proof catalog, is reused on later runs while
-older partial output is ignored.
+The default demo only needs Node.js 20+ and npm. Rust/Cargo, the Hamburg PBF,
+and the 2.3 GiB local road catalog are required only for regenerating or serving
+the complete-city road dataset.
 
 For a non-mutating setup check:
 
@@ -48,8 +44,9 @@ npm run dev:hamburg-roads
 Use `npm run dev:hamburg-roads -- --dry-run` to print the selected validated
 catalog and startup plan without opening either service.
 
-The generated data stays under ignored `Data/`; it is not supposed to be
-committed or copied through Git.
+The complete generated catalogs stay under ignored `Data/`. The browser-safe
+center building CityJSONSeq and OSM crop under
+`prototype/public/data/hamburg/` are deliberately committed.
 
 ## Current implementation snapshot
 
@@ -68,6 +65,7 @@ committed or copied through Git.
   command. `PREPARE_HAMBURG_ROADS.cmd` is the easier Windows entry point.
 - `npm run dev:hamburg-roads` starts the prepared port-8788 catalog and Vite
   together.
+- `npm run dev` starts Vite directly and auto-loads the committed center demo.
 - The latest prior roadmap slice added the pinned r:trån OpenDRIVE pipeline
   scaffold. A real `.xodr` fixture and output inspection are still pending.
 
