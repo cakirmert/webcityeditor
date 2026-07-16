@@ -104,11 +104,14 @@ DELETE /api/hamburg/tiles/LoD2_32_565_5936_1_HH
 ### Hosted Quick Sample
 
 For a browser-only demo without the local catalog server, use
-`public/data/hamburg/hamburg-center-alkis.city.jsonl`. It is generated with
-`npm run data:hamburg-center` from official Hamburg ALKIS footprints. The
-footprints and attributes are real; heights and LoD2-style roof geometry are
-procedurally derived from storey count and ALKIS `dachform`, not surveyed LoD2
-roof geometry.
+`public/data/hamburg/hamburg-city-center-buildings.city.jsonl` together with
+`public/data/hamburg/hamburg-city-center-roads.osm`. The building file is
+generated with `npm run data:hamburg-center` from the prepared official LoD2
+catalog. The compact OSM file is generated with
+`npm run data:hamburg-center:osm` and is processed in the browser through the
+same osm2streets WASM path as **Fetch Roads**. The crop covers the Elbe
+waterfront / HafenCity through Rathaus to Jungfernstieg and is the default
+`npm run dev` / GitHub Pages dataset.
 
 ---
 

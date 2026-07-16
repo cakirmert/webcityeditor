@@ -15,8 +15,8 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **Strict Hamburg CityJSONSeq catalog connection** — load screen connects to the local bbox server, opens a bounded centre viewport, then automatically fetches unseen nearby tiles as the map pans. Differing tile transforms are normalized exactly onto one integer grid; requests above 25 unseen tiles require zooming in first. **Save seq** persists edited source tiles with revision checks, backups, structural validation, and `val3dity`; clean off-screen tiles unload automatically.
 - Monolithic CityJSON 2.0 (`.json`, `.city.json`) — retained for small models and modified working-set export
 - Drop / file browse / URL fetch / built-in sample cube
-- Hosted Hamburg center sample under `public/data/hamburg/hamburg-center-alkis.city.jsonl`; FileLoader surfaces it from the same origin through `public/data/manifest.json`, so it works on GitHub Pages without CORS.
-- The hosted Hamburg sample is intentionally small (180 buildings). City-scale Hamburg editing uses the local strict CityJSONSeq catalog server and viewport tile loading.
+- **Immediate committed Hamburg demo**: `hamburg-city-center-buildings.city.jsonl` contains 1,353 official LoD2 buildings, and `hamburg-city-center-roads.osm` is processed at startup through the same browser osm2streets path as **Fetch Roads**, including lane polygons, intersections, and markings. The Elbe waterfront / HafenCity through Rathaus to Jungfernstieg auto-loads for both `npm run dev` and GitHub Pages with no Rust build, Overpass request, catalog server, or data download.
+- Whole-city Hamburg editing remains available through the optional local strict CityJSONSeq catalog servers and viewport tile loading.
 - Load data is a reopenable modal over the map. The Data toolbar button opens it without discarding the current document; successful loads replace the working document and close the modal.
 - Recent-saves list from IndexedDB
 - Local edit artifact bundle: modified CityJSON, machine-readable change report, and GeoJSON visual-diff overlay for the current before/after edit state
@@ -128,30 +128,30 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 | S16 | nginx tile serving | ❌ deferred | Backend phase |
 | S17 | Incremental tile regeneration | ❌ deferred | Backend phase |
 | S18 | Custom picking in Tile3DLayer | 🟢 different | deck.gl picking on SolidPolygonLayer is built-in; when we adopt Tile3DLayer, the workaround plan applies |
-| S19 | 3DBAG as primary test data; Hamburg via CityGML | ✅ / partial | 3DBAG quick-sample; ALKIS demo; official 2026 whole-city LoD2 batch converted and audited; strict editing catalog emitted with primitive-invalid originals quarantined |
+| S19 | 3DBAG as primary test data; Hamburg via CityGML | ✅ / partial | 3DBAG quick-sample; committed official LoD2 Hamburg center demo; official 2026 whole-city batch converted and audited; strict editing catalog emitted with primitive-invalid originals quarantined |
 | S20 | Transportation / roads | 🟡 v1 | CityJSON Transportation Road authoring, OSM reference, satellite check, manual redraw, lane/speed edit, percentage split, payload export; backend routing/OpenDRIVE importer deferred |
 
 ---
 
 ## 3. Hamburg workflow — current state
 
-1. Committed browser-safe demo: `public/data/hamburg/hamburg-center-alkis.city.jsonl`.
-2. Demo source: official Hamburg ALKIS building footprints via the public ArcGIS FeatureServer, regenerated with `npm run data:hamburg-center`.
-3. Demo output: 180 real Hamburg center footprints as CityJSONSeq. Heights are demo extrusions derived from storey count, not official LoD2 roof geometry.
+1. Committed browser-safe buildings: `public/data/hamburg/hamburg-city-center-buildings.city.jsonl`.
+2. Committed browser-safe roads: `public/data/hamburg/hamburg-city-center-roads.osm`.
+3. Demo source/output: `npm run data:hamburg-center` selects 1,353 official LoD2-DE buildings; `npm run data:hamburg-center:osm` extracts a compact road network from the Hamburg PBF. At startup the OSM crop runs through the same browser osm2streets rendering path as **Fetch Roads**. The close pitched camera covers the Elbe waterfront / HafenCity through Rathaus to Jungfernstieg.
 4. Authoritative source: LGV's complete-city LoD2-DE CityGML 1.0 archive. As of 2026-06-01, the script resolves `LoD2-DE_HH_2026-04-28.zip` (659,524,658 bytes) from the live official metadata endpoint.
 5. Whole-city preparation: `npm run data:hamburg-lod2 -- download`, `extract`, then `convert --cjval cjval`. This emits one structurally validated editable `.city.jsonl` per CityGML tile plus `catalog.json`.
 6. Primitive-valid editing set: run `geometry-audit --allow-invalid`, then `geometry-clean`. This retains defective source features under `Data/hamburg-lod2/quarantine/` and emits strict tiles under `Data/hamburg-lod2/cityjsonseq-clean/`.
 7. Local city-scale access: `npm run data:hamburg-lod2 -- serve --output-dir ../Data/hamburg-lod2/cityjsonseq-clean` exposes bbox tile lookup, tile delivery, and revision-checked validated tile write-back on `http://127.0.0.1:8787`.
 8. FileLoader exposes **Connect catalog** for the local strict CityJSONSeq server. It loads a bounded centre viewport and fetches unseen adjacent sequence tiles after map pans while preserving dirty edits. The toolbar's **Save seq** action checkpoints edited tiles; clean off-screen tiles are evicted to keep long pan sessions bounded.
-9. FileLoader exposes the committed ALKIS demo automatically from GitHub Pages with no CORS issue. The Planning toolbar fetches live Hamburg XPlan polygons for the same area.
+9. FileLoader exposes the committed building sample from GitHub Pages with no CORS issue; normal startup additionally loads and processes the matching OSM road crop. The Planning toolbar fetches live Hamburg XPlan polygons for the same area.
 
-**Tested**: Hamburg center ALKIS sample → 180 buildings → 6,034 vertices; Planning toggle returned 238 XPlan polygons in the local browser check. The official 2026 LoD2 archive downloaded and extracted to 783 tiles; every source GML passed `citygml-tools validate`; all tiles converted to 388,729 editable CityJSONSeq building features and 7,391,235 vertices; structural validation passed during conversion and again as a second full pass. Full isolated `val3dity 2.6.0` audit found 3,338 primitive-invalid originals plus 49 validator-crashing originals. The strict editing build quarantined those 3,387 source features, emitted 385,342 primitive-valid features across 782 tiles, and then passed a second citywide `val3dity` audit with zero defects and zero crashes. Strict-catalog bbox lookup and HTTP tile delivery passed. A current strict 2026 centre-tile building passed editor-library move, compact, save, reopen, and integrity checks. A real catalog-client smoke also loaded nine strict tiles, fetched unseen adjacent sequence tiles after a simulated pan, normalized differing transforms exactly, moved an imported building, compacted the larger working set, serialized, reopened, and passed integrity checks. A copied current strict centre tile then passed the complete HTTP write-back path: catalog load, imported-building move by `+7.5 m / -2.25 m`, local-grid reconstruction, structural validation, `val3dity`, atomic replacement, refetch, reopen, coordinate comparison, and integrity check. A generated two-floor plan with independent upper-floor footprint sections also serialized as one feature hierarchy and passed `val3dity`. The manual browser acceptance pass is still pending.
+**Tested**: the committed center building file parses as strict CityJSONSeq and renders the official LoD2 geometry; the committed OSM crop passes through the forked browser WASM into lane polygons, intersections, lane markings, and intersection markings using the same function as **Fetch Roads**. Imported-building editing remains covered, while OSM selection/draft/CityJSON insertion is covered by the transportation and osm2streets suites. The official 2026 LoD2 archive downloaded and extracted to 783 tiles; every source GML passed `citygml-tools validate`; all tiles converted to 388,729 editable CityJSONSeq building features and 7,391,235 vertices; structural validation passed during conversion and again as a second full pass. Full isolated `val3dity 2.6.0` audit found 3,338 primitive-invalid originals plus 49 validator-crashing originals. The strict editing build quarantined those 3,387 source features, emitted 385,342 primitive-valid features across 782 tiles, and then passed a second citywide `val3dity` audit with zero defects and zero crashes. Strict-catalog bbox lookup and HTTP tile delivery passed. A current strict 2026 centre-tile building passed editor-library move, compact, save, reopen, and integrity checks. A real catalog-client smoke also loaded nine strict tiles, fetched unseen adjacent sequence tiles after a simulated pan, normalized differing transforms exactly, moved an imported building, compacted the larger working set, serialized, reopened, and passed integrity checks. A copied current strict centre tile then passed the complete HTTP write-back path: catalog load, imported-building move by `+7.5 m / -2.25 m`, local-grid reconstruction, structural validation, `val3dity`, atomic replacement, refetch, reopen, coordinate comparison, and integrity check. A generated two-floor plan with independent upper-floor footprint sections also serialized as one feature hierarchy and passed `val3dity`.
 
 Caveats:
 - `citygml-tools` defaults to writing `.jsonl` rather than `.city.jsonl` for `-l` output; we accept both extensions.
 - Hamburg's LoD 2 files have a Building → BuildingPart hierarchy (the Building has no geometry, its children carry it). Our `extractFootprints` walks children, so this works.
 - Full Hamburg is not browser-loadable in one document. The current 2026 conversion is 863,708,269 bytes across 783 CityJSONSeq tiles; the pipeline serves a bbox-queryable catalog.
-- The committed Hamburg center sample is not LoD2. Use it for demo/data-loading/planning-overlay feedback, then replace or complement it with a converted LoD2 tile.
+- The committed Hamburg center sample is intentionally bounded. Use the local catalogs for areas outside the Elbe-to-Jungfernstieg showcase.
 - Hamburg does not publish an official native CityJSON LoD2 archive. Its JSON resource is a 3D Tiles viewing tileset, not an editable source.
 - The official LoD2 release contains primitive-level geometry defects even though its XML schemas and converted CityJSON structure validate. Use `cityjsonseq-clean/` for strict editing; use `quarantine/` when repairing the 3,387 excluded originals.
 
@@ -262,7 +262,7 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 - ✅ **Terrain-aware building move** — transform mode now exposes dX/dY/rotation plus manual dZ, auto terrain snap, and a "snap ground to terrain" action. Mouse drag updates dX/dY and, when auto terrain is enabled, adjusts dZ so the moved building footprint lands on the local terrain sample before "Place" commits.
 - ✅ **Hamburg MultiSurface export regression** — structural validation now uses the declared CityJSON geometry type before checking shell semantics, so valid imported `MultiSurface` face semantics are no longer misreported as `Solid` shell mismatches (`semantics.values has 22 shells, boundaries has 1`).
 - ✅ **Planning click details** — clicking a loaded Hamburg planning polygon now expands the legend with source, label, mapped compatible building types, and available plan attributes instead of relying on color alone.
-- ✅ **Hamburg initial camera + data-scope clarity** — the map now initializes from the loaded dataset bounds instead of the Delft fallback, and the loader distinguishes the small hosted Hamburg demo from the larger local CityJSONSeq catalog path.
+- ✅ **Hamburg initial camera + data-scope clarity** — the committed demo carries its close pitched camera in CityJSON metadata, while arbitrary files still initialize from their loaded bounds and whole-city catalogs retain viewport loading.
 - ✅ **Overhang/split-line status cleanup** — status notes now match the code: overhang controls are disabled pending a validated roof-slab model, and arbitrary drawn split lines are documented as a separate geometry-clipping task.
 - ✅ **Loader modal + simplified toolbar** — Data opens the load modal over the current map instead of clearing state, advanced loader choices are collapsed, and secondary map actions moved under More for a cleaner demo surface.
 
@@ -473,14 +473,17 @@ webcityeditor/
 
 ## 11. How to run
 
-Prerequisites: Node.js 20+, npm, Git. Rust/Cargo is required only for generating/refreshing the complete local osm2streets road catalog; Java 17+ and Docker remain optional for the Hamburg building pipeline / future backend.
+Prerequisites for the committed showcase: Node.js 20+, npm, Git. Rust/Cargo is
+required only for generating/refreshing the complete local osm2streets road
+catalog; Java 17+ and Docker remain optional for the Hamburg building pipeline /
+future backend.
 
 ```bash
 git clone https://github.com/cakirmert/webcityeditor.git
 cd webcityeditor
 cd prototype
 npm ci
-npm run dev:frontend  # http://localhost:5173
+npm run dev  # http://localhost:5173, Hamburg center auto-loads
 npm test
 ```
 

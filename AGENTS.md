@@ -16,18 +16,28 @@ This file is the fast entry point for Codex on a fresh PC.
 The working application is under `prototype/`. Use `rg` for searches and run
 Node commands from that directory.
 
-## Fresh-PC Hamburg road workflow
+## Immediate demo workflow
 
-On Windows, the simplest complete path is:
+The committed Hamburg city-center demo needs only Node.js:
+
+```powershell
+cd prototype
+npm ci
+npm run dev
+```
+
+It auto-loads official LoD2 buildings plus a committed OSM crop processed by
+the same browser osm2streets path as **Fetch Roads** for the
+Elbe-to-Jungfernstieg showcase. Do not make the default demo depend on the
+ignored whole-city catalogs, Rust/Cargo, Overpass, or a local backend.
+
+## Optional whole-city Hamburg road workflow
+
+On Windows, prepare and serve the complete road catalog with:
 
 ```powershell
 .\PREPARE_HAMBURG_ROADS.cmd -Serve
 ```
-
-That command checks Git, Node.js 20+, npm, and Rust/Cargo; initializes the
-osm2streets submodule; installs Node dependencies when needed; downloads the
-Hamburg OSM PBF; builds the patched native exporter; creates validated
-CityJSONSeq road tiles; and then starts the road catalog plus Vite.
 
 Useful variants:
 
@@ -43,6 +53,11 @@ The generated catalog is intentionally ignored under
 complete catalog is about 2.3 GiB and is reproducible locally. The startup
 resolver also recognizes a complete sibling `cityjsonseq-*` proof catalog, so
 an older incomplete directory does not force an unnecessary rebuild.
+
+The committed center files are the intentional exception:
+`hamburg-city-center-buildings.city.jsonl` and
+`hamburg-city-center-roads.osm` belong in Git. Regenerate them with
+`npm run data:hamburg-center` and `npm run data:hamburg-center:osm`.
 
 ## Road editing invariants
 

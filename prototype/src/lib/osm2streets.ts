@@ -40,6 +40,10 @@ export interface Osm2StreetsDiagnostic {
   message: string;
 }
 
+interface ProcessOsmXmlOptions {
+  echoDiagnostics?: boolean;
+}
+
 let initPromise: Promise<any> | null = null;
 const textEncoder = new TextEncoder();
 
@@ -52,7 +56,8 @@ export async function initOsm2Streets(): Promise<void> {
 
 export async function processOsmXml(
   osmXml: string,
-  clipBbox: [number, number, number, number] | null
+  clipBbox: [number, number, number, number] | null,
+  options: ProcessOsmXmlOptions = {}
 ): Promise<Osm2StreetsResult> {
   await initOsm2Streets();
 
@@ -60,15 +65,16 @@ export async function processOsmXml(
 
   const importOptions = buildOsm2StreetsImportOptions();
   const diagnostics: Osm2StreetsDiagnostic[] = [];
+  const echoDiagnostics = options.echoDiagnostics !== false;
   const originalWarn = console.warn;
   const originalError = console.error;
   console.warn = (...args: unknown[]) => {
     diagnostics.push({ level: 'warn', message: formatConsoleMessage(args) });
-    originalWarn(...args);
+    if (echoDiagnostics) originalWarn(...args);
   };
   console.error = (...args: unknown[]) => {
     diagnostics.push({ level: 'error', message: formatConsoleMessage(args) });
-    originalError(...args);
+    if (echoDiagnostics) originalError(...args);
   };
   try {
     return readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions, diagnostics);

@@ -250,6 +250,8 @@ interface Props {
   initialView?: {
     center: [number, number];
     zoom: number;
+    pitch?: number;
+    bearing?: number;
     disableDataFit?: boolean;
   };
   precomputedFootprints?: Footprint[];
@@ -440,8 +442,8 @@ export default function MapView({
       },
       center: initialCenter,
       zoom: initialView?.zoom ?? DEFAULT_INITIAL_ZOOM,
-      pitch: 0,
-      bearing: 0,
+      pitch: initialView?.pitch ?? 0,
+      bearing: initialView?.bearing ?? 0,
       canvasContextAttributes: { antialias: true },
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
@@ -687,8 +689,8 @@ export default function MapView({
           map.flyTo({
             center: initialView.center,
             zoom: initialView.zoom,
-            pitch: 0,
-            bearing: 0,
+            pitch: initialView.pitch ?? 0,
+            bearing: initialView.bearing ?? 0,
             duration: 0,
           });
         } else if (bbox && isFiniteBbox(bbox)) {

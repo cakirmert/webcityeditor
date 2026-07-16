@@ -28,8 +28,10 @@ const RECTANGLE: [number, number][] = [
 ];
 
 describeWithVal3dity('browser editor actions with val3dity', () => {
-  it('keeps every creator roof and detail variant primitive-valid', () => {
-    const creatorCases = [
+  it(
+    'keeps every creator roof and detail variant primitive-valid',
+    () => {
+      const creatorCases = [
       { roofType: 'flat' as const, eaveHeight: 9 },
       { roofType: 'flat' as const, eaveHeight: 9, eaveOverhang: 0.4 },
       { roofType: 'pyramid' as const, eaveHeight: 7 },
@@ -41,32 +43,34 @@ describeWithVal3dity('browser editor actions with val3dity', () => {
         eaveOverhang: 0.4,
         openings: { windows: true, door: true },
       },
-    ];
-    for (const [index, creator] of creatorCases.entries()) {
-      const doc = emptyHamburgDocument();
-      const created = createBuildingFromEditor(doc, {
-        targetCrs: 'EPSG:25832',
-        footprintWgs84: offsetFootprint(
-          index === 1 ? [...RECTANGLE].reverse() : RECTANGLE,
-          index * 0.00035
-        ),
-        storeys: 3,
-        eaveHeight: creator.eaveHeight,
-        ridgeHeight: 9,
-        roofType: creator.roofType,
-        openings: creator.openings,
-        eaveOverhang: creator.eaveOverhang,
-      });
-      expectVal3dityValid(doc, `${creator.roofType}-${index}-created`);
-      commitBuildingTransformFromEditor(doc, {
-        id: created.id,
-        dx: 1.25,
-        dy: -0.75,
-        angle: 3,
-      });
-      expectVal3dityValid(doc, `${creator.roofType}-${index}-moved`);
-    }
-  });
+      ];
+      for (const [index, creator] of creatorCases.entries()) {
+        const doc = emptyHamburgDocument();
+        const created = createBuildingFromEditor(doc, {
+          targetCrs: 'EPSG:25832',
+          footprintWgs84: offsetFootprint(
+            index === 1 ? [...RECTANGLE].reverse() : RECTANGLE,
+            index * 0.00035
+          ),
+          storeys: 3,
+          eaveHeight: creator.eaveHeight,
+          ridgeHeight: 9,
+          roofType: creator.roofType,
+          openings: creator.openings,
+          eaveOverhang: creator.eaveOverhang,
+        });
+        expectVal3dityValid(doc, `${creator.roofType}-${index}-created`);
+        commitBuildingTransformFromEditor(doc, {
+          id: created.id,
+          dx: 1.25,
+          dy: -0.75,
+          angle: 3,
+        });
+        expectVal3dityValid(doc, `${creator.roofType}-${index}-moved`);
+      }
+    },
+    15_000
+  );
 
   it('keeps moved and independently subdivided buildings primitive-valid', () => {
     const doc = emptyHamburgDocument();

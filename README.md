@@ -1,6 +1,10 @@
 # City Editor
 
-Browser-based LoD 2 city-model editor. Prefers tiled CityJSONSeq input, also loads monolithic CityJSON 2.0, renders buildings on a MapLibre + deck.gl map, and lets you edit, create, transform, subdivide, and export buildings. A lightweight optional local server provides strict whole-city Hamburg tile loading and write-back.
+Browser-based LoD 2 city-model editor. `npm run dev` immediately opens a
+committed Hamburg city-center CityJSONSeq showcase with official LoD2 buildings
+plus a committed OSM crop processed through the same browser osm2streets path
+as **Fetch Roads**, from the Elbe waterfront to Jungfernstieg. Optional local
+catalogs provide whole-city Hamburg loading and write-back.
 
 For a fresh-PC Codex handoff, start with [`AGENTS.md`](AGENTS.md) and
 [`NEXT_CHAT_PROMPT.md`](NEXT_CHAT_PROMPT.md).
@@ -36,7 +40,10 @@ npm install
 npm run dev
 ```
 
-The dev server opens at http://localhost:5173. Click **"Use built-in sample cube"** to see it working instantly. For strict whole-city Hamburg LoD2 data, start the local tile server and use **"Connect catalog"** on the load screen.
+The dev server opens at http://localhost:5173 and automatically loads the
+committed Hamburg center demo. No Rust build, data download, or local catalog
+server is required for the showcase. For strict whole-city Hamburg data, start
+one of the optional local catalog workflows and use **Connect catalog**.
 
 ### Generate the Hamburg road catalog locally
 
@@ -68,13 +75,15 @@ From `prototype/`:
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Start the local Hamburg catalog server, then Vite with HMR |
+| `npm run dev` | Start Vite with HMR and auto-load the committed Hamburg center buildings + roads demo |
+| `npm run dev:hamburg-buildings` | Start the prepared whole-city Hamburg building catalog on port `8787`, then Vite |
 | `npm run dev:hamburg-roads` | Start the prepared Hamburg road catalog on port `8788`, then Vite with HMR |
 | `npm test` | Run all tests once |
 | `npm run test:watch` | Watch-mode tests |
 | `npm run build` | Production bundle + TypeScript type-check |
 | `npm run build:pages` | Production bundle with GitHub Pages asset base |
-| `npm run data:hamburg-center` | Regenerate the small Hamburg center CityJSONSeq demo from official ALKIS footprints |
+| `npm run data:hamburg-center` | Regenerate the committed Elbe-to-Jungfernstieg building CityJSONSeq from the prepared official LoD2 catalog |
+| `npm run data:hamburg-center:osm` | Regenerate the committed compact OSM road crop from the local Hamburg PBF (requires Python `osmium`) |
 | `npm run data:hamburg-lod2 -- latest` | Resolve the newest official complete-city Hamburg LoD2 CityGML release |
 | `npm run data:hamburg-lod2 -- download` | Download the newest official complete-city Hamburg archive into local `Data/` |
 | `npm run data:hamburg-lod2 -- extract` | Extract the downloaded Hamburg CityGML tiles |
@@ -91,9 +100,12 @@ From `prototype/`:
 
 ## Hosting
 
-The prototype can be hosted as a static GitHub Pages site for small-file editing and demos. The complete-city Hamburg workflow uses the optional local catalog server for viewport loading and validated sequence-tile write-back. For `cakirmert/webcityeditor`, Pages serves the built static bundle from the `gh-pages` branch so the small hosted demo does not depend on backend infrastructure.
-
-Small demo datasets can also be hosted from GitHub Pages without CORS issues. The repo now includes `prototype/public/data/hamburg/hamburg-center-alkis.city.jsonl`, a small Hamburg-center CityJSONSeq sample generated from official ALKIS building footprints. FileLoader reads `prototype/public/data/manifest.json` and only shows hosted samples whose files exist.
+The prototype is hosted as a static GitHub Pages site. The repo includes
+`hamburg-city-center-buildings.city.jsonl` with 1,353 official LoD2 buildings
+and `hamburg-city-center-roads.osm`, which is processed by the vendored browser
+osm2streets engine into the same lane, intersection, and marking layers as the
+live road fetch. The complete-city workflow remains optional and uses local
+catalog servers for viewport loading and validated sequence-tile write-back.
 
 For `cakirmert/webcityeditor`, the deployed URL is:
 

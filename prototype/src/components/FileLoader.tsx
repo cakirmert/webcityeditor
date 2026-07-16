@@ -9,6 +9,7 @@ import {
   parseCityJsonSeqStrict,
   type CityJsonSeqViewportLoad,
 } from '../lib/cityjsonseq-catalog';
+import { publicAssetUrl } from '../lib/public-assets';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
@@ -34,7 +35,8 @@ interface Props {
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
 
-const DEFAULT_HAMBURG_SAMPLE = 'data/hamburg/hamburg-center-alkis.city.jsonl';
+const DEFAULT_HAMBURG_SAMPLE =
+  'data/hamburg/hamburg-city-center-buildings.city.jsonl';
 
 interface QuickSample {
   label: string;
@@ -601,10 +603,4 @@ function formatRelative(ts: number): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
   return `${d}d ago`;
-}
-
-function publicAssetUrl(path: string): string {
-  if (/^https?:\/\//i.test(path)) return path;
-  const base = import.meta.env.BASE_URL || '/';
-  return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
