@@ -2,6 +2,9 @@
 
 Browser-based LoD 2 city-model editor. Prefers tiled CityJSONSeq input, also loads monolithic CityJSON 2.0, renders buildings on a MapLibre + deck.gl map, and lets you edit, create, transform, subdivide, and export buildings. A lightweight optional local server provides strict whole-city Hamburg tile loading and write-back.
 
+For a fresh-PC Codex handoff, start with [`AGENTS.md`](AGENTS.md) and
+[`NEXT_CHAT_PROMPT.md`](NEXT_CHAT_PROMPT.md).
+
 Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`prototype/PROTOTYPE_STATUS.md`](prototype/PROTOTYPE_STATUS.md) for the full planned-vs-delivered breakdown, [`prototype/HAMBURG_PIPELINE.md`](prototype/HAMBURG_PIPELINE.md) for the Hamburg CityGML-to-CityJSON pipeline, [`prototype/CITYGML_TRANSPORTATION_PLAN.md`](prototype/CITYGML_TRANSPORTATION_PLAN.md) for the CityGML Transportation/OpenDRIVE/muv-osm roadmap, and [`prototype/METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md`](prototype/METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md) for the metric road-limit and r:trån trial pipeline plan.
 
 ## Features
@@ -12,19 +15,19 @@ Built as the prototype deliverable for the HiWi "LoD 2 Editor" project. See [`pr
 - Snap-to-existing-footprints while drawing (auto-collected from the loaded CityJSON).
 - Attribute editing with dirty tracking, per-building revert, export modified CityJSON, IndexedDB local persistence, and tested local change-report / visual-diff artifacts.
 - Hamburg planning overlay: fetches real XPlan building-use polygons by viewport, with FNP land-use fallback when XPlan has no polygons.
-- Road editing writes CityJSON Transportation `Road` objects, supports explicit cancel, keeps centerline handles attached until mouse release, can derive an editable layout from imported road surfaces, and saves changes back onto the same CityJSON Road id. With a precomputed catalog, OSM/osm2streets is needed only when generating or refreshing the OSM-derived base data.
+- Road editing writes CityJSON Transportation `Road` objects, supports explicit cancel, uses pointer capture so enlarged centerline handles stay attached until pointer release, can derive an editable layout from imported road surfaces, and saves changes back onto the same CityJSON Road id. With a precomputed catalog, OSM/osm2streets is needed only when generating or refreshing the OSM-derived base data.
 - CityJSONSeq-first Hamburg workflow: connect the local strict catalog once, pan to fetch nearby `.city.jsonl` tiles, use **Save seq** for validated optimistic-concurrency write-back, and let clean off-screen tiles unload automatically.
 - Subdivision into BuildingParts: split by floor, by side, or with per-floor footprint plans. Plans support manual percentage cuts, per-floor overrides, an apply-to-all-floors checkbox, and 2D/3D previews.
 - Live-preview transforms: translate and rotate buildings with a ghost preview on the map, then save or cancel.
 - 10 CRS registered via proj4 (EPSG:4326, 3857, 4978, 7415, 28992, 25831–25834, 3812, 2056, 31287, 5514).
-- 515 tests across validation, round-trip, generation, subdivision, transforms, CityJSONSeq catalog loading and write-back, IFC import, Hamburg data preparation, transportation conversion, local edit artifacts, planning data, and UI components.
+- 516 tests across validation, round-trip, generation, subdivision, transforms, CityJSONSeq catalog loading and write-back, IFC import, Hamburg data preparation, transportation conversion, local edit artifacts, planning data, and UI components.
 
 ## Setup
 
 Prerequisites: Node.js 20+, npm, Git. Rust/Cargo is additionally required to generate the complete local Hamburg road catalog; `wasm-pack` is only required when rebuilding the vendored browser osm2streets package.
 
 ```bash
-git clone https://github.com/YOUR-USER/webcityeditor.git
+git clone --recurse-submodules https://github.com/cakirmert/webcityeditor.git
 cd webcityeditor
 
 # Install and run the prototype
@@ -37,14 +40,25 @@ The dev server opens at http://localhost:5173. Click **"Use built-in sample cube
 
 ### Generate the Hamburg road catalog locally
 
-The large road dataset is deliberately not committed. On any clone, run this from `prototype/`:
+The large road dataset is deliberately not committed. On Windows, the easiest
+fresh-PC conversion and startup is one command from the repo root:
+
+```powershell
+.\PREPARE_HAMBURG_ROADS.cmd -Serve
+```
+
+Use `-DryRun` to check prerequisites and resolved paths without changing files,
+or omit `-Serve` to prepare the catalog without starting the app. On any
+platform, the equivalent commands from `prototype/` are:
 
 ```bash
 npm run data:hamburg-roads:prepare
-npm run data:hamburg-roads:serve
+npm run dev:hamburg-roads
 ```
 
-The first command initializes the patched osm2streets submodule, downloads the current [Geofabrik Hamburg OSM PBF](https://download.geofabrik.de/europe/germany/hamburg.html), builds the native exporter, and emits only the validated CityJSONSeq tiles needed by the editor. It recommends at least 10 GiB free for the long first build; the retained catalog is about 1.3 GiB. Successful intermediate tile work is discarded, and a later run exits immediately when every catalog tile is present. Connect the editor to `http://127.0.0.1:8788`.
+The preparation helper checks Git, Node.js 20+, npm, and Rust/Cargo before the
+large conversion. It initializes the patched osm2streets submodule, installs
+Node dependencies when needed, downloads the current [Geofabrik Hamburg OSM PBF](https://download.geofabrik.de/europe/germany/hamburg.html), builds the native exporter, and emits only the validated CityJSONSeq tiles needed by the editor. It recommends at least 10 GiB free for the long first build; the retained complete catalog is about 2.3 GiB. Successful intermediate tile work is discarded, and a later run exits immediately when a complete catalog is present. The startup resolver can also reuse a valid sibling `cityjsonseq-*` proof directory while ignoring older incomplete output. Connect the editor to `http://127.0.0.1:8788`.
 
 After this one-time conversion, day-to-day road loading, editing, cancellation, and saving use CityJSON/CityJSONSeq only. Creating an editable layout from an imported exact road derives a centerline and lane bands from its surfaces; saving a changed layout replaces those exact polygons with the editor's generated ribbon surfaces.
 
@@ -55,6 +69,7 @@ From `prototype/`:
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start the local Hamburg catalog server, then Vite with HMR |
+| `npm run dev:hamburg-roads` | Start the prepared Hamburg road catalog on port `8788`, then Vite with HMR |
 | `npm test` | Run all tests once |
 | `npm run test:watch` | Watch-mode tests |
 | `npm run build` | Production bundle + TypeScript type-check |
@@ -92,6 +107,9 @@ To refresh the hosted demo, push `main`. `.github/workflows/deploy-pages.yml` ru
 
 ```
 webcityeditor/
+├── AGENTS.md                              Automatic Codex repo instructions and verification rules
+├── NEXT_CHAT_PROMPT.md                    Fresh-PC setup and latest implementation handoff
+├── PREPARE_HAMBURG_ROADS.cmd             Windows road CityJSON preparation entry point
 ├── HiWi_LoD2_Proje_Plani.docx           Original HiWi proposal
 ├── HiWi_LoD2_Proje_Plani_v2.docx        Revised with richer tech stack
 ├── LoD2_Editor_Onay_Dokumani.docx       Supervisor approval document (19 decisions)
@@ -110,6 +128,7 @@ webcityeditor/
 │   │                                      Three-bbox Rust/WASM hardening and visual acceptance handoff
 │   ├── scripts/build-osm2streets-wasm.ps1
 │   ├── scripts/prepare-hamburg-road-catalog.mjs
+│   ├── scripts/prepare-hamburg-roads-on-windows.ps1
 │   ├── scripts/cityjson-to-citygml.mjs
 │   ├── test-fixtures/osm2streets/        Hamburg OSM regression fixtures and expected counts
 │   ├── vendor/osm2streets-js/            Built wasm-pack package consumed by the Vite app

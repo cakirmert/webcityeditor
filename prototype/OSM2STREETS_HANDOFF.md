@@ -1,6 +1,6 @@
 # osm2streets Implementation Handoff
 
-> Last updated: 2026-07-14
+> Last updated: 2026-07-16
 > Purpose: give the next model the current osm2streets-only decision, the reason
 > WASM is used, and the remaining non-fallback work.
 
@@ -58,18 +58,23 @@ optional live OSM fetch path still uses the browser WASM engine. A fresh clone
 can create the complete Hamburg road catalog with:
 
 ```powershell
-cd D:\webcityeditor\prototype
-npm run data:hamburg-roads:prepare
-npm run data:hamburg-roads:serve
+cd D:\webcityeditor
+.\PREPARE_HAMBURG_ROADS.cmd -Serve
 ```
 
-The preparation command initializes the Git submodule, downloads the Geofabrik
-Hamburg PBF when absent, builds the platform-native exporter with Cargo, runs the
-proven Hamburg tile/subdivision settings, validates each CityJSONSeq tile, and
-discards successful native/GeoJSON intermediates. It retains about 1.3 GiB of
-served `.city.jsonl` data under ignored `Data/`, so the full dataset is not
-committed. A complete zero-failure catalog is detected and skipped on later
-runs. `--dry-run` prints the resolved plan without creating files.
+The Windows entry point checks Git, Node.js 20+, npm, and Rust/Cargo before the
+large conversion. The underlying preparation command initializes the Git
+submodule, installs Node dependencies when needed, downloads the Geofabrik
+Hamburg PBF when absent, builds the platform-native exporter with Cargo, runs
+the proven Hamburg tile/subdivision settings, validates each CityJSONSeq tile,
+and discards successful native/GeoJSON intermediates. It retains about 2.3 GiB
+of served `.city.jsonl` data under ignored `Data/`, so the full dataset is not
+committed. A complete zero-failure preferred catalog, or the newest complete
+sibling `cityjsonseq-*` proof catalog, is detected and reused on later runs;
+older partial catalogs are ignored. `PREPARE_HAMBURG_ROADS.cmd -DryRun` prints
+the resolved plan without creating files; the cross-platform entry point remains
+`npm run data:hamburg-roads:prepare`, and `npm run dev:hamburg-roads` restarts
+the prepared catalog plus Vite.
 
 Once generated, the editor and local catalog server load, modify, and save
 CityJSONSeq without calling osm2streets. Exact imported road surfaces can be
@@ -157,13 +162,17 @@ backend unless the project explicitly changes direction later.
     planning, and panel sizing all passed with no console errors.
 18. Added explicit road-edit cancellation and in-place save for existing Road
     ids, including imported exact CityJSON roads that lack `_roadLayout`.
-19. Replaced the MapLibre-backed deck.gl drag gesture with a dedicated
-    mouse-down/move/up session, so road centerline handles remain attached until
-    mouse release.
+19. Replaced the MapLibre-backed deck.gl drag gesture with a capture-phase
+    Pointer Event session. Pointer capture, a preserved grab offset, and
+    release-only completion keep enlarged road centerline handles attached
+    across trackpad and overlay event sequences.
 20. Added the portable `data:hamburg-roads:prepare` and
     `data:hamburg-roads:serve` workflow; sequence-only output and successful-work
     cleanup keep the generated catalog local instead of committing a large or
     arbitrary area subset.
+21. Added `PREPARE_HAMBURG_ROADS.cmd`, prerequisite-aware Windows preparation,
+    `npm run dev:hamburg-roads`, root `AGENTS.md`, and `NEXT_CHAT_PROMPT.md` so a
+    fresh-PC Codex session can discover and run the current workflow quickly.
 
 ## What Is Still Left
 
@@ -197,6 +206,9 @@ npm outdated --json
 npm audit --json
 npm run osm2streets:compare
 npm run data:hamburg-roads:prepare -- --dry-run
+cd ..
+.\PREPARE_HAMBURG_ROADS.cmd -DryRun
+cd prototype
 npm run build
 npm run test -- src/lib/osm2streets.test.ts src/lib/road-fit.test.ts
 npm test
@@ -215,7 +227,8 @@ Browser verification should include:
 - [x] confirm the console has no red `console.error` lines
 - [x] inspect intersection/crosswalk markings and metadata
 - [x] confirm a dirty road edit exposes the explicit Cancel action (state preservation is unit-covered)
-- [x] drag a road endpoint continuously until mouseup
+- [ ] press and hold a road endpoint, drag continuously beyond the handle, and
+  confirm it remains attached until pointer release
 
 ## Do Not Do
 

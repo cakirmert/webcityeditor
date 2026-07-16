@@ -433,6 +433,13 @@ export default function RoadEditorPanel({
                 <span>{activeTotalWidth.toFixed(2)} m total</span>
                 <span>{activeSection.maxspeedKmh ?? 'n/a'} km/h</span>
               </div>
+              <p
+                className="mt-1.5 text-[10px] leading-4 text-[var(--text-dim)]"
+                data-testid="road-centerline-drag-hint"
+              >
+                On the map, press and hold a yellow point, then drag it. The point stays attached
+                until release; white midpoint handles add a new corner.
+              </p>
             </div>
             <div className="flex items-center justify-between gap-2 rounded-md border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.07)] px-2.5 py-2">
               <span className="min-w-0 text-[10px] text-[var(--text-dim)]">

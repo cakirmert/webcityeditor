@@ -100,6 +100,9 @@ describe('<RoadEditorPanel />', () => {
   it('shows road bands as draggable side-by-side boxes', () => {
     renderPanel();
 
+    expect(screen.getByTestId('road-centerline-drag-hint')).toHaveTextContent(
+      'The point stays attached until release'
+    );
     expect(screen.getByTestId('road-band-order-strip')).toBeInTheDocument();
     expect(screen.getByTestId('road-band-box-0')).toHaveTextContent('bike lane');
     expect(screen.getByTestId('road-band-box-1')).toHaveTextContent('car lane');

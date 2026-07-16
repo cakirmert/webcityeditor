@@ -4,9 +4,7 @@ import {
   createReadStream,
   createWriteStream,
   existsSync,
-  readFileSync,
   statfsSync,
-  statSync,
 } from 'node:fs';
 import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -14,6 +12,10 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import {
+  findReadyHamburgRoadCatalog,
+  readReadyHamburgRoadCatalog,
+} from './hamburg-road-catalog-path.mjs';
 
 const GEOFABRIK_HAMBURG_PBF =
   'https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf';
@@ -47,21 +49,25 @@ if (dryRun) {
   process.exit(0);
 }
 
-const readyCatalog = readReadyCatalog(outputDir);
+const readyCatalog =
+  outputDir === defaultOutputDir
+    ? findReadyHamburgRoadCatalog(outputDir)
+    : readReadyHamburgRoadCatalog(outputDir);
 if (readyCatalog && !flag('rebuild')) {
   console.log(
-    `Hamburg road catalog is already complete: ${readyCatalog.summary.features} features in ` +
-      `${readyCatalog.summary.tiles} tiles.`
+    `Hamburg road catalog is already complete: ${readyCatalog.catalog.summary.features} ` +
+      `features in ${readyCatalog.catalog.summary.tiles} tiles at ${readyCatalog.directory}.`
   );
-  printServeInstructions();
+  printServeInstructions(readyCatalog.directory);
   process.exit(0);
 }
 
 ensureFreeDisk();
 await ensureNodeDependencies();
 ensureOsm2StreetsSubmodule();
+const cargo = flag('skip-build') ? null : findCargo();
 await ensureHamburgPbf();
-if (!flag('skip-build')) buildNativeExporter();
+if (cargo) buildNativeExporter(cargo);
 if (!existsSync(exporter)) throw new Error(`Native osm2streets exporter is missing: ${exporter}`);
 
 const batchArgs = [
@@ -93,17 +99,17 @@ console.log('Generating the complete Hamburg CityJSONSeq road catalog.');
 console.log('This is a one-time, long-running local conversion; progress is printed per tile.');
 run(process.execPath, batchArgs, { cwd: prototypeRoot });
 
-const catalog = readReadyCatalog(outputDir);
+const catalog = readReadyHamburgRoadCatalog(outputDir);
 if (!catalog) {
   throw new Error(
     `Road export finished without a zero-failure catalog at ${resolve(outputDir, 'catalog.json')}.`
   );
 }
 console.log(
-  `Ready: ${catalog.summary.features} Road features in ${catalog.summary.tiles} tiles; ` +
-    `${catalog.summary.failed} failed.`
+  `Ready: ${catalog.catalog.summary.features} Road features in ` +
+    `${catalog.catalog.summary.tiles} tiles; ${catalog.catalog.summary.failed} failed.`
 );
-printServeInstructions();
+printServeInstructions(catalog.directory);
 
 function printPlan() {
   const plan = {
@@ -119,38 +125,10 @@ function printPlan() {
     bbox: PROVEN_HAMBURG_BBOX,
     tiling: { grid: 2, minDepth: 2, maxDepth: 3, maxLaneGeoJsonMiB: 384 },
     outputMode: { cityjsonseqOnly: true, discardSuccessfulWork: true },
-    expectedFinalSize: 'about 1.3 GiB plus Rust build artifacts',
+    expectedFinalSize: 'about 2.3 GiB plus Rust build artifacts',
     minimumRecommendedFreeSpace: '10 GiB',
   };
   console.log(JSON.stringify(plan, null, 2));
-}
-
-function readReadyCatalog(directory) {
-  const catalogPath = resolve(directory, 'catalog.json');
-  if (!existsSync(catalogPath)) return null;
-  try {
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-    if (
-      catalog.type !== 'HamburgOsm2StreetsRoadCityJSONSeqCatalog' ||
-      !catalog.summary ||
-      catalog.summary.failed !== 0 ||
-      !(catalog.summary.tiles > 0) ||
-      !(catalog.summary.features > 0)
-    ) {
-      return null;
-    }
-    const completeTiles =
-      Array.isArray(catalog.tiles) &&
-      catalog.tiles.length === catalog.summary.tiles &&
-      catalog.tiles.every((tile) => {
-        if (typeof tile?.file !== 'string' || tile.file.length === 0) return false;
-        const tilePath = resolve(directory, tile.file);
-        return existsSync(tilePath) && statSync(tilePath).size > 0;
-      });
-    return completeTiles ? catalog : null;
-  } catch {
-    return null;
-  }
 }
 
 function ensureFreeDisk() {
@@ -227,8 +205,7 @@ async function ensureHamburgPbf() {
   console.log(`Saved ${formatBytes(downloaded.size)} to ${osmPath}`);
 }
 
-function buildNativeExporter() {
-  const cargo = findCargo();
+function buildNativeExporter(cargo) {
   console.log('Building the patched native osm2streets exporter.');
   run(
     cargo,
@@ -272,12 +249,15 @@ async function sha256File(file) {
   return hash.digest('hex');
 }
 
-function printServeInstructions() {
-  if (outputDir === defaultOutputDir) {
+function printServeInstructions(catalogDirectory = outputDir) {
+  if (
+    catalogDirectory === defaultOutputDir ||
+    dirname(catalogDirectory) === dirname(defaultOutputDir)
+  ) {
     console.log('Start the road catalog with: npm run data:hamburg-roads:serve');
   } else {
     console.log(
-      `Start the road catalog with: npm run data:hamburg-roads:serve -- --output-dir "${outputDir}"`
+      `Start the road catalog with: npm run data:hamburg-roads:serve -- --output-dir "${catalogDirectory}"`
     );
   }
   console.log('Then connect the editor to: http://127.0.0.1:8788');

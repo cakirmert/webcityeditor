@@ -317,7 +317,17 @@ export default function MapView({
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const drawRef = useRef<TerraDraw | null>(null);
   const roadDraftRef = useRef<RoadDraft | null>(roadDraft);
-  const roadDraftDragRef = useRef<{ sectionId: string; pointIndex: number } | null>(null);
+  const roadDraftDragRef = useRef<{
+    sectionId: string;
+    pointIndex: number;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    grabOffsetX: number;
+    grabOffsetY: number;
+    moved: boolean;
+  } | null>(null);
+  const onRoadDraftChangeRef = useRef(onRoadDraftChange);
   const flownForDocRef = useRef<CityJsonDocument | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(initialView?.zoom ?? DEFAULT_INITIAL_ZOOM);
@@ -326,6 +336,10 @@ export default function MapView({
   useEffect(() => {
     roadDraftRef.current = roadDraft;
   }, [roadDraft]);
+
+  useEffect(() => {
+    onRoadDraftChangeRef.current = onRoadDraftChange;
+  }, [onRoadDraftChange]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -353,13 +367,10 @@ export default function MapView({
     [cityjson, reloadToken, precomputedFootprints]
   );
 
-  const commitRoadDraft = useCallback(
-    (next: RoadDraft) => {
-      roadDraftRef.current = next;
-      onRoadDraftChange?.(next);
-    },
-    [onRoadDraftChange]
-  );
+  const commitRoadDraft = useCallback((next: RoadDraft) => {
+    roadDraftRef.current = next;
+    onRoadDraftChangeRef.current?.(next);
+  }, []);
 
   // Detect CRS support and surface a warning if unsupported
   useEffect(() => {
@@ -458,113 +469,177 @@ export default function MapView({
     };
   }, []);
 
-  // Keep road-handle drags independent from MapLibre's pan gesture. The deck.gl
-  // Mapbox overlay forwards MapLibre drag events; disabling dragPan from a deck
-  // onDragStart callback therefore ends that same gesture immediately. Picking
-  // the handle on mousedown and tracking window mouse events keeps the selected
-  // point attached until mouseup, including when the cursor leaves the handle.
+  // Keep road-handle drags independent from MapLibre's pan gesture. Capture the
+  // pointer before MapLibre/deck.gl see it, then retain that pointer until an
+  // explicit pointer-up/cancel. This avoids trackpad/browser mousemove events
+  // that intermittently report no pressed button and used to drop the handle.
   useEffect(() => {
     const map = mapRef.current;
     const overlay = overlayRef.current;
     if (!map || !overlay) return;
 
-    const canvas = map.getCanvas();
+    const container = map.getContainer();
     let restoreDragPan = false;
     let previousCursor = '';
+    let previousTouchAction = '';
 
     const removeWindowListeners = () => {
-      window.removeEventListener('mousemove', onWindowMouseMove, true);
-      window.removeEventListener('mouseup', onWindowMouseUp, true);
-      window.removeEventListener('blur', finishDrag);
+      window.removeEventListener('pointermove', onWindowPointerMove, true);
+      window.removeEventListener('pointerup', onWindowPointerUp, true);
+      window.removeEventListener('pointercancel', onWindowPointerCancel, true);
+      window.removeEventListener('blur', onWindowBlur);
     };
 
-    const finishDrag = () => {
-      if (!roadDraftDragRef.current) return;
+    const finishDrag = (pointerId?: number) => {
+      const active = roadDraftDragRef.current;
+      if (!active || (pointerId !== undefined && active.pointerId !== pointerId)) return;
       roadDraftDragRef.current = null;
       removeWindowListeners();
-      canvas.style.cursor = previousCursor;
+      if (container.hasPointerCapture?.(active.pointerId)) {
+        try {
+          container.releasePointerCapture(active.pointerId);
+        } catch {
+          // Pointer capture can already be gone after browser/window changes.
+        }
+      }
+      container.style.cursor = previousCursor;
+      container.style.touchAction = previousTouchAction;
       if (restoreDragPan) map.dragPan.enable();
       restoreDragPan = false;
     };
 
-    const updateFromMouse = (event: MouseEvent) => {
+    const updateFromPointer = (event: PointerEvent) => {
       const active = roadDraftDragRef.current;
       const draft = roadDraftRef.current;
-      if (!active || !draft || !onRoadDraftChange) return;
-      const rect = canvas.getBoundingClientRect();
-      const lngLat = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
+      if (
+        !active ||
+        active.pointerId !== event.pointerId ||
+        !draft ||
+        !onRoadDraftChangeRef.current
+      ) {
+        return;
+      }
+      const distance = Math.hypot(
+        event.clientX - active.startClientX,
+        event.clientY - active.startClientY
+      );
+      if (!active.moved && distance < 2) return;
+      active.moved = true;
+
+      const rect = container.getBoundingClientRect();
+      const lngLat = map.unproject([
+        event.clientX - rect.left + active.grabOffsetX,
+        event.clientY - rect.top + active.grabOffsetY,
+      ]);
       commitRoadDraft(
         updateRoadDraftPoint(draft, active.sectionId, active.pointIndex, [lngLat.lng, lngLat.lat])
       );
     };
 
-    function onWindowMouseMove(event: MouseEvent) {
-      if (!roadDraftDragRef.current) return;
-      if (event.buttons === 0) {
-        finishDrag();
-        return;
-      }
+    function blockMapGesture(event: PointerEvent) {
       event.preventDefault();
-      updateFromMouse(event);
+      event.stopPropagation();
+      event.stopImmediatePropagation();
     }
 
-    function onWindowMouseUp(event: MouseEvent) {
-      if (!roadDraftDragRef.current) return;
-      updateFromMouse(event);
+    function onWindowPointerMove(event: PointerEvent) {
+      const active = roadDraftDragRef.current;
+      if (!active || active.pointerId !== event.pointerId) return;
+      blockMapGesture(event);
+      updateFromPointer(event);
+    }
+
+    function onWindowPointerUp(event: PointerEvent) {
+      const active = roadDraftDragRef.current;
+      if (!active || active.pointerId !== event.pointerId) return;
+      blockMapGesture(event);
+      updateFromPointer(event);
+      finishDrag(event.pointerId);
+    }
+
+    function onWindowPointerCancel(event: PointerEvent) {
+      finishDrag(event.pointerId);
+    }
+
+    function onWindowBlur() {
       finishDrag();
     }
 
-    const onMouseDown = (event: maplibregl.MapMouseEvent) => {
+    const onPointerDown = (event: PointerEvent) => {
       if (
-        event.originalEvent.button !== 0 ||
+        !event.isPrimary ||
+        event.button !== 0 ||
         roadDraftDragRef.current ||
         drawMode === 'road-line' ||
-        !onRoadDraftChange
+        !onRoadDraftChangeRef.current
       ) {
         return;
       }
       const draft = roadDraftRef.current;
       if (!draft) return;
 
+      const rect = container.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
       const picked = overlay.pickObject({
-        x: event.point.x,
-        y: event.point.y,
-        radius: 10,
+        x: pointerX,
+        y: pointerY,
+        radius: 18,
         layerIds: ['road-draft-centerline-handles'],
       });
       const handle = picked?.object as RoadDraftHandle | undefined;
       if (!handle) return;
 
-      event.preventDefault();
-      event.originalEvent.preventDefault();
+      blockMapGesture(event);
       restoreDragPan = map.dragPan.isEnabled();
       if (restoreDragPan) map.dragPan.disable();
-      previousCursor = canvas.style.cursor;
-      canvas.style.cursor = 'grabbing';
+      previousCursor = container.style.cursor;
+      previousTouchAction = container.style.touchAction;
+      container.style.cursor = 'grabbing';
+      container.style.touchAction = 'none';
+
+      const handlePoint = map.project({ lng: handle.position[0], lat: handle.position[1] });
 
       roadDraftDragRef.current = {
         sectionId: handle.sectionId,
         pointIndex: handle.pointIndex,
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        grabOffsetX: handlePoint.x - pointerX,
+        grabOffsetY: handlePoint.y - pointerY,
+        moved: false,
       };
-      const position: [number, number] = [event.lngLat.lng, event.lngLat.lat];
-      commitRoadDraft(
-        handle.kind === 'midpoint'
-          ? insertRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position)
-          : updateRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, position)
-      );
+      if (handle.kind === 'midpoint') {
+        commitRoadDraft(
+          insertRoadDraftPoint(draft, handle.sectionId, handle.pointIndex, handle.position)
+        );
+      }
 
-      window.addEventListener('mousemove', onWindowMouseMove, true);
-      window.addEventListener('mouseup', onWindowMouseUp, true);
-      window.addEventListener('blur', finishDrag);
+      try {
+        container.setPointerCapture(event.pointerId);
+      } catch {
+        // Window-level listeners still keep the drag alive when capture is unavailable.
+      }
+      window.addEventListener('pointermove', onWindowPointerMove, true);
+      window.addEventListener('pointerup', onWindowPointerUp, true);
+      window.addEventListener('pointercancel', onWindowPointerCancel, true);
+      window.addEventListener('blur', onWindowBlur);
     };
 
-    map.on('mousedown', onMouseDown);
+    const onLostPointerCapture = (event: PointerEvent) => {
+      if (roadDraftDragRef.current?.pointerId === event.pointerId) finishDrag(event.pointerId);
+    };
+
+    container.addEventListener('pointerdown', onPointerDown, true);
+    container.addEventListener('lostpointercapture', onLostPointerCapture);
     return () => {
-      map.off('mousedown', onMouseDown);
+      container.removeEventListener('pointerdown', onPointerDown, true);
+      container.removeEventListener('lostpointercapture', onLostPointerCapture);
       finishDrag();
       removeWindowListeners();
     };
-  }, [commitRoadDraft, drawMode, onRoadDraftChange]);
+  }, [commitRoadDraft, drawMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -993,10 +1068,10 @@ export default function MapView({
           getLineColor: (d) =>
             d.kind === 'vertex' ? [72, 46, 14, 255] : [255, 178, 64, 255],
           getLineWidth: 2,
-          getRadius: (d) => (d.kind === 'vertex' ? 6 : 4),
+          getRadius: (d) => (d.kind === 'vertex' ? 8 : 6),
           radiusUnits: 'pixels',
-          radiusMinPixels: 4,
-          radiusMaxPixels: 8,
+          radiusMinPixels: 6,
+          radiusMaxPixels: 11,
           stroked: true,
           filled: true,
           pickable: true,

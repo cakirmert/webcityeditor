@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:hamburg-roads": "node scripts/dev.mjs --catalog roads",
     "dev:frontend": "vite",
     "start": "npm run dev",
     "build": "tsc -b && vite build",
@@ -18,7 +19,7 @@
     "data:hamburg-roads": "node scripts/build-hamburg-osm2streets-roads.mjs",
     "data:hamburg-roads:catalog": "node scripts/build-hamburg-osm2streets-road-catalog.mjs",
     "data:hamburg-roads:prepare": "node scripts/prepare-hamburg-road-catalog.mjs",
-    "data:hamburg-roads:serve": "node scripts/hamburg-lod2.mjs serve --output-dir ../Data/hamburg-roads-osm2streets/cityjsonseq --port 8788",
+    "data:hamburg-roads:serve": "node scripts/dev.mjs --catalog roads --server-only",
     "cityjson:to-citygml": "node scripts/cityjson-to-citygml.mjs",
     "opendrive:rtron": "node scripts/opendrive-rtron.mjs",
     "osm2streets:cityjson": "node scripts/osm2streets-lanes-to-cityjson.mjs",
