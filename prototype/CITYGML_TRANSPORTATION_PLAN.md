@@ -388,13 +388,19 @@ inside their limited space.
 
 ### 7.4 OpenDRIVE/r:trån pipeline
 
-- [ ] Install r:trån CLI/JAR in local tools or document download path
+- [x] Document the pinned r:trån 1.3.0 JAR path and add a cross-platform runner
+      with Java/JAR/input preflight plus a non-mutating dry-run plan
 - [ ] Run `validate-opendrive` on a sample `.xodr`
 - [ ] Run `opendrive-to-citygml`
 - [ ] Inspect generated CityGML 3 Transportation classes and attributes
 - [ ] Add a parser/converter from r:trån CityGML output to `RoadDraft` or
       CityJSON Transportation
 - [ ] Add tests using a tiny committed or generated sample fixture
+
+The delivered runner is `scripts/opendrive-rtron.mjs`, exposed as
+`npm run opendrive:rtron`; setup is documented in
+`scripts/opendrive/README.md`. It deliberately does not mark validation or
+conversion complete until a real tiny `.xodr` fixture is selected and run.
 
 ### 7.5 Road-fit validation
 

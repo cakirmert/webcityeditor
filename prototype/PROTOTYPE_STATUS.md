@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-07-14. **Test suite**: 508 passing across 56 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
+**Last updated**: 2026-07-15. **Test suite**: 516 passing across 59 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -63,7 +63,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 - **Local diff artifacts**: road/building edits can be summarized as a deterministic `webcityeditor-local-change-report-v1` JSON report plus a GeoJSON visual-diff overlay while the prototype remains frontend/local-file based.
 - **osm2streets forked-WASM path**: OSM-derived reference and exact-surface lane geometry is generated through the vendored `vendor/osm2streets` Rust fork, rebuilt into `prototype/vendor/osm2streets-js` with `wasm-pack`. Manual/editable `RoadDraft` previews intentionally use the TypeScript ribbon generator; the old npm-wrapper `patch-package` path is removed.
 - **Hamburg osm2streets fixtures**: `npm run osm2streets:compare` runs committed Hamburg OSM snippets through both the forked WASM package and the native Rust exporter, checks minimum lane/marking counts, records warnings/errors, writes both outputs to `prototype/test-output/osm2streets-comparison/`, and fails if normalized outputs or diagnostics diverge.
-- **OpenDRIVE boundary**: Hamburg OpenDRIVE / Road2CityGML-style import is not implemented in-browser yet. The intended path is a converter that maps OpenDRIVE lanes/roads into the same `RoadDraft` model, then reuses the existing CityJSON Transportation generator and preview. The broader plan is documented in [`CITYGML_TRANSPORTATION_PLAN.md`](CITYGML_TRANSPORTATION_PLAN.md); the metric road-limit and r:trån trial pipeline is detailed in [`METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md`](METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md); osm2streets-specific fork and UI work is tracked in [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md).
+- **OpenDRIVE boundary**: Hamburg OpenDRIVE / Road2CityGML-style import is not implemented in-browser yet. The pinned r:trån 1.3.0 runner (`npm run opendrive:rtron`) now preflights Java/JAR/input requirements and executes validation plus OpenDRIVE-to-CityGML conversion, with a non-mutating `--dry-run` plan for setup. A real `.xodr` fixture, conversion inspection, and browser import remain pending. The intended importer maps compatible lanes/roads into the same `RoadDraft` model, then reuses the existing CityJSON Transportation generator and preview. The broader plan is documented in [`CITYGML_TRANSPORTATION_PLAN.md`](CITYGML_TRANSPORTATION_PLAN.md); the metric road-limit and r:trån trial pipeline is detailed in [`METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md`](METRIC_ROAD_LIMITS_AND_OPENDRIVE_PIPELINE.md); osm2streets-specific fork and UI work is tracked in [`OSM2STREETS_FORK_PLAN.md`](OSM2STREETS_FORK_PLAN.md).
 - **Road-fit validation**: generated road preview polygons are checked against loaded building footprints and planning/land polygons. Surface or known-z building collisions block insertion; OSM tunnel/bridge/layer hints without metric elevation become `vertical_uncertainty` warnings; known vertical separation suppresses overlap and horizontal-clearance conflicts. Near-building clearances are measured in metric CRS: under 0.5 m blocks insertion, and under 1 m warns. Projected polygon operations highlight the actual overlap geometry. The incomplete manual `Trusted road corridor` file workflow has been removed from the app; its pure helpers stay dormant until an authoritative corridor source can be loaded automatically.
 
 ### Edit existing buildings
@@ -322,7 +322,7 @@ For any simulator in the first five rows, LoD 2 is what we want. Regenerative ed
 1. **IFC → CityJSON import polish** — Route #2 (`web-ifc` WASM in-browser) is working and covered by unit tests, but should be exercised against known real IFC files for error reporting, IFC-version quirks, and complex storey layouts. Lower priority — current quality is "demo-able but rough."
 2. **Finish Hamburg external validation and quarantine repair** — Install official `cjval` and run it across the generated CityJSONSeq tiles. The source XML schema gate, repository structural gate, and `val3dity` primitive audit are green for the strict editing catalog. Repair and re-audit the 3,387 quarantined originals if the handoff requires lossless full-building coverage.
 3. **Hamburg pipeline end-to-end with 3DCityDB** — Spin up Docker compose, run `citydb import`, validate round-trip. ~½ day (tooling in place).
-4. **Transportation module next phase** — The [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md) implementation and automated/browser gates are complete; retain its five-minute user acceptance checklist for deployment sign-off. Next, evaluate `muv-osm`, choose an authoritative automatic corridor/parcel source before restoring corridor controls, and prototype an r:trån-backed OpenDRIVE → CityGML importer.
+4. **Transportation module next phase** — The [`OSM2STREETS_PANIC_HARDENING_PLAN.md`](OSM2STREETS_PANIC_HARDENING_PLAN.md) implementation and automated/browser gates are complete; retain its five-minute user acceptance checklist for deployment sign-off. The pinned r:trån runner and setup documentation now cover the first OpenDRIVE pipeline scaffold; next, add a tiny licensed/generated `.xodr` fixture and inspect its CityGML output, evaluate `muv-osm`, and choose an authoritative automatic corridor/parcel source before restoring corridor controls.
 5. **Backend Phase 0** — Fastify + OGC API - Features + pg2b3dm + nginx. Add authentication, shared-user history, and incremental published-tile regeneration. Unlocks Tile3DLayer + full S15. ~1-2 weeks.
 
 **Deferred (good ROI not obvious right now):**
@@ -408,7 +408,7 @@ webcityeditor/
 
 ---
 
-## 10. Test suite (515 tests across 58 files)
+## 10. Test suite (516 tests across 59 files)
 
 | File | Tests | Coverage |
 |---|---|---|
@@ -445,6 +445,7 @@ webcityeditor/
 | `lib/road-corridor-fit.test.ts` | 4 | Largest safe proportional section width, unchanged fits, off-corridor centerline refusal, and 0.40 m semantic-band floor |
 | `lib/road-query.test.ts` | 3 | Active-CRS Overpass bbox limiting and geographic fallback |
 | `lib/cityjson-to-citygml-cli.test.ts` | 1 | CityJSON Road conversion to schema-valid CityGML 3.0 Transportation XML through citygml-tools |
+| `lib/opendrive-rtron-cli.test.ts` | 1 | Pinned r:trån validation/conversion dry-run resolves Java, JAR, input, and output paths without filesystem mutation |
 | `lib/regenerate.test.ts` | 14 | regenerateBuilding: footprint swap, attr preservation, reshape overrides, opening toggles, non-rectangular gable rejection, JSON round-trip |
 | `lib/parametrise.test.ts` | 18 | Infer/import parametric attrs, normalise roofType, promote imported buildings and delegated BuildingPart hierarchies to valid editable generated geometry |
 | `lib/compact.test.ts` | 9 | compactVertices: no-op on clean docs, reclaims orphans from regenerate, footprint shape preserved, idempotent, multi-tile-scale chunked append |

@@ -3,7 +3,8 @@
 > **Status**: Road-fit baseline, metric clearance, query limiting, and vertical
 > profiles are implemented. Corridor normalization/fitting remains tested as a
 > pure library, but its manual upload UI was removed pending an authoritative
-> automatic source; the OpenDRIVE importer remains.
+> automatic source. The pinned r:trån runner now covers OpenDRIVE validation and
+> CityGML-conversion orchestration; a real fixture and importer remain.
 > **Date**: 2026-06-25  
 > **Scope**: `webcityeditor/prototype` road editor, Hamburg building/planning context, OpenDRIVE trial import path
 
@@ -399,7 +400,8 @@ Reference import should come first, because it avoids pretending every OpenDRIVE
 
 ## OpenDRIVE Implementation Order
 
-1. Create `prototype/scripts/opendrive/README.md` with pinned tool setup.
+1. [x] Create `prototype/scripts/opendrive/README.md` with pinned r:trån 1.3.0
+   setup and a dry-run-capable `scripts/opendrive-rtron.mjs` runner.
 2. Add a tiny `.xodr` fixture or document a downloaded sample outside git.
 3. Run `validate-opendrive` and commit only the summarized report if licensing prevents fixture commit.
 4. Run `opendrive-to-citygml` and inspect the CityGML classes.
@@ -435,17 +437,18 @@ Road limit tests:
 - [x] Road leaves corridor: `outside_corridor`.
 - [x] Road crosses planning/land polygons: `affected_land`.
 - [x] Missing corridor source: no hard block.
-- [x] Trusted corridor source and visible boundary.
-- [x] Explicit editor `fit to corridor` control with proportional-width, confirmation, and refusal-path coverage.
+- [x] Trusted-corridor normalization and boundary helpers covered as dormant pure-library infrastructure.
+- [x] Proportional fit-to-corridor and refusal paths covered in pure helpers; the editor control is removed pending an authoritative source.
 
 OpenDRIVE pipeline tests:
 
-- r:trån validation report is captured.
-- CityGML output contains expected Transportation objects.
-- CityGML to CityJSON conversion succeeds or failure is documented.
-- Prototype can load/render a small converted road network.
-- Lane/bike/sidewalk semantics are either preserved or explicitly reported as lost.
-- Imported road surfaces run through the same road-limit validator.
+- [x] Pinned r:trån validation/conversion plan resolves without filesystem mutation.
+- [ ] r:trån validation report is captured from a real tiny fixture.
+- [ ] CityGML output contains expected Transportation objects.
+- [ ] CityGML to CityJSON conversion succeeds or failure is documented.
+- [ ] Prototype can load/render a small converted road network.
+- [ ] Lane/bike/sidewalk semantics are either preserved or explicitly reported as lost.
+- [ ] Imported road surfaces run through the same road-limit validator.
 
 ## Decisions to Make Later
 

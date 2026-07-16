@@ -71,6 +71,7 @@ From `prototype/`:
 | `npm run data:hamburg-roads:prepare` | One-command local bootstrap for the complete Hamburg road CityJSONSeq catalog |
 | `npm run data:hamburg-roads:serve` | Serve the local Hamburg road catalog on port `8788` for editor loading and write-back |
 | `npm run cityjson:to-citygml -- INPUT.city.json --require-road` | Convert exported CityJSON roads to CityGML 3.0 with `citygml-tools from-cityjson`, then schema-validate the `.gml` |
+| `npm run opendrive:rtron -- INPUT_DIR --dry-run` | Resolve the pinned r:trån validation and OpenDRIVE-to-CityGML pipeline without writing files; omit `--dry-run` after installing Java 11+ and the documented JAR |
 | `npm run osm2streets:compare` | Compare source-built osm2streets WASM and native executable outputs for committed Hamburg OSM fixtures |
 
 ## Hosting
