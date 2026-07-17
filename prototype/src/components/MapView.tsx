@@ -24,7 +24,12 @@ import { applyVertexTransform, detectCrs, projectToWgs84 } from '../lib/projecti
 import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
-import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
+import type {
+  OsmPointFeature,
+  OsmRoadFeature,
+  RoadArea,
+  RoadDraft,
+} from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import {
@@ -61,6 +66,21 @@ const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
+
+function osmPointFeatureColor(feature: OsmPointFeature): Rgba {
+  switch (feature.kind) {
+    case 'tree':
+      return [40, 150, 76, 235];
+    case 'traffic_sign':
+      return [52, 125, 235, 245];
+    case 'traffic_signals':
+      return [224, 62, 62, 245];
+    case 'street_lamp':
+      return [245, 190, 55, 245];
+    case 'bollard':
+      return [110, 116, 128, 245];
+  }
+}
 
 function roadAreaKind(area: RoadArea): string {
   const usage = area.attributes.transportationUsage;
@@ -240,6 +260,7 @@ interface Props {
   roadDraft?: RoadDraft | null;
   onRoadDraftChange?: (draft: RoadDraft) => void;
   osmRoads?: OsmRoadFeature[];
+  osmPointFeatures?: OsmPointFeature[];
   selectedOsmRoadId?: string | null;
   onOsmRoadSelect?: (road: OsmRoadFeature) => void;
   osm2streetsResult?: import('../lib/osm2streets').Osm2StreetsResult | null;
@@ -304,6 +325,7 @@ export default function MapView({
   roadDraft = null,
   onRoadDraftChange,
   osmRoads = [],
+  osmPointFeatures = [],
   selectedOsmRoadId = null,
   onOsmRoadSelect,
   osm2streetsResult = null,
@@ -1189,6 +1211,29 @@ export default function MapView({
       );
     }
 
+    if (osmPointFeatures.length > 0) {
+      layers.push(
+        new ScatterplotLayer<OsmPointFeature>({
+          id: 'osm-street-point-features',
+          data: osmPointFeatures,
+          getPosition: (feature) => feature.position,
+          getRadius: (feature) => (feature.kind === 'tree' ? 3.5 : 2.2),
+          radiusUnits: 'meters',
+          radiusMinPixels: 3,
+          radiusMaxPixels: 9,
+          getFillColor: osmPointFeatureColor,
+          getLineColor: [255, 255, 255, 230],
+          getLineWidth: 1,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 1,
+          filled: true,
+          stroked: true,
+          pickable: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
     // Preview for the in-progress new building (mesh) OR a pending transform (polygon).
     if (preview?.mesh && preview.mesh.positions.length > 0) {
       layers.push(
@@ -1280,6 +1325,7 @@ export default function MapView({
     selectedRoadAreaId,
     onRoadAreaSelect,
     osmRoads,
+    osmPointFeatures,
     selectedOsmRoadId,
     onOsmRoadSelect,
     osm2streetsResult,

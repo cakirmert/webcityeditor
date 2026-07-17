@@ -3,12 +3,14 @@ import { buildSampleCube, parseCityJson } from '../../src/lib/cityjson';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import {
   buildRoadEditPayload,
+  buildOverpassRoadQuery,
   createManualRoadDraft,
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   inferRoadDraftFromOsmRoad,
   inferRoadVerticalProfileFromOsmTags,
   insertRoadIntoCityJson,
+  parseOsmPointFeaturesFromXml,
   parseOsmRoadsFromOverpass,
   splitRoadSectionAtFraction,
   type RoadArea,
@@ -21,6 +23,43 @@ const delftRoad: [number, number][] = [
 ];
 
 describe('transportation roads', () => {
+  it('queries road ways and the supported tagged street-point nodes', () => {
+    const query = buildOverpassRoadQuery([9.98, 53.54, 10.01, 53.56], 'xml', 30);
+
+    expect(query).toContain('way["highway"](53.54,9.98,53.56,10.01);');
+    expect(query).toContain('node["traffic_sign"](53.54,9.98,53.56,10.01);');
+    expect(query).toContain('node["natural"="tree"](53.54,9.98,53.56,10.01);');
+    expect(query).toContain('node["highway"~"^(street_lamp|traffic_signals)$"]');
+    expect(query).toContain('node["barrier"="bollard"](53.54,9.98,53.56,10.01);');
+  });
+
+  it('parses supported OSM point features while ignoring ordinary way nodes', () => {
+    const points = parseOsmPointFeaturesFromXml(`
+      <osm version="0.6">
+        <node id="1" lat="53.55" lon="9.99"><tag k="natural" v="tree"/></node>
+        <node id="2" lat="53.551" lon="9.991"><tag k="highway" v="traffic_signals"/></node>
+        <node id="3" lat="53.552" lon="9.992"><tag k="traffic_sign" v="DE:205"/></node>
+        <node id="4" lat="53.553" lon="9.993"><tag k="highway" v="street_lamp"/></node>
+        <node id="5" lat="53.554" lon="9.994"><tag k="barrier" v="bollard"/></node>
+        <node id="6" lat="53.555" lon="9.995"/>
+      </osm>
+    `);
+
+    expect(points.map((point) => point.kind)).toEqual([
+      'tree',
+      'traffic_signals',
+      'traffic_sign',
+      'street_lamp',
+      'bollard',
+    ]);
+    expect(points[0]).toMatchObject({
+      id: 'osm-node-1',
+      osmNodeId: '1',
+      position: [9.99, 53.55],
+      tags: { natural: 'tree' },
+    });
+  });
+
   it('parses OSM Overpass ways into selectable road features', () => {
     const roads = parseOsmRoadsFromOverpass({
       elements: [

@@ -646,6 +646,7 @@ export default function App() {
               roadDraft={roadEditor.roadDraft}
               onRoadDraftChange={roadEditor.handleRoadDraftChange}
               osmRoads={roadEditor.osmRoads}
+              osmPointFeatures={roadEditor.osmPointFeatures}
               selectedOsmRoadId={roadEditor.selectedOsmRoadId}
               onOsmRoadSelect={roadEditor.handleOsmRoadSelect}
               osm2streetsResult={roadEditor.osm2streetsResult}

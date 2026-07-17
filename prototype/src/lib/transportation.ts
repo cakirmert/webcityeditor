@@ -66,6 +66,21 @@ export interface OsmRoadFeature {
   inferredDraft: RoadDraft;
 }
 
+export type OsmPointFeatureKind =
+  | 'traffic_sign'
+  | 'tree'
+  | 'street_lamp'
+  | 'traffic_signals'
+  | 'bollard';
+
+export interface OsmPointFeature {
+  id: string;
+  osmNodeId: string;
+  kind: OsmPointFeatureKind;
+  position: [number, number];
+  tags: Record<string, string>;
+}
+
 export interface RoadArea {
   id: string;
   roadId: string;
@@ -201,10 +216,58 @@ export function buildOverpassRoadQuery(
     header,
     '(',
     `  way["highway"](${south},${west},${north},${east});`,
+    `  node["traffic_sign"](${south},${west},${north},${east});`,
+    `  node["natural"="tree"](${south},${west},${north},${east});`,
+    `  node["highway"~"^(street_lamp|traffic_signals)$"](${south},${west},${north},${east});`,
+    `  node["barrier"="bollard"](${south},${west},${north},${east});`,
     ');',
     '(._;>;);',
     'out body;',
   ].join('\n');
+}
+
+export function parseOsmPointFeaturesFromXml(xmlText: string): OsmPointFeature[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'text/xml');
+  const features: OsmPointFeature[] = [];
+  const nodeEls = doc.getElementsByTagName('node');
+
+  for (let i = 0; i < nodeEls.length; i++) {
+    const element = nodeEls[i];
+    const id = element.getAttribute('id');
+    const lat = parseFloat(element.getAttribute('lat') || '');
+    const lon = parseFloat(element.getAttribute('lon') || '');
+    if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const tags: Record<string, string> = {};
+    const tagEls = element.getElementsByTagName('tag');
+    for (let j = 0; j < tagEls.length; j++) {
+      const key = tagEls[j].getAttribute('k');
+      const value = tagEls[j].getAttribute('v');
+      if (key && value) tags[key] = value;
+    }
+
+    const kind = osmPointFeatureKind(tags);
+    if (!kind) continue;
+    features.push({
+      id: `osm-node-${id}`,
+      osmNodeId: id,
+      kind,
+      position: [lon, lat],
+      tags,
+    });
+  }
+
+  return features;
+}
+
+function osmPointFeatureKind(tags: Record<string, string>): OsmPointFeatureKind | null {
+  if (tags.traffic_sign) return 'traffic_sign';
+  if (tags.natural === 'tree') return 'tree';
+  if (tags.highway === 'traffic_signals') return 'traffic_signals';
+  if (tags.highway === 'street_lamp') return 'street_lamp';
+  if (tags.barrier === 'bollard') return 'bollard';
+  return null;
 }
 
 export function parseOsmRoadsFromXml(xmlText: string): OsmRoadFeature[] {

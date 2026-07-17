@@ -1,5 +1,10 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { OsmRoadFeature, RoadArea, RoadDraft } from '../lib/transportation';
+import type {
+  OsmPointFeature,
+  OsmRoadFeature,
+  RoadArea,
+  RoadDraft,
+} from '../lib/transportation';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
 import {
@@ -9,6 +14,7 @@ import {
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   insertRoadIntoCityJson,
+  parseOsmPointFeaturesFromXml,
   parseOsmRoadsFromXml,
   splitRoadSectionAtFraction,
   summarizeRoadDraft,
@@ -155,6 +161,7 @@ export function useRoadEditor(
   const [showRoadEditor, setShowRoadEditor] = useState(false);
   const [basemap, setBasemap] = useState<'map' | 'satellite'>('map');
   const [osmRoads, setOsmRoads] = useState<OsmRoadFeature[]>([]);
+  const [osmPointFeatures, setOsmPointFeatures] = useState<OsmPointFeature[]>([]);
   const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
   const [roadDraftDirty, setRoadDraftDirty] = useState(false);
@@ -171,6 +178,7 @@ export function useRoadEditor(
 
   const clearOsmRoadData = useCallback(() => {
     setOsmRoads([]);
+    setOsmPointFeatures([]);
     setSelectedOsmRoadId(null);
     setOsm2streetsResult(null);
     setOsm2streetsBbox(null);
@@ -187,7 +195,9 @@ export function useRoadEditor(
       setOsm2streetsSelection(null);
       setHighlightedOsm2StreetsRoadIds(new Set());
       const roads = parseOsmRoadsFromXml(xmlText);
+      const pointFeatures = parseOsmPointFeaturesFromXml(xmlText);
       setOsmRoads(roads);
+      setOsmPointFeatures(pointFeatures);
       setRoadStatus('Computing detailed lane-level 2D visualization (osm2streets)...');
 
       try {
@@ -211,14 +221,20 @@ export function useRoadEditor(
               }.`
             : '';
         const sourceSuffix = options.sourceLabel ? ` from ${options.sourceLabel}` : '';
+        const pointSuffix =
+          pointFeatures.length > 0
+            ? ` Also showing ${pointFeatures.length} tagged street point${
+                pointFeatures.length === 1 ? '' : 's'
+              } (trees, signs, signals, lamps, or bollards).`
+            : '';
         setRoadStatus(
           roads.length > 0
             ? `Loaded ${roads.length} OSM road segment${
                 roads.length === 1 ? '' : 's'
-              }${sourceSuffix} and computed 2D lane layout with osm2streets.${diagnosticSuffix} Click a road on the map to edit.`
+              }${sourceSuffix} and computed 2D lane layout with osm2streets.${pointSuffix}${diagnosticSuffix} Click a road on the map to edit.`
             : 'No OSM roads returned for this viewport.'
         );
-        return { roads, result };
+        return { roads, pointFeatures, result };
       } catch (error) {
         console.error('osm2streets Wasm generation failed:', error);
         setRoadStatus(
@@ -693,6 +709,7 @@ export function useRoadEditor(
     setBasemap,
     osmRoads,
     setOsmRoads,
+    osmPointFeatures,
     selectedOsmRoadId,
     setSelectedOsmRoadId,
     roadDraft,

@@ -439,9 +439,10 @@ generate:
 
 ### 9.3 Implementation Strategy
 
-1. Extend the Overpass query in `useRoadEditor.ts` to also fetch `node` types
-   with relevant tags (currently only fetches `way[highway]`)
-2. Add a new deck.gl `IconLayer` or `ScenegraphLayer` for point features
+1. [x] Extend the Overpass query to fetch tagged traffic signs, trees, street
+   lamps, traffic signals, and bollards alongside `way[highway]`.
+2. [x] Parse those nodes independently of osm2streets and render category-colored
+   deck.gl point markers. Icon/3D-model assets remain optional visual polish.
 3. For 3D trees: use `ScenegraphLayer` with a simple tree GLB model
 4. For signs: use `IconLayer` with SVG/PNG traffic sign sprites
 
