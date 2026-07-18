@@ -6,10 +6,18 @@ export interface CityJsonMapMesh {
   positions: Float32Array;
   indices: Uint32Array;
   colors: Float32Array;
+  textures: CityJsonTextureMesh[];
   anchorLngLat: [number, number];
   triangleCount: number;
   objectCount: number;
   maxLod: number | null;
+}
+
+export interface CityJsonTextureMesh {
+  image: string;
+  positions: Float32Array;
+  indices: Uint32Array;
+  texCoords: Float32Array;
 }
 
 interface BuildOptions {
@@ -48,7 +56,11 @@ export function buildCityJsonMapMesh(
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
 
-  const queued: Array<{ rings: number[][]; surfaceType: string }> = [];
+  const queued: Array<{
+    rings: number[][];
+    surfaceType: string;
+    texture: SurfaceTexture | null;
+  }> = [];
   const referenced = new Set<number>();
   let queuedVertexCount = 0;
   let objectCount = 0;
@@ -68,13 +80,18 @@ export function buildCityJsonMapMesh(
           surfaces?: Array<{ type?: string }>;
           values?: unknown;
         };
+        texture?: unknown;
       };
       const lod = numericLod(geom.lod);
       if (lod !== null) maxLod = Math.max(maxLod ?? lod, lod);
-      forEachSurface(geom, (rings, surfaceType) => {
+      forEachSurface(geom, (rings, surfaceType, path) => {
         const count = rings.reduce((sum, ring) => sum + ring.length, 0);
         if (count < 3 || queuedVertexCount + count > maxOutputVertices) return;
-        queued.push({ rings, surfaceType: surfaceType ?? obj.type });
+        queued.push({
+          rings,
+          surfaceType: surfaceType ?? obj.type,
+          texture: readSurfaceTexture(doc, geom, path, rings),
+        });
         queuedVertexCount += count;
         objectQueued = true;
         for (const ring of rings) for (const index of ring) referenced.add(index);
@@ -112,6 +129,10 @@ export function buildCityJsonMapMesh(
   const positions: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
+  const textured = new Map<
+    string,
+    { image: string; positions: number[]; indices: number[]; texCoords: number[] }
+  >();
 
   const localVertex = (idx: number): [number, number, number] | null => {
     const v = doc.vertices[idx];
@@ -121,23 +142,42 @@ export function buildCityJsonMapMesh(
   };
 
   for (const surface of queued) {
-    addSurface(
-      surface.rings,
-      surface.surfaceType,
-      localVertex,
-      positions,
-      colors,
-      indices
-    );
+    if (surface.texture) {
+      let target = textured.get(surface.texture.image);
+      if (!target) {
+        target = { image: surface.texture.image, positions: [], indices: [], texCoords: [] };
+        textured.set(surface.texture.image, target);
+      }
+      addTexturedSurface(surface.rings, surface.texture.uvRings, localVertex, target);
+    } else {
+      addSurface(
+        surface.rings,
+        surface.surfaceType,
+        localVertex,
+        positions,
+        colors,
+        indices
+      );
+    }
   }
 
-  if (positions.length === 0 || indices.length === 0) return null;
+  const textures = [...textured.values()]
+    .filter((mesh) => mesh.positions.length > 0 && mesh.indices.length > 0)
+    .map((mesh) => ({
+      image: mesh.image,
+      positions: new Float32Array(mesh.positions),
+      indices: new Uint32Array(mesh.indices),
+      texCoords: new Float32Array(mesh.texCoords),
+    }));
+  if ((positions.length === 0 || indices.length === 0) && textures.length === 0) return null;
   return {
     positions: new Float32Array(positions),
     indices: new Uint32Array(indices),
     colors: new Float32Array(colors),
+    textures,
     anchorLngLat,
-    triangleCount: indices.length / 3,
+    triangleCount:
+      indices.length / 3 + textures.reduce((sum, texture) => sum + texture.indices.length / 3, 0),
     objectCount,
     maxLod,
   };
@@ -167,8 +207,9 @@ function forEachSurface(
       surfaces?: Array<{ type?: string }>;
       values?: unknown;
     };
+    texture?: unknown;
   },
-  emit: (rings: number[][], surfaceType: string | null) => void
+  emit: (rings: number[][], surfaceType: string | null, path: number[]) => void
 ) {
   const b = geom.boundaries;
   if (!Array.isArray(b)) return;
@@ -186,14 +227,14 @@ function forEachSurface(
 
   if (geom.type === 'MultiSurface' || geom.type === 'CompositeSurface') {
     for (let i = 0; i < b.length; i++) {
-      emit(readFace(b[i]), getType(i));
+      emit(readFace(b[i]), getType(i), [i]);
     }
   } else if (geom.type === 'Solid') {
     for (let shellIdx = 0; shellIdx < b.length; shellIdx++) {
       const shell = b[shellIdx];
       if (!Array.isArray(shell)) continue;
       for (let faceIdx = 0; faceIdx < shell.length; faceIdx++) {
-        emit(readFace(shell[faceIdx]), getType(shellIdx, faceIdx));
+        emit(readFace(shell[faceIdx]), getType(shellIdx, faceIdx), [shellIdx, faceIdx]);
       }
     }
   } else if (geom.type === 'MultiSolid' || geom.type === 'CompositeSolid') {
@@ -204,11 +245,80 @@ function forEachSurface(
         const shell = solid[shellIdx];
         if (!Array.isArray(shell)) continue;
         for (let faceIdx = 0; faceIdx < shell.length; faceIdx++) {
-          emit(readFace(shell[faceIdx]), getType(solidIdx, shellIdx, faceIdx));
+          emit(
+            readFace(shell[faceIdx]),
+            getType(solidIdx, shellIdx, faceIdx),
+            [solidIdx, shellIdx, faceIdx]
+          );
         }
       }
     }
   }
+}
+
+interface SurfaceTexture {
+  image: string;
+  uvRings: [number, number][][];
+}
+
+function readSurfaceTexture(
+  doc: CityJsonDocument,
+  geom: { texture?: unknown },
+  path: number[],
+  rings: number[][]
+): SurfaceTexture | null {
+  const themes = geom.texture && typeof geom.texture === 'object'
+    ? Object.values(geom.texture as Record<string, unknown>)
+    : [];
+  const appearance = doc.appearance as {
+    textures?: Array<{ image?: string }>;
+    'vertices-texture'?: number[][];
+  } | undefined;
+  const textureVertices = appearance?.['vertices-texture'];
+  if (!appearance?.textures || !textureVertices) return null;
+
+  for (const theme of themes) {
+    let value: unknown = (theme as { values?: unknown })?.values;
+    for (const index of path) {
+      if (!Array.isArray(value)) {
+        value = null;
+        break;
+      }
+      value = value[index];
+    }
+    if (!Array.isArray(value) || value.length !== rings.length) continue;
+    const refs = value as unknown[];
+    const first = refs[0];
+    if (!Array.isArray(first) || !Number.isInteger(first[0])) continue;
+    const textureIndex = Number(first[0]);
+    const image = appearance.textures[textureIndex]?.image;
+    if (!image) continue;
+
+    const uvRings: [number, number][][] = [];
+    let valid = true;
+    for (let ringIndex = 0; ringIndex < rings.length; ringIndex++) {
+      const ref = refs[ringIndex];
+      if (
+        !Array.isArray(ref) ||
+        Number(ref[0]) !== textureIndex ||
+        ref.length !== rings[ringIndex].length + 1
+      ) {
+        valid = false;
+        break;
+      }
+      const uvRing = ref.slice(1).map((uvIndex): [number, number] | null => {
+        const uv = textureVertices[Number(uvIndex)];
+        return Array.isArray(uv) && uv.length >= 2 ? [Number(uv[0]), Number(uv[1])] : null;
+      });
+      if (uvRing.some((uv) => uv === null)) {
+        valid = false;
+        break;
+      }
+      uvRings.push(uvRing as [number, number][]);
+    }
+    if (valid) return { image, uvRings };
+  }
+  return null;
 }
 
 function readFace(face: unknown): number[][] {
@@ -262,6 +372,47 @@ function addSurface(
 
   const tris = earcut(flat2d, holes, 2);
   for (const triIdx of tris) indices.push(vertexOffset + triIdx);
+}
+
+function addTexturedSurface(
+  rings: number[][],
+  uvRings: [number, number][][],
+  localVertex: (idx: number) => [number, number, number] | null,
+  target: { positions: number[]; indices: number[]; texCoords: number[] },
+) {
+  if (rings.length === 0 || rings[0].length < 3 || rings.length !== uvRings.length) return;
+  const vertices3d: [number, number, number][] = [];
+  const flat2d: number[] = [];
+  const holes: number[] = [];
+  const uvCoordinates: [number, number][] = [];
+
+  for (let ringIndex = 0; ringIndex < rings.length; ringIndex++) {
+    const ring = rings[ringIndex];
+    const uvRing = uvRings[ringIndex];
+    if (ring.length < 3 || ring.length !== uvRing.length) return;
+    if (ringIndex > 0) holes.push(vertices3d.length);
+    for (let index = 0; index < ring.length; index++) {
+      const point = localVertex(ring[index]);
+      const uv = uvRing[index];
+      if (!point || !uv) return;
+      vertices3d.push(point);
+      uvCoordinates.push(uv);
+    }
+  }
+
+  const projection = projectionForFace(vertices3d);
+  for (const point of vertices3d) {
+    if (projection === 'yz') flat2d.push(point[1], point[2]);
+    else if (projection === 'xz') flat2d.push(point[0], point[2]);
+    else flat2d.push(point[0], point[1]);
+  }
+
+  const vertexOffset = target.positions.length / 3;
+  for (const point of vertices3d) target.positions.push(point[0], point[1], point[2]);
+  for (const uv of uvCoordinates) {
+    target.texCoords.push(uv[0], uv[1]);
+  }
+  for (const triangle of earcut(flat2d, holes, 2)) target.indices.push(vertexOffset + triangle);
 }
 
 function projectionForFace(points: [number, number, number][]): 'xy' | 'xz' | 'yz' {

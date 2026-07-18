@@ -217,6 +217,7 @@ export default function Viewer({
         ...USAGE_OBJECT_COLORS,
       };
     }
+    docToLoad = withoutUnsupportedSolidTextures(docToLoad);
 
     setParserPalette(state.parser, objectColors);
     state.parser.resetMaterial();
@@ -455,6 +456,32 @@ export default function Viewer({
       </div>
     </div>
   );
+}
+
+/**
+ * cityjson-threejs-loader currently indexes texture values as if every
+ * geometry were a flat MultiSurface. A valid textured Solid has one extra
+ * shell level and crashes that parser. The main map has its own Solid-aware
+ * texture renderer, so the close-up inspector keeps the complete LoD3 shape
+ * and semantics while omitting only the unsupported texture binding.
+ */
+function withoutUnsupportedSolidTextures(doc: CityJsonDocument): CityJsonDocument {
+  const hasTexturedSolid = Object.values(doc.CityObjects).some((object) =>
+    (object.geometry ?? []).some((geometry) => {
+      const candidate = geometry as { type?: string; texture?: unknown };
+      return candidate.type === 'Solid' && candidate.texture != null;
+    })
+  );
+  if (!hasTexturedSolid) return doc;
+
+  const clone = structuredClone(doc);
+  for (const object of Object.values(clone.CityObjects)) {
+    for (const geometry of object.geometry ?? []) {
+      const candidate = geometry as { type?: string; texture?: unknown };
+      if (candidate.type === 'Solid') delete candidate.texture;
+    }
+  }
+  return clone;
 }
 
 function ColorModeButton({

@@ -527,8 +527,8 @@ export function useRoadEditor(
     );
   }, [cityjson]);
 
-  const handleCancelRoadEdit = useCallback(() => {
-    if (roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
+  const handleCancelRoadEdit = useCallback((force = false) => {
+    if (!force && roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
     setDrawMode('none');
     setSelection(null);
     setRoadDraft(null);

@@ -28,6 +28,11 @@ import { deleteBuildings } from '../lib/delete';
 import { moveOpening } from '../lib/opening-edit';
 import { parametriseBuilding } from '../lib/parametrise';
 import { findZoneForPoint, validateBuildingType, type ParcelZone } from '../lib/zoning';
+import {
+  insertBuildingAsset,
+  loadBuildingAsset,
+  type BuildingAssetDefinition,
+} from '../lib/building-assets';
 
 export function useBuildingEditor(
   coreState: CoreState,
@@ -63,6 +68,7 @@ export function useBuildingEditor(
     fileName: string;
   } | null>(null);
   const [ifcParsing, setIfcParsing] = useState(false);
+  const [pendingAsset, setPendingAsset] = useState<BuildingAssetDefinition | null>(null);
 
   const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
   const [clipboardIds, setClipboardIds] = useState<Set<string> | null>(null);
@@ -572,6 +578,44 @@ export function useBuildingEditor(
     setIfcPending(null);
   }, []);
 
+  const handleAssetPlacement = useCallback(
+    async (lngLat: [number, number]) => {
+      if (!cityjson || !pendingAsset) return;
+      const asset = pendingAsset;
+      setPendingAsset(null);
+      try {
+        const assetDoc = await loadBuildingAsset(asset);
+        pushUndo(`Place ${asset.name}`);
+        const { value: id } = runStructurallyGuardedMutation(
+          cityjson,
+          `Placing ${asset.name}`,
+          () => insertBuildingAsset(cityjson, assetDoc, asset, lngLat)
+        );
+        setDirtyIds((prev) => new Set(prev).add(id));
+        setSelection({ objectId: id });
+        setReloadToken((token) => token + 1);
+        markGeometryChanged();
+      } catch (error) {
+        alert(`Could not place building asset: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [cityjson, pendingAsset, pushUndo, setDirtyIds, setSelection, setReloadToken, markGeometryChanged]
+  );
+
+  const handleCancelAssetPlacement = useCallback(() => setPendingAsset(null), []);
+
+  useEffect(() => {
+    if (!pendingAsset) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPendingAsset(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingAsset]);
+
   useEffect(() => {
     if (!ifcPending) return;
     const onKey = (e: KeyboardEvent) => {
@@ -622,6 +666,8 @@ export function useBuildingEditor(
     setIfcPending,
     ifcParsing,
     setIfcParsing,
+    pendingAsset,
+    setPendingAsset,
     multiSelection,
     setMultiSelection,
     clipboardIds,
@@ -649,6 +695,8 @@ export function useBuildingEditor(
     handleImportIfc,
     handleIfcPlacement,
     handleCancelIfcPlacement,
+    handleAssetPlacement,
+    handleCancelAssetPlacement,
     handleDragMove,
   };
 }

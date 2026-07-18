@@ -121,16 +121,15 @@ describe('<RoadEditorPanel />', () => {
     expect(screen.getByTestId('road-band-box-0')).toHaveTextContent('▶');
   });
 
-  it('edits a smooth curve with one touch-sized strength control', () => {
+  it('lets the user choose smooth or straight while shaping the actual curve on the map', () => {
     const onDraftChange = vi.fn();
     renderPanel(onDraftChange);
 
-    fireEvent.change(screen.getByLabelText('Road curve strength'), {
-      target: { value: '0.9' },
-    });
+    expect(screen.queryByLabelText('Road curve strength')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Straight' }));
 
     const [nextDraft] = onDraftChange.mock.calls[0] as [RoadDraft];
-    expect(nextDraft.sections[0].curve).toEqual({ mode: 'smooth', strength: 0.9 });
+    expect(nextDraft.sections[0].curve).toEqual({ mode: 'straight', strength: 0.72 });
     expect(screen.getByText(/Two anchors make a straight span/)).toBeInTheDocument();
   });
 

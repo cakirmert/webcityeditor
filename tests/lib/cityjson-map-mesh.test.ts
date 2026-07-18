@@ -87,4 +87,32 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.objectCount).toBe(1);
     expect(mesh?.triangleCount).toBe(1);
   });
+
+  it('preserves CityJSON face textures and UV coordinates for the close map view', () => {
+    const doc = detailDocument();
+    doc.appearance = {
+      textures: [{ type: 'JPG', image: '/assets/sample.jpg' }],
+      'vertices-texture': [[0, 0], [1, 0], [0, 1]],
+    };
+    const geometry = doc.CityObjects.detailed.geometry?.[1] as Record<string, unknown>;
+    geometry.texture = {
+      rgbTexture: {
+        values: [
+          [[0, 0, 1, 2]],
+          [[0, 0, 1, 2]],
+        ],
+      },
+    };
+
+    const mesh = buildCityJsonMapMesh(doc, { objectIds: new Set(['detailed']) });
+
+    expect(mesh?.triangleCount).toBe(2);
+    expect(mesh?.indices).toHaveLength(0);
+    expect(mesh?.textures).toHaveLength(1);
+    expect(mesh?.textures[0].image).toBe('/assets/sample.jpg');
+    expect([...mesh!.textures[0].texCoords]).toEqual([
+      0, 0, 1, 0, 0, 1,
+      0, 0, 1, 0, 0, 1,
+    ]);
+  });
 });

@@ -8,7 +8,7 @@ This file is the single technical handoff for City Editor. It consolidates the f
 - The committed Hamburg city-center demo starts by merging its LoD2 buildings and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close building views use the highest geometry LoD available per object; distant context falls back to outlines or blocks.
+- Close building views use the highest geometry LoD available per object, including textured LoD3 surfaces; distant context falls back to outlines or blocks.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws cheap footprint or block context. From zoom 15.75 onward it indexes nearby objects and selects the numerically highest `geometry.lod` for each building, including LoD3 when present and LoD2/2.2 as the fallback. The selected-building viewer also retains the full object geometry.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws cheap footprint or block context. From zoom 15.15 to 16.1 it gradually blends into an indexed mesh of up to 420 nearby objects and selects the numerically highest `geometry.lod` for each building, including LoD3 when present and LoD2/2.2 as the fallback. Its output limit is 160,000 vertices, so the transition retains more context and avoids a one-frame detail swap. The selected-building viewer also retains the full object geometry.
 
-The committed Hamburg demo is honestly LoD2 and contains no semantic Window or Door surfaces. The toolbar and map therefore report `LoD2 · no openings in source`; they do not fabricate LoD3. Hamburg also publishes a large official LoD3.0 CityGML model with detailed roof geometry and facade textures. Bringing a small redistributable converted tile plus CityJSON texture rendering into the hosted demo remains separate work.
+The committed Hamburg city context is honestly LoD2 and contains no semantic Window or Door surfaces. The toolbar and map therefore report `LoD2 · no openings in source`; they do not fabricate LoD3. Two ready-made buildings are converted from the official Hamburg LoD3.0 Area 1 tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. Their LoD3 solids, JPG atlases, CityJSON texture assignments, UV coordinates, source IDs, licence, and attribution ship under `public/data/assets/hamburg-lod3/`. The close map renderer creates a separate texture mesh for each atlas.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -86,7 +86,8 @@ Connection metadata confirms graph topology. It does not yet synthesize a comple
 ## UX and performance decisions
 
 - **Roads** starts as a compact chooser with one existing-road action: tap a CityJSON road, then choose **Edit road**. The sheet expands only after a road is being edited.
-- The active road is drawn on the map and represented by matching visual bands both on-map and in the sheet; large on-map width and direction controls avoid hunting through small rows.
+- On desktop, the active road's complete cross-section editor sits over the map along the bottom: matching visual bands plus large type, material, width, direction, order, remove, and add controls. The redundant lane editor in the right sheet is hidden. Touch layouts keep the same complete controls in the bottom sheet.
+- Road curvature is changed by dragging or adding visible map anchors. The UI exposes only the meaningful **Smooth** and **Straight** choice, not an abstract curve-strength percentage.
 - Map/satellite mode, satellite opacity, and road-overlay opacity are directly inside the road sheet. The generic **Map layers** control starts collapsed and closes when another map tool opens.
 - Phone layouts retain only Data, Roads, New Building, and More in the primary toolbar. Planning, list, export, validation, and secondary tools use the touch-sized More menu.
 - Drawing uses capture-phase Pointer Events and pointer capture. Do not add `event.buttons === 0` as a drag-ending condition; trackpads and overlay sequences can report it mid-drag.
@@ -122,6 +123,16 @@ npm run dev:hamburg-buildings
 ```
 
 The strict CityJSONSeq catalog streams tiles for the visible viewport and supports local changed-tile write-back. Large source and generated files stay under ignored `Data/`.
+
+### Official Hamburg LoD3 assets
+
+The shipped samples were selected from the official Hamburg LoD3.0 Area 1 CityGML archive, tile `6431`, converted to CityJSON 2.0 with `citygml-tools`, and normalized around a local placement origin. With the converted tile and its extracted `images` directory in the documented temporary paths, reproduce the committed files with:
+
+```powershell
+npm run data:hamburg-lod3-assets
+```
+
+The normalizer is `scripts/build-hamburg-lod3-assets.mjs`. The output is licensed under Datenlizenz Deutschland – Namensnennung – Version 2.0; attribution is **Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung**. The source dataset is <https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5>.
 
 ### Optional whole-city roads
 
@@ -196,6 +207,6 @@ The following work is intentionally not claimed as complete:
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
 3. Add topology-aware propagation when a connected road is later moved or deleted, with a clear conflict-resolution UI.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
-5. Convert a small redistributable Hamburg LoD3.0 tile, preserve its facade textures through CityJSON, and add visual regression coverage for mixed LoD2/LoD3 data.
+5. Add screenshot-based GPU regression coverage for multiple texture atlases and mixed LoD2/LoD3 data on lower-end mobile devices. The converted textured samples and structural UV regression coverage now ship.
 
 These are continuation tasks, not blockers for the committed demo or the exact attribute-editing workflow.
