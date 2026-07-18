@@ -30,6 +30,7 @@ import type {
   OsmPointFeature,
   OsmRoadFeature,
   RoadArea,
+  RoadBandKind,
   RoadDraft,
 } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
@@ -71,8 +72,9 @@ const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
-const BUILDING_DETAIL_MIN_ZOOM = 15.75;
-const EDIT_FOCUS_PADDING_DEGREES = 0.0022;
+const BUILDING_DETAIL_MIN_ZOOM = 15.15;
+const BUILDING_DETAIL_FULL_ZOOM = 16.1;
+const EDIT_FOCUS_PADDING_DEGREES = 0.0038;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
 
 function osmPointFeatureColor(feature: OsmPointFeature): Rgba {
@@ -500,16 +502,17 @@ export default function MapView({
   }, [roadDraft, footprintEdit, preview?.polygon, dragTransformId, selectedId, footprints]);
 
   const editFocusKey = rawEditFocusBbox
-    ? rawEditFocusBbox.map((value) => Math.round(value / 0.0004)).join(':')
+    ? rawEditFocusBbox.map((value) => Math.round(value / 0.0008)).join(':')
     : 'none';
   const editFocusBbox = useMemo(
     () =>
       rawEditFocusBbox
         ? rawEditFocusBbox.map(
-            (value) => Math.round(value / 0.0004) * 0.0004
+            (value) => Math.round(value / 0.0008) * 0.0008
           ) as LngLatBbox
         : null,
-    // The key intentionally quantizes focus updates to roughly 25-45 metres.
+    // The key intentionally quantizes focus updates to roughly 50-90 metres,
+    // keeping detailed building meshes stable during most road-handle drags.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editFocusKey]
   );
@@ -570,37 +573,47 @@ export default function MapView({
     };
   }, [osm2streetsResult, editFocusBbox]);
 
+  const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
+  const detailScopeBbox = editFocusBbox ?? viewportBbox;
   const detailObjectIds = useMemo(() => {
-    if (zoom < BUILDING_DETAIL_MIN_ZOOM || !viewportBbox) return null;
-    const visible = footprints.filter((footprint) =>
-      polygonIntersectsBbox(footprint.polygon, viewportBbox)
+    if (!detailEnabled || !detailScopeBbox) return null;
+    const visible = renderedFootprints.filter((footprint) =>
+      polygonIntersectsBbox(footprint.polygon, detailScopeBbox)
     );
     const center: [number, number] = [
-      (viewportBbox[0] + viewportBbox[2]) / 2,
-      (viewportBbox[1] + viewportBbox[3]) / 2,
+      (detailScopeBbox[0] + detailScopeBbox[2]) / 2,
+      (detailScopeBbox[1] + detailScopeBbox[3]) / 2,
     ];
     visible.sort(
       (a, b) =>
         squaredDistanceToPolygon(center, a.polygon) - squaredDistanceToPolygon(center, b.polygon)
     );
     const ids = new Set<string>();
-    for (const footprint of visible.slice(0, 220)) {
+    for (const footprint of visible.slice(0, 420)) {
       ids.add(footprint.id);
       if (footprint.parentId) ids.add(footprint.parentId);
     }
     if (selectedId) ids.add(selectedId);
     return ids.size > 0 ? ids : null;
-  }, [zoom, viewportBbox, footprints, selectedId]);
+  }, [detailEnabled, detailScopeBbox, renderedFootprints, selectedId]);
 
   const detailMesh = useMemo(
     () =>
       detailObjectIds
         ? buildCityJsonMapMesh(cityjson, {
             objectIds: detailObjectIds,
-            maxOutputVertices: 80_000,
+            maxOutputVertices: 160_000,
           })
         : null,
     [cityjson, detailObjectIds, reloadToken]
+  );
+  const detailOpacity = Math.max(
+    0,
+    Math.min(
+      1,
+      (zoom - BUILDING_DETAIL_MIN_ZOOM) /
+        (BUILDING_DETAIL_FULL_ZOOM - BUILDING_DETAIL_MIN_ZOOM)
+    )
   );
 
   // A drawing/editing gesture owns the map until it is saved or discarded.
@@ -1091,7 +1104,7 @@ export default function MapView({
       })
     );
 
-    if (detailMesh) {
+    if (detailMesh && detailMesh.indices.length > 0) {
       layers.push(
         new SimpleMeshLayer<{ position: [number, number, number] }>({
           id: 'building-highest-detail',
@@ -1106,6 +1119,7 @@ export default function MapView({
             indices: { value: detailMesh.indices, size: 1 },
           } as unknown as never,
           _instanced: false,
+          opacity: detailOpacity,
           sizeScale: 1,
           coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
           coordinateOrigin: [detailMesh.anchorLngLat[0], detailMesh.anchorLngLat[1], 0],
@@ -1120,9 +1134,42 @@ export default function MapView({
       );
     }
 
+    if (detailMesh?.textures.length) {
+      detailMesh.textures.forEach((textureMesh, index) => {
+        layers.push(
+          new SimpleMeshLayer<{ position: [number, number, number] }>({
+            id: `building-highest-detail-texture-${index}`,
+            data: [{ position: [0, 0, 0] }],
+            getPosition: (d: { position: [number, number, number] }) => d.position,
+            getColor: [255, 255, 255, 255],
+            mesh: {
+              attributes: {
+                positions: { value: textureMesh.positions, size: 3 },
+                texCoords: { value: textureMesh.texCoords, size: 2 },
+              },
+              indices: { value: textureMesh.indices, size: 1 },
+            } as unknown as never,
+            texture: textureMesh.image,
+            _instanced: false,
+            opacity: detailOpacity,
+            sizeScale: 1,
+            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+            coordinateOrigin: [detailMesh.anchorLngLat[0], detailMesh.anchorLngLat[1], 0],
+            pickable: false,
+            material: {
+              ambient: 0.78,
+              diffuse: 0.34,
+              shininess: 6,
+              specularColor: [30, 30, 30],
+            },
+          } as any)
+        );
+      });
+    }
+
     // Cheap block context fills the middle zoom range; close zoom swaps it for
     // the indexed highest-available CityJSON surface mesh above.
-    if (zoom > LOD_OUTLINE_MAX && !detailMesh) {
+    if (zoom > LOD_OUTLINE_MAX && (!detailMesh || detailOpacity < 1)) {
       layers.push(
         new SolidPolygonLayer<Footprint>({
           id: 'building-blocks',
@@ -1139,6 +1186,7 @@ export default function MapView({
             return mapColorMode === 'usage' ? tintByUsage(d, 230) : tintByRoofType(d, 230);
           },
           extruded: true,
+          opacity: detailMesh ? 1 - detailOpacity : 1,
           wireframe: false,
           pickable: buildingSelectionEnabled,
           material: {
@@ -2196,7 +2244,7 @@ export default function MapView({
               : `Overview geometry · zoom closer for the highest source LoD`
         }
         focusActive={!!editFocusBbox}
-        obscuredByInspector={!!selectedId && !roadWorkspaceOpen}
+        obscuredByInspector={roadWorkspaceOpen || !!selectedId}
       />
     </>
   );
@@ -2264,6 +2312,7 @@ function MapRoadCrossSection({
   onChange: (draft: RoadDraft) => void;
 }) {
   const [activeBandIndex, setActiveBandIndex] = useState(0);
+  const [newBandKind, setNewBandKind] = useState<RoadBandKind>('car_lane');
   const section = draft.sections[0];
   const effectiveBandIndex = Math.min(
     activeBandIndex,
@@ -2288,9 +2337,16 @@ function MapRoadCrossSection({
     });
   };
 
+  const replaceBands = (bands: typeof section.bands) => {
+    onChange({
+      ...draft,
+      sections: draft.sections.map((candidate, sectionIndex) =>
+        sectionIndex === 0 ? { ...candidate, bands } : candidate
+      ),
+    });
+  };
+
   const directions = ['forward', 'backward', 'both', 'none'] as const;
-  const directionIndex = directions.indexOf(activeBand.direction ?? 'none');
-  const nextDirection = directions[(directionIndex + 1) % directions.length];
 
   return (
     <section className="map-road-cross-section" aria-label="Road cross-section quick editor">
@@ -2322,6 +2378,31 @@ function MapRoadCrossSection({
       </div>
       <div className="map-road-cross-section__actions">
         <div><b>{mapRoadBandLabel(activeBand.kind, activeBand.sourceType)}</b><span>band {effectiveBandIndex + 1}</span></div>
+        <label className="map-road-cross-section__field">
+          <span>Type</span>
+          <select
+            value={activeBand.sourceType ? '__source__' : activeBand.kind}
+            onChange={(event) => {
+              const kind = event.target.value as RoadBandKind;
+              patchActiveBand({ kind, sourceType: undefined, direction: kind === 'car_lane' || kind === 'bike_lane' ? 'forward' : 'none' });
+            }}
+          >
+            {activeBand.sourceType && <option value="__source__" disabled>{mapRoadBandLabel(activeBand.kind, activeBand.sourceType)} (source)</option>}
+            {MAP_ROAD_BAND_KINDS.map((kind) => <option key={kind} value={kind}>{mapRoadBandLabel(kind)}</option>)}
+          </select>
+        </label>
+        <label className="map-road-cross-section__field">
+          <span>Surface</span>
+          <select value={activeBand.surface ?? 'asphalt'} onChange={(event) => patchActiveBand({ surface: event.target.value })}>
+            <option value="asphalt">Asphalt</option>
+            <option value="concrete">Concrete</option>
+            <option value="paving_stones">Paving stones</option>
+            <option value="compacted">Compacted</option>
+            <option value="gravel">Gravel</option>
+            <option value="grass">Grass</option>
+          </select>
+        </label>
+        <div className="map-road-cross-section__width">
         <button
           type="button"
           onClick={() => patchActiveBand({ widthM: Math.max(0.4, activeBand.widthM - 0.25) })}
@@ -2333,26 +2414,69 @@ function MapRoadCrossSection({
           onClick={() => patchActiveBand({ widthM: Math.min(12, activeBand.widthM + 0.25) })}
           aria-label="Make selected road band wider"
         >+</button>
-        <button
-          type="button"
-          className="map-road-cross-section__direction"
-          onClick={() => patchActiveBand({ direction: nextDirection })}
-        >Direction {roadDirectionGlyph(activeBand.direction)}</button>
+        </div>
+        <div className="map-road-cross-section__directions" role="group" aria-label="Selected band direction">
+          {directions.map((direction) => (
+            <button key={direction} type="button" className={(activeBand.direction ?? 'none') === direction ? 'is-active' : ''} onClick={() => patchActiveBand({ direction })}>
+              {roadDirectionGlyph(direction)} {direction}
+            </button>
+          ))}
+        </div>
+        <div className="map-road-cross-section__order">
+        <button type="button" disabled={effectiveBandIndex === 0} onClick={() => {
+          const bands = section.bands.slice();
+          [bands[effectiveBandIndex - 1], bands[effectiveBandIndex]] = [bands[effectiveBandIndex], bands[effectiveBandIndex - 1]];
+          setActiveBandIndex(effectiveBandIndex - 1);
+          replaceBands(bands);
+        }}>Move left</button>
+        <button type="button" disabled={effectiveBandIndex === section.bands.length - 1} onClick={() => {
+          const bands = section.bands.slice();
+          [bands[effectiveBandIndex], bands[effectiveBandIndex + 1]] = [bands[effectiveBandIndex + 1], bands[effectiveBandIndex]];
+          setActiveBandIndex(effectiveBandIndex + 1);
+          replaceBands(bands);
+        }}>Move right</button>
+        <button type="button" className="is-destructive" disabled={section.bands.length <= 1} onClick={() => {
+          replaceBands(section.bands.filter((_, index) => index !== effectiveBandIndex));
+          setActiveBandIndex(Math.max(0, effectiveBandIndex - 1));
+        }}>Remove</button>
+        </div>
+      </div>
+      <div className="map-road-cross-section__add">
+        <label><span>Add a band</span><select value={newBandKind} onChange={(event) => setNewBandKind(event.target.value as RoadBandKind)}>{MAP_ROAD_BAND_KINDS.map((kind) => <option key={kind} value={kind}>{mapRoadBandLabel(kind)}</option>)}</select></label>
+        <button type="button" onClick={() => {
+          replaceBands([...section.bands, { kind: newBandKind, widthM: MAP_ROAD_DEFAULT_WIDTH[newBandKind], direction: newBandKind === 'car_lane' || newBandKind === 'bike_lane' ? 'forward' : 'none', surface: newBandKind === 'green' ? 'grass' : 'asphalt' }]);
+          setActiveBandIndex(section.bands.length);
+        }}>Add band</button>
       </div>
     </section>
   );
 }
 
+const MAP_ROAD_BAND_KINDS: RoadBandKind[] = ['car_lane', 'bike_lane', 'sidewalk', 'parking', 'median', 'green'];
+const MAP_ROAD_DEFAULT_WIDTH: Record<RoadBandKind, number> = {
+  car_lane: 3,
+  bike_lane: 1.8,
+  sidewalk: 1.8,
+  parking: 2.3,
+  median: 0.6,
+  green: 1.5,
+};
+
 function mapRoadBandLabel(kind: string, sourceType?: string): string {
   const key = (sourceType ?? kind).toLowerCase().replace(/[^a-z0-9]/g, '');
   if (key.includes('sidewalk')) return 'Sidewalk';
   if (key.includes('footway')) return 'Footway';
-  if (key.includes('bike')) return 'Bike';
+  if (key.includes('bike') || key.includes('bicy') || key.includes('cycle')) return 'Bike';
   if (key.includes('parking')) return 'Parking';
   if (key.includes('bus')) return 'Bus';
   if (key.includes('rail') || key.includes('tram')) return 'Rail';
   if (key.includes('buffer') || key.includes('median')) return 'Buffer';
   if (key.includes('green') || key.includes('verge')) return 'Green';
+  if (kind === 'bike_lane') return 'Bike';
+  if (kind === 'sidewalk') return 'Sidewalk';
+  if (kind === 'parking') return 'Parking';
+  if (kind === 'median') return 'Buffer';
+  if (kind === 'green') return 'Green';
   return 'Car lane';
 }
 

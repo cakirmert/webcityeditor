@@ -165,14 +165,14 @@ export default function BuildingCreator({
   }, [onCancel]);
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-[rgba(0,0,0,0.55)] backdrop-blur-sm">
-      <div className="m-auto flex h-[92vh] w-[94vw] max-w-[1600px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+    <div className="fixed inset-0 z-[90] flex bg-[rgba(0,0,0,0.55)] backdrop-blur-sm">
+      <div className="m-auto flex h-full w-full max-w-[1600px] overflow-hidden border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_64px_rgba(0,0,0,0.5)] md:h-[92vh] md:w-[94vw] md:rounded-lg">
         {/* ── Left pane: form ──────────────────────────────────────────── */}
-        <div className="flex w-[420px] flex-col border-r border-[var(--border)]">
+        <div className="flex w-full shrink-0 flex-col border-r border-[var(--border)] md:w-[420px]">
           <header className="border-b border-[var(--border)] px-5 py-3">
-            <h2 className="text-[14px] font-semibold">New Building</h2>
-            <p className="mt-0.5 text-[11px] text-[var(--text-dim)]">
-              Footprint: {vertexCount} vertices · preview updates live
+            <h2 className="text-[18px] font-semibold">Custom building</h2>
+            <p className="mt-1 text-[12px] text-[var(--text-dim)]">
+              Your {vertexCount}-corner outline is ready. Changes appear immediately in the preview.
             </p>
           </header>
 
@@ -342,7 +342,10 @@ export default function BuildingCreator({
               </Row>
             </Section>
 
-            <Section label="Procedural openings">
+            <Section label="Windows and entrance">
+              <div className="mb-2 text-[11px] leading-relaxed text-[var(--text-dim)]">
+                Add editable Window and Door surfaces. This does not pretend the custom model came from an official LoD3 survey.
+              </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
                 <label className="flex items-center gap-1 cursor-pointer">
                   <input
@@ -362,36 +365,37 @@ export default function BuildingCreator({
                   />
                   <span>Door</span>
                 </label>
-                {(addWindows || addDoor) && (
-                  <span className="text-[10px] text-[var(--text-faint)]">
-                    → LoD 2.2
-                  </span>
-                )}
               </div>
             </Section>
 
-            <Section label="Subdivide on create">
-              <Row label="Mode">
-                <Select
-                  value={splitMode}
-                  onValueChange={(v) =>
-                    setSplitMode(v as 'none' | 'floors' | 'sides')
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">none</SelectItem>
-                    <SelectItem value="floors">by floor (stacked)</SelectItem>
-                    <SelectItem value="sides">by side (along long axis)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Row>
+            <Section label="Separate editable parts (optional)">
+              <p className="mb-2 text-[11px] leading-relaxed text-[var(--text-dim)]">
+                Choose this only when floors or wings must be selected and edited independently later.
+              </p>
+              <div className="grid gap-2">
+                <PartChoice
+                  selected={splitMode === 'none'}
+                  title="Keep one building"
+                  description="Recommended. The whole building stays one simple object."
+                  onClick={() => setSplitMode('none')}
+                />
+                <PartChoice
+                  selected={splitMode === 'floors'}
+                  title="Make floors independent"
+                  description="Creates stacked BuildingParts so each level can be selected separately."
+                  onClick={() => setSplitMode('floors')}
+                />
+                <PartChoice
+                  selected={splitMode === 'sides'}
+                  title="Make side-by-side wings"
+                  description="Cuts the footprint into separately editable sections."
+                  onClick={() => setSplitMode('sides')}
+                />
+              </div>
               {splitMode !== 'none' && (
                 <>
                   <Row
-                    label={splitMode === 'floors' ? 'Number of floors' : 'Parts'}
+                    label={splitMode === 'floors' ? 'Independent levels' : 'Independent wings'}
                   >
                     <Input
                       type="number"
@@ -405,7 +409,7 @@ export default function BuildingCreator({
                   </Row>
                   {splitMode === 'sides' && (
                     <div className="flex items-center gap-1 text-[10px] pl-[42%]">
-                      <span className="text-[var(--text-dim)] mr-1">Axis:</span>
+                      <span className="text-[var(--text-dim)] mr-1">Cut:</span>
                       {(['auto', 'longer', 'shorter'] as const).map((a) => (
                         <button
                           key={a}
@@ -424,7 +428,7 @@ export default function BuildingCreator({
                               : 'Force the shorter axis'
                           }
                         >
-                          {a}
+                          {a === 'auto' ? 'Best fit' : a === 'longer' ? 'Long side' : 'Short side'}
                         </button>
                       ))}
                     </div>
@@ -440,21 +444,21 @@ export default function BuildingCreator({
             </Section>
           </div>
 
-          <footer className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+          <footer className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             {error && (
               <div className="mr-auto max-w-[250px] rounded-md border border-[var(--err,#cb4b4b)] bg-[rgba(203,75,75,0.12)] px-2 py-1 text-[11px] text-[var(--err,#ff7b7b)]">
                 {error}
               </div>
             )}
-            <Button onClick={onCancel}>Cancel</Button>
-            <Button variant="primary" onClick={() => onCreate(form)}>
+            <Button className="h-12" onClick={onCancel}>Cancel</Button>
+            <Button className="h-12" variant="primary" onClick={() => onCreate(form)}>
               Create Building
             </Button>
           </footer>
         </div>
 
         {/* ── Right pane: live 3D preview ─────────────────────────────── */}
-        <div className="relative flex-1 bg-black">
+        <div className="relative hidden min-w-0 flex-1 bg-black md:block">
           {previewDoc ? (
             <Viewer
               cityjson={previewDoc}
@@ -494,6 +498,37 @@ function Section({
       </div>
       <div className="space-y-1.5">{children}</div>
     </div>
+  );
+}
+
+function PartChoice({
+  selected,
+  title,
+  description,
+  onClick,
+}: {
+  selected: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={`flex min-h-[58px] items-center gap-3 rounded-lg border px-3 py-2 text-left touch-manipulation ${
+        selected
+          ? 'border-[var(--accent)] bg-[rgba(76,125,255,0.12)]'
+          : 'border-[var(--border)] bg-[var(--bg)]'
+      }`}
+    >
+      <span className={`h-5 w-5 shrink-0 rounded-full border-2 ${selected ? 'border-[var(--accent)] bg-[var(--accent)] shadow-[inset_0_0_0_4px_var(--surface)]' : 'border-[var(--text-faint)]'}`} />
+      <span>
+        <strong className="block text-[12px]">{title}</strong>
+        <small className="mt-0.5 block text-[10px] leading-snug text-[var(--text-dim)]">{description}</small>
+      </span>
+    </button>
   );
 }
 

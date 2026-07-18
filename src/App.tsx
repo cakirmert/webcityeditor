@@ -5,6 +5,7 @@ import MapView from './components/MapView';
 import Viewer from './components/Viewer';
 import AttributePanel from './components/AttributePanel';
 import BuildingCreator from './components/BuildingCreator';
+import BuildingStartPanel from './components/BuildingStartPanel';
 import RoadEditorPanel from './components/RoadEditorPanel';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
@@ -62,6 +63,7 @@ export default function App() {
   const importExport = useImportExport(coreState, undoRedo, catalog);
 
   const [sidePanelWide, setSidePanelWide] = useState(false);
+  const [showBuildingStart, setShowBuildingStart] = useState(false);
   const autoHamburgLoadStartedRef = useRef(false);
   const [autoHamburgStatus, setAutoHamburgStatus] = useState<{
     kind: 'loading' | 'error';
@@ -296,6 +298,8 @@ export default function App() {
         // building/planning inspector stacked underneath its right-hand dock.
         coreState.setSelection(null);
         buildingEditor.setMultiSelection(new Set());
+        buildingEditor.setPendingAsset(null);
+        setShowBuildingStart(false);
         setSelectedZone(null);
         roadEditor.setRoadStatus(
           (current) => current ?? 'Road editor ready. Fetch OSM roads or draw a road manually.'
@@ -389,18 +393,25 @@ export default function App() {
     return filterToBuilding(coreState.cityjson, coreState.selection.objectId);
   }, [coreState.cityjson, coreState.selection, coreState.reloadToken]);
 
-  const initialMapView = useMemo(
-    () =>
-      readInitialMapView(coreState.cityjson) ??
-      (catalog.catalogConnection
+  const initialMapView = useMemo(() => {
+    const saved = readInitialMapView(coreState.cityjson);
+    if (saved) {
+      return coreState.fileName === HAMBURG_CITY_CENTER_COMBINED_NAME
         ? {
-            center: HAMBURG_CITY_CENTER,
-            zoom: HAMBURG_OVERVIEW_ZOOM,
-            disableDataFit: true,
+            ...saved,
+            zoom: Math.min(saved.zoom, 14.9),
+            pitch: Math.max(saved.pitch ?? 0, 58),
           }
-        : undefined),
-    [catalog.catalogConnection, coreState.cityjson]
-  );
+        : saved;
+    }
+    return catalog.catalogConnection
+      ? {
+          center: HAMBURG_CITY_CENTER,
+          zoom: HAMBURG_OVERVIEW_ZOOM,
+          disableDataFit: true,
+        }
+      : undefined;
+  }, [catalog.catalogConnection, coreState.cityjson, coreState.fileName]);
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
@@ -500,6 +511,14 @@ export default function App() {
         saveStatus={coreState.saveStatus}
         drawMode={coreState.drawMode}
         onStartDraw={() => {
+          if (
+            roadEditor.roadDraft &&
+            roadEditor.roadDraftDirty &&
+            !window.confirm('Discard the unsaved road edit and start adding a building?')
+          ) {
+            return;
+          }
+          if (roadEditor.roadDraft) roadEditor.handleCancelRoadEdit(true);
           roadEditor.setShowRoadEditor(false);
           roadEditor.setSelectedRoadArea(null);
           if (zoningEnabled) handleHideZoning();
@@ -507,7 +526,9 @@ export default function App() {
           coreState.setSelection(null);
           roadEditor.setRoadStatus(null);
           buildingEditor.setCreationError(null);
-          coreState.setDrawMode('polygon');
+          buildingEditor.setPendingAsset(null);
+          coreState.setDrawMode('none');
+          setShowBuildingStart(true);
         }}
         onCancelDraw={() => {
           if (coreState.drawMode === 'road-line') {
@@ -517,6 +538,7 @@ export default function App() {
           buildingEditor.setPendingFootprint(null);
           buildingEditor.setPendingForm(null);
           buildingEditor.setCreationError(null);
+          setShowBuildingStart(false);
         }}
         roadEditorOpen={roadEditor.showRoadEditor}
         onToggleRoadEditor={handleToggleRoadEditor}
@@ -581,6 +603,26 @@ export default function App() {
               parsed={buildingEditor.ifcPending.parsed}
               fileName={buildingEditor.ifcPending.fileName}
               onCancel={buildingEditor.handleCancelIfcPlacement}
+            />
+          )}
+          {buildingEditor.pendingAsset && (
+            <AssetPlacementBanner
+              name={buildingEditor.pendingAsset.name}
+              size={buildingEditor.pendingAsset.size}
+              onCancel={buildingEditor.handleCancelAssetPlacement}
+            />
+          )}
+          {showBuildingStart && (
+            <BuildingStartPanel
+              onDrawCustom={() => {
+                setShowBuildingStart(false);
+                coreState.setDrawMode('polygon');
+              }}
+              onPlaceAsset={(asset) => {
+                setShowBuildingStart(false);
+                buildingEditor.setPendingAsset(asset);
+              }}
+              onCancel={() => setShowBuildingStart(false)}
             />
           )}
           {zoningEnabled && zones.length > 0 && (
@@ -666,7 +708,13 @@ export default function App() {
                 buildingEditor.setCreationError(null);
               }}
               filteredIds={filterIsEmpty ? null : filteredIds}
-              onPlacementClick={buildingEditor.ifcPending ? buildingEditor.handleIfcPlacement : undefined}
+              onPlacementClick={
+                buildingEditor.pendingAsset
+                  ? buildingEditor.handleAssetPlacement
+                  : buildingEditor.ifcPending
+                  ? buildingEditor.handleIfcPlacement
+                  : undefined
+              }
               onViewportChange={handleMapViewportChange}
               dragTransformId={buildingEditor.pendingTransform?.id ?? null}
               onDragMove={buildingEditor.handleDragMove}
@@ -1337,6 +1385,26 @@ function IfcPlacementBanner({
           ✕ Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+function AssetPlacementBanner({
+  name,
+  size,
+  onCancel,
+}: {
+  name: string;
+  size: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="building-placement-banner" role="status">
+      <div>
+        <strong>Tap the map to place {name}</strong>
+        <span>{size} · genuine textured Hamburg LoD3 geometry</span>
+      </div>
+      <button type="button" onClick={onCancel}>Cancel</button>
     </div>
   );
 }

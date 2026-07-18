@@ -16,6 +16,25 @@ const RECT_DELFT: [number, number][] = [
 ];
 
 describe('<BuildingCreator /> overhang controls', () => {
+  it('explains optional editable parts without the ambiguous subdivide wording', async () => {
+    const onFormChange = vi.fn();
+    const { queryByText, getByText } = render(
+      <BuildingCreator
+        vertexCount={RECT_DELFT.length}
+        footprint={RECT_DELFT}
+        cityjson={buildSampleCube()}
+        onFormChange={onFormChange}
+        onCreate={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+
+    expect(queryByText(/Subdivide on create/i)).not.toBeInTheDocument();
+    expect(getByText('Keep one building')).toBeInTheDocument();
+    fireEvent.click(getByText('Make floors independent'));
+    await waitFor(() => expect(onFormChange.mock.calls.at(-1)?.[0]?.splitMode).toBe('floors'));
+  });
+
   it('enables flat eave overhang and emits it in form state', async () => {
     const onFormChange = vi.fn();
     const { container } = render(

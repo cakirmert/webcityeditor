@@ -544,28 +544,6 @@ export default function RoadEditorPanel({
                   >Straight</button>
                 </div>
               </div>
-              <label>
-                <span>Curve strength</span>
-                <output>{Math.round((activeSection.curve?.strength ?? 0.72) * 100)}%</output>
-                <input
-                  type="range"
-                  min={0.2}
-                  max={1}
-                  step={0.05}
-                  disabled={activeSection.curve?.mode === 'straight'}
-                  value={activeSection.curve?.strength ?? 0.72}
-                  aria-label="Road curve strength"
-                  onChange={(event) =>
-                    updateSection(activeSection.id, (section) => ({
-                      ...section,
-                      curve: {
-                        mode: section.curve?.mode ?? 'smooth',
-                        strength: Number(event.target.value),
-                      },
-                    }))
-                  }
-                />
-              </label>
               {activeSection.centerlineWgs84.length < 3 && (
                 <p>Two anchors make a straight span. Tap the white + on the map to add a bend.</p>
               )}
@@ -697,7 +675,7 @@ export default function RoadEditorPanel({
               </Button>
             </div>
 
-            <div className="road-lane-editor">
+            <div className="road-lane-editor road-lane-editor--mobile">
               <PanelSectionHeader
                 icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
               title="Lanes and roadside"

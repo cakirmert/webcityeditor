@@ -255,7 +255,7 @@ export default function Toolbar({
                 className="app-toolbar__action"
                 variant="primary"
                 onClick={onStartDraw}
-                title="Draw a 2D footprint to create a new LoD2 building"
+                title="Add a custom or ready-made LoD3 building"
               >
                 <Building2 aria-hidden="true" /> New Building
               </Button>
