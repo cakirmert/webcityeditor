@@ -421,7 +421,11 @@ function parseSpeedKmh(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string' || value.toLowerCase() === 'none') return null;
   const match = value.match(/\d+(?:\.\d+)?/);
-  return match ? Number(match[0]) : null;
+  if (!match) return null;
+  const speed = Number(match[0]);
+  if (/\bSpeed\s*\(/i.test(value)) return Math.round(speed * 3_600) / 1_000;
+  if (/\bMph\s*\(/i.test(value)) return Math.round(speed * 1_609.344) / 1_000;
+  return speed;
 }
 
 function numberValue(value: unknown): number {

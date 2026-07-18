@@ -84,6 +84,19 @@ describe('mergeCityJson', () => {
     expect(r.reason).toMatch(/CRS mismatch/);
   });
 
+  it('treats equivalent OGC http and https EPSG identifiers as the same CRS', () => {
+    const base = buildSampleCube();
+    const inc = buildSampleCube();
+    if (base.metadata) {
+      base.metadata.referenceSystem = 'https://www.opengis.net/def/crs/EPSG/0/25832';
+    }
+    if (inc.metadata) {
+      inc.metadata.referenceSystem = 'http://www.opengis.net/def/crs/EPSG/0/25832';
+    }
+
+    expect(mergeCityJson(base, inc).ok).toBe(true);
+  });
+
   it('re-encodes compatible transform mismatches onto the base integer grid', () => {
     const base = buildSampleCube();
     const inc = buildSampleCube();

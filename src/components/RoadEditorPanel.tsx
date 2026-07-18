@@ -46,6 +46,9 @@ interface Props {
   editingRoadId?: string | null;
   status: string | null;
   basemap: 'map' | 'satellite';
+  satelliteOpacity: number;
+  roadOverlayOpacity: number;
+  cityJsonRoadCount: number;
   drawMode: 'none' | 'polygon' | 'road-line';
   backendUrl: string;
   insertedRoadId?: string | null;
@@ -56,6 +59,8 @@ interface Props {
   onClose: () => void;
   onFetchOsmRoads: () => void;
   onBasemapChange: (basemap: 'map' | 'satellite') => void;
+  onSatelliteOpacityChange: (opacity: number) => void;
+  onRoadOverlayOpacityChange: (opacity: number) => void;
   onStartManualDraw: () => void;
   onFinishManualDraw: () => void;
   onCancelDraw: () => void;
@@ -67,8 +72,7 @@ interface Props {
   onPostPayload: () => void;
   onBackendUrlChange: (url: string) => void;
   onEditSelectedRoadArea: (area: RoadArea) => void;
-  onCreateDraftFromOsm2StreetsSelection: () => void;
-  onInsertOsm2StreetsSelection: () => void;
+  onEditOsm2StreetsSelection: () => void;
   onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
 }
@@ -101,6 +105,9 @@ export default function RoadEditorPanel({
   editingRoadId = null,
   status,
   basemap,
+  satelliteOpacity,
+  roadOverlayOpacity,
+  cityJsonRoadCount,
   drawMode,
   backendUrl,
   insertedRoadId,
@@ -110,6 +117,9 @@ export default function RoadEditorPanel({
   osm2streetsSelection = null,
   onClose,
   onFetchOsmRoads,
+  onBasemapChange,
+  onSatelliteOpacityChange,
+  onRoadOverlayOpacityChange,
   onStartManualDraw,
   onFinishManualDraw,
   onCancelDraw,
@@ -121,8 +131,7 @@ export default function RoadEditorPanel({
   onPostPayload,
   onBackendUrlChange,
   onEditSelectedRoadArea,
-  onCreateDraftFromOsm2StreetsSelection,
-  onInsertOsm2StreetsSelection,
+  onEditOsm2StreetsSelection,
   onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
 }: Props) {
@@ -172,18 +181,17 @@ export default function RoadEditorPanel({
     ? activeSection.bands.reduce((sum, band) => sum + band.widthM, 0)
     : 0;
   const draftBandCount = activeSection?.bands.length ?? 0;
-  const carLaneCount = activeSection?.bands.filter((band) => band.kind === 'car_lane').length ?? 0;
-  const bikeLaneCount =
-    activeSection?.bands.filter((band) => band.kind === 'bike_lane').length ?? 0;
-  const roadFitTone =
-    blockingFitConflicts.length > 0 ? 'error' : roadFitConflicts.length > 0 ? 'warn' : 'ok';
-  const sourceLabel = selectedOsm
+  const sourceLabel = selectedRoadArea
+    ? 'CityJSON'
+    : selectedOsm
     ? selectedOsm.tags.name ?? selectedOsm.id
     : osm2streetsSelection
       ? 'osm2streets selection'
       : draft
         ? draft.source
-        : 'none';
+        : cityJsonRoadCount > 0
+          ? 'CityJSON'
+          : 'none';
   const verticalProfile = draft ? roadVerticalProfileForDraft(draft) : null;
   const activeBand = activeSection?.bands[activeBandIndex] ?? null;
   const connectionCount = draft?.sections.reduce(
@@ -289,7 +297,7 @@ export default function RoadEditorPanel({
 
   return (
     <aside
-      className={`road-editor-panel ${expanded ? 'is-expanded' : ''} ${drawMode === 'road-line' ? 'is-drawing' : ''}`}
+      className={`road-editor-panel ${expanded ? 'is-expanded' : ''} ${drawMode === 'road-line' ? 'is-drawing' : ''} ${!draft ? 'is-browse' : ''}`}
       data-testid="road-editor-panel"
     >
       <header className="road-editor-panel__header">
@@ -314,7 +322,7 @@ export default function RoadEditorPanel({
             type="button"
             size="icon"
             variant="ghost"
-            className="h-11 w-11"
+            className="road-editor-expand h-11 w-11"
             onClick={() => setExpanded((value) => !value)}
             aria-label={expanded ? 'Use compact road editor' : 'Expand road editor'}
             title={expanded ? 'Use compact width' : 'Make editor wider'}
@@ -356,83 +364,86 @@ export default function RoadEditorPanel({
         </div>
       )}
 
-      <div className="road-editor-panel__metrics grid grid-cols-3 gap-1 border-b border-[rgba(148,163,184,0.14)] bg-[rgba(0,0,0,0.16)] px-3 py-2">
-        <MetricPill
-          icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
-          label="OSM"
-          value={String(osmRoads.length)}
-          sub="segments"
-        />
-        <MetricPill
-          icon={<Road className="h-3.5 w-3.5" aria-hidden="true" />}
-          label="Draft"
-          value={draft ? `${draftBandCount} bands` : 'none'}
-          sub={activeSection ? `${activeTotalWidth.toFixed(1)} m` : 'not selected'}
-        />
-        <MetricPill
-          icon={
-            roadFitTone === 'error' ? (
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )
-          }
-          label="Fit"
-          value={
-            roadFitPending
-              ? 'checking…'
-              : roadFitTone === 'error'
-              ? `${blockingFitConflicts.length} block`
-              : warningFitConflicts > 0
-                ? `${warningFitConflicts} warn`
-                : 'clear'
-          }
-          sub={roadFitPending ? 'while you shape' : carLaneCount || bikeLaneCount ? `${carLaneCount} car / ${bikeLaneCount} bike` : 'preview'}
-          tone={roadFitPending ? 'neutral' : roadFitTone}
-        />
+      <div className="road-editor-quick-status" role="status">
+        <span><b>{cityJsonRoadCount.toLocaleString()}</b> CityJSON roads</span>
+        {draft && <span><b>{draftBandCount}</b> bands · {activeTotalWidth.toFixed(1)} m</span>}
+        {roadFitPending ? (
+          <span>Checking fit…</span>
+        ) : blockingFitConflicts.length > 0 ? (
+          <span className="is-error"><b>{blockingFitConflicts.length}</b> conflicts</span>
+        ) : warningFitConflicts > 0 ? (
+          <span className="is-warning"><b>{warningFitConflicts}</b> warnings</span>
+        ) : draft ? (
+          <span className="is-ok">Fit clear</span>
+        ) : null}
       </div>
 
       <div className="road-editor-panel__scroll">
-        <nav className="road-editor-steps" aria-label="Road editing steps">
-          <span className={draft ? 'is-done' : 'is-active'}><b>1</b>Choose</span>
-          <span className={draft ? 'is-active' : ''}><b>2</b>Shape</span>
-          <span className={draft ? 'is-active' : ''}><b>3</b>Lanes</span>
-          <span><b>4</b>Save</span>
-        </nav>
-
         <section className="road-editor-card">
           <PanelSectionHeader
             icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
-            title="1 · Choose a road"
-            meta={selectedOsm ? selectedOsm.tags.name ?? selectedOsm.id : `${osmRoads.length} OSM segments`}
+            title="Roads"
+            meta={`${cityJsonRoadCount.toLocaleString()} saved in CityJSON`}
           />
           <p className="road-editor-card__help">
-            Load detailed osm2streets roads for what you can see, then tap a road. Or draw a
-            centreline yourself while comparing it with the imagery.
+            <b>Tap any road on the map to edit it.</b> Buildings remain selectable; tapping one
+            leaves road mode and opens its attributes.
           </p>
           <div className="road-source-actions">
-            <Button variant="primary" className="road-touch-action" onClick={onFetchOsmRoads}>
-              <Route className="h-5 w-5" aria-hidden="true" />
-              <span>
-                <b>{osmRoads.length > 0 ? 'Refresh visible roads' : 'Load visible roads'}</b>
-                <small>osm2streets lanes and junctions</small>
-              </span>
-            </Button>
             {drawMode !== 'road-line' && (
-              <Button className="road-touch-action" onClick={onStartManualDraw}>
+              <Button variant="primary" className="road-touch-action" onClick={onStartManualDraw}>
                 <PencilLine className="h-5 w-5" aria-hidden="true" />
-                <span><b>{draft ? 'Redraw centreline' : 'Draw a road'}</b><small>tap points along every bend</small></span>
+                <span><b>{draft ? 'Redraw road' : 'Draw new road'}</b><small>tap points along every bend</small></span>
               </Button>
             )}
           </div>
-          <div className="road-map-layers-hint">
-            {basemap === 'satellite' ? <Satellite aria-hidden="true" /> : <Map aria-hidden="true" />}
-            <span>
-              {basemap === 'satellite' ? 'Satellite comparison is on.' : 'Map view is on.'}{' '}
-              Use <b>Map layers</b> in the lower-left of the map to switch and blend imagery
-              against road surfaces.
-            </span>
+          <div className="road-map-compare" aria-label="Road and imagery comparison">
+            <div className="road-map-compare__modes" role="group" aria-label="Basemap">
+              <button
+                type="button"
+                className={basemap === 'map' ? 'is-active' : ''}
+                onClick={() => onBasemapChange('map')}
+              ><Map aria-hidden="true" /> Map</button>
+              <button
+                type="button"
+                className={basemap === 'satellite' ? 'is-active' : ''}
+                onClick={() => onBasemapChange('satellite')}
+              ><Satellite aria-hidden="true" /> Satellite</button>
+            </div>
+            <label className={basemap !== 'satellite' ? 'is-disabled' : ''}>
+              <span>Satellite</span><output>{Math.round(satelliteOpacity * 100)}%</output>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={satelliteOpacity}
+                disabled={basemap !== 'satellite'}
+                aria-label="Satellite opacity"
+                onChange={(event) => onSatelliteOpacityChange(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Roads</span><output>{Math.round(roadOverlayOpacity * 100)}%</output>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={roadOverlayOpacity}
+                aria-label="Road opacity"
+                onChange={(event) => onRoadOverlayOpacityChange(Number(event.target.value))}
+              />
+            </label>
           </div>
+          <details className="road-osm-update">
+            <summary>Update from OSM (optional)</summary>
+            <p>Use this only to compare newer OSM data. Saved and exported roads remain CityJSON.</p>
+            <Button className="h-12 w-full" onClick={onFetchOsmRoads}>
+              <Route className="h-5 w-5" aria-hidden="true" />
+              {osmRoads.length > 0 ? 'Refresh OSM comparison' : 'Load OSM comparison'}
+            </Button>
+          </details>
           {status && <StatusCard>{status}</StatusCard>}
         </section>
 
@@ -445,12 +456,11 @@ export default function RoadEditorPanel({
 
         <Osm2StreetsInspector
           selection={osm2streetsSelection}
-          onCreateDraft={onCreateDraftFromOsm2StreetsSelection}
-          onInsertCityJson={onInsertOsm2StreetsSelection}
+          onEditRoad={onEditOsm2StreetsSelection}
           onHighlightConnectedRoads={onHighlightConnectedOsm2StreetsRoads}
           onClear={onClearOsm2StreetsSelection}
         />
-        {selectedRoadArea && (
+        {selectedRoadArea && !draft && (
           <SelectedRoadAreaCard area={selectedRoadArea} onEdit={onEditSelectedRoadArea} />
         )}
 
@@ -458,7 +468,7 @@ export default function RoadEditorPanel({
           <section className="road-editor-card space-y-4">
             <PanelSectionHeader
               icon={<Road className="h-3.5 w-3.5" aria-hidden="true" />}
-              title="2 · Shape and connect"
+              title="Shape and connect"
               meta={draft.name ?? draft.source}
             />
             <div className="road-shape-summary">
@@ -690,7 +700,7 @@ export default function RoadEditorPanel({
             <div className="road-lane-editor">
               <PanelSectionHeader
                 icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
-                title="3 · Lanes and roadside"
+              title="Lanes and roadside"
                 meta="left to right on the map"
               />
               <p className="road-editor-card__help">
@@ -1022,39 +1032,6 @@ function PanelSectionHeader({
   );
 }
 
-function MetricPill({
-  icon,
-  label,
-  value,
-  sub,
-  tone = 'neutral',
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-  tone?: 'neutral' | 'ok' | 'warn' | 'error';
-}) {
-  const toneClass =
-    tone === 'error'
-      ? 'border-red-400/35 bg-red-500/10 text-red-100'
-      : tone === 'warn'
-        ? 'border-amber-400/35 bg-amber-500/10 text-amber-100'
-        : tone === 'ok'
-          ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100'
-          : 'border-[rgba(148,163,184,0.16)] bg-[rgba(255,255,255,0.035)] text-[var(--text)]';
-  return (
-    <div className={`min-w-0 rounded-md border px-2 py-1.5 ${toneClass}`}>
-      <div className="flex min-w-0 items-center gap-1.5 text-[10px] uppercase tracking-wide opacity-80">
-        {icon}
-        <span>{label}</span>
-      </div>
-      <div className="mt-0.5 truncate text-[12px] font-semibold leading-tight">{value}</div>
-      <div className="truncate text-[10px] opacity-65">{sub}</div>
-    </div>
-  );
-}
-
 function StatusCard({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-md border border-[rgba(148,163,184,0.16)] bg-[rgba(0,0,0,0.18)] px-2.5 py-2 text-[11px] leading-snug text-[var(--text-dim)]">
@@ -1118,56 +1095,36 @@ function SelectedRoadAreaCard({ area, onEdit }: { area: RoadArea; onEdit: (area:
       : null;
 
   return (
-    <div className="rounded border border-[var(--border)] bg-[rgba(0,0,0,0.2)] p-2 text-[11px]">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="font-semibold">CityJSON road surface</span>
-        <span className="rounded bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)]">
-          {area.surfaceType}
-        </span>
+    <div className="selected-road-card">
+      <div className="selected-road-card__title">
+        <div>
+          <b>{stringAttr(attrs.roadName) ?? 'Selected CityJSON road'}</b>
+          <span>{stringAttr(attrs.sourceType) ?? area.function} · {stringAttr(attrs.trafficDirection) ?? 'no direction'}</span>
+        </div>
+        <span>{modes}</span>
       </div>
-      <dl className="grid grid-cols-[88px_1fr] gap-x-2 gap-y-1">
-        <dt className="text-[var(--text-dim)]">road</dt>
-        <dd className="truncate">{area.roadId}</dd>
-        <dt className="text-[var(--text-dim)]">function</dt>
-        <dd>{area.function}</dd>
-        <dt className="text-[var(--text-dim)]">source type</dt>
-        <dd>{stringAttr(attrs.sourceType) ?? 'unknown'}</dd>
-        <dt className="text-[var(--text-dim)]">osm2streets</dt>
-        <dd>
-          road {stringAttr(attrs.osm2streetsRoadId) ?? 'n/a'}, lane{' '}
-          {stringAttr(attrs.osm2streetsLaneIndex) ?? 'n/a'}
-        </dd>
-        <dt className="text-[var(--text-dim)]">direction</dt>
-        <dd>{stringAttr(attrs.trafficDirection) ?? 'none'}</dd>
-        <dt className="text-[var(--text-dim)]">modes</dt>
-        <dd>{modes}</dd>
-        <dt className="text-[var(--text-dim)]">OSM ways</dt>
-        <dd className="break-words">{osmWayIds}</dd>
-      </dl>
-      <Button size="sm" className="mt-2 w-full" onClick={() => onEdit(area)}>
-        <PencilLine className="h-3.5 w-3.5" aria-hidden="true" />
-        {area.geometryMode === 'exact'
-          ? 'Edit exact road'
-          : area.editableDraft
-            ? 'Edit saved layout'
-            : 'Create editable layout'}
+      <Button className="h-14 w-full text-sm" variant="primary" onClick={() => onEdit(area)}>
+        <PencilLine className="h-5 w-5" aria-hidden="true" /> Edit road
       </Button>
       {area.geometryMode === 'exact' && (
-        <p className="mt-1.5 text-[10px] leading-snug text-[var(--text-faint)]">
-          Attribute edits preserve these exact polygons. Only moving handles, changing width,
-          reordering or adding bands, splitting, or changing the curve rebuilds editable ribbons.
+        <p>
+          Speed, direction, access, material, and type keep the exact source polygons. Shape or
+          width changes rebuild only this road.
         </p>
       )}
-      {provenance && (
-        <details className="mt-2">
-          <summary className="cursor-pointer text-[10px] text-[var(--text-dim)]">
-            osm2streets properties JSON
-          </summary>
+      <details className="selected-road-card__source">
+        <summary>Source details</summary>
+        <dl>
+          <dt>CityJSON id</dt><dd>{area.roadId}</dd>
+          <dt>osm2streets</dt><dd>road {stringAttr(attrs.osm2streetsRoadId) ?? 'n/a'}, lane {stringAttr(attrs.osm2streetsLaneIndex) ?? 'n/a'}</dd>
+          <dt>OSM ways</dt><dd>{osmWayIds}</dd>
+        </dl>
+        {provenance && (
           <pre className="mt-1 max-h-28 overflow-auto rounded bg-[rgba(0,0,0,0.28)] p-1 text-[10px] leading-snug">
             {provenance}
           </pre>
-        </details>
-      )}
+        )}
+      </details>
     </div>
   );
 }

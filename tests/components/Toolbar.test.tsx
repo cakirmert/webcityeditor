@@ -7,8 +7,11 @@ const defaultStats = {
   version: '2.0',
   totalObjects: 100,
   rootBuildings: 42,
+  roads: 1608,
   vertices: 12345,
   crs: 'https://www.opengis.net/def/crs/EPSG/0/28992',
+  maxBuildingLod: 2,
+  hasOpenings: false,
 };
 
 describe('<Toolbar />', () => {
@@ -115,7 +118,7 @@ describe('<Toolbar />', () => {
     expect(onReloadView).toHaveBeenCalledTimes(1);
   });
 
-  it('turns an enabled Planning action into an explicit current-view refresh', async () => {
+  it('turns an enabled Planning action into an explicit off switch', async () => {
     const onToggleZoning = vi.fn();
     render(
       <Toolbar
@@ -131,9 +134,9 @@ describe('<Toolbar />', () => {
       />
     );
 
-    const refresh = screen.getByRole('button', { name: 'Refresh Planning' });
-    expect(refresh).toHaveAttribute('title', 'Refresh planning overlay for the current map view');
-    await userEvent.click(refresh);
+    const hide = screen.getByRole('button', { name: 'Hide Planning' });
+    expect(hide).toHaveAttribute('title', 'Hide the planning overlay');
+    await userEvent.click(hide);
     expect(onToggleZoning).toHaveBeenCalledTimes(1);
   });
 

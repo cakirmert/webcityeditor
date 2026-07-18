@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import proj4 from 'proj4';
 import type { CityJsonDocument } from '../../src/types';
 import type { Osm2StreetsResult, Osm2StreetsSelection } from '../../src/lib/osm2streets';
 import { insertOsm2StreetsRoadIntoCityJson } from '../../src/lib/osm2streets-cityjson';
@@ -218,6 +219,39 @@ describe('insertOsm2StreetsRoadIntoCityJson', () => {
       osmLayer: -2,
     });
   });
+
+  it('places exact imported surfaces on the local building ground instead of the document minimum', () => {
+    const doc = localGroundHamburgDoc();
+    const selection: Osm2StreetsSelection = {
+      kind: 'lane',
+      feature: result.lanes.features[0],
+    };
+
+    const inserted = insertOsm2StreetsRoadIntoCityJson(
+      doc,
+      selection,
+      result,
+      [osmRoad],
+      { id: 'locally-grounded-road' }
+    );
+
+    expect(inserted.areas[0].vertical).toMatchObject({
+      placement: 'surface',
+      elevationM: 12,
+    });
+    const roadGeometry = doc.CityObjects['locally-grounded-road'].geometry?.[0] as {
+      boundaries: number[][][];
+    };
+    const roadVertexIndices = roadGeometry.boundaries.flat(2);
+    expect(
+      roadVertexIndices.every(
+        (vertexIndex) =>
+          doc.vertices[vertexIndex][2] * doc.transform!.scale[2] +
+            doc.transform!.translate[2] ===
+          12
+      )
+    ).toBe(true);
+  });
 });
 
 function emptyHamburgDoc(): CityJsonDocument {
@@ -233,6 +267,50 @@ function emptyHamburgDoc(): CityJsonDocument {
     },
     CityObjects: {},
     vertices: [],
+  };
+}
+
+function localGroundHamburgDoc(): CityJsonDocument {
+  const doc = emptyHamburgDoc();
+  addGroundBuilding(doc, 'near-road', [9.99204, 53.54905], 12);
+  addGroundBuilding(doc, 'distant-low-point', [9.98, 53.54], -8);
+  return doc;
+}
+
+function addGroundBuilding(
+  doc: CityJsonDocument,
+  id: string,
+  center: [number, number],
+  elevationM: number
+): void {
+  const [x, y] = proj4('EPSG:4326', 'EPSG:25832', center) as [number, number];
+  const t = doc.transform!;
+  const firstVertex = doc.vertices.length;
+  for (const [dx, dy] of [
+    [-15, -15],
+    [15, -15],
+    [15, 15],
+    [-15, 15],
+  ] as [number, number][]) {
+    doc.vertices.push([
+      Math.round((x + dx - t.translate[0]) / t.scale[0]),
+      Math.round((y + dy - t.translate[1]) / t.scale[1]),
+      Math.round((elevationM - t.translate[2]) / t.scale[2]),
+    ]);
+  }
+  doc.CityObjects[id] = {
+    type: 'Building',
+    geometry: [
+      {
+        type: 'MultiSurface',
+        lod: '2',
+        boundaries: [[[firstVertex, firstVertex + 1, firstVertex + 2, firstVertex + 3]]],
+        semantics: {
+          surfaces: [{ type: 'GroundSurface' }],
+          values: [0],
+        },
+      },
+    ],
   };
 }
 

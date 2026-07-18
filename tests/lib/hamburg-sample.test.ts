@@ -5,16 +5,23 @@ import { buildCityJsonMapMesh } from '../../src/lib/cityjson-map-mesh';
 import { commitBuildingTransformFromEditor } from '../../src/lib/editor-actions';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import { extractFootprints, filterToBuilding } from '../../src/lib/footprints';
+import { mergeCityJson } from '../../src/lib/merge';
+import { extractTransportationAreas } from '../../src/lib/transportation';
 
 const HAMBURG_BUILDINGS_PATH =
   'public/data/hamburg/hamburg-city-center-buildings.city.jsonl';
-const HAMBURG_ROADS_PATH = 'public/data/hamburg/hamburg-city-center-roads.osm';
+const HAMBURG_ROADS_CITYJSON_PATH =
+  'public/data/hamburg/hamburg-city-center-roads.city.json';
+const HAMBURG_ROADS_OSM_PATH = 'public/data/hamburg/hamburg-city-center-roads.osm';
 const DEMO_BBOX: [number, number, number, number] = [9.978, 53.5395, 10.0035, 53.5545];
 
 const text = readFileSync(HAMBURG_BUILDINGS_PATH, 'utf8');
-const osmText = readFileSync(HAMBURG_ROADS_PATH, 'utf8');
+const roadText = readFileSync(HAMBURG_ROADS_CITYJSON_PATH, 'utf8');
+const osmText = readFileSync(HAMBURG_ROADS_OSM_PATH, 'utf8');
 const parsed = parseCityJsonAuto(text);
 if (!parsed.ok) throw new Error(parsed.error);
+const parsedRoads = parseCityJsonAuto(roadText);
+if (!parsedRoads.ok) throw new Error(parsedRoads.error);
 
 const doc = parsed.doc;
 const footprints = extractFootprints(doc);
@@ -46,7 +53,48 @@ describe('Hamburg committed city-center demo', () => {
     expect(mesh!.triangleCount).toBeGreaterThan(10_000);
   });
 
-  it('contains a compact OSM road crop in the same shape as Fetch Roads', () => {
+  it('starts from editable osm2streets road surfaces stored in CityJSON', () => {
+    const roadIds = Object.entries(parsedRoads.doc.CityObjects)
+      .filter(([, object]) => object.type === 'Road')
+      .map(([id]) => id);
+    const areas = extractTransportationAreas(parsedRoads.doc);
+
+    expect(roadIds).toHaveLength(1_608);
+    expect(areas).toHaveLength(6_555);
+    expect(areas.every((area) => area.geometryMode === 'exact')).toBe(true);
+    expect(areas.some((area) => area.function === 'driving_lane')).toBe(true);
+    expect(areas.some((area) => area.function === 'bike_lane')).toBe(true);
+    expect(areas.some((area) => area.function === 'sidewalk')).toBe(true);
+    expect(parsedRoads.doc.metadata?.source).toContain('osm2streets');
+    expect(
+      parsedRoads.doc.CityObjects['hh-road-r00-c00-osm2streets-road-29']?.attributes
+    ).toMatchObject({
+      name: 'Steintwietenhof',
+      _highwayType: 'residential',
+      _createdBy: 'webcityeditor',
+      _verticalProfile: {
+        placement: 'surface',
+        elevationM: 0,
+        osmLayer: 0,
+      },
+    });
+  });
+
+  it('merges the default roads into the building document without changing building geometry', () => {
+    const combined = structuredClone(doc);
+    const originalBuildingVertices = combined.vertices.length;
+    const result = mergeCityJson(combined, parsedRoads.doc);
+
+    expect(result).toMatchObject({ ok: true, added: 1_608, renamed: 0 });
+    expect(
+      Object.values(combined.CityObjects).filter((object) => object.type === 'Building')
+    ).toHaveLength(1_353);
+    expect(combined.vertices.length).toBe(
+      originalBuildingVertices + parsedRoads.doc.vertices.length
+    );
+  });
+
+  it('keeps the compact OSM crop only as an optional refresh source', () => {
     expect((osmText.match(/<way\b/g) ?? []).length).toBe(1_624);
     expect(osmText).toContain('<tag k="highway" v="primary"');
     expect(osmText).toContain('<tag k="highway" v="secondary"');

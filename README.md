@@ -1,6 +1,6 @@
 # City Editor
 
-City Editor is a touch-friendly browser workspace for checking and editing CityJSON buildings and osm2streets-quality roads directly on a map. The Hamburg city-center demo opens automatically, so you can explore the interface before loading your own data.
+City Editor is a touch-friendly map for editing buildings and osm2streets-quality roads in one CityJSON file. The Hamburg demo opens automatically with 1,353 buildings and 1,608 editable CityJSON roads—no server or OSM conversion is needed at startup.
 
 ![Hamburg buildings in City Editor](assets/readme/city-overview.jpg)
 
@@ -17,38 +17,35 @@ Open the local address printed in the terminal. No backend, Rust installation, o
 
 ## Edit a building
 
-1. Tap a building on the map.
+1. Tap a building on the map to see its attributes.
 2. Change its height, storeys, function, or roof type in **Building details**.
-3. Choose **Make editable** only when you want to replace imported geometry with a parametric building that can be reshaped.
-4. Use the larger action cards for footprint, position, floors, openings, or roof changes.
-5. Choose **Export CityJSON** when you are ready to save or compare the result.
+3. Choose **Start editing position** to move it while keeping its ground aligned with nearby terrain.
+4. Choose **Make editable** only when you intentionally want to replace imported geometry with a reshaped parametric building.
+5. Export CityJSON when you are ready to save or compare the result.
 
-The close-up viewer uses the highest LoD stored for that building. Far-away buildings become inexpensive outlines or blocks so navigation stays responsive.
+The close-up viewer uses the highest LoD actually stored for that building. The built-in Hamburg source is LoD2, so the UI says **LoD2 · no openings in source** instead of pretending windows or LoD3 geometry exist. A file that really contains LoD3 or semantic Window/Door surfaces is rendered at that higher source detail. Hamburg’s much larger official [LoD3.0 CityGML source](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5) has detailed roofs and facade textures, but must first be converted to CityJSON.
 
 ![Building details and highest-detail preview](assets/readme/building-editor.jpg)
 
 ## Edit a road
 
-1. Choose **Roads**. Tap an existing road, choose **Load visible roads**, or choose **Draw a road**.
-2. Shape the centreline on the map. Yellow handles move bends, white `+` handles add bends, and teal endpoints show places where roads can connect.
-3. In **Lanes**, edit the road type, direction, speed, access, surface, and the width or order of each visible band. The preview uses the same surface styling as the map.
-4. Open **Map layers** to switch between map and satellite imagery and adjust both imagery and road opacity.
-5. Review the preview and choose **Save**. **Discard** is always available.
+1. Choose **Roads**, then tap a road on the map.
+2. Choose the single **Edit road** action. The exact osm2streets polygons are already stored in CityJSON.
+3. Tap a coloured band in the map-integrated cross-section. Use the large `−`, `+`, and direction controls, or scroll the road sheet for every attribute.
+4. Drag yellow handles to bend the road, tap white `+` handles to add a curve point, and drag an end onto a teal dot to confirm a connection.
+5. Switch between **Map** and **Satellite** inside the road sheet. Both satellite and road opacity have their own sliders.
+6. Choose **Save** or **Discard**.
 
-For imported osm2streets roads, ordinary attribute changes preserve the exact source polygons and vertices. Moving the centreline, changing widths, rearranging bands, splitting, or changing the curve intentionally rebuilds an editable road ribbon, and the editor warns before that happens.
+The saved CityJSON road layer uses the same lane colours and polygon boundaries as the osm2streets view, without the extra white outlines that previously changed its appearance. Attribute-only changes preserve the exact source vertices. Moving a handle, changing width/order, splitting, or changing curve settings deliberately rebuilds only that road and is clearly labelled before save.
 
 ![Touch-friendly exact road editing](assets/readme/road-editor.jpg)
 
 ## Save, compare, and continue later
 
-Edits stay local until you export. **Export CityJSON** downloads a complete editable snapshot that can be reopened, compared, and changed again. A connected local Hamburg catalog can also write changed CityJSONSeq tiles back to disk.
+Edits stay local until you export. **Export CityJSON** downloads one complete snapshot containing both buildings and roads. Reopen it later to compare or continue editing.
 
-For the optional complete Hamburg road catalog on Windows:
+To create a building, choose **New Building**, tap at least three corners, choose **Use outline**, review the preview, then choose **Create Building**. This flow works with touch and does not require a double-click.
 
-```powershell
-.\PREPARE_HAMBURG_ROADS.cmd -Serve
-```
-
-The large generated catalog stays under `Data/` and is intentionally ignored by Git.
+On a phone, the toolbar keeps only **Data**, **Roads**, **New Building**, and **More** visible. Building list, planning, export, validation, and developer actions remain available in the large **More** menu.
 
 Architecture, data formats, osm2streets decisions, contributor commands, and the honest remaining roadmap are in [PROJECT.md](PROJECT.md).

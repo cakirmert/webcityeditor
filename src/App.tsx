@@ -24,6 +24,8 @@ import { estimateTerrainSnap } from './lib/terrain';
 import { buildPreviewMesh } from './lib/preview-mesh';
 import { computeTransformedFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
+import { parseCityJson } from './lib/cityjson';
+import { mergeCityJson } from './lib/merge';
 import {
   parseCityJsonSeqStrict,
   type CityJsonSeqViewportLoad,
@@ -49,8 +51,9 @@ const HAMBURG_OVERVIEW_ZOOM = 9.75;
 const HAMBURG_CITY_CENTER_DEMO_URL =
   'data/hamburg/hamburg-city-center-buildings.city.jsonl';
 const HAMBURG_CITY_CENTER_DEMO_NAME = 'hamburg-city-center-buildings.city.jsonl';
-const HAMBURG_CITY_CENTER_OSM_URL = 'data/hamburg/hamburg-city-center-roads.osm';
-const HAMBURG_CITY_CENTER_DEMO_BBOX: Wgs84Bbox = [9.978, 53.5395, 10.0035, 53.5545];
+const HAMBURG_CITY_CENTER_ROADS_URL =
+  'data/hamburg/hamburg-city-center-roads.city.json';
+const HAMBURG_CITY_CENTER_COMBINED_NAME = 'hamburg-city-center.city.json';
 
 export default function App() {
   const coreState = useCoreState();
@@ -73,8 +76,22 @@ export default function App() {
   const planningAbortRef = useRef<AbortController | null>(null);
   const planningRequestIdRef = useRef(0);
 
+  const handleHideZoning = useCallback(() => {
+    planningRequestIdRef.current += 1;
+    planningAbortRef.current?.abort();
+    planningAbortRef.current = null;
+    setZoningLoading(false);
+    setZoningEnabled(false);
+    setZones([]);
+    setSelectedZone(null);
+  }, []);
+
   const handleToggleZoning = useCallback(async () => {
     if (!coreState.cityjson || zoningLoading) return;
+    if (zoningEnabled) {
+      handleHideZoning();
+      return;
+    }
 
     const queryBbox = choosePlanningQueryBbox({
       viewportBbox: coreState.mapBboxRef.current,
@@ -129,17 +146,14 @@ export default function App() {
         setZoningLoading(false);
       }
     }
-  }, [coreState.cityjson, coreState.cityjsonRef, coreState.mapBboxRef, zoningLoading]);
-
-  const handleHideZoning = useCallback(() => {
-    planningRequestIdRef.current += 1;
-    planningAbortRef.current?.abort();
-    planningAbortRef.current = null;
-    setZoningLoading(false);
-    setZoningEnabled(false);
-    setZones([]);
-    setSelectedZone(null);
-  }, []);
+  }, [
+    coreState.cityjson,
+    coreState.cityjsonRef,
+    coreState.mapBboxRef,
+    handleHideZoning,
+    zoningEnabled,
+    zoningLoading,
+  ]);
 
   useEffect(
     () => () => {
@@ -204,9 +218,9 @@ export default function App() {
 
     void (async () => {
       try {
-        const [buildingResult, osmResult] = await Promise.allSettled([
+        const [buildingResult, roadResult] = await Promise.allSettled([
           fetch(publicAssetUrl(HAMBURG_CITY_CENTER_DEMO_URL)),
-          fetch(publicAssetUrl(HAMBURG_CITY_CENTER_OSM_URL)),
+          fetch(publicAssetUrl(HAMBURG_CITY_CENTER_ROADS_URL)),
         ]);
         if (buildingResult.status === 'rejected') throw buildingResult.reason;
         const response = buildingResult.value;
@@ -215,35 +229,30 @@ export default function App() {
         }
         const text = await response.text();
         const doc = parseCityJsonSeqStrict(text, HAMBURG_CITY_CENTER_DEMO_NAME);
-        handleLoadedForApp(doc, HAMBURG_CITY_CENTER_DEMO_NAME, text);
+
+        if (roadResult.status === 'rejected') throw roadResult.reason;
+        const roadResponse = roadResult.value;
+        if (!roadResponse.ok) {
+          throw new Error(`Road CityJSON: HTTP ${roadResponse.status} ${roadResponse.statusText}`);
+        }
+        const parsedRoads = parseCityJson(await roadResponse.text());
+        if (!parsedRoads.ok) throw new Error(`Road CityJSON: ${parsedRoads.error}`);
+        const merge = mergeCityJson(doc, parsedRoads.doc);
+        if (!merge.ok) throw new Error(`Road CityJSON merge failed: ${merge.reason}`);
+        if (!doc.metadata) doc.metadata = {};
+        doc.metadata.title = 'Hamburg city center buildings and editable roads';
+        doc.metadata.sourceDescription =
+          'Official Hamburg LoD2 buildings merged with precomputed osm2streets CityJSON Transportation roads.';
+
+        handleLoadedForApp(doc, HAMBURG_CITY_CENTER_COMBINED_NAME, null);
         coreState.setPrimitiveValidation({
           kind: 'valid',
           message:
-            'The committed Hamburg building demo was generated from the validated LoD2 catalog.',
+            'The committed Hamburg building demo is validated LoD2. This source does not contain LoD3 windows or doors.',
         });
-
-        try {
-          if (osmResult.status === 'rejected') throw osmResult.reason;
-          const osmResponse = osmResult.value;
-          if (!osmResponse.ok) {
-            throw new Error(`HTTP ${osmResponse.status} ${osmResponse.statusText}`);
-          }
-          await roadEditor.loadOsmRoadXml(
-            await osmResponse.text(),
-            HAMBURG_CITY_CENTER_DEMO_BBOX,
-            {
-              sourceLabel: 'the committed Hamburg center OSM crop',
-              showBoundary: false,
-              echoDiagnostics: false,
-            }
-          );
-        } catch (roadError) {
-          roadEditor.setRoadStatus(
-            `The committed demo roads could not be processed: ${
-              roadError instanceof Error ? roadError.message : String(roadError)
-            }. Use Fetch Roads to retry.`
-          );
-        }
+        roadEditor.setRoadStatus(
+          `Loaded ${merge.added ?? 0} CityJSON road objects. Tap Roads, then tap a road on the map to edit it.`
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         catalog.setCatalogStatus({
@@ -262,7 +271,6 @@ export default function App() {
     coreState,
     handleLoadedForApp,
     importExport,
-    roadEditor.loadOsmRoadXml,
     roadEditor.setRoadStatus,
   ]);
 
@@ -368,8 +376,11 @@ export default function App() {
       version: doc.version,
       totalObjects: ids.length,
       rootBuildings: rootBuildings.length,
+      roads: ids.filter((id) => doc.CityObjects[id]?.type === 'Road').length,
       vertices: doc.vertices.length,
       crs: doc.metadata?.referenceSystem ?? null,
+      maxBuildingLod: maximumBuildingLod(doc),
+      hasOpenings: hasBuildingOpenings(doc),
     };
   }, [coreState.cityjson]);
 
@@ -393,6 +404,11 @@ export default function App() {
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
+      if (info && roadEditor.showRoadEditor && !roadEditor.roadDraft) {
+        roadEditor.setShowRoadEditor(false);
+        roadEditor.setSelectedRoadArea(null);
+        roadEditor.setOsm2streetsSelection(null);
+      }
       if (info?.ctrlKey) {
         buildingEditor.setMultiSelection((prev) => {
           const next = new Set(prev);
@@ -410,7 +426,7 @@ export default function App() {
         coreState.originals.set(info.objectId, { ...(obj?.attributes ?? {}) });
       }
     },
-    [coreState, buildingEditor]
+    [coreState, buildingEditor, roadEditor]
   );
 
   const handleAttributeChange = useCallback(
@@ -484,6 +500,10 @@ export default function App() {
         saveStatus={coreState.saveStatus}
         drawMode={coreState.drawMode}
         onStartDraw={() => {
+          roadEditor.setShowRoadEditor(false);
+          roadEditor.setSelectedRoadArea(null);
+          if (zoningEnabled) handleHideZoning();
+          coreState.setShowList(false);
           coreState.setSelection(null);
           roadEditor.setRoadStatus(null);
           buildingEditor.setCreationError(null);
@@ -582,12 +602,17 @@ export default function App() {
               editingRoadId={roadEditor.editingRoadId}
               status={roadEditor.roadStatus}
               basemap={roadEditor.basemap}
+              satelliteOpacity={roadEditor.satelliteOpacity}
+              roadOverlayOpacity={roadEditor.roadOverlayOpacity}
+              cityJsonRoadCount={new Set(roadEditor.roadAreas.map((area) => area.roadId)).size}
               drawMode={coreState.drawMode}
               backendUrl={roadEditor.roadBackendUrl}
               insertedRoadId={roadEditor.editingRoadId ?? roadEditor.lastInsertedRoadId}
               onClose={() => roadEditor.setShowRoadEditor(false)}
               onFetchOsmRoads={() => void roadEditor.handleFetchOsmRoads()}
               onBasemapChange={roadEditor.setBasemap}
+              onSatelliteOpacityChange={roadEditor.setSatelliteOpacity}
+              onRoadOverlayOpacityChange={roadEditor.setRoadOverlayOpacity}
               onStartManualDraw={roadEditor.handleStartRoadDraw}
               onFinishManualDraw={() => roadEditor.setFinishRoadDrawToken((token) => token + 1)}
               onCancelDraw={() => {
@@ -609,10 +634,7 @@ export default function App() {
               selectedRoadArea={roadEditor.selectedRoadArea}
               onEditSelectedRoadArea={roadEditor.handleEditSelectedRoadArea}
               osm2streetsSelection={roadEditor.osm2streetsSelection}
-              onCreateDraftFromOsm2StreetsSelection={
-                roadEditor.handleCreateDraftFromOsm2StreetsSelection
-              }
-              onInsertOsm2StreetsSelection={roadEditor.handleInsertOsm2StreetsSelection}
+              onEditOsm2StreetsSelection={roadEditor.handleInsertOsm2StreetsSelection}
               onHighlightConnectedOsm2StreetsRoads={
                 roadEditor.handleHighlightConnectedOsm2StreetsRoads
               }
@@ -628,7 +650,10 @@ export default function App() {
               precomputedFootprints={footprintsForFilter}
               initialView={initialMapView}
               drawMode={coreState.drawMode}
-              onFootprintDrawn={buildingEditor.setPendingFootprint}
+              onFootprintDrawn={(ring) => {
+                buildingEditor.setPendingFootprint(ring);
+                coreState.setDrawMode('none');
+              }}
               onRoadLineDrawn={roadEditor.handleRoadLineDrawn}
               finishRoadDrawToken={roadEditor.finishRoadDrawToken}
               onDrawCanceled={() => {
@@ -1314,4 +1339,36 @@ function IfcPlacementBanner({
       </div>
     </div>
   );
+}
+
+function maximumBuildingLod(doc: CityJsonDocument): number | null {
+  let maximum: number | null = null;
+  for (const object of Object.values(doc.CityObjects)) {
+    if (object.type !== 'Building' && object.type !== 'BuildingPart') continue;
+    for (const geometryValue of object.geometry ?? []) {
+      const geometry = geometryValue as { lod?: string | number };
+      const lod = Number.parseFloat(String(geometry.lod ?? ''));
+      if (Number.isFinite(lod)) maximum = Math.max(maximum ?? lod, lod);
+    }
+  }
+  return maximum;
+}
+
+function hasBuildingOpenings(doc: CityJsonDocument): boolean {
+  for (const object of Object.values(doc.CityObjects)) {
+    if (object.type !== 'Building' && object.type !== 'BuildingPart') continue;
+    for (const geometry of object.geometry ?? []) {
+      const semantics = (geometry as {
+        semantics?: { surfaces?: Array<{ type?: string }> };
+      }).semantics;
+      if (
+        semantics?.surfaces?.some(
+          (surface) => surface.type === 'Window' || surface.type === 'Door'
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }

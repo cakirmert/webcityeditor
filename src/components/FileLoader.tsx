@@ -61,6 +61,14 @@ const QUICK_SAMPLES: QuickSample[] = [
     badge: 'GUIDE',
   },
   {
+    label: 'Hamburg - official LoD3.0 source',
+    description:
+      'Detailed roof geometry and facade textures are available as large tiled CityGML archives. Convert a selected tile to CityJSON before loading it.',
+    url: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5',
+    guideOnly: true,
+    badge: 'GUIDE',
+  },
+  {
     label: 'twocube - minimal solid',
     description: 'Two adjacent unit cubes, for round-trip testing',
     url: 'https://3d.bk.tudelft.nl/opendata/cityjson/simplegeom/v2.0/twocube.city.json',

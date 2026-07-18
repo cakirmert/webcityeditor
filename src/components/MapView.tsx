@@ -71,7 +71,7 @@ const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
-const BUILDING_DETAIL_MIN_ZOOM = 16.75;
+const BUILDING_DETAIL_MIN_ZOOM = 15.75;
 const EDIT_FOCUS_PADDING_DEGREES = 0.0022;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
 
@@ -125,11 +125,7 @@ function roadAreaLineColor(
     ? [255, 224, 130, 255]
     : preview
       ? [245, 248, 255, 185]
-      : roadAreaKind(area) === 'green' ||
-          roadAreaKind(area) === 'green_verge' ||
-          roadAreaKind(area) === 'verge'
-        ? [116, 190, 142, 165]
-        : [238, 242, 255, 130];
+      : [0, 0, 0, 0];
   return roadOverlayColor(color, {
     basemap,
     underground: area.vertical?.placement === 'underground',
@@ -386,14 +382,15 @@ export default function MapView({
   const [zoom, setZoom] = useState<number>(initialView?.zoom ?? DEFAULT_INITIAL_ZOOM);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
-  const [layerControlOpen, setLayerControlOpen] = useState(roadWorkspaceOpen);
+  const [layerControlOpen, setLayerControlOpen] = useState(false);
 
   useEffect(() => {
-    if (!roadWorkspaceOpen) return;
-    // On a phone the road editor is already a tall bottom sheet. Keep the map
-    // comparison control one tap away instead of stacking both over the map.
-    setLayerControlOpen(!window.matchMedia('(max-width: 900px)').matches);
-  }, [roadWorkspaceOpen]);
+    // Keep this compact control behind its button whenever another map tool
+    // opens. Satellite/road blending is also available directly in Roads.
+    if (roadWorkspaceOpen || zones.length > 0 || drawMode !== 'none' || selectedId) {
+      setLayerControlOpen(false);
+    }
+  }, [drawMode, roadWorkspaceOpen, selectedId, zones.length]);
 
   useEffect(() => {
     roadDraftRef.current = roadDraft;
@@ -420,6 +417,26 @@ export default function MapView({
     drawRef.current = null;
     return true;
   }, [onRoadLineDrawn]);
+
+  const finishCurrentBuildingDraw = useCallback(() => {
+    const draw = drawRef.current;
+    if (!draw) return false;
+    const feature = draw
+      .getSnapshot()
+      .find(
+        (candidate) =>
+          candidate.geometry.type === 'Polygon' &&
+          Array.isArray(candidate.geometry.coordinates?.[0]) &&
+          candidate.geometry.coordinates[0].length >= 3
+      );
+    if (!feature || feature.geometry.type !== 'Polygon') return false;
+    const ring = feature.geometry.coordinates[0] as [number, number][];
+    onFootprintDrawn(ring);
+    draw.clear();
+    draw.stop();
+    drawRef.current = null;
+    return true;
+  }, [onFootprintDrawn]);
 
   const footprints = useMemo(
     () => precomputedFootprints ?? extractFootprints(cityjson),
@@ -595,8 +612,8 @@ export default function MapView({
     !!onPlacementClick ||
     !!footprintEdit ||
     !!dragTransformId;
-  const buildingSelectionEnabled = !mapSelectionLocked && !roadWorkspaceOpen;
-  const roadSelectionEnabled = !mapSelectionLocked;
+  const buildingSelectionEnabled = !mapSelectionLocked;
+  const roadSelectionEnabled = !mapSelectionLocked && roadWorkspaceOpen;
   const planningSelectionEnabled = !mapSelectionLocked && !roadWorkspaceOpen;
 
   // Detect CRS support and surface a warning if unsupported
@@ -1830,8 +1847,14 @@ export default function MapView({
     }
     // Escape key cancels drawing
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && drawMode === 'road-line' && drawRef.current) {
-        if (finishCurrentRoadDraw()) {
+      if (e.key === 'Enter' && drawRef.current) {
+        const finished =
+          drawMode === 'road-line'
+            ? finishCurrentRoadDraw()
+            : drawMode === 'polygon'
+              ? finishCurrentBuildingDraw()
+              : false;
+        if (finished) {
           e.preventDefault();
         }
         return;
@@ -1844,7 +1867,15 @@ export default function MapView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [drawMode, onFootprintDrawn, onRoadLineDrawn, onDrawCanceled, footprints, finishCurrentRoadDraw]);
+  }, [
+    drawMode,
+    onFootprintDrawn,
+    onRoadLineDrawn,
+    onDrawCanceled,
+    footprints,
+    finishCurrentRoadDraw,
+    finishCurrentBuildingDraw,
+  ]);
 
   useEffect(() => {
     if (finishRoadDrawToken <= 0 || drawMode !== 'road-line') return;
@@ -2072,26 +2103,29 @@ export default function MapView({
     <>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
       {drawMode === 'polygon' && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 10,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: 'rgba(46,64,87,0.95)',
-            color: '#fff',
-            padding: '8px 14px',
-            borderRadius: 4,
-            fontSize: 12,
-            zIndex: 10,
-            boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
-          }}
-        >
-          <b>Drawing mode</b> — click to place vertices · double-click to finish ·{' '}
-          <kbd style={{ background: '#fff', color: '#333', padding: '1px 5px', borderRadius: 3 }}>
-            Esc
-          </kbd>{' '}
-          to cancel
+        <div className="building-draw-guide" role="status">
+          <div>
+            <b>Draw the building outline</b>
+            <span>Tap at least 3 corners. Tap the first point again, or use the button.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!finishCurrentBuildingDraw()) {
+                setDrawWarning('Add at least three building corners before finishing.');
+                window.setTimeout(() => setDrawWarning(null), 2500);
+              }
+            }}
+          >Use outline</button>
+          <button
+            type="button"
+            className="is-cancel"
+            onClick={() => {
+              drawRef.current?.stop();
+              drawRef.current = null;
+              onDrawCanceled?.();
+            }}
+          >Cancel</button>
         </div>
       )}
       {drawMode === 'road-line' && (
@@ -2105,7 +2139,12 @@ export default function MapView({
         </div>
       )}
       {roadDraft && drawMode !== 'road-line' && (
-        <RoadHandleGuide draft={roadDraft} />
+        <>
+          <RoadHandleGuide draft={roadDraft} />
+          {onRoadDraftChange && (
+            <MapRoadCrossSection draft={roadDraft} onChange={onRoadDraftChange} />
+          )}
+        </>
       )}
       {(drawWarning ?? warning) && (
         <div
@@ -2151,10 +2190,10 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         detailLabel={
           detailMesh
-            ? `LoD ${detailMesh.maxLod?.toFixed(1) ?? 'best'} · ${detailMesh.objectCount} nearby`
+            ? `Highest source detail: LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${detailMesh.objectCount} nearby`
             : zoom >= BUILDING_DETAIL_MIN_ZOOM
               ? 'Footprint detail (source mesh unavailable)'
-              : `LoD 0/1 · zoom closer for full surfaces`
+              : `Overview geometry · zoom closer for the highest source LoD`
         }
         focusActive={!!editFocusBbox}
         obscuredByInspector={!!selectedId && !roadWorkspaceOpen}
@@ -2215,6 +2254,113 @@ function RoadHandleGuide({ draft }: { draft: RoadDraft }) {
       </div>
     </div>
   );
+}
+
+function MapRoadCrossSection({
+  draft,
+  onChange,
+}: {
+  draft: RoadDraft;
+  onChange: (draft: RoadDraft) => void;
+}) {
+  const [activeBandIndex, setActiveBandIndex] = useState(0);
+  const section = draft.sections[0];
+  const effectiveBandIndex = Math.min(
+    activeBandIndex,
+    Math.max(0, (section?.bands.length ?? 1) - 1)
+  );
+  const activeBand = section?.bands[effectiveBandIndex];
+  if (!section || !activeBand) return null;
+
+  const patchActiveBand = (patch: Partial<typeof activeBand>) => {
+    onChange({
+      ...draft,
+      sections: draft.sections.map((candidate, sectionIndex) =>
+        sectionIndex === 0
+          ? {
+              ...candidate,
+              bands: candidate.bands.map((band, bandIndex) =>
+                bandIndex === effectiveBandIndex ? { ...band, ...patch } : band
+              ),
+            }
+          : candidate
+      ),
+    });
+  };
+
+  const directions = ['forward', 'backward', 'both', 'none'] as const;
+  const directionIndex = directions.indexOf(activeBand.direction ?? 'none');
+  const nextDirection = directions[(directionIndex + 1) % directions.length];
+
+  return (
+    <section className="map-road-cross-section" aria-label="Road cross-section quick editor">
+      <header>
+        <div><b>Road on the map</b><span>Tap a band, then adjust it with large controls.</span></div>
+        <span>{section.bands.reduce((sum, band) => sum + band.widthM, 0).toFixed(1)} m total</span>
+      </header>
+      <div className="map-road-cross-section__bands">
+        {section.bands.map((band, index) => {
+          const color = roadBandFillColor(band.kind, band.sourceType);
+          return (
+            <button
+              type="button"
+              key={`${band.id ?? band.kind}-${index}`}
+              className={index === effectiveBandIndex ? 'is-active' : ''}
+              style={{
+                flexGrow: Math.max(0.75, band.widthM),
+                background: `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`,
+              }}
+              onClick={() => setActiveBandIndex(index)}
+              aria-pressed={index === effectiveBandIndex}
+              aria-label={`Band ${index + 1}: ${mapRoadBandLabel(band.kind, band.sourceType)}, ${band.widthM.toFixed(2)} metres`}
+            >
+              <b>{mapRoadBandLabel(band.kind, band.sourceType)}</b>
+              <span>{band.widthM.toFixed(1)} m · {roadDirectionGlyph(band.direction)}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="map-road-cross-section__actions">
+        <div><b>{mapRoadBandLabel(activeBand.kind, activeBand.sourceType)}</b><span>band {effectiveBandIndex + 1}</span></div>
+        <button
+          type="button"
+          onClick={() => patchActiveBand({ widthM: Math.max(0.4, activeBand.widthM - 0.25) })}
+          aria-label="Make selected road band narrower"
+        >−</button>
+        <output>{activeBand.widthM.toFixed(2)} m</output>
+        <button
+          type="button"
+          onClick={() => patchActiveBand({ widthM: Math.min(12, activeBand.widthM + 0.25) })}
+          aria-label="Make selected road band wider"
+        >+</button>
+        <button
+          type="button"
+          className="map-road-cross-section__direction"
+          onClick={() => patchActiveBand({ direction: nextDirection })}
+        >Direction {roadDirectionGlyph(activeBand.direction)}</button>
+      </div>
+    </section>
+  );
+}
+
+function mapRoadBandLabel(kind: string, sourceType?: string): string {
+  const key = (sourceType ?? kind).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (key.includes('sidewalk')) return 'Sidewalk';
+  if (key.includes('footway')) return 'Footway';
+  if (key.includes('bike')) return 'Bike';
+  if (key.includes('parking')) return 'Parking';
+  if (key.includes('bus')) return 'Bus';
+  if (key.includes('rail') || key.includes('tram')) return 'Rail';
+  if (key.includes('buffer') || key.includes('median')) return 'Buffer';
+  if (key.includes('green') || key.includes('verge')) return 'Green';
+  return 'Car lane';
+}
+
+function roadDirectionGlyph(direction?: string): string {
+  if (direction === 'forward') return '→';
+  if (direction === 'backward') return '←';
+  if (direction === 'both') return '↔';
+  return '—';
 }
 
 function MapLayerControl({
