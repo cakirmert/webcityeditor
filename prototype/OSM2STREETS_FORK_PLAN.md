@@ -444,7 +444,9 @@ generate:
 2. [x] Parse those nodes independently of osm2streets and render category-colored
    deck.gl point markers. Icon/3D-model assets remain optional visual polish.
 3. For 3D trees: use `ScenegraphLayer` with a simple tree GLB model
-4. For signs: use `IconLayer` with SVG/PNG traffic sign sprites
+4. [x] For signs: use `IconLayer` with self-contained SVG traffic sign sprites.
+   Hamburg's common `DE:205` yield and `DE:206` stop ids get distinct icons;
+   unknown or combined values retain a generic sign icon.
 
 This is independent of the osm2streets fork and can be done in parallel.
 

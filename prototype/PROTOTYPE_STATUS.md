@@ -2,7 +2,7 @@
 
 Source of truth for **what was planned, what's delivered now, and what's left**. Complements `LoD2_Editor_Onay_Dokumani.docx` (the 19-question approval document) with a concrete code-aware delta.
 
-**Last updated**: 2026-07-17. **Test suite**: 518 passing across 59 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
+**Last updated**: 2026-07-18. **Test suite**: 520 passing across 60 files. **TypeScript**: clean. **Production build**: clean. **Dependency setup**: clean `npm ci`; CityJSON loader pinned to upstream commit `cf8db910`.
 
 ---
 
@@ -49,7 +49,7 @@ React editor with a client-side edit model. A lightweight local Hamburg tile-cat
 ### Transportation / road editing
 - **Source-of-truth decision for v1**: edited roads are stored as CityJSON 2.0 Transportation `Road` objects. OSM is used only as a reference/seed layer; the editor does not write back to OSM.
 - **OSM reference fetch**: Road editor fetches `highway=*` ways from Overpass for the current viewport and runs them through the forked osm2streets engine. Exact lane, intersection, and marking surfaces retain semantic colors while picking/editing; the generic OSM path/hit layer is suppressed wherever exact output exists. Direct pedestrian/path/cycleway features no longer invent underground car lanes. Large query caps are computed in the active metric CRS (Hamburg fallback: EPSG:25832) before converting back to the WGS84 Overpass bbox.
-- **OSM street-point context**: the same bounded Overpass request fetches tagged traffic signs, trees, street lamps, traffic signals, and bollards. These nodes bypass osm2streets lane generation and render as category-colored deck.gl markers above the road/building context.
+- **OSM street-point context**: the same bounded Overpass request fetches tagged traffic signs, trees, street lamps, traffic signals, and bollards. These nodes bypass osm2streets lane generation and render above the road/building context. Traffic signs use self-contained deck.gl SVG sprites for known yield/stop ids plus a generic unknown-sign fallback; the other categories retain color-coded markers.
 - **User verification step**: clicking an OSM road prompts the user to confirm whether the inferred layout matches reality. Accept uses the OSM-derived draft; cancel keeps it as an editable seed for redraw/manual correction.
 - **Manual correction scene**: Terra Draw LineString mode lets the user draw or redraw the road centerline over the basemap/satellite image. Existing draft vertices and midpoints use capture-phase Pointer Events, pointer capture, and a preserved grab offset, so the enlarged selected handle stays attached until pointer release/cancel instead of dropping on unreliable button-state events or becoming a MapLibre pan gesture. The current draft previews as transportation surface polygons before insertion.
 - **Lane/band editor**: per-section bands are editable left-to-right as car lane, bike lane, sidewalk, parking, median, or green verge. A proportional colored strip shows width and direction arrows, supports drag-to-reorder, and keeps detailed width/direction/speed controls below it.

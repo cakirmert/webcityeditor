@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import {
   GeoJsonLayer,
+  IconLayer,
   PathLayer,
   PolygonLayer,
   ScatterplotLayer,
@@ -50,6 +51,7 @@ import {
   type RoadDraftHandle,
   type RoadDraftPath,
 } from '../lib/road-draft-edit';
+import { osmTrafficSignIcon } from '../lib/osm-street-point-style';
 
 /**
  * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
@@ -1212,10 +1214,16 @@ export default function MapView({
     }
 
     if (osmPointFeatures.length > 0) {
+      const trafficSigns = osmPointFeatures.filter(
+        (feature) => feature.kind === 'traffic_sign'
+      );
+      const pointMarkers = osmPointFeatures.filter(
+        (feature) => feature.kind !== 'traffic_sign'
+      );
       layers.push(
         new ScatterplotLayer<OsmPointFeature>({
           id: 'osm-street-point-features',
-          data: osmPointFeatures,
+          data: pointMarkers,
           getPosition: (feature) => feature.position,
           getRadius: (feature) => (feature.kind === 'tree' ? 3.5 : 2.2),
           radiusUnits: 'meters',
@@ -1232,6 +1240,23 @@ export default function MapView({
           parameters: { depthTest: false } as unknown as never,
         })
       );
+      if (trafficSigns.length > 0) {
+        layers.push(
+          new IconLayer<OsmPointFeature>({
+            id: 'osm-traffic-sign-features',
+            data: trafficSigns,
+            getPosition: (feature) => feature.position,
+            getIcon: osmTrafficSignIcon,
+            getSize: 24,
+            sizeUnits: 'pixels',
+            sizeMinPixels: 18,
+            sizeMaxPixels: 30,
+            billboard: true,
+            pickable: false,
+            parameters: { depthTest: false } as unknown as never,
+          })
+        );
+      }
     }
 
     // Preview for the in-progress new building (mesh) OR a pending transform (polygon).
