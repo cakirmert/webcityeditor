@@ -1,23 +1,16 @@
 # Dependencies
 node_modules/
-/node_modules/
-prototype/node_modules/
-spike/cityjson-threejs-loader/node_modules/
 
-# Optional legacy/local checkout of the CityJSON loader. Normal setup uses the
-# pinned Git dependency in prototype/package.json.
-spike/cityjson-threejs-loader/
+# The CityJSON loader is pinned as a Git dependency in package.json.
 
 # Build output
-prototype/dist/
-prototype/.vite/
-spike/cityjson-threejs-loader/dist/
-spike/unpacked/
+dist/
+.vite/
 unpacked_v*/
 
 # Test + coverage
-prototype/coverage/
-prototype/test-output/
+coverage/
+test-output/
 *.test.log
 
 # Environment
@@ -55,33 +48,21 @@ data/
 *.city.json
 *.city.jsonl
 *.jsonl
-!prototype/public/data/
-!prototype/public/data/manifest.json
-!prototype/public/data/hamburg/
-!prototype/public/data/hamburg/README.md
-!prototype/public/data/hamburg/LoD2_565_5936_1_HH.city.jsonl
-!prototype/public/data/hamburg/hamburg-city-center-buildings.city.jsonl
-!prototype/public/data/hamburg/hamburg-city-center-roads.osm
-!prototype/public/data/transportation/
-!prototype/public/data/transportation/osm2streets-hamburg-short-intersection.city.json
-!prototype/public/data/transportation/osm2streets-hamburg-short-intersection.city.jsonl
-# keep the built-in sample cube in source tests unaffected — none on disk
-
+!public/data/
+!public/data/manifest.json
+!public/data/hamburg/
+!public/data/hamburg/hamburg-city-center-buildings.city.jsonl
+!public/data/hamburg/hamburg-city-center-roads.osm
+!public/data/transportation/
+!public/data/transportation/osm2streets-hamburg-short-intersection.city.json
+!public/data/transportation/osm2streets-hamburg-short-intersection.city.jsonl
 # Third-party CLI tools downloaded during setup (citygml-tools, citydb-tool, …)
 tools/
 
-# Local demo folder — see demo/README.md. Sample IFCs and CityJSON tiles
-# get downloaded here for in-person demos; they're public-domain test
-# fixtures but we don't want to bloat the repo with binaries.
-demo/
-
-# Browser-driven test artefacts. The dev server serves /public for fetch
-# during in-browser demos; we stage demo .ifc / .city.json here when
-# automating the flow but they're never source. Vite's vite-env.d.ts +
-# any TS files in /public stay tracked (none today).
+# Browser-driven test artifacts.
 .ifc-test/
 .docx-build/
 .docx-extract/
-prototype/public/*.ifc
-prototype/public/*.city.json
-prototype/public/*.city.jsonl
+public/*.ifc
+public/*.city.json
+public/*.city.jsonl
