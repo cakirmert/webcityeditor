@@ -1,0 +1,196 @@
+# City Editor project reference
+
+This file is the single technical handoff for City Editor. It consolidates the former prototype status, road-geometry notes, Hamburg pipeline guides, osm2streets plans, and next-session task list.
+
+## What the project guarantees
+
+- The application runs from the repository root with `npm ci` and `npm run dev`.
+- The committed Hamburg city-center demo needs only Node.js and works without a local backend, Overpass, Rust, or the ignored whole-city data.
+- CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
+- Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
+- Close building views use the highest geometry LoD available per object; distant context falls back to outlines or blocks.
+- Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
+- All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
+
+```mermaid
+flowchart LR
+  A["CityJSON / CityJSONSeq / IFC"] --> B["Browser editor"]
+  O["OSM XML"] --> S["osm2streets WASM"]
+  S --> P["Exact lane and junction polygons"]
+  P --> B
+  B --> V["Map and highest-LoD preview"]
+  B --> E["Editable CityJSON export"]
+  B --> W["Optional catalog write-back"]
+```
+
+## Repository layout
+
+```text
+webcityeditor/
+├── src/                   React editor, hooks, map layers, and geometry logic
+├── tests/                 Component, hook, CLI, and geometry tests
+├── scripts/               Hamburg, CityJSON, osm2streets, and OpenDRIVE tools
+├── public/data/           Small committed browser-safe Hamburg demo
+├── test-fixtures/         Small deterministic regression inputs
+├── assets/readme/         Screenshots used by README.md
+├── vendor/osm2streets/    Git submodule containing the maintained fork
+├── vendor/osm2streets-js/ Built browser WASM package
+├── Data/                  Optional large local catalogs; ignored by Git
+├── README.md              User guide
+└── PROJECT.md             This technical reference and roadmap
+```
+
+The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must not be placed back under them.
+
+## Editing model
+
+### Buildings and LoD
+
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws cheap footprint or block context. At close zoom it indexes nearby objects and selects the numerically highest `geometry.lod` for each building, including LoD3 when present and LoD2/2.2 as the fallback. The selected-building viewer also retains the full object geometry.
+
+Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
+
+The legacy `_createdBy: "city-editor-prototype"` value remains a deliberate on-disk compatibility marker for already exported parametric objects. It is not a path or repository-layout dependency.
+
+### Roads: exact surfaces versus editable ribbons
+
+Roads are stored as CityJSON `Transportation` objects. Each lane, shoulder, sidewalk, cycleway, parking strip, or median is a semantic `TrafficArea` or `AuxiliaryTrafficArea` polygon.
+
+There are two geometry modes:
+
+| Mode | Used for | Save behavior |
+|---|---|---|
+| `exact` | Imported osm2streets lane and junction polygons | Type, direction, material, access, and speed update attributes while boundaries and the global vertex array remain unchanged |
+| `generated` | User-drawn or intentionally reshaped roads | The curved centreline and ordered bands regenerate matching preview and CityJSON ribbons |
+
+The `_roadLayout` attribute stores editable sections, bands, curve settings, elevation, and confirmed endpoint connections. `_roadGeometryMode` records whether the current boundaries are `exact` or `generated`. Existing exact data without the marker is still treated as exact for compatibility.
+
+Changing only semantic attributes shows **Exact source polygons protected**. Moving handles, changing any width, reordering or adding bands, splitting a section, or changing curve settings switches the pending save to a clearly labelled geometry rebuild.
+
+### Curves and connections
+
+Road sections use a sampled smooth curve, not straight chords between every control point. The same sampled path drives the map preview and saved band polygons, preventing preview/export drift.
+
+Endpoint editing is deliberate:
+
+- yellow handles move existing bends;
+- white midpoint handles insert a bend;
+- teal endpoint targets come from other draft sections, editable CityJSON roads, and OSM road endpoints;
+- dropping an endpoint on a teal target stores a confirmed connection;
+- connections between two editable CityJSON roads are written reciprocally.
+
+Connection metadata confirms graph topology. It does not yet synthesize a complete lane-level intersection, turn restrictions, or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
+
+## UX and performance decisions
+
+- **Roads** opens a four-step workspace: Choose, Shape, Lanes, Save. It can expand on desktop and becomes a full-width touch panel on small screens.
+- The active road is drawn on the map and represented by matching visual band cards in the panel.
+- **Map layers** is integrated over the map and controls map/satellite mode, satellite opacity, and road-overlay opacity.
+- Drawing uses capture-phase Pointer Events and pointer capture. Do not add `event.buttons === 0` as a drag-ending condition; trackpads and overlay sequences can report it mid-drag.
+- Edit focus computes a padded bounding box around the active road or building, then filters buildings, roads, zones, OSM centre-lines, osm2streets polygons, and street objects outside it.
+- Tagged OSM street points stay hidden below close zoom unless edit focus needs them.
+- Clearance and overlap checks are deferred while dragging, and expensive geometry is memoized rather than rebuilt on every pointer event.
+- Generic building metadata is collapsed under **Source metadata**; common fields and actions stay visible first.
+
+## Data and format workflows
+
+### Built-in Hamburg demo
+
+The committed browser-safe files are:
+
+- `public/data/hamburg/hamburg-city-center-buildings.city.jsonl`
+- `public/data/hamburg/hamburg-city-center-roads.osm`
+- `public/data/transportation/osm2streets-hamburg-short-intersection.city.json`
+
+Regenerate the center samples with:
+
+```powershell
+npm run data:hamburg-center
+npm run data:hamburg-center:osm
+```
+
+### Optional whole-city buildings
+
+```powershell
+npm run data:hamburg-lod2
+npm run dev:hamburg-buildings
+```
+
+The strict CityJSONSeq catalog streams tiles for the visible viewport and supports local changed-tile write-back. Large source and generated files stay under ignored `Data/`.
+
+### Optional whole-city roads
+
+On Windows, inspect, prepare, or serve the complete reproducible catalog with:
+
+```powershell
+.\PREPARE_HAMBURG_ROADS.cmd -DryRun
+.\PREPARE_HAMBURG_ROADS.cmd
+.\PREPARE_HAMBURG_ROADS.cmd -Serve
+```
+
+Equivalent npm commands are `npm run data:hamburg-roads:prepare` and `npm run dev:hamburg-roads`. Generated CityJSONSeq road tiles stay in `Data/hamburg-roads-osm2streets/cityjsonseq/` and must not be committed. The retained complete catalog is roughly 2.3 GiB and reproducible from the local OSM input.
+
+### osm2streets fork and WASM
+
+`vendor/osm2streets` is the retained Git submodule. The browser consumes `vendor/osm2streets-js`, which is built from the fork and committed so the default demo does not require Rust.
+
+The fork hardens degenerate geometry, zero-width and shared-use edge cases, separated sidewalks, short intersections, and deterministic lane-polygon output. Normal edits do not rerun osm2streets: it generates or refreshes exact base polygons, after which CityJSON is authoritative.
+
+Rebuild and compare the engine only when changing the fork:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-osm2streets-wasm.ps1
+npm run osm2streets:compare
+npm test
+npm run build
+```
+
+### Conversion and interoperability
+
+- `npm run osm2streets:cityjson` converts osm2streets lane polygons to CityJSON Transportation surfaces while retaining provenance and exact boundaries.
+- `npm run cityjson:to-citygml` exports the supported CityJSON subset to CityGML.
+- IFC import keeps a low-detail footprint plus the detailed mesh and its semantic surfaces.
+- `npm run opendrive:rtron -- --dry-run` exposes the experimental r:trån/OpenDRIVE command path. It remains a pipeline scaffold until a real licensed fixture and end-to-end geometry acceptance are added.
+
+## Development and verification
+
+Start each repository session with read-only orientation and preserve unrelated work:
+
+```powershell
+git status --short --branch
+git fetch --prune origin
+```
+
+Fast-forward from `origin/main` only when it preserves the current worktree. Never reset or discard unrelated changes.
+
+Run ordinary verification from the repository root:
+
+```powershell
+npm run test -- tests/lib/transportation.test.ts
+npm test
+npm run build
+git diff --check
+```
+
+For catalog setup changes, also run:
+
+```powershell
+.\PREPARE_HAMBURG_ROADS.cmd -DryRun
+node --check scripts/dev.mjs
+node --check scripts/prepare-hamburg-road-catalog.mjs
+npm run dev:hamburg-roads -- --dry-run
+```
+
+Focused regression coverage exists for smooth road preview/export parity, touch handle editing, endpoint snapping, reciprocal CityJSON connections, exact-polygon attribute saves, highest-LoD mesh selection, catalog preparation, and the Hamburg committed fixtures.
+
+## Remaining roadmap
+
+The following work is intentionally not claimed as complete:
+
+1. Generate true intersection surfaces from confirmed connected roads, including lane-to-lane connectors, turns, crossings, and regenerated markings.
+2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
+3. Add topology-aware propagation when a connected road is later moved or deleted, with a clear conflict-resolution UI.
+4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
+5. Expand visual regression coverage for phone, tablet, desktop, satellite blending, and mixed LoD2/LoD3 datasets.
+
+These are continuation tasks, not blockers for the committed demo or the exact attribute-editing workflow.
