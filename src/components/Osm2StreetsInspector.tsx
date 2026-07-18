@@ -3,16 +3,14 @@ import { Button } from './ui/button';
 
 interface Props {
   selection: Osm2StreetsSelection;
-  onCreateDraft: () => void;
-  onInsertCityJson: () => void;
+  onEditRoad: () => void;
   onHighlightConnectedRoads: () => void;
   onClear: () => void;
 }
 
 export default function Osm2StreetsInspector({
   selection,
-  onCreateDraft,
-  onInsertCityJson,
+  onEditRoad,
   onHighlightConnectedRoads,
   onClear,
 }: Props) {
@@ -45,8 +43,7 @@ export default function Osm2StreetsInspector({
       {selection.kind === 'lane' ? (
         <LaneDetails
           properties={props}
-          onCreateDraft={onCreateDraft}
-          onInsertCityJson={onInsertCityJson}
+          onEditRoad={onEditRoad}
         />
       ) : (
         <IntersectionDetails
@@ -60,12 +57,10 @@ export default function Osm2StreetsInspector({
 
 function LaneDetails({
   properties,
-  onCreateDraft,
-  onInsertCityJson,
+  onEditRoad,
 }: {
   properties: Record<string, any>;
-  onCreateDraft: () => void;
-  onInsertCityJson: () => void;
+  onEditRoad: () => void;
 }) {
   return (
     <>
@@ -87,12 +82,13 @@ function LaneDetails({
           </pre>
         </details>
       )}
-      <Button size="sm" variant="primary" className="w-full" onClick={onCreateDraft}>
-        Create editable road draft
+      <Button className="h-12 w-full" variant="primary" onClick={onEditRoad}>
+        Edit road
       </Button>
-      <Button size="sm" className="w-full" onClick={onInsertCityJson}>
-        Insert exact CityJSON surfaces
-      </Button>
+      <p className="m-0 text-[11px] leading-5 text-[var(--text-dim)]">
+        Stores this road's exact osm2streets surfaces in CityJSON, then opens the same
+        touch editor used for saved roads.
+      </p>
     </>
   );
 }

@@ -2,11 +2,19 @@
   "cityjsonSamples": [
     {
       "label": "Hamburg city center - official LoD2 buildings",
-      "description": "Same-origin CityJSONSeq building showcase from the Elbe waterfront through Rathaus to Jungfernstieg. The default demo also processes the committed matching OSM road crop through browser osm2streets.",
+      "description": "Same-origin CityJSONSeq LoD2 building showcase from the Elbe waterfront through Rathaus to Jungfernstieg. The default app merges it with the committed matching osm2streets CityJSON roads; no OSM XML conversion runs at startup.",
       "url": "data/hamburg/hamburg-city-center-buildings.city.jsonl",
       "enabled": true,
       "checkAvailability": true,
       "source": "https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg2"
+    },
+    {
+      "label": "Hamburg city center - editable CityJSON roads",
+      "description": "Precomputed osm2streets lane surfaces stored as CityJSON Transportation Road objects. This is the default and exported road source of truth.",
+      "url": "data/hamburg/hamburg-city-center-roads.city.json",
+      "enabled": true,
+      "checkAvailability": true,
+      "source": "public/data/hamburg/hamburg-city-center-roads.osm"
     },
     {
       "label": "Hamburg osm2streets roads - real fixture",

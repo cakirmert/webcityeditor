@@ -20,12 +20,16 @@ if (seqOnly && !seqOutputPath) {
 const generatedAt = String(args['generated-at'] ?? new Date().toISOString());
 const sourceLabel = String(args.source ?? 'osm2streets lane-polygons.geojson');
 const idPrefix = String(args['id-prefix'] ?? '');
+const roadMetadataById = args.network
+  ? readRoadMetadata(JSON.parse(await readFile(resolve(String(args.network)), 'utf8')))
+  : new Map();
 const cityjson = convertLanePolygonsToCityJson(
   JSON.parse(await readFile(lanesPath, 'utf8')),
   {
     generatedAt,
     sourceLabel,
     idPrefix,
+    roadMetadataById,
   }
 );
 
@@ -57,7 +61,7 @@ function convertLanePolygonsToCityJson(geojson, options) {
   }
 
   const projectedGroups = groups
-    .map((group) => projectRoadGroup(group, options.idPrefix))
+    .map((group) => projectRoadGroup(group, options.idPrefix, options.roadMetadataById))
     .filter((group) => group.surfaces.length > 0);
   if (projectedGroups.length === 0) {
     throw new Error('No convertible polygon lane features were found.');
@@ -69,7 +73,7 @@ function convertLanePolygonsToCityJson(geojson, options) {
     translate: [round3(Math.floor(bbox[0])), round3(Math.floor(bbox[1])), 0],
   };
   const metadata = {
-    referenceSystem: 'http://www.opengis.net/def/crs/EPSG/0/25832',
+    referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832',
     geographicalExtent: [round3(bbox[0]), round3(bbox[1]), 0, round3(bbox[3]), round3(bbox[4]), 0],
     title: 'osm2streets lane polygons converted to CityJSON Transportation Roads',
     source: options.sourceLabel,
@@ -150,9 +154,13 @@ function groupLaneFeatures(features) {
   return [...groups.values()].sort((a, b) => String(a.roadId).localeCompare(String(b.roadId)));
 }
 
-function projectRoadGroup(group, idPrefix) {
+function projectRoadGroup(group, idPrefix, roadMetadataById) {
   const cityObjectId = cityObjectIdForRoad(group.roadId, idPrefix);
-  const sourceOsmWayIds = uniqueValues(group.features.flatMap(({ feature }) => osmWayIds(feature)));
+  const roadMetadata = roadMetadataById.get(String(group.roadId)) ?? null;
+  const sourceOsmWayIds = uniqueValues([
+    ...group.features.flatMap(({ feature }) => osmWayIds(feature)),
+    ...(Array.isArray(roadMetadata?.osm_ids) ? roadMetadata.osm_ids : []),
+  ]);
   const surfaces = [];
 
   for (const { feature, index } of group.features) {
@@ -187,6 +195,7 @@ function projectRoadGroup(group, idPrefix) {
   return {
     roadId: group.roadId,
     cityObjectId,
+    roadMetadata,
     sourceOsmWayIds,
     surfaces,
   };
@@ -197,6 +206,9 @@ function roadObjectFromProjectedGroup(group, transform, vertices, generatedAt) {
   const semanticSurfaces = [];
   const values = [];
   const sourceOsmWayIds = group.sourceOsmWayIds.map(String);
+  const layer = roadLayer(group);
+  const placement = verticalPlacementForLayer(layer);
+  const name = roadName(group);
 
   group.surfaces.forEach((surface, surfaceIndex) => {
     const face = surface.rings.map((ring) =>
@@ -216,13 +228,27 @@ function roadObjectFromProjectedGroup(group, transform, vertices, generatedAt) {
     attributes: {
       class: 'transportation',
       function: 'road',
-      name: roadName(group),
-      _createdBy: 'city-editor-prototype',
+      name,
+      _createdBy: 'webcityeditor',
       _createdAt: generatedAt,
       _source: 'osm2streets',
       _osm2streetsRoadId: String(group.roadId),
       _osmWayIds: sourceOsmWayIds,
       _osm2streetsLaneCount: group.surfaces.length,
+      _highwayType: group.roadMetadata?.highway_type ?? null,
+      _osmTags: {
+        ...(group.roadMetadata?.highway_type
+          ? { highway: String(group.roadMetadata.highway_type) }
+          : {}),
+        ...(name ? { name } : {}),
+        layer: String(layer),
+      },
+      _verticalProfile: {
+        placement,
+        source: 'osm_tags',
+        elevationM: placement === 'surface' ? 0 : null,
+        osmLayer: layer,
+      },
     },
     geometry: [
       {
@@ -255,8 +281,10 @@ function surfaceSemantics(surface, group, surfaceIndex) {
     bandId: `osm2streets-${kind}-${surface.sourceIndex}-${surface.polygonIndex}`,
     trafficDirection: directionFromLaneDirection(String(surface.properties.direction ?? '')),
     transportationUsage: kind,
-    surfaceMaterial: kind === 'green' ? 'grass' : 'asphalt',
+    surfaceMaterial: sourceSurfaceMaterial(surface.properties, kind),
     maxspeed: parseSpeedKmh(surface.properties.speed_limit),
+    verticalPlacement: verticalPlacementForLayer(roadLayer(group)),
+    roadElevation: verticalPlacementForLayer(roadLayer(group)) === 'surface' ? 0 : null,
     source: 'osm2streets',
     sourceType: laneType,
     sourceSurfaceIndex: surfaceIndex,
@@ -356,11 +384,53 @@ function cityObjectIdForRoad(roadId, prefix = '') {
 }
 
 function roadName(group) {
+  if (typeof group.roadMetadata?.name === 'string' && group.roadMetadata.name.trim()) {
+    return group.roadMetadata.name.trim();
+  }
   for (const surface of group.surfaces) {
     const name = surface.properties.name ?? surface.properties.road_name;
     if (typeof name === 'string' && name.trim()) return name.trim();
   }
   return `osm2streets road ${group.roadId}`;
+}
+
+function readRoadMetadata(network) {
+  const result = new Map();
+  if (!network || !Array.isArray(network.roads)) return result;
+  for (const entry of network.roads) {
+    if (!Array.isArray(entry) || entry.length < 2 || !isObject(entry[1])) continue;
+    result.set(String(entry[0]), entry[1]);
+  }
+  return result;
+}
+
+function roadLayer(group) {
+  if (typeof group.roadMetadata?.layer === 'number' && Number.isFinite(group.roadMetadata.layer)) {
+    return group.roadMetadata.layer;
+  }
+  for (const surface of group.surfaces) {
+    if (typeof surface.properties.layer === 'number' && Number.isFinite(surface.properties.layer)) {
+      return surface.properties.layer;
+    }
+  }
+  return 0;
+}
+
+function verticalPlacementForLayer(layer) {
+  if (layer < 0) return 'underground';
+  if (layer > 0) return 'elevated';
+  return 'surface';
+}
+
+function sourceSurfaceMaterial(properties, kind) {
+  const sourceKind = properties?.muv?.surface?.kind;
+  if (typeof sourceKind === 'string' && sourceKind.trim()) {
+    return sourceKind
+      .trim()
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .toLowerCase();
+  }
+  return kind === 'green' ? 'grass' : 'asphalt';
 }
 
 function osmWayIds(feature) {
@@ -424,7 +494,11 @@ function parseSpeedKmh(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string' || value.toLowerCase() === 'none') return null;
   const match = value.match(/\d+(?:\.\d+)?/);
-  return match ? Number(match[0]) : null;
+  if (!match) return null;
+  const speed = Number(match[0]);
+  if (/\bSpeed\s*\(/i.test(value)) return Math.round(speed * 3_600) / 1_000;
+  if (/\bMph\s*\(/i.test(value)) return Math.round(speed * 1_609.344) / 1_000;
+  return speed;
 }
 
 function numberValue(value, fallback) {
@@ -493,7 +567,7 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    'Usage: node scripts/osm2streets-lanes-to-cityjson.mjs --lanes lane-polygons.geojson --output roads.city.json [--seq-output roads.city.jsonl] [--seq-only] [--id-prefix tile-001-]',
+    'Usage: node scripts/osm2streets-lanes-to-cityjson.mjs --lanes lane-polygons.geojson --output roads.city.json [--network network.json] [--seq-output roads.city.jsonl] [--seq-only] [--id-prefix tile-001-]',
     '',
     'Converts osm2streets lane polygons into CityJSON 2.0 Road MultiSurfaces in EPSG:25832.',
   ].join('\n');

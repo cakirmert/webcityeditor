@@ -52,6 +52,7 @@ data/
 !public/data/manifest.json
 !public/data/hamburg/
 !public/data/hamburg/hamburg-city-center-buildings.city.jsonl
+!public/data/hamburg/hamburg-city-center-roads.city.json
 !public/data/hamburg/hamburg-city-center-roads.osm
 !public/data/transportation/
 !public/data/transportation/osm2streets-hamburg-short-intersection.city.json

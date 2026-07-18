@@ -83,6 +83,31 @@ describe('buildRoadDraftFromOsm2StreetsSelection', () => {
     });
   });
 
+  it('converts osm2streets metre-per-second speed values to km/h', () => {
+    const speedResult: Osm2StreetsResult = {
+      ...result,
+      lanes: {
+        ...result.lanes,
+        features: result.lanes.features.map((feature) => ({
+          ...feature,
+          properties: {
+            ...feature.properties,
+            speed_limit: 'Some(Speed(13.8889))',
+          },
+        })),
+      },
+    };
+    const selection: Osm2StreetsSelection = {
+      kind: 'lane',
+      feature: speedResult.lanes.features[1],
+    };
+
+    const { draft } = buildRoadDraftFromOsm2StreetsSelection(selection, speedResult, [osmRoad]);
+
+    expect(draft.sections[0].maxspeedKmh).toBeCloseTo(50, 3);
+    expect(draft.sections[0].bands[0].maxspeedKmh).toBeCloseTo(50, 3);
+  });
+
   it('normalizes sibling lane polygons into reusable road surface assets', () => {
     const selection: Osm2StreetsSelection = { kind: 'lane', feature: result.lanes.features[1] };
 

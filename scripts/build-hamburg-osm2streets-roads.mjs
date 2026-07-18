@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   createReadStream,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -9,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import proj4 from 'proj4';
@@ -36,6 +37,7 @@ const validate = args.validate !== false && args.validate !== 'false';
 const clean = args.clean === true || args.clean === 'true';
 const seqOnly = args['seq-only'] === true || args['seq-only'] === 'true';
 const discardWork = args['discard-work'] === true || args['discard-work'] === 'true';
+const singleOutput = args.output ? resolvePath(args.output) : null;
 
 if (minDepth > maxDepth) {
   throw new Error('--min-depth cannot be greater than --max-depth');
@@ -106,6 +108,18 @@ while (pending.length > 0) {
       panicSignature: result.panicSignature ?? null,
     });
   }
+}
+
+if (singleOutput) {
+  if (seqOnly) throw new Error('--output cannot be combined with --seq-only');
+  if (successful.length !== 1 || !successful[0].cityjson) {
+    throw new Error(
+      `--output requires exactly one successful CityJSON tile; received ${successful.length}`
+    );
+  }
+  mkdirSync(dirname(singleOutput), { recursive: true });
+  copyFileSync(successful[0].cityjson, singleOutput);
+  console.log(`Copied single CityJSON output to ${singleOutput}`);
 }
 
 const forkRevision = readGitRevision(resolve(projectRoot, 'vendor/osm2streets'));
@@ -226,11 +240,15 @@ async function runTile(tile) {
       cleanupWork: true,
     };
   }
-  const source = `Geofabrik Hamburg OSM PBF -> osm2streets tile ${tile.id}`;
+  const source = String(
+    args.source ?? `Geofabrik Hamburg OSM PBF -> osm2streets tile ${tile.id}`
+  );
   const converterArgs = [
     converter,
     '--lanes',
     lanes,
+    '--network',
+    resolve(tileWorkDir, 'network.json'),
     '--output',
     tileOutJson,
     '--seq-output',

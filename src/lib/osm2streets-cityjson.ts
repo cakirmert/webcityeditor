@@ -6,6 +6,7 @@ import {
 } from './osm2streets-draft';
 import type { Osm2StreetsResult, Osm2StreetsSelection } from './osm2streets';
 import { computeBbox, detectCrs } from './projection';
+import { estimateTerrainElevationAtPoint } from './terrain';
 import {
   inferRoadVerticalProfileFromOsmTags,
   type InsertRoadResult,
@@ -21,6 +22,9 @@ export function insertOsm2StreetsRoadIntoCityJson(
   osmRoads: OsmRoadFeature[],
   options: { id?: string; baseElevation?: number } = {}
 ): InsertRoadResult {
+  if (!selection) {
+    throw new Error('Select an osm2streets lane before editing it.');
+  }
   const crs = detectCrs(doc);
   if (!crs.supported) {
     throw new Error(`Cannot create osm2streets road: CRS ${crs.code} is not supported by proj4.`);
@@ -33,7 +37,12 @@ export function insertOsm2StreetsRoadIntoCityJson(
     throw new Error('Cannot create osm2streets road: CityJSON transform is invalid.');
   }
 
-  const baseElevation = options.baseElevation ?? computeBbox(doc).min.z;
+  const referencePoint = featureReferencePoint(selection.feature.geometry?.coordinates);
+  const baseElevation =
+    options.baseElevation ??
+    (referencePoint
+      ? estimateTerrainElevationAtPoint(doc, referencePoint)
+      : computeBbox(doc).min.z);
   const assets = buildOsm2StreetsRoadAssets(selection, result, osmRoads, {
     crsCode: crs.code,
     elevationM: baseElevation,
@@ -114,7 +123,7 @@ export function insertOsm2StreetsRoadIntoCityJson(
       class: 'transportation',
       function: 'road',
       name: assets.matchedOsmRoad?.tags.name ?? `osm2streets road ${assets.roadId}`,
-      _createdBy: 'city-editor-prototype',
+      _createdBy: 'webcityeditor',
       _createdAt: new Date().toISOString(),
       _source: 'osm2streets',
       _osm2streetsRoadId: String(assets.roadId),
@@ -165,7 +174,7 @@ function surfaceFromLane(
     bandId: lane.trafficAreaId,
     trafficDirection: lane.band.direction ?? null,
     transportationUsage: lane.usageCode,
-    surfaceMaterial: defaultSurfaceForBand(lane.band.kind),
+    surfaceMaterial: sourceSurfaceMaterial(lane),
     maxspeed: lane.band.maxspeedKmh ?? null,
     source: 'osm2streets',
     sourceSurfaceIndex: surfaceIndex,
@@ -185,6 +194,47 @@ function surfaceFromLane(
 function defaultSurfaceForBand(kind: string): string {
   if (kind === 'green') return 'grass';
   return 'asphalt';
+}
+
+function sourceSurfaceMaterial(lane: Osm2StreetsRoadLaneAsset): string {
+  const muv = lane.properties.muv;
+  if (muv && typeof muv === 'object') {
+    const surface = (muv as { surface?: unknown }).surface;
+    if (surface && typeof surface === 'object') {
+      const kind = (surface as { kind?: unknown }).kind;
+      if (typeof kind === 'string' && kind.trim()) {
+        return kind
+          .trim()
+          .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+          .toLowerCase();
+      }
+    }
+  }
+  return defaultSurfaceForBand(lane.band.kind);
+}
+
+function featureReferencePoint(value: unknown): [number, number] | null {
+  let lng = 0;
+  let lat = 0;
+  let count = 0;
+  const visit = (node: unknown) => {
+    if (!Array.isArray(node)) return;
+    if (
+      node.length >= 2 &&
+      typeof node[0] === 'number' &&
+      typeof node[1] === 'number' &&
+      Number.isFinite(node[0]) &&
+      Number.isFinite(node[1])
+    ) {
+      lng += node[0];
+      lat += node[1];
+      count += 1;
+      return;
+    }
+    for (const child of node) visit(child);
+  };
+  visit(value);
+  return count > 0 ? [lng / count, lat / count] : null;
 }
 
 function closeRing(ring: [number, number][]): [number, number][] {

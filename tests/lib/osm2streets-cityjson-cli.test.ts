@@ -17,9 +17,19 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
     const dir = mkdtempSync(resolve(tmpdir(), 'webcityeditor-osm2streets-cityjson-'));
     try {
       const input = resolve(dir, 'lane-polygons.geojson');
+      const network = resolve(dir, 'network.json');
       const output = resolve(dir, 'roads.city.json');
       const seqOutput = resolve(dir, 'roads.city.jsonl');
       writeFileSync(input, `${JSON.stringify(lanePolygonsFixture())}\n`);
+      writeFileSync(
+        network,
+        JSON.stringify({
+          roads: [
+            [7, { name: 'Fixture Avenue', highway_type: 'primary', layer: 0, osm_ids: [3100] }],
+            [9, { name: 'Lower Lane', highway_type: 'service', layer: -1, osm_ids: [4100] }],
+          ],
+        })
+      );
 
       execFileSync(
         process.execPath,
@@ -29,6 +39,8 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
           input,
           '--output',
           output,
+          '--network',
+          network,
           '--seq-output',
           seqOutput,
           '--generated-at',
@@ -54,10 +66,18 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
         _osm2streetsRoadId: '7',
         _osmWayIds: ['3100'],
         _osm2streetsLaneCount: 4,
+        name: 'Fixture Avenue',
+        _highwayType: 'primary',
+        _verticalProfile: {
+          placement: 'surface',
+          elevationM: 0,
+          osmLayer: 0,
+        },
       });
       const road7Geometry = road7.geometry[0];
       expect(road7Geometry.boundaries).toHaveLength(4);
       expect(road7Geometry.semantics.values).toEqual([0, 1, 2, 3]);
+      expect(road7Geometry.semantics.surfaces[0].surfaceMaterial).toBe('paving_stones');
       expect(road7Geometry.semantics.surfaces.map((surface: any) => surface.function)).toEqual([
         'driving_lane',
         'bike_lane',
@@ -70,6 +90,8 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
         allowedModes: ['bicycle'],
         osm2streetsRoadId: '7',
         osmWayIds: ['3100'],
+        verticalPlacement: 'surface',
+        roadElevation: 0,
       });
       expect(road7Geometry.semantics.surfaces[1].osm2streetsPropertiesJson).toContain(
         '"type":"Biking"'
@@ -77,6 +99,11 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
       expect(road7Geometry.semantics.surfaces[3]).toMatchObject({
         type: 'AuxiliaryTrafficArea',
         function: 'median',
+      });
+      expect(doc.CityObjects['osm2streets-road-9'].attributes._verticalProfile).toMatchObject({
+        placement: 'underground',
+        elevationM: null,
+        osmLayer: -1,
       });
 
       const parsed = parseCityJson(JSON.stringify(doc));
@@ -155,7 +182,6 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
       expect(JSON.parse(surfaces[0].osm2streetsPropertiesJson).muv).toMatchObject({
         is_sidepath: true,
       });
-
       const parsed = parseCityJson(JSON.stringify(doc));
       expect(parsed.ok).toBe(true);
       if (!parsed.ok) return;
@@ -299,6 +325,7 @@ function lane(
       direction,
       speed_limit: speed,
       osm_way_ids: osmWayIds,
+      ...(type === 'Driving' ? { muv: { surface: { kind: 'PavingStones' } } } : {}),
     },
     geometry: {
       type: 'Polygon',

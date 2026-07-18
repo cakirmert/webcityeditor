@@ -49,7 +49,7 @@ export function mergeCityJson(
   // user error but recoverable), reject mismatch.
   const baseCrs = base.metadata?.referenceSystem;
   const incCrs = incoming.metadata?.referenceSystem;
-  if (baseCrs && incCrs && baseCrs !== incCrs) {
+  if (baseCrs && incCrs && !sameCrsReference(baseCrs, incCrs)) {
     return {
       ok: false,
       reason: `CRS mismatch — base is ${baseCrs}, incoming is ${incCrs}. Convert one before merging.`,
@@ -125,6 +125,15 @@ export function mergeCityJson(
     renamed: Object.keys(renameMap).length,
     renameMap: Object.keys(renameMap).length > 0 ? renameMap : undefined,
   };
+}
+
+function sameCrsReference(left: string, right: string): boolean {
+  if (left === right) return true;
+  const epsgCode = (value: string) =>
+    value.match(/EPSG\/\d+\/(\d+)|EPSG:(\d+)/i)?.slice(1).find(Boolean) ?? null;
+  const leftCode = epsgCode(left);
+  const rightCode = epsgCode(right);
+  return leftCode !== null && leftCode === rightCode;
 }
 
 /** Deep-clone a CityObject and add `offset` to every vertex index in its

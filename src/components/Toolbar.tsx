@@ -14,8 +14,11 @@ interface Stats {
   version: string;
   totalObjects: number;
   rootBuildings: number;
+  roads?: number;
   vertices: number;
   crs: string | null;
+  maxBuildingLod?: number | null;
+  hasOpenings?: boolean;
 }
 
 interface Props {
@@ -174,8 +177,13 @@ export default function Toolbar({
       {stats && (
         <span className="hidden text-[11px] text-[var(--text-dim)] tabular-nums lg:inline">
           CityJSON <b className="text-[var(--text)]">{stats.version}</b>{' '}
-          / <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
-          / <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
+           / <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
+           / <b className="text-[var(--text)]">{stats.roads ?? 0}</b> roads{' '}
+           / <b className="text-[var(--text)]">
+             {stats.maxBuildingLod == null ? 'LoD ?' : `LoD${stats.maxBuildingLod}`}
+           </b>{' '}
+           {stats.hasOpenings ? 'with openings' : 'no openings in source'}{' '}
+           / <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
           vertices
           {stats.crs && (
             <>
@@ -256,7 +264,7 @@ export default function Toolbar({
 
           {onToggleList && (
             <Button
-              className="app-toolbar__action"
+              className="app-toolbar__action app-toolbar__mobile-hide"
               variant="ghost"
               onClick={onToggleList}
               title={showList ? 'Hide building list' : 'Show building list'}
@@ -268,18 +276,18 @@ export default function Toolbar({
 
           {onToggleZoning && (
             <Button
-              className="app-toolbar__action"
+              className="app-toolbar__action app-toolbar__mobile-hide"
               variant={zoningEnabled ? 'primary' : 'ghost'}
               onClick={onToggleZoning}
               disabled={zoningLoading}
-              title={
-                zoningEnabled
-                  ? 'Refresh planning overlay for the current map view'
-                  : 'Load planning overlay for the current map view'
-              }
+               title={
+                 zoningEnabled
+                   ? 'Hide the planning overlay'
+                   : 'Load planning overlay for the current map view'
+               }
             >
               <MapPinned aria-hidden="true" />
-              {zoningLoading ? 'Planning...' : zoningEnabled ? 'Refresh Planning' : 'Planning'}
+               {zoningLoading ? 'Planning...' : zoningEnabled ? 'Hide Planning' : 'Planning'}
             </Button>
           )}
 
@@ -295,7 +303,7 @@ export default function Toolbar({
             </Button>
           )}
 
-          <Button className="app-toolbar__action" variant="primary" onClick={onExport} disabled={!hasData}>
+          <Button className="app-toolbar__action app-toolbar__mobile-hide" variant="primary" onClick={onExport} disabled={!hasData}>
             <Download aria-hidden="true" /> Export CityJSON
           </Button>
 
@@ -305,6 +313,23 @@ export default function Toolbar({
                 <MoreHorizontal aria-hidden="true" /> More
               </summary>
               <div className="absolute right-0 top-full z-40 mt-2 flex min-w-[230px] flex-col gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 shadow-2xl">
+                <div className="app-toolbar__mobile-menu-actions">
+                  {onToggleList && (
+                    <MenuAction onClick={onToggleList}>
+                      {showList ? 'Hide building list' : 'Show building list'}
+                    </MenuAction>
+                  )}
+                  {onToggleZoning && (
+                    <MenuAction onClick={onToggleZoning} disabled={zoningLoading}>
+                      {zoningLoading
+                        ? 'Loading planning...'
+                        : zoningEnabled
+                          ? 'Hide planning overlay'
+                          : 'Show planning overlay'}
+                    </MenuAction>
+                  )}
+                  <MenuAction onClick={onExport}>Export current CityJSON</MenuAction>
+                </div>
                 <div className="app-toolbar__more-validation grid gap-1">
                   {integrity && (
                     <Button size="sm" variant="ghost" onClick={integrity.onShow}>

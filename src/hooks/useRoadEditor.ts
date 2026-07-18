@@ -241,7 +241,7 @@ export function useRoadEditor(
 
       try {
         const result = await processOsmXml(xmlText, queryBbox, {
-          echoDiagnostics: options.echoDiagnostics,
+          echoDiagnostics: options.echoDiagnostics ?? false,
         });
         setOsm2streetsResult(result);
         setOsm2streetsBbox(options.showBoundary === false ? null : queryBbox);
@@ -378,7 +378,7 @@ export function useRoadEditor(
     if (selection.kind === 'lane') {
       const props = selection.feature.properties ?? {};
       setRoadStatus(
-        `Selected osm2streets lane ${props.index ?? '?'} on road ${props.road ?? '?'}. Inspect it or create an editable draft.`
+        `Selected osm2streets lane ${props.index ?? '?'} on road ${props.road ?? '?'}. Tap Edit road to store its exact surfaces in CityJSON and change it.`
       );
     } else {
       const props = selection.feature.properties ?? {};
@@ -721,7 +721,7 @@ export function useRoadEditor(
         for (const connectedRoadId of result.connectedRoadIds) next.add(connectedRoadId);
         return next;
       });
-      setSelection({ objectId: result.id });
+      setSelection(null);
       setSelectedRoadArea(null);
       setLastInsertedRoadId(result.id);
       setEditingRoadId(result.id);
@@ -780,35 +780,10 @@ export function useRoadEditor(
   const handleInsertOsm2StreetsSelection = useCallback(() => {
     if (!cityjson || !osm2streetsResult || !osm2streetsSelection) return;
     try {
-      const previewDoc = JSON.parse(JSON.stringify(cityjson)) as typeof cityjson;
-      const preview = insertOsm2StreetsRoadIntoCityJson(
-        previewDoc,
-        osm2streetsSelection,
-        osm2streetsResult,
-        osmRoads
-      );
-      const conflicts = validateRoadFit({
-        roadAreas: preview.areas,
-        buildingFootprints,
-        affectedLand: affectedZones,
-        metricCrs: activeMetricCrsForCityJson(cityjson),
-        buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
-        buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
-      });
-      const blockingConflicts = conflicts.filter((conflict) => conflict.severity === 'error');
-      if (blockingConflicts.length > 0) {
-        alert(
-          `osm2streets road insertion is blocked by ${blockingConflicts.length} fit conflict${
-            blockingConflicts.length === 1 ? '' : 's'
-          }:\n\n${blockingConflicts.slice(0, 5).map((conflict) => conflict.label).join('\n')}`
-        );
-        return;
-      }
-
-      pushUndo('Insert osm2streets CityJSON road');
+      pushUndo('Import osm2streets road into CityJSON for editing');
       const { value: result } = runStructurallyGuardedMutation(
         cityjson,
-        'Inserting osm2streets CityJSON road',
+        'Importing osm2streets road into CityJSON for editing',
         () =>
           insertOsm2StreetsRoadIntoCityJson(
             cityjson,
@@ -822,13 +797,22 @@ export function useRoadEditor(
         next.add(result.id);
         return next;
       });
-      setSelection({ objectId: result.id });
-      setSelectedRoadArea(null);
+      const editingDraft = deriveEditableRoadDraftFromAreas(result.areas, result.id);
+      setSelection(null);
+      setRoadDraft(editingDraft);
+      setRoadEditBaseline({
+        roadId: result.id,
+        draft: cloneRoadDraft(editingDraft),
+        exactGeometry: true,
+      });
+      setRoadDraftDirty(false);
+      setEditingRoadId(result.id);
+      setSelectedRoadArea(result.areas[0] ?? null);
       setLastInsertedRoadId(result.id);
       setReloadToken((t) => t + 1);
       markGeometryChanged('Road geometry changed; run Check 3D before export.');
       setRoadStatus(
-        `Inserted ${result.id} from exact osm2streets polygons with ${result.areas.length} transportation surfaces.`
+        `Editing ${result.id}. Its ${result.areas.length} exact osm2streets surfaces are now stored in CityJSON; attribute edits preserve their vertices.`
       );
     } catch (error) {
       console.error(error);
@@ -843,8 +827,6 @@ export function useRoadEditor(
     osm2streetsResult,
     osm2streetsSelection,
     osmRoads,
-    buildingFootprints,
-    affectedZones,
     pushUndo,
     setDirtyIds,
     setSelection,
