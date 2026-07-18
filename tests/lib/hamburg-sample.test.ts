@@ -12,16 +12,20 @@ const HAMBURG_BUILDINGS_PATH =
   'public/data/hamburg/hamburg-city-center-buildings.city.jsonl';
 const HAMBURG_ROADS_CITYJSON_PATH =
   'public/data/hamburg/hamburg-city-center-roads.city.json';
+const HAMBURG_LOD3_PATH = 'public/data/hamburg/hamburg-lod3-showcase.city.json';
 const HAMBURG_ROADS_OSM_PATH = 'public/data/hamburg/hamburg-city-center-roads.osm';
 const DEMO_BBOX: [number, number, number, number] = [9.978, 53.5395, 10.0035, 53.5545];
 
 const text = readFileSync(HAMBURG_BUILDINGS_PATH, 'utf8');
 const roadText = readFileSync(HAMBURG_ROADS_CITYJSON_PATH, 'utf8');
+const lod3Text = readFileSync(HAMBURG_LOD3_PATH, 'utf8');
 const osmText = readFileSync(HAMBURG_ROADS_OSM_PATH, 'utf8');
 const parsed = parseCityJsonAuto(text);
 if (!parsed.ok) throw new Error(parsed.error);
 const parsedRoads = parseCityJsonAuto(roadText);
 if (!parsedRoads.ok) throw new Error(parsedRoads.error);
+const parsedLod3 = parseCityJsonAuto(lod3Text);
+if (!parsedLod3.ok) throw new Error(parsedLod3.error);
 
 const doc = parsed.doc;
 const footprints = extractFootprints(doc);
@@ -51,6 +55,33 @@ describe('Hamburg committed city-center demo', () => {
     expect(footprints).toHaveLength(1_353);
     expect(mesh).not.toBeNull();
     expect(mesh!.triangleCount).toBeGreaterThan(10_000);
+  });
+
+  it('ships a surveyed textured LoD3 district inside the default map area', () => {
+    const roots = Object.entries(parsedLod3.doc.CityObjects)
+      .filter(([, object]) => object.type === 'Building')
+      .map(([id]) => id);
+    const installations = Object.values(parsedLod3.doc.CityObjects)
+      .filter((object) => object.type === 'BuildingInstallation');
+    const selectedIds = new Set(Object.keys(parsedLod3.doc.CityObjects));
+    const mesh = buildCityJsonMapMesh(parsedLod3.doc, {
+      objectIds: selectedIds,
+      maxOutputVertices: 160_000,
+    });
+
+    expect(roots).toHaveLength(24);
+    expect(roots.every((id) => doc.CityObjects[id]?.type === 'Building')).toBe(true);
+    expect(installations).toHaveLength(395);
+    expect((parsedLod3.doc.appearance as any)?.textures).toHaveLength(24);
+    expect(mesh?.maxLod).toBe(3);
+    expect(mesh?.textures).toHaveLength(24);
+    expect(parsedLod3.doc.metadata?.geographicalExtent).toEqual(
+      expect.arrayContaining([
+        expect.any(Number),
+        expect.any(Number),
+        expect.any(Number),
+      ])
+    );
   });
 
   it('starts from editable osm2streets road surfaces stored in CityJSON', () => {

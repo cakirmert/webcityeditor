@@ -57,25 +57,42 @@ import {
 } from '../lib/road-draft-edit';
 import { osmTrafficSignIcon } from '../lib/osm-street-point-style';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
+import {
+  BUILDING_BLOCK_FULL_ZOOM,
+  BUILDING_BLOCK_MIN_ZOOM,
+  BUILDING_DETAIL_FULL_ZOOM,
+  BUILDING_DETAIL_MIN_ZOOM,
+  smoothZoomStep,
+} from '../lib/lod-transition';
 import { Layers3, Map as MapIcon, Satellite } from 'lucide-react';
 
 /**
- * Zoom-based LoD thresholds (chosen empirically for OSM raster tiles + city-scale data):
- *  - <= LOD_OUTLINE_MAX: LoD0-style footprint context.
- *  - above LOD_OUTLINE_MAX: inexpensive extruded blocks.
- *  - >= BUILDING_DETAIL_MIN_ZOOM: the highest geometry available per nearby
- *    CityObject (LoD3 when supplied, otherwise LoD2/2.2) replaces the blocks.
+ * Zoom-based LoD thresholds use long overlapping ramps rather than discrete
+ * swaps. The block context appears over two zoom levels and the source mesh
+ * blends over 3.5 levels, so trackpad and pinch zoom do not pop from LoD0 to
+ * LoD2/3 in a single gesture.
  */
-const LOD_OUTLINE_MAX = 14.5;
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
 const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
-const BUILDING_DETAIL_MIN_ZOOM = 15.15;
-const BUILDING_DETAIL_FULL_ZOOM = 16.1;
 const EDIT_FOCUS_PADDING_DEGREES = 0.0038;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
+
+function addCityObjectWithDescendants(
+  doc: CityJsonDocument,
+  id: string,
+  target: Set<string>
+): void {
+  if (target.has(id)) return;
+  const object = doc.CityObjects[id];
+  if (!object) return;
+  target.add(id);
+  for (const child of object.children ?? []) {
+    addCityObjectWithDescendants(doc, child, target);
+  }
+}
 
 function osmPointFeatureColor(feature: OsmPointFeature): Rgba {
   switch (feature.kind) {
@@ -590,12 +607,12 @@ export default function MapView({
     );
     const ids = new Set<string>();
     for (const footprint of visible.slice(0, 420)) {
-      ids.add(footprint.id);
-      if (footprint.parentId) ids.add(footprint.parentId);
+      addCityObjectWithDescendants(cityjson, footprint.id, ids);
+      if (footprint.parentId) addCityObjectWithDescendants(cityjson, footprint.parentId, ids);
     }
-    if (selectedId) ids.add(selectedId);
+    if (selectedId) addCityObjectWithDescendants(cityjson, selectedId, ids);
     return ids.size > 0 ? ids : null;
-  }, [detailEnabled, detailScopeBbox, renderedFootprints, selectedId]);
+  }, [cityjson, detailEnabled, detailScopeBbox, renderedFootprints, selectedId]);
 
   const detailMesh = useMemo(
     () =>
@@ -607,14 +624,14 @@ export default function MapView({
         : null,
     [cityjson, detailObjectIds, reloadToken]
   );
-  const detailOpacity = Math.max(
-    0,
-    Math.min(
-      1,
-      (zoom - BUILDING_DETAIL_MIN_ZOOM) /
-        (BUILDING_DETAIL_FULL_ZOOM - BUILDING_DETAIL_MIN_ZOOM)
-    )
+  const detailOpacity = smoothZoomStep(
+    BUILDING_DETAIL_MIN_ZOOM,
+    BUILDING_DETAIL_FULL_ZOOM,
+    zoom
   );
+  const blockOpacity =
+    smoothZoomStep(BUILDING_BLOCK_MIN_ZOOM, BUILDING_BLOCK_FULL_ZOOM, zoom) *
+    (1 - detailOpacity);
 
   // A drawing/editing gesture owns the map until it is saved or discarded.
   // Keeping unrelated pick targets live here caused one finger tap to both add
@@ -709,6 +726,14 @@ export default function MapView({
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     map.addControl(overlay as unknown as maplibregl.IControl);
 
+    let liveZoomFrame: number | null = null;
+    const syncLiveZoom = () => {
+      if (liveZoomFrame !== null) return;
+      liveZoomFrame = window.requestAnimationFrame(() => {
+        liveZoomFrame = null;
+        setZoom(map.getZoom());
+      });
+    };
     const syncSettledView = () => {
       setZoom(map.getZoom());
       const bounds = map.getBounds();
@@ -719,6 +744,7 @@ export default function MapView({
         bounds.getNorth(),
       ]);
     };
+    map.on('zoom', syncLiveZoom);
     map.on('zoomend', syncSettledView);
     map.on('moveend', syncSettledView);
     if (map.isStyleLoaded()) syncSettledView();
@@ -728,8 +754,10 @@ export default function MapView({
     overlayRef.current = overlay;
 
     return () => {
+      map.off('zoom', syncLiveZoom);
       map.off('zoomend', syncSettledView);
       map.off('moveend', syncSettledView);
+      if (liveZoomFrame !== null) window.cancelAnimationFrame(liveZoomFrame);
       overlay.finalize();
       map.remove();
       mapRef.current = null;
@@ -1169,7 +1197,7 @@ export default function MapView({
 
     // Cheap block context fills the middle zoom range; close zoom swaps it for
     // the indexed highest-available CityJSON surface mesh above.
-    if (zoom > LOD_OUTLINE_MAX && (!detailMesh || detailOpacity < 1)) {
+    if (blockOpacity > 0.001 && (!detailMesh || detailOpacity < 1)) {
       layers.push(
         new SolidPolygonLayer<Footprint>({
           id: 'building-blocks',
@@ -1186,7 +1214,7 @@ export default function MapView({
             return mapColorMode === 'usage' ? tintByUsage(d, 230) : tintByRoofType(d, 230);
           },
           extruded: true,
-          opacity: detailMesh ? 1 - detailOpacity : 1,
+          opacity: blockOpacity,
           wireframe: false,
           pickable: buildingSelectionEnabled,
           material: {
@@ -1249,7 +1277,7 @@ export default function MapView({
               onOsm2StreetsSelect?.({ kind: 'lane', feature: info.object });
             }
           },
-          parameters: { depthTest: false } as unknown as never,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
             getLineColor: [osm2streetsSelection, highlightedOsm2StreetsRoadIds],
@@ -1302,7 +1330,7 @@ export default function MapView({
                 onOsm2StreetsSelect?.({ kind: 'intersection', feature: info.object });
               }
             },
-            parameters: { depthTest: false } as unknown as never,
+            parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
             updateTriggers: {
               getFillColor: [basemap, roadOverlayOpacity],
               getLineColor: [osm2streetsSelection],
@@ -1357,7 +1385,7 @@ export default function MapView({
               basemap,
               roadOverlayOpacity
             ),
-          parameters: { depthTest: false } as unknown as never,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
           updateTriggers: { getFillColor: [basemap, roadOverlayOpacity] },
         })
       );
@@ -1380,7 +1408,7 @@ export default function MapView({
               basemap,
               roadOverlayOpacity
             ),
-          parameters: { depthTest: false } as unknown as never,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
           updateTriggers: { getFillColor: [basemap, roadOverlayOpacity] },
         })
       );
@@ -1407,7 +1435,7 @@ export default function MapView({
           filled: true,
           pickable: roadSelectionEnabled,
           extruded: false,
-          parameters: { depthTest: false } as unknown as never,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
             getLineColor: [selectedRoadAreaId, basemap, roadOverlayOpacity],
@@ -1797,6 +1825,7 @@ export default function MapView({
     mapColorMode,
     buildingSelectionEnabled,
     roadSelectionEnabled,
+    roadWorkspaceOpen,
     planningSelectionEnabled,
   ]);
 
@@ -2238,10 +2267,10 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         detailLabel={
           detailMesh
-            ? `Highest source detail: LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${detailMesh.objectCount} nearby`
+            ? `Source LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${Math.round(detailOpacity * 100)}% detail · ${detailMesh.objectCount} nearby objects`
             : zoom >= BUILDING_DETAIL_MIN_ZOOM
               ? 'Footprint detail (source mesh unavailable)'
-              : `Overview geometry · zoom closer for the highest source LoD`
+              : 'Overview geometry · close detail begins gradually at zoom 14.75'
         }
         focusActive={!!editFocusBbox}
         obscuredByInspector={roadWorkspaceOpen || !!selectedId}

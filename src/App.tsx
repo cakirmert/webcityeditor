@@ -54,7 +54,10 @@ const HAMBURG_CITY_CENTER_DEMO_URL =
 const HAMBURG_CITY_CENTER_DEMO_NAME = 'hamburg-city-center-buildings.city.jsonl';
 const HAMBURG_CITY_CENTER_ROADS_URL =
   'data/hamburg/hamburg-city-center-roads.city.json';
+const HAMBURG_LOD3_SHOWCASE_URL =
+  'data/hamburg/hamburg-lod3-showcase.city.json';
 const HAMBURG_CITY_CENTER_COMBINED_NAME = 'hamburg-city-center.city.json';
+const HAMBURG_LOD3_SHOWCASE_CENTER: [number, number] = [9.9803, 53.5473];
 
 export default function App() {
   const coreState = useCoreState();
@@ -220,9 +223,10 @@ export default function App() {
 
     void (async () => {
       try {
-        const [buildingResult, roadResult] = await Promise.allSettled([
+        const [buildingResult, roadResult, lod3Result] = await Promise.allSettled([
           fetch(publicAssetUrl(HAMBURG_CITY_CENTER_DEMO_URL)),
           fetch(publicAssetUrl(HAMBURG_CITY_CENTER_ROADS_URL)),
+          fetch(publicAssetUrl(HAMBURG_LOD3_SHOWCASE_URL)),
         ]);
         if (buildingResult.status === 'rejected') throw buildingResult.reason;
         const response = buildingResult.value;
@@ -241,19 +245,33 @@ export default function App() {
         if (!parsedRoads.ok) throw new Error(`Road CityJSON: ${parsedRoads.error}`);
         const merge = mergeCityJson(doc, parsedRoads.doc);
         if (!merge.ok) throw new Error(`Road CityJSON merge failed: ${merge.reason}`);
+
+        if (lod3Result.status === 'rejected') throw lod3Result.reason;
+        const lod3Response = lod3Result.value;
+        if (!lod3Response.ok) {
+          throw new Error(`LoD3 CityJSON: HTTP ${lod3Response.status} ${lod3Response.statusText}`);
+        }
+        const parsedLod3 = parseCityJson(await lod3Response.text());
+        if (!parsedLod3.ok) throw new Error(`LoD3 CityJSON: ${parsedLod3.error}`);
+        const lod3RootIds = Object.entries(parsedLod3.doc.CityObjects)
+          .filter(([, object]) => object.type === 'Building')
+          .map(([id]) => id);
+        for (const id of lod3RootIds) removeCityObjectTree(doc, id);
+        const lod3Merge = mergeCityJson(doc, parsedLod3.doc);
+        if (!lod3Merge.ok) throw new Error(`LoD3 CityJSON merge failed: ${lod3Merge.reason}`);
         if (!doc.metadata) doc.metadata = {};
-        doc.metadata.title = 'Hamburg city center buildings and editable roads';
+        doc.metadata.title = 'Hamburg city center LoD2/LoD3 buildings and editable roads';
         doc.metadata.sourceDescription =
-          'Official Hamburg LoD2 buildings merged with precomputed osm2streets CityJSON Transportation roads.';
+          'Official Hamburg LoD2 context, 24 surveyed textured LoD3 buildings, and precomputed osm2streets CityJSON Transportation roads.';
 
         handleLoadedForApp(doc, HAMBURG_CITY_CENTER_COMBINED_NAME, null);
         coreState.setPrimitiveValidation({
           kind: 'valid',
           message:
-            'The committed Hamburg building demo is validated LoD2. This source does not contain LoD3 windows or doors.',
+            'The close showcase area contains 24 official textured Hamburg LoD3 buildings; the surrounding city context is LoD2.',
         });
         roadEditor.setRoadStatus(
-          `Loaded ${merge.added ?? 0} CityJSON road objects. Tap Roads, then tap a road on the map to edit it.`
+          `Loaded ${merge.added ?? 0} CityJSON road objects and ${lod3RootIds.length} official LoD3 buildings. Tap Roads, then tap a road on the map to edit it.`
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -399,8 +417,9 @@ export default function App() {
       return coreState.fileName === HAMBURG_CITY_CENTER_COMBINED_NAME
         ? {
             ...saved,
-            zoom: Math.min(saved.zoom, 14.9),
-            pitch: Math.max(saved.pitch ?? 0, 58),
+            center: HAMBURG_LOD3_SHOWCASE_CENTER,
+            zoom: Math.min(saved.zoom, 14.85),
+            pitch: Math.max(saved.pitch ?? 0, 62),
           }
         : saved;
     }
@@ -1407,6 +1426,13 @@ function AssetPlacementBanner({
       <button type="button" onClick={onCancel}>Cancel</button>
     </div>
   );
+}
+
+function removeCityObjectTree(doc: CityJsonDocument, id: string): void {
+  const object = doc.CityObjects[id];
+  if (!object) return;
+  for (const child of object.children ?? []) removeCityObjectTree(doc, child);
+  delete doc.CityObjects[id];
 }
 
 function maximumBuildingLod(doc: CityJsonDocument): number | null {
