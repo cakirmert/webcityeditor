@@ -5,7 +5,7 @@ This file is the single technical handoff for City Editor. It consolidates the f
 ## What the project guarantees
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
-- The committed Hamburg city-center demo starts by merging its LoD2 buildings and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
+- The committed Hamburg city-center demo starts by merging its LoD2 context, 24 surveyed textured LoD3 buildings with 395 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
 - Close building views use the highest geometry LoD available per object, including textured LoD3 surfaces; distant context falls back to outlines or blocks.
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws cheap footprint or block context. From zoom 15.15 to 16.1 it gradually blends into an indexed mesh of up to 420 nearby objects and selects the numerically highest `geometry.lod` for each building, including LoD3 when present and LoD2/2.2 as the fallback. Its output limit is 160,000 vertices, so the transition retains more context and avoids a one-frame detail swap. The selected-building viewer also retains the full object geometry.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws cheap footprint context; blocks blend in from zoom 13.25 to 15.25. From zoom 14.75 to 18.25 it uses a smooth 3.5-level transition into an indexed mesh of up to 420 nearby buildings plus their child installations. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. It selects the numerically highest `geometry.lod` for each object, including LoD3 when present and LoD2/2.2 as the fallback. Its output limit is 160,000 vertices. The selected-building viewer also retains the full object geometry.
 
-The committed Hamburg city context is honestly LoD2 and contains no semantic Window or Door surfaces. The toolbar and map therefore report `LoD2 · no openings in source`; they do not fabricate LoD3. Two ready-made buildings are converted from the official Hamburg LoD3.0 Area 1 tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. Their LoD3 solids, JPG atlases, CityJSON texture assignments, UV coordinates, source IDs, licence, and attribution ship under `public/data/assets/hamburg-lod3/`. The close map renderer creates a separate texture mesh for each atlas.
+The wide Hamburg context is LoD2. The default close-up area replaces 24 matching LoD2 buildings with their surveyed LoD3 counterparts from official Area 1 tile `6433`; 24 JPG atlases, UV coordinates, and 395 BuildingInstallation objects ship with them. The toolbar therefore reports `LoD3 · no openings in source`: textures visibly contain facade detail, but the source does not encode separate semantic Window or Door surfaces. Two additional placeable assets are converted from tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. The close map renderer includes child installations and creates a separate texture mesh for each atlas.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -124,9 +124,18 @@ npm run dev:hamburg-buildings
 
 The strict CityJSONSeq catalog streams tiles for the visible viewport and supports local changed-tile write-back. Large source and generated files stay under ignored `Data/`.
 
-### Official Hamburg LoD3 assets
+### Official Hamburg LoD3 data
 
-The shipped samples were selected from the official Hamburg LoD3.0 Area 1 CityGML archive, tile `6431`, converted to CityJSON 2.0 with `citygml-tools`, and normalized around a local placement origin. With the converted tile and its extracted `images` directory in the documented temporary paths, reproduce the committed files with:
+The default showcase is selected from official tile `6433`, remains at its surveyed coordinates, and replaces matching LoD2 IDs during startup. Download the tile's records from the 1.5 GB Area 1 archive without fetching the whole archive, convert it with `citygml-tools`, then build the compact committed subset with:
+
+```bash
+npm run data:hamburg-lod3-download -- 6433
+# Extract the resulting partial ZIP with a Deflate64-capable ZIP tool.
+tools/citygml-tools-2.4.0/citygml-tools to-cityjson -e 25832 -c -o .tmp/hamburg-lod3-converted/6433 .tmp/hamburg-lod3-source/6433/6433/6433.gml
+npm run data:hamburg-lod3-showcase
+```
+
+The two placement assets were selected from tile `6431` and normalized around local placement origins. With that converted tile and its extracted `images` directory in the documented temporary paths, reproduce them with:
 
 ```powershell
 npm run data:hamburg-lod3-assets

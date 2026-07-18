@@ -23,6 +23,8 @@ export interface MergeOutcome {
  *    silently — that would scatter incoming buildings across the map.
  *  - Vertex indices in `incoming` are shifted by `base.vertices.length` so
  *    every reference still resolves after the merge.
+ *  - Texture atlases and UV vertices are appended and every incoming texture
+ *    reference is shifted, so textured CityJSON stays textured after merge.
  *  - CityObject id conflicts get a unique suffix (`__merge2`, `__merge3`, …)
  *    and the renames are reported. If a child references a renamed parent,
  *    the parents/children arrays are rewritten to use the new id.
@@ -86,6 +88,11 @@ export function mergeCityJson(
   else if (!base.metadata && incoming.metadata) base.metadata = { ...incoming.metadata };
   mergeGeographicalExtent(base, incoming);
 
+  // Merge texture atlases and UV vertices before cloning CityObjects. Geometry
+  // texture leaves reference both arrays by index, just like boundaries refer
+  // to the document vertex array.
+  const appearanceOffsets = mergeAppearance(base, incoming);
+
   // ── Vertex merge ────────────────────────────────────────────────────────
   const vertexOffset = base.vertices.length;
   for (const v of incomingVertices) base.vertices.push(v);
@@ -112,7 +119,12 @@ export function mergeCityJson(
   let added = 0;
   for (const [oldId, raw] of Object.entries(incoming.CityObjects)) {
     const newId = renameMap[oldId] ?? oldId;
-    const obj: CityObject = cloneAndShift(raw, vertexOffset);
+    const obj: CityObject = cloneAndShift(
+      raw,
+      vertexOffset,
+      appearanceOffsets.texture,
+      appearanceOffsets.uv
+    );
     if (obj.parents) obj.parents = obj.parents.map((p) => renameMap[p] ?? p);
     if (obj.children) obj.children = obj.children.map((c) => renameMap[c] ?? c);
     base.CityObjects[newId] = obj;
@@ -138,11 +150,19 @@ function sameCrsReference(left: string, right: string): boolean {
 
 /** Deep-clone a CityObject and add `offset` to every vertex index in its
  *  geometry. Does not mutate the input. */
-function cloneAndShift(obj: CityObject, offset: number): CityObject {
+function cloneAndShift(
+  obj: CityObject,
+  offset: number,
+  textureOffset = 0,
+  textureVertexOffset = 0
+): CityObject {
   const cloned = JSON.parse(JSON.stringify(obj)) as CityObject;
   if (cloned.geometry) {
-    for (const g of cloned.geometry as Array<{ boundaries?: unknown }>) {
+    for (const g of cloned.geometry as Array<{ boundaries?: unknown; texture?: unknown }>) {
       if (g.boundaries) g.boundaries = shiftIndices(g.boundaries, offset);
+      if (g.texture) {
+        g.texture = shiftTextureIndices(g.texture, textureOffset, textureVertexOffset);
+      }
     }
   }
   return cloned;
@@ -152,6 +172,62 @@ function shiftIndices(node: unknown, offset: number): unknown {
   if (typeof node === 'number') return node + offset;
   if (Array.isArray(node)) return node.map((c) => shiftIndices(c, offset));
   return node;
+}
+
+function shiftTextureIndices(
+  node: unknown,
+  textureOffset: number,
+  textureVertexOffset: number
+): unknown {
+  if (node == null || typeof node !== 'object') return node;
+  if (!Array.isArray(node)) {
+    return Object.fromEntries(
+      Object.entries(node).map(([key, value]) => [
+        key,
+        shiftTextureIndices(value, textureOffset, textureVertexOffset),
+      ])
+    );
+  }
+  if (node.length > 1 && Number.isInteger(node[0])) {
+    return [
+      Number(node[0]) + textureOffset,
+      ...node.slice(1).map((value) =>
+        Number.isInteger(value) ? Number(value) + textureVertexOffset : value
+      ),
+    ];
+  }
+  return node.map((value) =>
+    shiftTextureIndices(value, textureOffset, textureVertexOffset)
+  );
+}
+
+function mergeAppearance(
+  base: CityJsonDocument,
+  incoming: CityJsonDocument
+): { texture: number; uv: number } {
+  const incomingAppearance = incoming.appearance as
+    | {
+        textures?: unknown[];
+        'vertices-texture'?: unknown[];
+      }
+    | undefined;
+  if (!incomingAppearance?.textures?.length) return { texture: 0, uv: 0 };
+
+  const baseDocument = base as CityJsonDocument & {
+    appearance?: {
+      textures?: unknown[];
+      'vertices-texture'?: unknown[];
+    };
+  };
+  const target = (baseDocument.appearance ??= {});
+  const textures = (target.textures ??= []);
+  const textureVertices = (target['vertices-texture'] ??= []);
+  const offsets = { texture: textures.length, uv: textureVertices.length };
+  textures.push(...structuredClone(incomingAppearance.textures));
+  textureVertices.push(
+    ...structuredClone(incomingAppearance['vertices-texture'] ?? [])
+  );
+  return offsets;
 }
 
 function reencodeVertices(

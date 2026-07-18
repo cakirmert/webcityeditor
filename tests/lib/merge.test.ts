@@ -164,6 +164,34 @@ describe('mergeCityJson', () => {
     expect(inc).toEqual(incCopy);
   });
 
+  it('merges texture atlases and shifts texture and UV indices', () => {
+    const base = buildSampleCube() as CityJsonDocument & { appearance?: any };
+    base.appearance = {
+      textures: [{ image: 'base.jpg' }],
+      'vertices-texture': [[0, 0]],
+    };
+    const inc = buildSampleCube() as CityJsonDocument & { appearance?: any };
+    inc.CityObjects.Building_B = inc.CityObjects.Building_A;
+    delete inc.CityObjects.Building_A;
+    (inc.CityObjects.Building_B.geometry?.[0] as any).texture = {
+      rgbTexture: { values: [[[[0, 0, 1, 2, 3]]]] },
+    };
+    inc.appearance = {
+      textures: [{ image: 'incoming.jpg' }],
+      'vertices-texture': [[0, 0], [1, 0], [1, 1], [0, 1]],
+    };
+
+    expect(mergeCityJson(base, inc).ok).toBe(true);
+    expect(base.appearance.textures).toEqual([
+      { image: 'base.jpg' },
+      { image: 'incoming.jpg' },
+    ]);
+    expect(base.appearance['vertices-texture']).toHaveLength(5);
+    expect((base.CityObjects.Building_B.geometry?.[0] as any).texture).toEqual({
+      rgbTexture: { values: [[[[1, 1, 2, 3, 4]]]] },
+    });
+  });
+
   it('handles three-way conflicts (A, A__merge2 already exist → A becomes A__merge3)', () => {
     const base = buildSampleCube();
     // Pre-populate base with a Building_A__merge2 to force the next conflict

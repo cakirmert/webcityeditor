@@ -33,7 +33,7 @@ To edit an existing building:
 4. Choose **Make editable** only when you intentionally want to replace imported geometry with a reshaped parametric building.
 5. Export CityJSON when you are ready to save or compare the result.
 
-The close map uses the highest LoD actually stored for each nearby building and changes detail gradually as you zoom. The city context is LoD2, so it is labelled **LoD2 · no openings in source** rather than inventing windows. The included assets are real LoD3 solids converted from Hamburg's [official LoD3.0 source](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5); their face textures and UV coordinates remain in CityJSON and render on the map.
+The default map now includes a surveyed district of **24 textured LoD3 buildings** at their real Hamburg coordinates, surrounded by the wider LoD2 city context. Detail blends continuously from overview footprints to blocks and then to the source geometry across 3.5 zoom levels; it does not jump after one wheel step. The toolbar says LoD3 because LoD3 is genuinely loaded. Texture-visible windows are retained, while the app does not invent semantic Window or Door surfaces that the source omits. The included placement assets come from the same [official Hamburg LoD3.0 source](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5).
 
 ![Building details and highest-detail preview](assets/readme/building-editor.jpg)
 
