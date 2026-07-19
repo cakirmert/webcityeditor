@@ -2085,8 +2085,75 @@ export function synchronizeRoadConnectionMetadata(
   doc: CityJsonDocument,
   sourceRoadId: string,
   sourceDraft: RoadDraft
-): string[] {
+): { connectedRoadIds: string[]; disconnectedRoadIds: string[] } {
   const changedTargets = new Set<string>();
+  const disconnectedTargets = new Set<string>();
+  const activeReciprocals = new Set<string>();
+
+  for (const sourceSection of sourceDraft.sections) {
+    for (const sourceEndpoint of ['start', 'end'] as const) {
+      const connection = sourceSection.connections?.[sourceEndpoint];
+      if (
+        connection?.target !== 'cityjson' ||
+        !connection.targetSectionId ||
+        (connection.targetEndpoint !== 'start' && connection.targetEndpoint !== 'end') ||
+        connection.targetId === sourceRoadId
+      ) {
+        continue;
+      }
+      activeReciprocals.add(
+        roadConnectionKey(
+          connection.targetId,
+          connection.targetSectionId,
+          connection.targetEndpoint,
+          sourceSection.id,
+          sourceEndpoint
+        )
+      );
+    }
+  }
+
+  // A dragged endpoint loses its source-side connection immediately. Remove
+  // the corresponding target-side link on Save so reopening either road does
+  // not present a connection that no longer exists.
+  for (const [targetRoadId, targetObject] of Object.entries(doc.CityObjects)) {
+    if (targetRoadId === sourceRoadId || targetObject.type !== 'Road') continue;
+    const targetDraft = readEditableRoadDraftFromCityObject(targetObject);
+    if (!targetDraft) continue;
+    let disconnected = false;
+    for (const targetSection of targetDraft.sections) {
+      for (const targetEndpoint of ['start', 'end'] as const) {
+        const connection = targetSection.connections?.[targetEndpoint];
+        if (connection?.target !== 'cityjson' || connection.targetId !== sourceRoadId) continue;
+        const remainsConnected =
+          !!connection.targetSectionId &&
+          (connection.targetEndpoint === 'start' || connection.targetEndpoint === 'end') &&
+          activeReciprocals.has(
+            roadConnectionKey(
+              targetRoadId,
+              targetSection.id,
+              targetEndpoint,
+              connection.targetSectionId,
+              connection.targetEndpoint
+            )
+          );
+        if (remainsConnected) continue;
+        delete targetSection.connections?.[targetEndpoint];
+        if (!targetSection.connections?.start && !targetSection.connections?.end) {
+          delete targetSection.connections;
+        }
+        disconnected = true;
+      }
+    }
+    if (!disconnected) continue;
+    targetObject.attributes = {
+      ...(targetObject.attributes ?? {}),
+      _roadLayout: roadDraftToJson(targetDraft),
+      _updatedAt: new Date().toISOString(),
+    };
+    disconnectedTargets.add(targetRoadId);
+  }
+
   for (const sourceSection of sourceDraft.sections) {
     for (const sourceEndpoint of ['start', 'end'] as const) {
       const connection = sourceSection.connections?.[sourceEndpoint];
@@ -2125,7 +2192,26 @@ export function synchronizeRoadConnectionMetadata(
       changedTargets.add(connection.targetId);
     }
   }
-  return [...changedTargets];
+  return {
+    connectedRoadIds: [...changedTargets],
+    disconnectedRoadIds: [...disconnectedTargets],
+  };
+}
+
+function roadConnectionKey(
+  targetRoadId: string,
+  targetSectionId: string,
+  targetEndpoint: 'start' | 'end',
+  sourceSectionId: string,
+  sourceEndpoint: 'start' | 'end'
+): string {
+  return [
+    targetRoadId,
+    targetSectionId,
+    targetEndpoint,
+    sourceSectionId,
+    sourceEndpoint,
+  ].join('\u0000');
 }
 
 function readRoadDraft(value: unknown): RoadDraft | null {

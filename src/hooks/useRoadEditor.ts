@@ -715,19 +715,20 @@ export function useRoadEditor(
                 roadDraft,
                 targetRoadId ? { id: targetRoadId } : undefined
               );
-          const connectedRoadIds = synchronizeRoadConnectionMetadata(
+          const connectionSync = synchronizeRoadConnectionMetadata(
             cityjson,
             inserted.id,
             roadDraft
           );
           if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
-          return { ...inserted, connectedRoadIds };
+          return { ...inserted, ...connectionSync };
         }
       );
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(result.id);
         for (const connectedRoadId of result.connectedRoadIds) next.add(connectedRoadId);
+        for (const disconnectedRoadId of result.disconnectedRoadIds) next.add(disconnectedRoadId);
         return next;
       });
       setSelection(null);
@@ -748,24 +749,16 @@ export function useRoadEditor(
       if (!preserveExactGeometry) {
         markGeometryChanged('Road geometry changed; run Check 3D before export.');
       }
+      const connectionStatus = formatRoadConnectionSyncStatus(
+        result.connectedRoadIds.length,
+        result.disconnectedRoadIds.length
+      );
       setRoadStatus(
         preserveExactGeometry
-          ? `Saved attributes on ${result.id} while preserving all ${result.areas.length} exact transportation polygons and vertices${
-              result.connectedRoadIds.length > 0
-                ? `; confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
-                : ''
-            }.`
+          ? `Saved attributes on ${result.id} while preserving all ${result.areas.length} exact transportation polygons and vertices${connectionStatus ? `; ${connectionStatus}` : ''}.`
           : targetRoadId
-          ? `Saved changes to ${result.id} with ${result.areas.length} transportation surfaces${
-              result.connectedRoadIds.length > 0
-                ? ` and confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
-                : ''
-            }.`
-          : `Inserted ${result.id} with ${result.areas.length} transportation surfaces${
-              result.connectedRoadIds.length > 0
-                ? ` and confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
-                : ''
-            }.`
+          ? `Saved changes to ${result.id} with ${result.areas.length} transportation surfaces${connectionStatus ? `; ${connectionStatus}` : ''}.`
+          : `Inserted ${result.id} with ${result.areas.length} transportation surfaces${connectionStatus ? `; ${connectionStatus}` : ''}.`
       );
     } catch (error) {
       console.error(error);
@@ -932,6 +925,18 @@ export function useRoadEditor(
     roadFitConflicts,
     roadFitPending,
   };
+}
+
+function formatRoadConnectionSyncStatus(connected: number, disconnected: number): string {
+  const updates = [
+    connected > 0
+      ? `confirmed ${connected} reciprocal road connection${connected === 1 ? '' : 's'}`
+      : null,
+    disconnected > 0
+      ? `cleared ${disconnected} stale reciprocal road connection${disconnected === 1 ? '' : 's'}`
+      : null,
+  ].filter((value): value is string => value !== null);
+  return updates.join(' and ');
 }
 export type RoadEditorState = ReturnType<typeof useRoadEditor>;
 

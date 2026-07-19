@@ -418,9 +418,10 @@ describe('transportation roads', () => {
     };
     insertRoadIntoCityJson(doc, source, { id: 'source-road' });
 
-    expect(synchronizeRoadConnectionMetadata(doc, 'source-road', source)).toEqual([
-      'target-road',
-    ]);
+    expect(synchronizeRoadConnectionMetadata(doc, 'source-road', source)).toEqual({
+      connectedRoadIds: ['target-road'],
+      disconnectedRoadIds: [],
+    });
     expect(readEditableRoadDraftFromCityObject(doc.CityObjects['target-road'])).toMatchObject({
       sections: [
         {
@@ -435,6 +436,42 @@ describe('transportation roads', () => {
         },
       ],
     });
+  });
+
+  it('clears reciprocal metadata after a connected endpoint is dragged away and saved', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(delftRoad);
+    insertRoadIntoCityJson(doc, target, { id: 'target-road' });
+
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      delftRoad[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'target-road',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: delftRoad[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'source-road' });
+    synchronizeRoadConnectionMetadata(doc, 'source-road', source);
+
+    const disconnected = JSON.parse(JSON.stringify(source)) as typeof source;
+    disconnected.sections[0].centerlineWgs84[1] = [4.35695, 52.01156];
+    delete disconnected.sections[0].connections;
+    insertRoadIntoCityJson(doc, disconnected, { id: 'source-road' });
+
+    expect(synchronizeRoadConnectionMetadata(doc, 'source-road', disconnected)).toEqual({
+      connectedRoadIds: [],
+      disconnectedRoadIds: ['target-road'],
+    });
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects['target-road'])?.sections[0].connections
+    ).toBeUndefined();
   });
 
   it('splits a road section into two building-block sections while preserving bands', () => {

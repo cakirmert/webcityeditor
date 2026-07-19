@@ -82,6 +82,7 @@ Endpoint editing is deliberate:
 - connections between two editable CityJSON roads are written reciprocally.
 
 Connection metadata confirms graph topology. It does not yet synthesize a complete lane-level intersection, turn restrictions, or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
+Dragging a confirmed endpoint away and saving now removes the stale reciprocal connection from the other editable CityJSON road, so both roads reopen with the same disconnected topology.
 
 ## UX and performance decisions
 
@@ -214,7 +215,7 @@ The following work is intentionally not claimed as complete:
 
 1. Generate true intersection surfaces from confirmed connected roads, including lane-to-lane connectors, turns, crossings, and regenerated markings. Exact lane polygons already match osm2streets styling; dynamic junction synthesis is not claimed as complete.
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
-3. Add topology-aware propagation when a connected road is later moved or deleted, with a clear conflict-resolution UI.
+3. Add topology-aware propagation and conflict resolution when a connected road is moved while remaining joined or is deleted. Explicit endpoint disconnection already clears the reciprocal metadata on save.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
 5. Add screenshot-based GPU regression coverage for multiple texture atlases and mixed LoD2/LoD3 data on lower-end mobile devices. The converted textured samples and structural UV regression coverage now ship.
 
