@@ -33,6 +33,8 @@ interface BuildOptions {
   maxOutputVertices?: number;
   /** Backwards-compatible alias for maxOutputVertices. */
   maxInputVertices?: number;
+  /** Place each root object group on the flat map ground without changing its relative heights. */
+  groundObjectGroups?: boolean;
 }
 
 const DEFAULT_MAX_OUTPUT_VERTICES = 80_000;
@@ -66,16 +68,31 @@ export function buildCityJsonMapMesh(
     rings: number[][];
     surfaceType: string;
     texture: SurfaceTexture | null;
+    groundZ: number | null;
   }> = [];
   const referenced = new Set<number>();
   let queuedVertexCount = 0;
   let objectCount = 0;
   let maxLod: number | null = null;
 
+  const selectedGeometries = new Map<string, unknown[]>();
+  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
+    if (options.objectIds && !options.objectIds.has(objectId)) continue;
+    selectedGeometries.set(
+      objectId,
+      highestAvailableGeometries(object.geometry ?? [], options.maxLod)
+    );
+  }
+  const groundByGroup = options.groundObjectGroups
+    ? computeObjectGroupGrounds(doc, selectedGeometries)
+    : new Map<string, number>();
+
   for (const [objectId, obj] of Object.entries(doc.CityObjects)) {
     if (options.objectIds && !options.objectIds.has(objectId)) continue;
-    const geometries = highestAvailableGeometries(obj.geometry ?? [], options.maxLod);
+    const geometries = selectedGeometries.get(objectId) ?? [];
     if (geometries.length === 0) continue;
+    const groupId = rootObjectId(doc, objectId);
+    const groundZ = groundByGroup.get(groupId) ?? null;
     let objectQueued = false;
     for (const geomRaw of geometries) {
       const geom = geomRaw as {
@@ -97,6 +114,7 @@ export function buildCityJsonMapMesh(
           rings,
           surfaceType: surfaceType ?? obj.type,
           texture: readSurfaceTexture(doc, geom, path, rings),
+          groundZ,
         });
         queuedVertexCount += count;
         objectQueued = true;
@@ -128,7 +146,7 @@ export function buildCityJsonMapMesh(
   const origin = {
     x: (minX + maxX) / 2,
     y: (minY + maxY) / 2,
-    z: minZ,
+    z: options.groundObjectGroups ? 0 : minZ,
   };
   const anchorLngLat = projectToWgs84(crs.code, origin);
 
@@ -140,11 +158,11 @@ export function buildCityJsonMapMesh(
     { image: string; positions: number[]; indices: number[]; texCoords: number[] }
   >();
 
-  const localVertex = (idx: number): [number, number, number] | null => {
+  const localVertex = (idx: number, groundZ: number | null): [number, number, number] | null => {
     const v = doc.vertices[idx];
     if (!v) return null;
     const c = applyVertexTransform(v, doc);
-    return [c.x - origin.x, c.y - origin.y, c.z - origin.z];
+    return [c.x - origin.x, c.y - origin.y, c.z - (groundZ ?? origin.z)];
   };
 
   for (const surface of queued) {
@@ -154,12 +172,17 @@ export function buildCityJsonMapMesh(
         target = { image: surface.texture.image, positions: [], indices: [], texCoords: [] };
         textured.set(surface.texture.image, target);
       }
-      addTexturedSurface(surface.rings, surface.texture.uvRings, localVertex, target);
+      addTexturedSurface(
+        surface.rings,
+        surface.texture.uvRings,
+        (idx) => localVertex(idx, surface.groundZ),
+        target
+      );
     } else {
       addSurface(
         surface.rings,
         surface.surfaceType,
-        localVertex,
+        (idx) => localVertex(idx, surface.groundZ),
         positions,
         colors,
         indices
@@ -192,6 +215,45 @@ export function buildCityJsonMapMesh(
       (surface) => surface.surfaceType === 'Window' || surface.surfaceType === 'Door'
     ).length,
   };
+}
+
+function computeObjectGroupGrounds(
+  doc: CityJsonDocument,
+  geometriesByObject: ReadonlyMap<string, unknown[]>
+): Map<string, number> {
+  const groundByGroup = new Map<string, number>();
+  for (const [objectId, geometries] of geometriesByObject) {
+    const groupId = rootObjectId(doc, objectId);
+    for (const geometry of geometries) {
+      const indices = collectBoundaryIndices((geometry as { boundaries?: unknown }).boundaries);
+      for (const index of indices) {
+        const vertex = doc.vertices[index];
+        if (!vertex) continue;
+        const z = applyVertexTransform(vertex, doc).z;
+        if (!Number.isFinite(z)) continue;
+        groundByGroup.set(groupId, Math.min(groundByGroup.get(groupId) ?? Infinity, z));
+      }
+    }
+  }
+  return groundByGroup;
+}
+
+function rootObjectId(doc: CityJsonDocument, objectId: string): string {
+  let currentId = objectId;
+  const visited = new Set<string>();
+  while (!visited.has(currentId)) {
+    visited.add(currentId);
+    const parentId = doc.CityObjects[currentId]?.parents?.[0];
+    if (!parentId || !doc.CityObjects[parentId]) break;
+    currentId = parentId;
+  }
+  return currentId;
+}
+
+function collectBoundaryIndices(value: unknown, result = new Set<number>()): Set<number> {
+  if (Number.isInteger(value)) result.add(Number(value));
+  else if (Array.isArray(value)) value.forEach((item) => collectBoundaryIndices(item, result));
+  return result;
 }
 
 function highestAvailableGeometries<T>(geometries: T[], maxLod?: number): T[] {

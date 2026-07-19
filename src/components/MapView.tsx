@@ -12,6 +12,7 @@ import {
   TextLayer,
 } from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
+import { Tile3DLayer } from '@deck.gl/geo-layers';
 import { PathStyleExtension } from '@deck.gl/extensions';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
 import {
@@ -76,6 +77,10 @@ import {
   type HamburgCityTree,
 } from '../lib/hamburg-trees';
 import type { BasemapMode } from '../lib/basemap';
+import {
+  groundHamburgLod3Tile,
+  HAMBURG_LOD3_TILESET_URL,
+} from '../lib/hamburg-lod3-tiles';
 import { Layers3, Map as MapIcon, Satellite } from 'lucide-react';
 
 /** Zoom stages keep LoD0, source LoD2, and close textured LoD3 distinct. */
@@ -420,6 +425,10 @@ export default function MapView({
   const treeLoadStartedRef = useRef(false);
   const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[] | null>(null);
   const [treeDataError, setTreeDataError] = useState<string | null>(null);
+  const [officialLod3Status, setOfficialLod3Status] = useState<
+    'loading' | 'ready' | 'error'
+  >('loading');
+  const [officialLod3LoadedTiles, setOfficialLod3LoadedTiles] = useState(0);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
@@ -456,6 +465,22 @@ export default function MapView({
         setTreeDataError(error instanceof Error ? error.message : String(error));
       });
   }, [zoom]);
+
+  const handleOfficialLod3TileLoad = useCallback((tile: any) => {
+    groundHamburgLod3Tile(tile);
+    setOfficialLod3Status('ready');
+    setOfficialLod3LoadedTiles((count) => count + 1);
+  }, []);
+
+  const handleOfficialLod3TileError = useCallback(
+    (_tile: unknown, firstMessage: string, secondMessage: string) => {
+      setOfficialLod3Status('error');
+      setWarning(
+        `Official Hamburg LoD3 tile failed to load: ${secondMessage || firstMessage || 'unknown error'}`
+      );
+    },
+    []
+  );
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -668,6 +693,7 @@ export default function MapView({
   );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
   const detailLod: 'lod2' | 'lod3' = zoom >= BUILDING_LOD3_MIN_ZOOM ? 'lod3' : 'lod2';
+  const officialLod3Active = detailLod === 'lod3' && officialLod3Status !== 'error';
   const treeDetailLabel = editFocusBbox
     ? 'street trees hidden while editing'
     : zoom < HAMBURG_TREE_MIN_ZOOM
@@ -706,25 +732,28 @@ export default function MapView({
 
   const detailMesh = useMemo(
     () =>
-      detailObjectIds
+      detailObjectIds && !officialLod3Active
         ? buildCityJsonMapMesh(cityjson, {
             objectIds: detailObjectIds,
             maxOutputVertices: 160_000,
-            maxLod: detailLod === 'lod2' ? 2.9 : undefined,
+            maxLod: 2.9,
+            groundObjectGroups: true,
           })
         : null,
-    [cityjson, detailLod, detailObjectIds, reloadToken]
+    [cityjson, detailObjectIds, officialLod3Active, reloadToken]
   );
   const blockFootprints = useMemo(
     () =>
-      detailObjectIds
+      officialLod3Active
+        ? []
+        : detailObjectIds
         ? renderedFootprints.filter(
             (footprint) =>
               !detailObjectIds.has(footprint.id) &&
               (!footprint.parentId || !detailObjectIds.has(footprint.parentId))
           )
         : renderedFootprints,
-    [renderedFootprints, detailObjectIds]
+    [renderedFootprints, detailObjectIds, officialLod3Active]
   );
   const blockOpacity = smoothZoomStep(
     BUILDING_BLOCK_MIN_ZOOM,
@@ -1248,6 +1277,29 @@ export default function MapView({
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
     // thing drawn, at high zoom it still fires picking when clicking a roof edge.
+    // Stream the exact PBR/texture hierarchy used by Hamburg's official
+    // geoportal. Per-feature grounding happens before the b3dm scenegraph is
+    // uploaded, using each batch feature's surveyed base elevation.
+    if (officialLod3Active) {
+      layers.push(
+        new Tile3DLayer({
+          id: 'hamburg-official-textured-lod3',
+          data: HAMBURG_LOD3_TILESET_URL,
+          loadOptions: {
+            tileset: {
+              maximumScreenSpaceError: 4,
+              maximumMemoryUsage: 192,
+              throttleRequests: true,
+            },
+          },
+          opacity: 1,
+          pickable: false,
+          onTileLoad: handleOfficialLod3TileLoad,
+          onTileError: handleOfficialLod3TileError,
+        })
+      );
+    }
+
     layers.push(
       new PolygonLayer<Footprint>({
         id: 'building-outlines',
@@ -2048,6 +2100,9 @@ export default function MapView({
     roadSelectionEnabled,
     roadWorkspaceOpen,
     planningSelectionEnabled,
+    officialLod3Active,
+    handleOfficialLod3TileLoad,
+    handleOfficialLod3TileError,
   ]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
@@ -2493,8 +2548,14 @@ export default function MapView({
         roadOverlayOpacity={roadOverlayOpacity}
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         detailLabel={
-          detailMesh
-            ? `Source ${detailLod === 'lod3' ? 'textured LoD3' : 'LoD2'} · ${detailMesh.objectCount} nearby objects · ${
+          detailLod === 'lod3' && officialLod3Status === 'error'
+            ? `Official textured LoD3 unavailable · grounded source LoD2 fallback · ${treeDetailLabel}`
+            : officialLod3Active
+              ? officialLod3Status === 'ready'
+                ? `Official Hamburg 20 cm LoD3 3D Tiles · ${officialLod3LoadedTiles} streamed tiles · grounded per building · ${treeDetailLabel}`
+                : `Loading official Hamburg 20 cm LoD3 3D Tiles · ${treeDetailLabel}`
+              : detailMesh
+            ? `Source LoD2 · ${detailMesh.objectCount} nearby objects · ${
                 detailMesh.texturedSurfaceCount > 0
                   ? detailMesh.explicitOpeningSurfaceCount > 0
                     ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`

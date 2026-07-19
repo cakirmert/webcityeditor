@@ -134,4 +134,41 @@ describe('CityJSON close-range map mesh', () => {
       0, 0, 1, 0, 0, 1,
     ]);
   });
+
+  it('grounds each root object group independently on a flat map', () => {
+    const doc = detailDocument();
+    doc.vertices = [
+      [565000, 5935000, 10],
+      [565010, 5935000, 10],
+      [565000, 5935010, 15],
+      [565020, 5935000, 20],
+      [565030, 5935000, 20],
+      [565020, 5935010, 26],
+      [565002, 5935002, 23],
+      [565004, 5935002, 23],
+      [565002, 5935004, 25],
+    ];
+    doc.CityObjects = {
+      first: {
+        type: 'Building',
+        children: ['roof-installation'],
+        geometry: [{ type: 'MultiSurface', lod: '2', boundaries: [[[0, 1, 2]]] }],
+      },
+      'roof-installation': {
+        type: 'BuildingInstallation',
+        parents: ['first'],
+        geometry: [{ type: 'MultiSurface', lod: '2', boundaries: [[[6, 7, 8]]] }],
+      },
+      second: {
+        type: 'Building',
+        geometry: [{ type: 'MultiSurface', lod: '2', boundaries: [[[3, 4, 5]]] }],
+      },
+    };
+
+    const mesh = buildCityJsonMapMesh(doc, { groundObjectGroups: true });
+    const z = [...mesh!.positions].filter((_, index) => index % 3 === 2);
+
+    expect(mesh?.originProjected[2]).toBe(0);
+    expect(z).toEqual([0, 0, 5, 13, 13, 15, 0, 0, 6]);
+  });
 });

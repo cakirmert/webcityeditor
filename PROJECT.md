@@ -8,7 +8,7 @@ This file is the single technical handoff for City Editor. It consolidates the f
 - The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed textured LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close building views use the highest geometry LoD available per object, including textured LoD3 surfaces; distant context falls back to outlines or blocks.
+- Close building views stream Hamburg's official textured 3D Tiles; editable CityJSON remains the source of truth and distant context falls back to grounded LoD2, outlines, or blocks.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. Textured LoD3 is a separate, non-overlapping close stage beginning at zoom 18.25. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. Its output limit is 160,000 vertices. The selected-building viewer also retains the full object geometry.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. Each root building group is normalized by its own minimum source elevation, rather than one viewport-wide minimum, so every building touches the flat editor map while installations remain at the correct relative height. Official textured 3D Tiles are a separate, non-overlapping close stage beginning at zoom 18.25. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. The selected-building viewer retains the editable CityJSON geometry.
 
-The wide Hamburg context is LoD2. The default close-up area preserves that LoD2 geometry and adds all 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, and 1,043 BuildingInstallation objects ship with them. The toolbar reports `textured LoD3` only at the very close threshold: textures visibly contain facade detail, but the source does not encode separate semantic Window or Door surfaces. Two additional placeable assets are converted from tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. The close map renderer includes child installations and creates a separate texture mesh for each atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, species, planting years, and streets. Edit focus hides that context to preserve interaction performance.
+The wide Hamburg context is LoD2. The editable close-up data preserves that geometry and adds 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, and 1,043 BuildingInstallation objects ship as an offline/editing fallback. The close map no longer triangulates that conversion for its main visual. It streams `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json`, the CORS-enabled PBR hierarchy used by Hamburg's geoportal, at a screen-space error of four pixels. Each b3dm batch feature is shifted by its own `Grundhöhe NN` metadata (or its minimum vertex when missing), which attaches it to the flat map without flattening roof detail. Two additional placeable assets are converted from tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, species, planting years, and streets. Edit focus hides that context to preserve interaction performance.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -127,7 +127,7 @@ The strict CityJSONSeq catalog streams tiles for the visible viewport and suppor
 
 ### Official Hamburg LoD3 data
 
-The default showcase is selected from official tile `6433`, remains at its surveyed coordinates, and replaces matching LoD2 IDs during startup. Download the tile's records from the 1.5 GB Area 1 archive without fetching the whole archive, convert it with `citygml-tools`, then build the compact committed subset with:
+The close map streams the official live tileset at `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json`; its JSON and b3dm children return `Access-Control-Allow-Origin: *`. CityJSON remains authoritative for edits and export. The compact tile `6433` conversion is retained as editable/offline source data. Reproduce it by downloading the tile's records from the Area 1 archive, converting with `citygml-tools`, then building the subset with:
 
 ```bash
 npm run data:hamburg-lod3-download -- 6433
@@ -220,6 +220,7 @@ The following work is intentionally not claimed as complete:
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
 3. Add topology-aware propagation when a connected road is later moved or deleted, with a clear conflict-resolution UI.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
-5. Add screenshot-based GPU regression coverage for multiple texture atlases and mixed LoD2/LoD3 data on lower-end mobile devices. The converted textured samples and structural UV regression coverage now ship.
+5. Add a dedicated renderer for Hamburg's CORS-enabled Cesium quantized-mesh DGM terrain and drape the active MapLibre basemap onto it. Per-building grounding fixes floating models now; full terrain is required to preserve surveyed elevation differences and terrain breaklines visually.
+6. Add screenshot-based GPU regression coverage for official 3D Tiles and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural grounding and tile-data regressions already have unit coverage.
 
 These are continuation tasks, not blockers for the committed demo or the exact attribute-editing workflow.
