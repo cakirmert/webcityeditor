@@ -100,6 +100,42 @@ describe('useRoadEditor road-edit lifecycle', () => {
     ).toBe(4);
     expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
   });
+
+  it('undoes and redoes unsaved road-draft changes before CityJSON is saved', () => {
+    const doc = buildSampleCube();
+    const savedDraft = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
+    insertRoadIntoCityJson(doc, savedDraft, { id: 'road-existing' });
+    const coreState = coreStateFor(doc);
+    const { result } = renderHook(() =>
+      useRoadEditor(coreState as never, { pushUndo: vi.fn() } as never)
+    );
+    const area = extractTransportationAreas(doc).find(
+      (candidate) => candidate.roadId === 'road-existing'
+    );
+    expect(area).toBeDefined();
+    if (!area) return;
+
+    act(() => result.current.handleEditSelectedRoadArea(area));
+    const originalWidth = result.current.roadDraft!.sections[0].bands[0].widthM;
+    act(() =>
+      result.current.handleRoadDraftChange(
+        withFirstBandWidth(result.current.roadDraft!, 4),
+        'Change lane width'
+      )
+    );
+
+    expect(result.current.roadDraftHistoryState.canUndo).toBe(true);
+    expect(result.current.roadDraftDirty).toBe(true);
+
+    act(() => result.current.handleUndoRoadDraft());
+    expect(result.current.roadDraft?.sections[0].bands[0].widthM).toBe(originalWidth);
+    expect(result.current.roadDraftDirty).toBe(false);
+    expect(result.current.roadDraftHistoryState.canRedo).toBe(true);
+
+    act(() => result.current.handleRedoRoadDraft());
+    expect(result.current.roadDraft?.sections[0].bands[0].widthM).toBe(4);
+    expect(result.current.roadDraftDirty).toBe(true);
+  });
 });
 
 function withFirstBandWidth(draft: RoadDraft, widthM: number): RoadDraft {

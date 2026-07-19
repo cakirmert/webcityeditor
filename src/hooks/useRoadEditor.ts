@@ -37,6 +37,10 @@ import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
 import type { BasemapMode } from '../lib/basemap';
 import { compactVertices } from '../lib/compact';
+import {
+  RoadDraftHistory,
+  type RoadDraftHistorySnapshot,
+} from '../lib/road-draft-history';
 
 interface FetchOsmRoadOptions {
   source?: 'viewport' | 'loaded-data';
@@ -192,6 +196,68 @@ export function useRoadEditor(
   const [osm2streetsBbox, setOsm2streetsBbox] = useState<[number, number, number, number] | null>(null);
   const [osm2streetsSelection, setOsm2streetsSelection] = useState<Osm2StreetsSelection>(null);
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
+  const roadDraftHistoryRef = useRef(new RoadDraftHistory());
+  const [roadDraftHistoryVersion, setRoadDraftHistoryVersion] = useState(0);
+
+  const clearRoadDraftHistory = useCallback(() => {
+    roadDraftHistoryRef.current.clear();
+    setRoadDraftHistoryVersion((version) => version + 1);
+  }, []);
+
+  const recordRoadDraftHistory = useCallback(
+    (
+      currentDraft: RoadDraft | null,
+      currentDirty: boolean,
+      label: string,
+      group?: string
+    ) => {
+      roadDraftHistoryRef.current.record(
+        { draft: currentDraft, dirty: currentDirty },
+        { label, group }
+      );
+      setRoadDraftHistoryVersion((version) => version + 1);
+    },
+    []
+  );
+
+  const applyRoadDraftHistorySnapshot = useCallback(
+    (snapshot: RoadDraftHistorySnapshot, action: 'Undid' | 'Redid') => {
+      setRoadDraft(snapshot.draft);
+      setRoadDraftDirty(snapshot.dirty);
+      setDrawMode('none');
+      setRoadStatus(
+        `${action} ${snapshot.label?.toLowerCase() ?? 'road edit'}. Changes are recorded automatically.`
+      );
+      setRoadDraftHistoryVersion((version) => version + 1);
+    },
+    [setDrawMode]
+  );
+
+  const handleUndoRoadDraft = useCallback(() => {
+    const previous = roadDraftHistoryRef.current.undo({
+      draft: roadDraft,
+      dirty: roadDraftDirty,
+    });
+    if (previous) applyRoadDraftHistorySnapshot(previous, 'Undid');
+  }, [applyRoadDraftHistorySnapshot, roadDraft, roadDraftDirty]);
+
+  const handleRedoRoadDraft = useCallback(() => {
+    const next = roadDraftHistoryRef.current.redo({
+      draft: roadDraft,
+      dirty: roadDraftDirty,
+    });
+    if (next) applyRoadDraftHistorySnapshot(next, 'Redid');
+  }, [applyRoadDraftHistorySnapshot, roadDraft, roadDraftDirty]);
+
+  const roadDraftHistoryState = useMemo(
+    () => ({
+      canUndo: roadDraftHistoryRef.current.canUndo(),
+      canRedo: roadDraftHistoryRef.current.canRedo(),
+      undoLabel: roadDraftHistoryRef.current.peekUndoLabel(),
+      redoLabel: roadDraftHistoryRef.current.peekRedoLabel(),
+    }),
+    [roadDraftHistoryVersion]
+  );
 
   const exactGeometryStatus = useMemo<'preserved' | 'changed' | null>(() => {
     if (
@@ -208,6 +274,7 @@ export function useRoadEditor(
   }, [editingRoadId, roadDraft, roadEditBaseline]);
 
   const clearOsmRoadData = useCallback(() => {
+    clearRoadDraftHistory();
     setRoadEditBaseline(null);
     setRoadDraft(null);
     setRoadDraftDirty(false);
@@ -224,7 +291,7 @@ export function useRoadEditor(
     setRoadStatus(null);
     setDrawMode('none');
     setSelection(null);
-  }, [setDrawMode, setSelection]);
+  }, [clearRoadDraftHistory, setDrawMode, setSelection]);
 
   const loadOsmRoadXml = useCallback(
     async (
@@ -344,6 +411,7 @@ export function useRoadEditor(
   }, [cityjson, coreState.mapBboxRef, loadOsmRoadXml]);
 
   const handleOsmRoadSelect = useCallback((road: OsmRoadFeature) => {
+    clearRoadDraftHistory();
     setShowRoadEditor(true);
     setOsm2streetsSelection(null);
     setHighlightedOsm2StreetsRoadIds(new Set());
@@ -369,7 +437,7 @@ export function useRoadEditor(
     setRoadDraft({ ...inferred, userVerified: false });
     setRoadDraftDirty(false);
     setRoadStatus('OSM kept as a seed. Use Draw / redraw road and edit lanes before inserting.');
-  }, []);
+  }, [clearRoadDraftHistory]);
 
   const handleOsm2StreetsSelect = useCallback((selection: Osm2StreetsSelection) => {
     setShowRoadEditor(true);
@@ -414,6 +482,7 @@ export function useRoadEditor(
         osm2streetsResult,
         osmRoads
       );
+      clearRoadDraftHistory();
       setRoadDraft(draft);
       setRoadEditBaseline(null);
       setRoadDraftDirty(false);
@@ -431,7 +500,7 @@ export function useRoadEditor(
       setRoadStatus(message);
       alert(`osm2streets draft creation failed: ${message}`);
     }
-  }, [osm2streetsResult, osm2streetsSelection, osmRoads]);
+  }, [clearRoadDraftHistory, osm2streetsResult, osm2streetsSelection, osmRoads]);
 
   const handleStartRoadDraw = useCallback(() => {
     setShowRoadEditor(true);
@@ -447,14 +516,18 @@ export function useRoadEditor(
         alert('Road centerline needs at least two points.');
         return;
       }
-      setRoadDraft((current) => {
-        if (!current) {
-          return createManualRoadDraft(lineWgs84);
-        }
+      recordRoadDraftHistory(
+        roadDraft,
+        roadDraftDirty,
+        roadDraft ? 'Redraw road' : 'Draw new road'
+      );
+      if (!roadDraft) {
+        setRoadDraft(createManualRoadDraft(lineWgs84));
+      } else {
         const fallback = createManualRoadDraft(lineWgs84).sections[0];
-        const first = current.sections[0] ?? fallback;
-        return {
-          ...current,
+        const first = roadDraft.sections[0] ?? fallback;
+        setRoadDraft({
+          ...roadDraft,
           userVerified: true,
           sections: [
             {
@@ -469,19 +542,23 @@ export function useRoadEditor(
               })),
             },
           ],
-        };
-      });
+        });
+      }
       setRoadDraftDirty(true);
       setRoadStatus('Manual road centerline updated. Check bands and speed, then insert.');
     },
-    [setDrawMode]
+    [recordRoadDraftHistory, roadDraft, roadDraftDirty, setDrawMode]
   );
 
-  const handleRoadDraftChange = useCallback((draft: RoadDraft) => {
-    setRoadDraft(draft);
-    setRoadDraftDirty(true);
-    setLastInsertedRoadId(null);
-  }, []);
+  const handleRoadDraftChange = useCallback(
+    (draft: RoadDraft, label = 'Edit road', historyGroup?: string) => {
+      recordRoadDraftHistory(roadDraft, roadDraftDirty, label, historyGroup);
+      setRoadDraft(draft);
+      setRoadDraftDirty(true);
+      setLastInsertedRoadId(null);
+    },
+    [recordRoadDraftHistory, roadDraft, roadDraftDirty]
+  );
 
   const handleEditSelectedRoadArea = useCallback((area: RoadArea) => {
     if (String(area.attributes.transportationUsage ?? area.function).toLowerCase() === 'intersection') {
@@ -512,6 +589,7 @@ export function useRoadEditor(
       ...draft,
       id: draft.id ?? area.roadId,
     };
+    clearRoadDraftHistory();
     setRoadDraft(editingDraft);
     const preservesImportedGeometry = area.geometryMode === 'exact' || !savedDraft;
     setRoadEditBaseline(
@@ -535,10 +613,11 @@ export function useRoadEditor(
         ? `Loaded editable layout from ${area.roadId}. Changes stay in the draft until you save them.`
         : `Editing ${area.roadId} on its exact CityJSON polygons. Type, direction, material, access and speed edits preserve them; moving handles, changing widths or restructuring bands rebuilds editable ribbons.`
     );
-  }, [cityjson]);
+  }, [cityjson, clearRoadDraftHistory]);
 
   const handleCancelRoadEdit = useCallback((force = false) => {
     if (!force && roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
+    clearRoadDraftHistory();
     setDrawMode('none');
     setSelection(null);
     setRoadDraft(null);
@@ -551,22 +630,20 @@ export function useRoadEditor(
     setOsm2streetsSelection(null);
     setHighlightedOsm2StreetsRoadIds(new Set());
     setRoadStatus('Road edit canceled. No unsaved draft changes were applied to CityJSON.');
-  }, [roadDraftDirty, setDrawMode, setSelection]);
+  }, [clearRoadDraftHistory, roadDraftDirty, setDrawMode, setSelection]);
 
   const handleSplitRoadDraft = useCallback((sectionId: string, fraction: number) => {
-    setRoadDraftDirty(true);
-    setRoadDraft((current) => {
-      if (!current) return current;
-      try {
-        const next = splitRoadSectionAtFraction(current, sectionId, fraction);
-        setRoadStatus(`Split ${sectionId} at ${(fraction * 100).toFixed(0)}%.`);
-        return next;
-      } catch (error) {
-        alert(`Road split failed: ${error instanceof Error ? error.message : String(error)}`);
-        return current;
-      }
-    });
-  }, []);
+    if (!roadDraft) return;
+    try {
+      const next = splitRoadSectionAtFraction(roadDraft, sectionId, fraction);
+      recordRoadDraftHistory(roadDraft, roadDraftDirty, 'Split road section');
+      setRoadDraft(next);
+      setRoadDraftDirty(true);
+      setRoadStatus(`Split ${sectionId} at ${(fraction * 100).toFixed(0)}%.`);
+    } catch (error) {
+      alert(`Road split failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [recordRoadDraftHistory, roadDraft, roadDraftDirty]);
 
   const buildingFootprints = useMemo(
     () => (cityjson ? extractFootprints(cityjson) : []),
@@ -736,6 +813,7 @@ export function useRoadEditor(
       setLastInsertedRoadId(result.id);
       setEditingRoadId(result.id);
       setRoadDraftDirty(false);
+      clearRoadDraftHistory();
       setRoadEditBaseline(
         preserveExactGeometry
           ? {
@@ -780,6 +858,7 @@ export function useRoadEditor(
     roadAreas,
     buildingFootprints,
     affectedZones,
+    clearRoadDraftHistory,
     pushUndo,
     setDirtyIds,
     setSelection,
@@ -808,6 +887,7 @@ export function useRoadEditor(
         return next;
       });
       const editingDraft = deriveEditableRoadDraftFromAreas(result.areas, result.id);
+      clearRoadDraftHistory();
       setSelection(null);
       setRoadDraft(editingDraft);
       setRoadEditBaseline({
@@ -837,6 +917,7 @@ export function useRoadEditor(
     osm2streetsResult,
     osm2streetsSelection,
     osmRoads,
+    clearRoadDraftHistory,
     pushUndo,
     setDirtyIds,
     setSelection,
@@ -890,6 +971,9 @@ export function useRoadEditor(
     roadDraft,
     setRoadDraft,
     roadDraftDirty,
+    roadDraftHistoryState,
+    handleUndoRoadDraft,
+    handleRedoRoadDraft,
     exactGeometryStatus,
     editingRoadId,
     roadStatus,
