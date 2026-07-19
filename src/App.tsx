@@ -357,11 +357,23 @@ export default function App() {
       if (!meta) return;
       if (e.key === 'z' || e.key === 'Z') {
         e.preventDefault();
-        if (e.shiftKey) undoRedo.handleRedo();
+        const useRoadDraftHistory =
+          roadEditor.showRoadEditor &&
+          (roadEditor.roadDraftDirty ||
+            roadEditor.roadDraftHistoryState.canUndo ||
+            roadEditor.roadDraftHistoryState.canRedo);
+        if (useRoadDraftHistory) {
+          if (e.shiftKey) roadEditor.handleRedoRoadDraft();
+          else roadEditor.handleUndoRoadDraft();
+        } else if (e.shiftKey) undoRedo.handleRedo();
         else undoRedo.handleUndo();
       } else if (e.key === 'y') {
         e.preventDefault();
-        undoRedo.handleRedo();
+        if (roadEditor.showRoadEditor && roadEditor.roadDraftHistoryState.canRedo) {
+          roadEditor.handleRedoRoadDraft();
+        } else {
+          undoRedo.handleRedo();
+        }
       } else if (e.key === 'c' || e.key === 'C') {
         e.preventDefault();
         buildingEditor.handleCopy();
@@ -372,7 +384,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undoRedo, buildingEditor]);
+  }, [undoRedo, buildingEditor, roadEditor]);
 
   // Derived properties
   const footprintsForFilter = useMemo(() => {
@@ -700,6 +712,10 @@ export default function App() {
               drawMode={coreState.drawMode}
               backendUrl={roadEditor.roadBackendUrl}
               insertedRoadId={roadEditor.editingRoadId ?? roadEditor.lastInsertedRoadId}
+              canUndoDraft={roadEditor.roadDraftHistoryState.canUndo}
+              canRedoDraft={roadEditor.roadDraftHistoryState.canRedo}
+              undoDraftLabel={roadEditor.roadDraftHistoryState.undoLabel}
+              redoDraftLabel={roadEditor.roadDraftHistoryState.redoLabel}
               onClose={() => roadEditor.setShowRoadEditor(false)}
               onFetchOsmRoads={() => void roadEditor.handleFetchOsmRoads()}
               onBasemapChange={roadEditor.setBasemap}
@@ -716,6 +732,8 @@ export default function App() {
               }}
               onCancelEdit={roadEditor.handleCancelRoadEdit}
               onDraftChange={roadEditor.handleRoadDraftChange}
+              onUndoDraft={roadEditor.handleUndoRoadDraft}
+              onRedoDraft={roadEditor.handleRedoRoadDraft}
               onSplitDraft={roadEditor.handleSplitRoadDraft}
               onInsertRoad={roadEditor.handleInsertRoad}
               onExportPayload={roadEditor.handleExportRoadPayload}
@@ -790,7 +808,9 @@ export default function App() {
                 coreState.setSelection(null);
               }}
               roadDraft={roadEditor.roadDraft}
-              onRoadDraftChange={roadEditor.handleRoadDraftChange}
+              onRoadDraftChange={(draft) =>
+                roadEditor.handleRoadDraftChange(draft, 'Shape road', 'road-shape')
+              }
               osmRoads={roadEditor.osmRoads}
               osmPointFeatures={roadEditor.osmPointFeatures}
               selectedOsmRoadId={roadEditor.selectedOsmRoadId}

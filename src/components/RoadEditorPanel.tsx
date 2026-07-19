@@ -13,10 +13,12 @@ import {
   PencilLine,
   Road,
   Route,
+  Redo2,
   Satellite,
   Scissors,
   Send,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import {
@@ -58,6 +60,10 @@ interface Props {
   roadFitPending?: boolean;
   selectedRoadArea?: RoadArea | null;
   osm2streetsSelection?: Osm2StreetsSelection;
+  canUndoDraft: boolean;
+  canRedoDraft: boolean;
+  undoDraftLabel?: string;
+  redoDraftLabel?: string;
   onClose: () => void;
   onFetchOsmRoads: () => void;
   onBasemapChange: (basemap: BasemapMode) => void;
@@ -67,7 +73,9 @@ interface Props {
   onFinishManualDraw: () => void;
   onCancelDraw: () => void;
   onCancelEdit: () => void;
-  onDraftChange: (draft: RoadDraft) => void;
+  onDraftChange: (draft: RoadDraft, label?: string, historyGroup?: string) => void;
+  onUndoDraft: () => void;
+  onRedoDraft: () => void;
   onSplitDraft: (sectionId: string, fraction: number) => void;
   onInsertRoad: () => void;
   onExportPayload: () => void;
@@ -118,6 +126,10 @@ export default function RoadEditorPanel({
   roadFitPending = false,
   selectedRoadArea = null,
   osm2streetsSelection = null,
+  canUndoDraft,
+  canRedoDraft,
+  undoDraftLabel,
+  redoDraftLabel,
   onClose,
   onFetchOsmRoads,
   onBasemapChange,
@@ -128,6 +140,8 @@ export default function RoadEditorPanel({
   onCancelDraw,
   onCancelEdit,
   onDraftChange,
+  onUndoDraft,
+  onRedoDraft,
   onSplitDraft,
   onInsertRoad,
   onExportPayload,
@@ -205,25 +219,37 @@ export default function RoadEditorPanel({
 
   const updateSection = (
     sectionId: string,
-    updater: (section: RoadDraft['sections'][number]) => RoadDraft['sections'][number]
+    updater: (section: RoadDraft['sections'][number]) => RoadDraft['sections'][number],
+    label = 'Edit road',
+    historyGroup?: string
   ) => {
     if (!draft) return;
-    onDraftChange({
-      ...draft,
-      sections: draft.sections.map((section) =>
-        section.id === sectionId ? updater(section) : section
-      ),
-    });
+    onDraftChange(
+      {
+        ...draft,
+        sections: draft.sections.map((section) =>
+          section.id === sectionId ? updater(section) : section
+        ),
+      },
+      label,
+      historyGroup
+    );
   };
 
   const updateBand = (bandIndex: number, patch: Partial<RoadBand>) => {
     if (!activeSection || !draft) return;
-    updateSection(activeSection.id, (section) => ({
-      ...section,
-      bands: section.bands.map((band, index) =>
-        index === bandIndex ? { ...band, ...patch } : band
-      ),
-    }));
+    const changedFields = Object.keys(patch).sort().join('-');
+    updateSection(
+      activeSection.id,
+      (section) => ({
+        ...section,
+        bands: section.bands.map((band, index) =>
+          index === bandIndex ? { ...band, ...patch } : band
+        ),
+      }),
+      'Change road band',
+      `band-${activeSection.id}-${bandIndex}-${changedFields}`
+    );
   };
 
   const removeBand = (bandIndex: number) => {
@@ -379,6 +405,49 @@ export default function RoadEditorPanel({
         ) : draft ? (
           <span className="is-ok">Fit clear</span>
         ) : null}
+      </div>
+
+      <div className="road-editor-history" role="toolbar" aria-label="Road edit history">
+        <div>
+          <b>Road edit history</b>
+          <span>Changes are recorded automatically</span>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12"
+          onClick={onUndoDraft}
+          disabled={!canUndoDraft}
+          aria-label={
+            canUndoDraft && undoDraftLabel
+              ? `Undo road edit: ${undoDraftLabel}`
+              : 'Undo road edit'
+          }
+          title={
+            canUndoDraft ? `Undo ${undoDraftLabel ?? 'last road edit'} (Ctrl+Z)` : 'Nothing to undo'
+          }
+        >
+          <Undo2 className="h-5 w-5" aria-hidden="true" /> Undo
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12"
+          onClick={onRedoDraft}
+          disabled={!canRedoDraft}
+          aria-label={
+            canRedoDraft && redoDraftLabel
+              ? `Redo road edit: ${redoDraftLabel}`
+              : 'Redo road edit'
+          }
+          title={
+            canRedoDraft
+              ? `Redo ${redoDraftLabel ?? 'last road edit'} (Ctrl+Shift+Z)`
+              : 'Nothing to redo'
+          }
+        >
+          <Redo2 className="h-5 w-5" aria-hidden="true" /> Redo
+        </Button>
       </div>
 
       <div className="road-editor-panel__scroll">

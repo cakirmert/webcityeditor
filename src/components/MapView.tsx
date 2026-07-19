@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
@@ -429,7 +429,7 @@ export default function MapView({
     'loading' | 'ready' | 'error'
   >('loading');
   const [officialLod3LoadedTiles, setOfficialLod3LoadedTiles] = useState(0);
-  const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
+  const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('usage');
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
 
@@ -2374,11 +2374,12 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    // Only one TerraDraw can be alive at a time on the map. If the polygon-
-    // draw effect already started one, bail (drawMode === 'polygon' takes
-    // precedence — the parent should ensure these aren't both set, but we
-    // fail-soft if they are).
-    if (drawMode === 'polygon') return;
+    // Only one TerraDraw can be alive at a time on the map. Both new-building
+    // polygon drawing and new-road line drawing are owned by the draw-mode
+    // effect above. This guard must include road-line: otherwise this
+    // footprint cleanup immediately stops the freshly started road tool and
+    // every map tap is lost.
+    if (drawMode !== 'none') return;
 
     if (footprintEdit && !drawRef.current) {
       const start = () => {
@@ -2518,26 +2519,6 @@ export default function MapView({
           {drawWarning ?? warning}
         </div>
       )}
-      <div
-        className="map-color-control"
-        style={{
-          top: (drawWarning ?? warning) ? 58 : 12,
-          left: layerControlOpen ? 354 : 202,
-        }}
-      >
-        <MapColorModeButton
-          active={mapColorMode === 'roof'}
-          onClick={() => setMapColorMode('roof')}
-        >
-          Roof
-        </MapColorModeButton>
-        <MapColorModeButton
-          active={mapColorMode === 'usage'}
-          onClick={() => setMapColorMode('usage')}
-        >
-          Usage
-        </MapColorModeButton>
-      </div>
       <MapLayerControl
         open={layerControlOpen}
         onOpenChange={setLayerControlOpen}
@@ -2547,6 +2528,8 @@ export default function MapView({
         onSatelliteOpacityChange={onSatelliteOpacityChange}
         roadOverlayOpacity={roadOverlayOpacity}
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
+        mapColorMode={mapColorMode}
+        onMapColorModeChange={setMapColorMode}
         detailLabel={
           detailLod === 'lod3' && officialLod3Status === 'error'
             ? `Official textured LoD3 unavailable · grounded source LoD2 fallback · ${treeDetailLabel}`
@@ -2570,38 +2553,6 @@ export default function MapView({
         obscuredByInspector={roadWorkspaceOpen || !!selectedId}
       />
     </>
-  );
-}
-
-function MapColorModeButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: 'none',
-        borderRadius: 8,
-        cursor: 'pointer',
-        background: active ? 'var(--accent)' : 'transparent',
-        color: active ? '#fff' : 'var(--text-dim)',
-        fontFamily: 'inherit',
-        fontSize: 12,
-        fontWeight: 600,
-        lineHeight: 1,
-        minHeight: 38,
-        padding: '8px 12px',
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -2822,6 +2773,8 @@ function MapLayerControl({
   onSatelliteOpacityChange,
   roadOverlayOpacity,
   onRoadOverlayOpacityChange,
+  mapColorMode,
+  onMapColorModeChange,
   detailLabel,
   focusActive,
   obscuredByInspector,
@@ -2834,6 +2787,8 @@ function MapLayerControl({
   onSatelliteOpacityChange?: (opacity: number) => void;
   roadOverlayOpacity: number;
   onRoadOverlayOpacityChange?: (opacity: number) => void;
+  mapColorMode: 'roof' | 'usage';
+  onMapColorModeChange: (mode: 'roof' | 'usage') => void;
   detailLabel: string;
   focusActive: boolean;
   obscuredByInspector: boolean;
@@ -2879,6 +2834,29 @@ function MapLayerControl({
             >
               <Satellite aria-hidden="true" /> Satellite
             </button>
+          </div>
+          <div className="map-layer-control__option">
+            <span>Building colours</span>
+            <div
+              className="map-layer-control__segment map-layer-control__segment--two"
+              role="group"
+              aria-label="Building colours"
+            >
+              <button
+                type="button"
+                className={mapColorMode === 'usage' ? 'is-active' : ''}
+                onClick={() => onMapColorModeChange('usage')}
+              >
+                Usage
+              </button>
+              <button
+                type="button"
+                className={mapColorMode === 'roof' ? 'is-active' : ''}
+                onClick={() => onMapColorModeChange('roof')}
+              >
+                Roof type
+              </button>
+            </div>
           </div>
           <LayerOpacityControl
             label="Satellite image"

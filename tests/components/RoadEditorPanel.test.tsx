@@ -37,6 +37,12 @@ function renderPanel(
     onEditSelectedRoadArea?: (area: RoadArea) => void;
     onEditOsm2StreetsSelection?: () => void;
     onHighlightConnectedOsm2StreetsRoads?: () => void;
+    canUndoDraft?: boolean;
+    canRedoDraft?: boolean;
+    undoDraftLabel?: string;
+    redoDraftLabel?: string;
+    onUndoDraft?: () => void;
+    onRedoDraft?: () => void;
   } = {}
 ) {
   const onEditOsm2StreetsSelection = options.onEditOsm2StreetsSelection ?? vi.fn();
@@ -54,6 +60,10 @@ function renderPanel(
       satelliteOpacity={0.82}
       roadOverlayOpacity={0.92}
       cityJsonRoadCount={1608}
+      canUndoDraft={options.canUndoDraft ?? false}
+      canRedoDraft={options.canRedoDraft ?? false}
+      undoDraftLabel={options.undoDraftLabel}
+      redoDraftLabel={options.redoDraftLabel}
       drawMode="none"
       backendUrl="http://127.0.0.1:8787/api/roads"
       onClose={() => {}}
@@ -66,6 +76,8 @@ function renderPanel(
       onCancelDraw={() => {}}
       onCancelEdit={options.onCancelEdit ?? vi.fn()}
       onDraftChange={onDraftChange}
+      onUndoDraft={options.onUndoDraft ?? vi.fn()}
+      onRedoDraft={options.onRedoDraft ?? vi.fn()}
       onSplitDraft={() => {}}
       onInsertRoad={() => {}}
       onExportPayload={() => {}}
@@ -173,6 +185,26 @@ describe('<RoadEditorPanel />', () => {
     renderPanel(vi.fn(), { editingRoadId: 'road-1', draftDirty: true });
     expect(screen.getByRole('button', { name: 'Save road changes' })).toBeEnabled();
     expect(screen.getByText('Unsaved changes to road-1')).toBeInTheDocument();
+  });
+
+  it('keeps large automatic-history undo and redo controls in the road editor', () => {
+    const onUndoDraft = vi.fn();
+    const onRedoDraft = vi.fn();
+    renderPanel(vi.fn(), {
+      canUndoDraft: true,
+      canRedoDraft: true,
+      undoDraftLabel: 'Change lane width',
+      redoDraftLabel: 'Shape road',
+      onUndoDraft,
+      onRedoDraft,
+    });
+
+    expect(screen.getByText('Changes are recorded automatically')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo road edit: Change lane width' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo road edit: Shape road' }));
+
+    expect(onUndoDraft).toHaveBeenCalledTimes(1);
+    expect(onRedoDraft).toHaveBeenCalledTimes(1);
   });
 
   it('stores user-selected vertical placement on the road draft', () => {
