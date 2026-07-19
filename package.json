@@ -19,7 +19,7 @@
     "data:hamburg-center:roads": "node scripts/build-hamburg-osm2streets-roads.mjs --osm public/data/hamburg/hamburg-city-center-roads.osm --output-dir .tmp/hamburg-center-cityjson --work-dir .tmp/hamburg-center-osm2streets --output public/data/hamburg/hamburg-city-center-roads.city.json --bbox 9.978,53.5395,10.0035,53.5545 --grid 1 --min-depth 0 --max-depth 0 --validate false --generated-at 2026-07-18T00:00:00.000Z --source \"Committed Hamburg center OSM crop -> osm2streets -> CityJSON\"",
     "data:hamburg-lod2": "node scripts/hamburg-lod2.mjs",
     "data:hamburg-lod2:serve": "node scripts/hamburg-lod2.mjs serve",
-    "data:hamburg-lod3-assets": "node scripts/build-hamburg-lod3-assets.mjs",
+    "data:hamburg-lod3-assets": "node scripts/build-hamburg-lod3-assets.mjs && node scripts/build-hamburg-lod3-townhouse-asset.mjs",
     "data:hamburg-lod3-download": "node scripts/download-hamburg-lod3-tile.mjs",
     "data:hamburg-lod3-showcase": "node scripts/build-hamburg-lod3-showcase.mjs",
     "data:hamburg-trees": "node scripts/build-hamburg-city-center-trees.mjs",

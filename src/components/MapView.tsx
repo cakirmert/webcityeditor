@@ -24,7 +24,12 @@ import {
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import proj4 from 'proj4';
 import type { CityJsonDocument, SelectionInfo } from '../types';
-import { applyVertexTransform, detectCrs, projectToWgs84 } from '../lib/projection';
+import {
+  activeMetricCrsForCityJson,
+  applyVertexTransform,
+  detectCrs,
+  projectToWgs84,
+} from '../lib/projection';
 import { extractFootprints, type Footprint } from '../lib/footprints';
 import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
@@ -35,7 +40,7 @@ import type {
   RoadBandKind,
   RoadDraft,
 } from '../lib/transportation';
-import type { RoadFitConflict } from '../lib/road-fit';
+import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import {
   osm2streetsIntersectionFillColor,
@@ -67,6 +72,7 @@ import {
   BUILDING_DETAIL_MIN_ZOOM,
   BUILDING_LOD3_MIN_ZOOM,
   HAMBURG_TREE_MIN_ZOOM,
+  buildingDetailObjectLimit,
   smoothZoomStep,
 } from '../lib/lod-transition';
 import {
@@ -431,6 +437,7 @@ export default function MapView({
   const [officialLod3LoadedTiles, setOfficialLod3LoadedTiles] = useState(0);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('usage');
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
+  const [detailFocusPoint, setDetailFocusPoint] = useState<[number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
 
   useEffect(() => {
@@ -704,12 +711,21 @@ export default function MapView({
           ? `${renderedHamburgTrees.length} official street trees in view`
           : 'official street trees loading';
   const detailScopeBbox = editFocusBbox ?? viewportBbox;
+  const detailFocus = editFocusBbox
+    ? [
+        (editFocusBbox[0] + editFocusBbox[2]) / 2,
+        (editFocusBbox[1] + editFocusBbox[3]) / 2,
+      ] as [number, number]
+    : detailFocusPoint;
   const detailObjectIds = useMemo(() => {
     if (!detailEnabled || !detailScopeBbox) return null;
     const visible = renderedFootprints.filter((footprint) =>
       polygonIntersectsBbox(footprint.polygon, detailScopeBbox)
     );
-    const center: [number, number] = [
+    // getBounds() becomes strongly skewed toward the horizon on a pitched
+    // camera. Prioritise a screen-derived near focus instead of the geographic
+    // bbox centre, which previously produced a small distant cone of LoD2.
+    const center: [number, number] = detailFocus ?? [
       (detailScopeBbox[0] + detailScopeBbox[2]) / 2,
       (detailScopeBbox[1] + detailScopeBbox[3]) / 2,
     ];
@@ -721,21 +737,29 @@ export default function MapView({
     // More buildings switch to their highest source geometry progressively as
     // the view closes in. Each building swaps once; two LoDs are never drawn
     // on top of one another, avoiding z-fighting and doubled walls.
-    const detailLimit = Math.max(24, Math.round(24 + detailOpacity * 396));
+    const detailLimit = buildingDetailObjectLimit(detailOpacity);
     for (const footprint of visible.slice(0, detailLimit)) {
       addCityObjectWithDescendants(cityjson, footprint.id, ids);
       if (footprint.parentId) addCityObjectWithDescendants(cityjson, footprint.parentId, ids);
     }
     if (selectedId) addCityObjectWithDescendants(cityjson, selectedId, ids);
     return ids.size > 0 ? ids : null;
-  }, [cityjson, detailEnabled, detailOpacity, detailScopeBbox, renderedFootprints, selectedId]);
+  }, [
+    cityjson,
+    detailEnabled,
+    detailFocus,
+    detailOpacity,
+    detailScopeBbox,
+    renderedFootprints,
+    selectedId,
+  ]);
 
   const detailMesh = useMemo(
     () =>
       detailObjectIds && !officialLod3Active
         ? buildCityJsonMapMesh(cityjson, {
             objectIds: detailObjectIds,
-            maxOutputVertices: 160_000,
+            maxOutputVertices: 280_000,
             maxLod: 2.9,
             groundObjectGroups: true,
           })
@@ -760,6 +784,58 @@ export default function MapView({
     BUILDING_BLOCK_FULL_ZOOM,
     zoom
   );
+
+  const inspectedBuildingFootprints = useMemo<Footprint[]>(
+    () => {
+      const previewPolygon = preview?.polygon ?? footprintEdit?.footprintWgs84;
+      if (previewPolygon && previewPolygon.length >= 3) {
+        return [
+          {
+            id: preview?.polygon ? '__building_preview__' : footprintEdit!.buildingId,
+            type: 'Building',
+            polygon: previewPolygon.map(
+              ([lng, lat]) => [lng, lat, 0] as [number, number, number]
+            ),
+            height: preview?.height ?? 10,
+            baseElevation: 0,
+            attributes: {},
+          },
+        ];
+      }
+      return selectedId
+        ? footprints.filter(
+            (footprint) => footprint.id === selectedId || footprint.parentId === selectedId
+          )
+        : [];
+    },
+    [footprintEdit, footprints, preview?.height, preview?.polygon, selectedId]
+  );
+  const inspectedBuildingRoadConflicts = useMemo(
+    () =>
+      inspectedBuildingFootprints.length > 0 && roadAreas.length > 0 && !roadDraft
+        ? validateRoadFit({
+            roadAreas,
+            buildingFootprints: inspectedBuildingFootprints,
+            metricCrs: activeMetricCrsForCityJson(cityjson),
+          }).filter((conflict) => conflict.kind === 'building_overlap')
+        : [],
+    [cityjson, inspectedBuildingFootprints, roadAreas, roadDraft]
+  );
+  const visibleRoadFitConflicts = useMemo(
+    () => [...roadFitConflicts, ...inspectedBuildingRoadConflicts],
+    [roadFitConflicts, inspectedBuildingRoadConflicts]
+  );
+  const conflictingSavedRoadAreas = useMemo(() => {
+    if (inspectedBuildingRoadConflicts.length === 0) return [];
+    const ids = new Set(inspectedBuildingRoadConflicts.map((conflict) => conflict.roadAreaId));
+    return roadAreas.filter((area) => ids.has(area.id));
+  }, [inspectedBuildingRoadConflicts, roadAreas]);
+  const buildingRoadConflictMessage =
+    inspectedBuildingRoadConflicts.length > 0
+      ? `${inspectedBuildingRoadConflicts.length} road surface${
+          inspectedBuildingRoadConflicts.length === 1 ? '' : 's'
+        } overlap this building. The affected road is highlighted red; move or reshape the road/building before export.`
+      : null;
 
   // A drawing/editing gesture owns the map until it is saved or discarded.
   // Keeping unrelated pick targets live here caused one finger tap to both add
@@ -886,6 +962,13 @@ export default function MapView({
         bounds.getEast(),
         bounds.getNorth(),
       ]);
+      const canvas = map.getCanvas();
+      const pitchProgress = Math.max(0, Math.min(1, map.getPitch() / 75));
+      const nearScreenPoint = map.unproject([
+        canvas.clientWidth / 2,
+        canvas.clientHeight * (0.5 + pitchProgress * 0.17),
+      ]);
+      setDetailFocusPoint([nearScreenPoint.lng, nearScreenPoint.lat]);
     };
     map.on('zoom', syncLiveZoom);
     map.on('zoomend', syncSettledView);
@@ -1832,11 +1915,11 @@ export default function MapView({
       );
     }
 
-    if (roadFitConflicts.length > 0) {
+    if (visibleRoadFitConflicts.length > 0) {
       layers.push(
         new PolygonLayer<RoadFitConflict>({
           id: 'road-fit-conflicts',
-          data: roadFitConflicts,
+          data: visibleRoadFitConflicts,
           getPolygon: (d) => d.polygon,
           getFillColor: (d) =>
             d.severity === 'error' ? [240, 50, 50, 145] : [255, 120, 40, 110],
@@ -1844,6 +1927,29 @@ export default function MapView({
             d.severity === 'error' ? [255, 235, 235, 255] : [255, 210, 160, 255],
           getLineWidth: 2,
           lineWidthMinPixels: 2,
+          stroked: true,
+          filled: true,
+          pickable: false,
+          extruded: false,
+          parameters: { depthTest: false } as unknown as never,
+        })
+      );
+    }
+
+    // Saved roads normally sit on the ground and are correctly occluded by a
+    // building. When the selected building actually collides with a road,
+    // repeat only those road surfaces above the depth buffer in red so the
+    // invalid geometry does not look like a mysteriously broken road.
+    if (conflictingSavedRoadAreas.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadArea>({
+          id: 'selected-building-road-conflicts',
+          data: conflictingSavedRoadAreas,
+          getPolygon: (area) => area.polygon,
+          getFillColor: [239, 68, 68, 175],
+          getLineColor: [255, 235, 235, 255],
+          getLineWidth: 3,
+          lineWidthMinPixels: 3,
           stroked: true,
           filled: true,
           pickable: false,
@@ -2078,7 +2184,8 @@ export default function MapView({
     roadDraft,
     onRoadDraftChange,
     drawMode,
-    roadFitConflicts,
+    conflictingSavedRoadAreas,
+    visibleRoadFitConflicts,
     selectedRoadAreaId,
     onRoadAreaSelect,
     renderedOsmRoads,
@@ -2500,23 +2607,26 @@ export default function MapView({
           )}
         </>
       )}
-      {(drawWarning ?? warning) && (
+      {(drawWarning ?? buildingRoadConflictMessage ?? warning) && (
         <div
           style={{
             position: 'absolute',
             top: 10,
             left: 10,
             right: 10,
-            background: 'rgba(248,113,113,0.15)',
-            border: '1px solid var(--error)',
+            background: 'rgba(91, 24, 30, 0.96)',
+            border: '2px solid #ff7b82',
             color: '#fff',
-            padding: '8px 10px',
-            borderRadius: 4,
+            padding: '10px 12px',
+            borderRadius: 8,
             fontSize: 12,
+            fontWeight: 700,
+            lineHeight: 1.35,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.28)',
             zIndex: 10,
           }}
         >
-          {drawWarning ?? warning}
+          {drawWarning ?? buildingRoadConflictMessage ?? warning}
         </div>
       )}
       <MapLayerControl

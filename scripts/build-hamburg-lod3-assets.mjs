@@ -18,14 +18,6 @@ const selections = [
     textureOutput: 'round-courtyard.jpg',
     name: 'Hamburg round courtyard',
   },
-  {
-    sourceId: 'DEHHALKAJ0000oWO',
-    id: 'hamburg-lod3-industrial-hall',
-    file: 'industrial-hall.city.json',
-    texture: 'a2afafdb-324f-4493-89d4-9c0e2bdc4cce.jpg',
-    textureOutput: 'industrial-hall.jpg',
-    name: 'Hamburg industrial hall',
-  },
 ];
 
 const source = JSON.parse(await fs.readFile(path.resolve(inputArg), 'utf8'));
@@ -103,6 +95,8 @@ for (const selection of selections) {
       source: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5',
     },
   };
+  delete asset.CityObjects[selection.id].children;
+  delete asset.CityObjects[selection.id].parents;
   await fs.writeFile(path.join(outputDir, selection.file), `${JSON.stringify(asset)}\n`);
   await fs.copyFile(
     path.resolve(textureDirArg, selection.texture),

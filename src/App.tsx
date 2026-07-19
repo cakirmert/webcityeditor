@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import FileLoader from './components/FileLoader';
 import MapView from './components/MapView';
-import Viewer from './components/Viewer';
+import BuildingDetailPreview from './components/BuildingDetailPreview';
 import AttributePanel from './components/AttributePanel';
 import BuildingCreator from './components/BuildingCreator';
 import BuildingStartPanel from './components/BuildingStartPanel';
@@ -938,10 +938,10 @@ export default function App() {
             </div>
 
             <div className="building-viewer-host">
-              <Viewer
+              <BuildingDetailPreview
                 cityjson={filteredForSelected}
+                buildingId={coreState.selection.objectId}
                 reloadToken={coreState.reloadToken}
-                onSelect={() => {}}
                 splitPreview={
                   buildingEditor.splitPreviewHeights
                     ? {
