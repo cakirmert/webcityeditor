@@ -677,7 +677,7 @@ select:focus {
 
 .map-layer-control__segment {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
   padding: 4px;
   border-radius: 11px;
@@ -1272,7 +1272,7 @@ select:focus {
 .road-map-compare__modes {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   border-radius: 11px;
   background: rgba(0, 0, 0, 0.22);

@@ -27,6 +27,8 @@ export interface CityJsonTextureMesh {
 interface BuildOptions {
   /** Only include these CityObject ids (usually the current close viewport). */
   objectIds?: ReadonlySet<string>;
+  /** Select the highest source geometry at or below this LoD. */
+  maxLod?: number;
   /** Output safety cap; unlike the old gate this does not reject a large source document. */
   maxOutputVertices?: number;
   /** Backwards-compatible alias for maxOutputVertices. */
@@ -72,7 +74,7 @@ export function buildCityJsonMapMesh(
 
   for (const [objectId, obj] of Object.entries(doc.CityObjects)) {
     if (options.objectIds && !options.objectIds.has(objectId)) continue;
-    const geometries = highestAvailableGeometries(obj.geometry ?? []);
+    const geometries = highestAvailableGeometries(obj.geometry ?? [], options.maxLod);
     if (geometries.length === 0) continue;
     let objectQueued = false;
     for (const geomRaw of geometries) {
@@ -192,14 +194,16 @@ export function buildCityJsonMapMesh(
   };
 }
 
-function highestAvailableGeometries<T>(geometries: T[]): T[] {
-  if (geometries.length <= 1) return geometries;
+function highestAvailableGeometries<T>(geometries: T[], maxLod?: number): T[] {
+  if (geometries.length === 0) return [];
   const lods = geometries.map((geometry) =>
     numericLod((geometry as { lod?: string | number }).lod)
   );
   const numeric = lods.filter((lod): lod is number => lod !== null);
   if (numeric.length === 0) return [geometries.at(-1)!];
-  const highest = Math.max(...numeric);
+  const eligible = maxLod === undefined ? numeric : numeric.filter((lod) => lod <= maxLod);
+  if (eligible.length === 0) return [];
+  const highest = Math.max(...eligible);
   return geometries.filter((_, index) => lods[index] === highest);
 }
 

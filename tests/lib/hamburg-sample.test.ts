@@ -6,6 +6,7 @@ import { commitBuildingTransformFromEditor } from '../../src/lib/editor-actions'
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import { extractFootprints, filterToBuilding } from '../../src/lib/footprints';
 import { mergeCityJson } from '../../src/lib/merge';
+import { parseHamburgCityTrees } from '../../src/lib/hamburg-trees';
 import { extractTransportationAreas } from '../../src/lib/transportation';
 
 const HAMBURG_BUILDINGS_PATH =
@@ -13,12 +14,14 @@ const HAMBURG_BUILDINGS_PATH =
 const HAMBURG_ROADS_CITYJSON_PATH =
   'public/data/hamburg/hamburg-city-center-roads.city.json';
 const HAMBURG_LOD3_PATH = 'public/data/hamburg/hamburg-lod3-showcase.city.json';
+const HAMBURG_TREES_PATH = 'public/data/hamburg/hamburg-city-center-trees.json';
 const HAMBURG_ROADS_OSM_PATH = 'public/data/hamburg/hamburg-city-center-roads.osm';
 const DEMO_BBOX: [number, number, number, number] = [9.978, 53.5395, 10.0035, 53.5545];
 
 const text = readFileSync(HAMBURG_BUILDINGS_PATH, 'utf8');
 const roadText = readFileSync(HAMBURG_ROADS_CITYJSON_PATH, 'utf8');
 const lod3Text = readFileSync(HAMBURG_LOD3_PATH, 'utf8');
+const treeText = readFileSync(HAMBURG_TREES_PATH, 'utf8');
 const osmText = readFileSync(HAMBURG_ROADS_OSM_PATH, 'utf8');
 const parsed = parseCityJsonAuto(text);
 if (!parsed.ok) throw new Error(parsed.error);
@@ -26,6 +29,7 @@ const parsedRoads = parseCityJsonAuto(roadText);
 if (!parsedRoads.ok) throw new Error(parsedRoads.error);
 const parsedLod3 = parseCityJsonAuto(lod3Text);
 if (!parsedLod3.ok) throw new Error(parsedLod3.error);
+const hamburgTrees = parseHamburgCityTrees(JSON.parse(treeText));
 
 const doc = parsed.doc;
 const footprints = extractFootprints(doc);
@@ -69,12 +73,12 @@ describe('Hamburg committed city-center demo', () => {
       maxOutputVertices: 160_000,
     });
 
-    expect(roots).toHaveLength(24);
+    expect(roots).toHaveLength(68);
     expect(roots.every((id) => doc.CityObjects[id]?.type === 'Building')).toBe(true);
-    expect(installations).toHaveLength(395);
-    expect((parsedLod3.doc.appearance as any)?.textures).toHaveLength(24);
+    expect(installations).toHaveLength(1_043);
+    expect((parsedLod3.doc.appearance as any)?.textures).toHaveLength(68);
     expect(mesh?.maxLod).toBe(3);
-    expect(mesh?.textures).toHaveLength(24);
+    expect(mesh?.textures).toHaveLength(68);
     expect(mesh?.texturedSurfaceCount).toBeGreaterThan(4_000);
     expect(mesh?.explicitOpeningSurfaceCount).toBe(0);
     expect(parsedLod3.doc.metadata?.geographicalExtent).toEqual(
@@ -84,6 +88,21 @@ describe('Hamburg committed city-center demo', () => {
         expect.any(Number),
       ])
     );
+  });
+
+  it('ships measured official 3D street trees only for the city-center bbox', () => {
+    expect(hamburgTrees).toHaveLength(2_110);
+    expect(
+      hamburgTrees.every(
+        (tree) =>
+          tree.position[0] >= DEMO_BBOX[0] &&
+          tree.position[0] <= DEMO_BBOX[2] &&
+          tree.position[1] >= DEMO_BBOX[1] &&
+          tree.position[1] <= DEMO_BBOX[3]
+      )
+    ).toBe(true);
+    expect(hamburgTrees.every((tree) => tree.height > 0 && tree.crownDiameter > 0)).toBe(true);
+    expect(hamburgTrees.some((tree) => tree.species.includes('Acer'))).toBe(true);
   });
 
   it('starts from editable osm2streets road surfaces stored in CityJSON', () => {

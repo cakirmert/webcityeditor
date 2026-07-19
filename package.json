@@ -22,6 +22,7 @@
     "data:hamburg-lod3-assets": "node scripts/build-hamburg-lod3-assets.mjs",
     "data:hamburg-lod3-download": "node scripts/download-hamburg-lod3-tile.mjs",
     "data:hamburg-lod3-showcase": "node scripts/build-hamburg-lod3-showcase.mjs",
+    "data:hamburg-trees": "node scripts/build-hamburg-city-center-trees.mjs",
     "data:hamburg-roads": "node scripts/build-hamburg-osm2streets-roads.mjs",
     "data:hamburg-roads:catalog": "node scripts/build-hamburg-osm2streets-road-catalog.mjs",
     "data:hamburg-roads:prepare": "node scripts/prepare-hamburg-road-catalog.mjs",
