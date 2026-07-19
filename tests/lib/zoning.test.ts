@@ -13,6 +13,7 @@ import {
   isPlanningBboxSupported,
   isPlanningBboxLoadable,
   isBboxNearHamburg,
+  limitPlanningBboxSpan,
   planningBboxSizeMeters,
   planningCoverageSummary,
   planningSourceLabel,
@@ -95,6 +96,10 @@ describe('Hamburg planning URL builders', () => {
     expect(size.heightMeters).toBeGreaterThan(3_000);
     expect(isPlanningBboxLoadable(HAMBURG_BBOX)).toBe(true);
     expect(isPlanningBboxLoadable([9.7, 53.4, 10.3, 53.7])).toBe(false);
+    const overviewQuery = limitPlanningBboxSpan([9.7, 53.4, 10.3, 53.7]);
+    expect(isPlanningBboxLoadable(overviewQuery)).toBe(true);
+    expect((overviewQuery[0] + overviewQuery[2]) / 2).toBeCloseTo(10, 6);
+    expect((overviewQuery[1] + overviewQuery[3]) / 2).toBeCloseTo(53.55, 6);
   });
 
   it('exposes the current planning coverage through a generic provider API', () => {

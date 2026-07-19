@@ -281,6 +281,7 @@ describe('transportation roads', () => {
           trafficDirection: 'backward',
           allowedModes: ['pedestrian'],
           osm2streetsLaneIndex: 0,
+          sourceCenterlineWgs84: [[9.99, 53.54999], [10, 53.54999]],
           osmWayIds: ['3100'],
           osm2streetsPropertiesJson: '{"type":"Sidewalk","width":1.5}',
         },
@@ -323,12 +324,25 @@ describe('transportation roads', () => {
       userVerified: false,
     });
     expect(draft.sections).toHaveLength(1);
-    expect(draft.sections[0].centerlineWgs84).toHaveLength(2);
+    expect(draft.sections[0].centerlineWgs84).toEqual([
+      [9.99, 53.54999],
+      [10, 53.54999],
+    ]);
     expect(draft.sections[0].maxspeedKmh).toBe(30);
     expect(draft.sections[0].bands).toEqual([
       expect.objectContaining({ kind: 'sidewalk', widthM: 1.5, direction: 'backward' }),
       expect.objectContaining({ kind: 'car_lane', widthM: 3, direction: 'forward' }),
     ]);
+
+    const reordered = JSON.parse(JSON.stringify(draft)) as typeof draft;
+    reordered.sections[0].bands.reverse();
+    const reorderedPreview = buildRoadPreviewAreas(buildSampleCube(), reordered);
+    expect(
+      reorderedPreview.every((area) =>
+        JSON.stringify(area.attributes.sourceCenterlineWgs84) ===
+        JSON.stringify(draft.sections[0].centerlineWgs84)
+      )
+    ).toBe(true);
   });
 
   it('uses a known draft elevation for geometry and preserves its vertical profile', () => {

@@ -1554,28 +1554,30 @@ export default function MapView({
 
     if ((zoom >= 16 || roadWorkspaceOpen) && roadVisuals.directions.length > 0) {
       layers.push(
-        new TextLayer({
+        new PolygonLayer({
           id: 'cityjson-road-direction-arrows',
           data: roadVisuals.directions,
-          getPosition: (d: any) => d.position,
-          getText: (d: any) => d.label,
-          getAngle: (d: any) => -d.angle,
-          getSize: 18,
-          sizeUnits: 'pixels',
-          getColor: roadOverlayColor([248, 250, 252, 238], {
+          getPolygon: (d: any) => d.polygon,
+          getFillColor: roadOverlayColor([248, 250, 252, 238], {
             basemap,
             opacity: roadOverlayOpacity,
           }),
-          getTextAnchor: 'middle',
-          getAlignmentBaseline: 'center',
-          billboard: true,
-          characterSet: 'auto',
-          fontFamily: 'Arial, sans-serif',
-          fontSettings: { sdf: true, fontSize: 64, buffer: 4 },
-          outlineWidth: 2,
-          outlineColor: [36, 40, 47, 220],
+          getLineColor: roadOverlayColor([36, 40, 47, 220], {
+            basemap,
+            opacity: roadOverlayOpacity,
+          }),
+          getLineWidth: 0.55,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 0.55,
+          stroked: true,
+          filled: true,
+          extruded: false,
           pickable: false,
           parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          updateTriggers: {
+            getFillColor: [basemap, roadOverlayOpacity],
+            getLineColor: [basemap, roadOverlayOpacity],
+          },
         } as any)
       );
     }
@@ -2352,7 +2354,13 @@ export default function MapView({
           {drawWarning ?? warning}
         </div>
       )}
-      <div className="map-color-control" style={{ top: (drawWarning ?? warning) ? 58 : 12 }}>
+      <div
+        className="map-color-control"
+        style={{
+          top: (drawWarning ?? warning) ? 58 : 12,
+          left: layerControlOpen ? 354 : 202,
+        }}
+      >
         <MapColorModeButton
           active={mapColorMode === 'roof'}
           onClick={() => setMapColorMode('roof')}
@@ -2377,7 +2385,13 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         detailLabel={
           detailMesh
-            ? `Source LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${Math.round(detailOpacity * 100)}% area coverage · ${detailMesh.objectCount} nearby objects`
+            ? `Source LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${detailMesh.objectCount} nearby objects · ${
+                detailMesh.texturedSurfaceCount > 0
+                  ? detailMesh.explicitOpeningSurfaceCount > 0
+                    ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
+                    : 'photo-textured facades; windows/doors are painted, not editable geometry'
+                  : 'semantic surface colors'
+              }`
             : zoom >= BUILDING_DETAIL_MIN_ZOOM
               ? 'Footprint detail (source mesh unavailable)'
               : 'Overview geometry · close detail begins gradually at zoom 14.75'

@@ -64,7 +64,14 @@ function convertLanePolygonsToCityJson(geojson, options) {
   }
 
   const roadGroups = groups
-    .map((group) => projectRoadGroup(group, options.idPrefix, options.roadMetadataById))
+    .map((group) =>
+      projectRoadGroup(
+        group,
+        options.idPrefix,
+        options.roadMetadataById,
+        options.sourceNetwork
+      )
+    )
     .filter((group) => group.surfaces.length > 0);
   if (roadGroups.length === 0) {
     throw new Error('No convertible polygon lane features were found.');
@@ -139,28 +146,9 @@ function convertLanePolygonsToCityJson(geojson, options) {
 }
 
 function projectIntersectionGroups(network, idPrefix) {
-  if (!network || !Array.isArray(network.intersections) || !isObject(network.gps_bounds)) {
-    return [];
-  }
-  const bounds = network.gps_bounds;
-  const boundaryRing = network.boundary_polygon?.rings?.[0]?.pts;
-  const maxX = Array.isArray(boundaryRing)
-    ? Math.max(...boundaryRing.map((point) => Number(point?.x)).filter(Number.isFinite))
-    : NaN;
-  const maxY = Array.isArray(boundaryRing)
-    ? Math.max(...boundaryRing.map((point) => Number(point?.y)).filter(Number.isFinite))
-    : NaN;
-  if (
-    ![bounds.min_lon, bounds.min_lat, bounds.max_lon, bounds.max_lat, maxX, maxY].every(Number.isFinite) ||
-    maxX <= 0 || maxY <= 0
-  ) {
-    return [];
-  }
-
-  const toWgs84 = (point) => [
-    bounds.min_lon + (Number(point.x) / maxX) * (bounds.max_lon - bounds.min_lon),
-    bounds.max_lat - (Number(point.y) / maxY) * (bounds.max_lat - bounds.min_lat),
-  ];
+  if (!network || !Array.isArray(network.intersections)) return [];
+  const toWgs84 = networkPointToWgs84(network);
+  if (!toWgs84) return [];
   const result = [];
   for (const entry of network.intersections) {
     if (!Array.isArray(entry) || !isObject(entry[1])) continue;
@@ -264,7 +252,7 @@ function groupLaneFeatures(features) {
   return [...groups.values()].sort((a, b) => String(a.roadId).localeCompare(String(b.roadId)));
 }
 
-function projectRoadGroup(group, idPrefix, roadMetadataById) {
+function projectRoadGroup(group, idPrefix, roadMetadataById, sourceNetwork) {
   const cityObjectId = cityObjectIdForRoad(group.roadId, idPrefix);
   const roadMetadata = roadMetadataById.get(String(group.roadId)) ?? null;
   const sourceOsmWayIds = uniqueValues([
@@ -306,6 +294,7 @@ function projectRoadGroup(group, idPrefix, roadMetadataById) {
     roadId: group.roadId,
     cityObjectId,
     roadMetadata,
+    sourceCenterlineWgs84: roadCenterlineWgs84(roadMetadata, sourceNetwork),
     sourceOsmWayIds,
     surfaces,
   };
@@ -343,6 +332,7 @@ function roadObjectFromProjectedGroup(group, transform, vertices, generatedAt) {
       _createdAt: generatedAt,
       _source: 'osm2streets',
       _osm2streetsRoadId: String(group.roadId),
+      _sourceCenterlineWgs84: group.sourceCenterlineWgs84,
       _osmWayIds: sourceOsmWayIds,
       _osm2streetsLaneCount: group.surfaces.length,
       _highwayType: group.roadMetadata?.highway_type ?? null,
@@ -512,6 +502,47 @@ function readRoadMetadata(network) {
     result.set(String(entry[0]), entry[1]);
   }
   return result;
+}
+
+function networkPointToWgs84(network) {
+  if (!network || !isObject(network.gps_bounds)) return null;
+  const bounds = network.gps_bounds;
+  const boundaryRing = network.boundary_polygon?.rings?.[0]?.pts;
+  const maxX = Array.isArray(boundaryRing)
+    ? Math.max(...boundaryRing.map((point) => Number(point?.x)).filter(Number.isFinite))
+    : NaN;
+  const maxY = Array.isArray(boundaryRing)
+    ? Math.max(...boundaryRing.map((point) => Number(point?.y)).filter(Number.isFinite))
+    : NaN;
+  if (
+    ![bounds.min_lon, bounds.min_lat, bounds.max_lon, bounds.max_lat, maxX, maxY].every(Number.isFinite) ||
+    maxX <= 0 || maxY <= 0
+  ) {
+    return null;
+  }
+  return (point) => [
+    bounds.min_lon + (Number(point.x) / maxX) * (bounds.max_lon - bounds.min_lon),
+    bounds.max_lat - (Number(point.y) / maxY) * (bounds.max_lat - bounds.min_lat),
+  ];
+}
+
+function roadCenterlineWgs84(roadMetadata, network) {
+  const toWgs84 = networkPointToWgs84(network);
+  if (!toWgs84) return null;
+  const points = roadMetadata?.center_line?.pts ?? roadMetadata?.reference_line?.pts;
+  if (!Array.isArray(points)) return null;
+  const line = [];
+  for (const point of points) {
+    if (!isObject(point) || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
+      return null;
+    }
+    const converted = toWgs84(point);
+    const previous = line.at(-1);
+    if (!previous || Math.hypot(previous[0] - converted[0], previous[1] - converted[1]) > 1e-12) {
+      line.push(converted);
+    }
+  }
+  return line.length >= 2 ? line : null;
 }
 
 function roadLayer(group) {

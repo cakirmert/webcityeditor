@@ -75,6 +75,8 @@ describe('Hamburg committed city-center demo', () => {
     expect((parsedLod3.doc.appearance as any)?.textures).toHaveLength(24);
     expect(mesh?.maxLod).toBe(3);
     expect(mesh?.textures).toHaveLength(24);
+    expect(mesh?.texturedSurfaceCount).toBeGreaterThan(4_000);
+    expect(mesh?.explicitOpeningSurfaceCount).toBe(0);
     expect(parsedLod3.doc.metadata?.geographicalExtent).toEqual(
       expect.arrayContaining([
         expect.any(Number),
