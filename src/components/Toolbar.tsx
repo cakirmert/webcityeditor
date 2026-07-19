@@ -15,10 +15,12 @@ interface Stats {
   totalObjects: number;
   rootBuildings: number;
   roads?: number;
+  intersections?: number;
   vertices: number;
   crs: string | null;
   maxBuildingLod?: number | null;
   hasOpenings?: boolean;
+  hasTextures?: boolean;
 }
 
 interface Props {
@@ -179,10 +181,15 @@ export default function Toolbar({
           CityJSON <b className="text-[var(--text)]">{stats.version}</b>{' '}
            / <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
            / <b className="text-[var(--text)]">{stats.roads ?? 0}</b> roads{' '}
+           / <b className="text-[var(--text)]">{stats.intersections ?? 0}</b> junctions{' '}
            / <b className="text-[var(--text)]">
              {stats.maxBuildingLod == null ? 'LoD ?' : `LoD${stats.maxBuildingLod}`}
            </b>{' '}
-           {stats.hasOpenings ? 'with openings' : 'no openings in source'}{' '}
+           {stats.hasOpenings
+             ? 'with editable openings'
+             : stats.hasTextures
+               ? 'with textured facade detail'
+               : 'no openings in source'}{' '}
            / <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
           vertices
           {stats.crs && (

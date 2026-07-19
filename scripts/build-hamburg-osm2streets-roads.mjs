@@ -153,6 +153,7 @@ const summary = {
     empty: empty.length,
     failed: failed.length,
     roads: successful.reduce((sum, tile) => sum + tile.roads, 0),
+    intersections: successful.reduce((sum, tile) => sum + (tile.intersections ?? 0), 0),
     surfaces: successful.reduce((sum, tile) => sum + tile.surfaces, 0),
     vertices: successful.reduce((sum, tile) => sum + tile.vertices, 0),
   },
@@ -304,7 +305,8 @@ async function runTile(tile) {
       native: nativeSummary.counts,
       diagnostics: nativeSummary.diagnostics,
       extent: seqStats.extent,
-      roads: seqStats.features,
+      roads: seqStats.roads,
+      intersections: seqStats.intersections,
       surfaces: seqStats.surfaces,
       vertices: seqStats.vertices,
     },
@@ -319,6 +321,8 @@ async function readSeqStats(file) {
   const lines = createInterface({ input, crlfDelay: Infinity });
   let header = null;
   let features = 0;
+  let roads = 0;
+  let intersections = 0;
   let surfaces = 0;
   let vertices = 0;
   for await (const line of lines) {
@@ -331,6 +335,8 @@ async function readSeqStats(file) {
     features++;
     vertices += Array.isArray(feature.vertices) ? feature.vertices.length : 0;
     for (const object of Object.values(feature.CityObjects ?? {})) {
+      if (object.attributes?._transportationKind === 'intersection') intersections++;
+      else roads++;
       for (const geometry of object.geometry ?? []) {
         if (Array.isArray(geometry.boundaries)) surfaces += geometry.boundaries.length;
       }
@@ -339,6 +345,8 @@ async function readSeqStats(file) {
   if (!header) throw new Error(`CityJSONSeq output is empty: ${file}`);
   return {
     features,
+    roads,
+    intersections,
     surfaces,
     vertices,
     extent: header.metadata?.geographicalExtent ?? null,
@@ -353,8 +361,10 @@ function writeRoadCatalog(directory, summary) {
       url: `/tiles/${basename(tile.cityjsonseq)}`,
       bbox: tile.bbox,
       extent: tile.extent,
-      features: tile.roads,
-      cityObjects: tile.roads,
+      features: tile.roads + (tile.intersections ?? 0),
+      cityObjects: tile.roads + (tile.intersections ?? 0),
+      roads: tile.roads,
+      intersections: tile.intersections ?? 0,
       surfaces: tile.surfaces,
       vertices: tile.vertices,
     }))
@@ -368,8 +378,10 @@ function writeRoadCatalog(directory, summary) {
       tiles: tiles.length,
       empty: summary.totals.empty,
       failed: summary.totals.failed,
-      features: summary.totals.roads,
-      cityObjects: summary.totals.roads,
+      features: summary.totals.roads + summary.totals.intersections,
+      cityObjects: summary.totals.roads + summary.totals.intersections,
+      roads: summary.totals.roads,
+      intersections: summary.totals.intersections,
       surfaces: summary.totals.surfaces,
       vertices: summary.totals.vertices,
     },

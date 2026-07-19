@@ -483,6 +483,15 @@ export function useRoadEditor(
   }, []);
 
   const handleEditSelectedRoadArea = useCallback((area: RoadArea) => {
+    if (String(area.attributes.transportationUsage ?? area.function).toLowerCase() === 'intersection') {
+      const connected = Array.isArray(area.attributes.connectedRoadIds)
+        ? area.attributes.connectedRoadIds.length
+        : 0;
+      setRoadStatus(
+        `This is an exact osm2streets junction surface connected to ${connected} road${connected === 1 ? '' : 's'}. Its shape stays protected; tap a lane entering it, edit that road, then drag its yellow end onto a teal join target to confirm the connection.`
+      );
+      return;
+    }
     const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
     let draft: RoadDraft;
     try {

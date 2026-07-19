@@ -90,12 +90,19 @@ describe('Hamburg committed city-center demo', () => {
       .map(([id]) => id);
     const areas = extractTransportationAreas(parsedRoads.doc);
 
-    expect(roadIds).toHaveLength(1_608);
-    expect(areas).toHaveLength(6_555);
+    expect(roadIds).toHaveLength(2_650);
+    expect(areas).toHaveLength(7_597);
     expect(areas.every((area) => area.geometryMode === 'exact')).toBe(true);
     expect(areas.some((area) => area.function === 'driving_lane')).toBe(true);
     expect(areas.some((area) => area.function === 'bike_lane')).toBe(true);
     expect(areas.some((area) => area.function === 'sidewalk')).toBe(true);
+    expect(areas.filter((area) => area.function === 'intersection')).toHaveLength(1_042);
+    expect(
+      areas.some(
+        (area) =>
+          area.function === 'intersection' && Array.isArray(area.attributes.connectedRoadIds)
+      )
+    ).toBe(true);
     expect(parsedRoads.doc.metadata?.source).toContain('osm2streets');
     expect(
       parsedRoads.doc.CityObjects['hh-road-r00-c00-osm2streets-road-29']?.attributes
@@ -116,7 +123,7 @@ describe('Hamburg committed city-center demo', () => {
     const originalBuildingVertices = combined.vertices.length;
     const result = mergeCityJson(combined, parsedRoads.doc);
 
-    expect(result).toMatchObject({ ok: true, added: 1_608, renamed: 0 });
+    expect(result).toMatchObject({ ok: true, added: 2_650, renamed: 0 });
     expect(
       Object.values(combined.CityObjects).filter((object) => object.type === 'Building')
     ).toHaveLength(1_353);

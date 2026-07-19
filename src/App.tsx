@@ -271,7 +271,7 @@ export default function App() {
             'The close showcase area contains 24 official textured Hamburg LoD3 buildings; the surrounding city context is LoD2.',
         });
         roadEditor.setRoadStatus(
-          `Loaded ${merge.added ?? 0} CityJSON road objects and ${lod3RootIds.length} official LoD3 buildings. Tap Roads, then tap a road on the map to edit it.`
+          `Loaded ${Object.values(parsedRoads.doc.CityObjects).filter((object) => object.attributes?._transportationKind !== 'intersection').length} CityJSON roads, ${Object.values(parsedRoads.doc.CityObjects).filter((object) => object.attributes?._transportationKind === 'intersection').length} junctions, and ${lod3RootIds.length} official LoD3 buildings. Tap Roads, then tap a road on the map to edit it.`
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -398,11 +398,21 @@ export default function App() {
       version: doc.version,
       totalObjects: ids.length,
       rootBuildings: rootBuildings.length,
-      roads: ids.filter((id) => doc.CityObjects[id]?.type === 'Road').length,
+      roads: ids.filter(
+        (id) =>
+          doc.CityObjects[id]?.type === 'Road' &&
+          doc.CityObjects[id]?.attributes?._transportationKind !== 'intersection'
+      ).length,
+      intersections: ids.filter(
+        (id) => doc.CityObjects[id]?.attributes?._transportationKind === 'intersection'
+      ).length,
       vertices: doc.vertices.length,
       crs: doc.metadata?.referenceSystem ?? null,
       maxBuildingLod: maximumBuildingLod(doc),
       hasOpenings: hasBuildingOpenings(doc),
+      hasTextures:
+        Array.isArray((doc.appearance as { textures?: unknown[] } | undefined)?.textures) &&
+        ((doc.appearance as { textures?: unknown[] }).textures?.length ?? 0) > 0,
     };
   }, [coreState.cityjson]);
 
@@ -665,7 +675,16 @@ export default function App() {
               basemap={roadEditor.basemap}
               satelliteOpacity={roadEditor.satelliteOpacity}
               roadOverlayOpacity={roadEditor.roadOverlayOpacity}
-              cityJsonRoadCount={new Set(roadEditor.roadAreas.map((area) => area.roadId)).size}
+              cityJsonRoadCount={new Set(
+                roadEditor.roadAreas
+                  .filter((area) => area.function !== 'intersection')
+                  .map((area) => area.roadId)
+              ).size}
+              cityJsonJunctionCount={new Set(
+                roadEditor.roadAreas
+                  .filter((area) => area.function === 'intersection')
+                  .map((area) => area.roadId)
+              ).size}
               drawMode={coreState.drawMode}
               backendUrl={roadEditor.roadBackendUrl}
               insertedRoadId={roadEditor.editingRoadId ?? roadEditor.lastInsertedRoadId}

@@ -942,6 +942,19 @@ select:focus {
   color: var(--text);
   font: inherit;
   font-size: 12px;
+  color-scheme: dark;
+}
+
+.map-road-cross-section select option,
+.road-editor-panel select option {
+  background: #1c2330;
+  color: #f8fafc;
+}
+
+.map-road-cross-section select:focus,
+.road-editor-panel select:focus {
+  outline: 3px solid rgba(108, 146, 255, 0.48);
+  outline-offset: 1px;
 }
 
 .map-road-cross-section__width {

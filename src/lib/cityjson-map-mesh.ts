@@ -8,6 +8,8 @@ export interface CityJsonMapMesh {
   colors: Float32Array;
   textures: CityJsonTextureMesh[];
   anchorLngLat: [number, number];
+  /** Projected source coordinate represented by local [0,0,0]. */
+  originProjected: [number, number, number];
   triangleCount: number;
   objectCount: number;
   maxLod: number | null;
@@ -176,6 +178,7 @@ export function buildCityJsonMapMesh(
     colors: new Float32Array(colors),
     textures,
     anchorLngLat,
+    originProjected: [origin.x, origin.y, origin.z],
     triangleCount:
       indices.length / 3 + textures.reduce((sum, texture) => sum + texture.indices.length / 3, 0),
     objectCount,
