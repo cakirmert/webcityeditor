@@ -770,6 +770,7 @@ export function insertRoadIntoCityJson(
       allowedModes: area.attributes.allowedModes ?? null,
       surfaceMaterial: area.attributes.surfaceMaterial,
       maxspeed: area.attributes.maxspeed ?? null,
+      sourceCenterlineWgs84: area.attributes.sourceCenterlineWgs84 ?? null,
       verticalPlacement: vertical.placement,
       roadElevation: vertical.elevationM ?? null,
     });
@@ -792,6 +793,8 @@ export function insertRoadIntoCityJson(
         : (existingAttributes._osmTags ?? null),
       _verticalProfile: roadVerticalProfileToJson(vertical),
       _roadGeometryMode: 'generated',
+      _sourceCenterlineWgs84:
+        projectedAreas[0]?.attributes.sourceCenterlineWgs84 ?? null,
       _roadLayout: roadDraftToJson(draft),
     },
     geometry: [
@@ -1083,6 +1086,9 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             osm2streetsRoadId: (
               surface.osm2streetsRoadId ?? object.attributes?._osm2streetsRoadId ?? null
             ) as JsonValue,
+            sourceCenterlineWgs84: (
+              surface.sourceCenterlineWgs84 ?? object.attributes?._sourceCenterlineWgs84 ?? null
+            ) as JsonValue,
             osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
             osm2streetsIntersectionId: (surface.osm2streetsIntersectionId ?? null) as JsonValue,
             connectedRoadIds: (surface.connectedRoadIds ?? null) as JsonValue,
@@ -1129,7 +1135,8 @@ export function deriveEditableRoadDraftFromAreas(
     .map(([sectionId, sectionAreas]) => {
       const orderedAreas = uniqueImportedBandAreas(sectionAreas);
       const bands = orderedAreas.map((area, index) => importedRoadBand(area, index));
-      const centerlineWgs84 = deriveCenterlineFromImportedAreas(sectionAreas);
+      const centerlineWgs84 =
+        importedSourceCenterline(sectionAreas) ?? deriveCenterlineFromImportedAreas(sectionAreas);
       const maxspeedKmh = bands.find((band) => Number.isFinite(band.maxspeedKmh))
         ?.maxspeedKmh;
       return {
@@ -1345,6 +1352,14 @@ function deriveCenterlineFromImportedAreas(areas: RoadArea[]): [number, number][
   return best;
 }
 
+function importedSourceCenterline(areas: RoadArea[]): [number, number][] | null {
+  for (const area of areas) {
+    const line = readWgs84Line(area.attributes.sourceCenterlineWgs84);
+    if (line) return line;
+  }
+  return null;
+}
+
 function farthestLngLatPair(
   polygon: [number, number][]
 ): [[number, number], [number, number]] | null {
@@ -1457,8 +1472,9 @@ function buildProjectedRoadAreas(
   const areas: ProjectedRoadArea[] = [];
   for (const section of draft.sections) {
     validateSection(section);
+    const centerlineWgs84 = sampleRoadSectionCenterlineWgs84(section);
     const centerline = normaliseProjectedLine(
-      sampleRoadSectionCenterlineWgs84(section).map(([lng, lat]) => {
+      centerlineWgs84.map(([lng, lat]) => {
         const [x, y] = proj4('EPSG:4326', crsCode, [lng, lat]) as [number, number];
         return { x, y };
       })
@@ -1492,6 +1508,7 @@ function buildProjectedRoadAreas(
           surfaceMaterial: band.surface ?? defaultSurfaceForBand(band.kind),
           allowedModes: band.allowedModes ?? defaultModesForBand(band.kind),
           maxspeed: band.maxspeedKmh ?? section.maxspeedKmh ?? null,
+          sourceCenterlineWgs84: centerlineWgs84.map(([lng, lat]) => [lng, lat]),
         },
       });
     }

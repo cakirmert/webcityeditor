@@ -129,6 +129,28 @@ export function isPlanningBboxLoadable(
   return widthMeters <= maxSpanMeters && heightMeters <= maxSpanMeters;
 }
 
+/** Limit an overview query to a safe window around the current map centre. */
+export function limitPlanningBboxSpan(
+  bbox: Wgs84Bbox,
+  maxSpanMeters = MAX_PLANNING_VIEWPORT_SPAN_METERS * 0.96
+): Wgs84Bbox {
+  if (isPlanningBboxLoadable(bbox, maxSpanMeters)) return [...bbox];
+  const [west, south, east, north] = bbox;
+  const centerLng = (west + east) / 2;
+  const centerLat = (south + north) / 2;
+  const metersPerDegreeLatitude = 111_320;
+  const metersPerDegreeLongitude =
+    metersPerDegreeLatitude * Math.max(0.1, Math.cos((centerLat * Math.PI) / 180));
+  const halfLng = Math.min((east - west) / 2, maxSpanMeters / metersPerDegreeLongitude / 2);
+  const halfLat = Math.min((north - south) / 2, maxSpanMeters / metersPerDegreeLatitude / 2);
+  return [
+    centerLng - halfLng,
+    centerLat - halfLat,
+    centerLng + halfLng,
+    centerLat + halfLat,
+  ];
+}
+
 function assertPlanningBboxLoadable(bbox: Wgs84Bbox): void {
   if (isPlanningBboxLoadable(bbox)) return;
   const { widthMeters, heightMeters } = planningBboxSizeMeters(bbox);

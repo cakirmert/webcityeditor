@@ -188,7 +188,7 @@ export default function Toolbar({
            {stats.hasOpenings
              ? 'with editable openings'
              : stats.hasTextures
-               ? 'with textured facade detail'
+               ? 'with photo textures; openings are not separate geometry'
                : 'no openings in source'}{' '}
            / <b className="text-[var(--text)]">{stats.vertices.toLocaleString()}</b>{' '}
           vertices

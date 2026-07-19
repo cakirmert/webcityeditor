@@ -13,6 +13,8 @@ export interface CityJsonMapMesh {
   triangleCount: number;
   objectCount: number;
   maxLod: number | null;
+  texturedSurfaceCount: number;
+  explicitOpeningSurfaceCount: number;
 }
 
 export interface CityJsonTextureMesh {
@@ -183,6 +185,10 @@ export function buildCityJsonMapMesh(
       indices.length / 3 + textures.reduce((sum, texture) => sum + texture.indices.length / 3, 0),
     objectCount,
     maxLod,
+    texturedSurfaceCount: queued.filter((surface) => surface.texture !== null).length,
+    explicitOpeningSurfaceCount: queued.filter(
+      (surface) => surface.surfaceType === 'Window' || surface.surfaceType === 'Door'
+    ).length,
   };
 }
 

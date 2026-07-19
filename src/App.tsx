@@ -35,6 +35,8 @@ import { publicAssetUrl } from './lib/public-assets';
 import {
   fetchPlanningZones,
   getPlanningProviderForBbox,
+  isPlanningBboxLoadable,
+  limitPlanningBboxSpan,
   planningCoverageSummary,
   planningSourceLabel,
   type ParcelZone,
@@ -1041,11 +1043,20 @@ function choosePlanningQueryBbox({
   const viewportQueryBbox = viewportBbox ? expandBbox(viewportBbox) : null;
   const footprintQueryBbox = footprintBbox ? expandBbox(footprintBbox) : null;
 
-  if (viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)) {
+  if (
+    viewportQueryBbox &&
+    getPlanningProviderForBbox(viewportQueryBbox) &&
+    isPlanningBboxLoadable(viewportQueryBbox)
+  ) {
     return viewportQueryBbox;
   }
   if (footprintQueryBbox && getPlanningProviderForBbox(footprintQueryBbox)) {
-    return footprintQueryBbox;
+    const limitedFootprints = limitPlanningBboxSpan(footprintQueryBbox);
+    if (getPlanningProviderForBbox(limitedFootprints)) return limitedFootprints;
+  }
+  if (viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)) {
+    const limitedViewport = limitPlanningBboxSpan(viewportQueryBbox);
+    if (getPlanningProviderForBbox(limitedViewport)) return limitedViewport;
   }
   return viewportQueryBbox ?? footprintQueryBbox;
 }
@@ -1191,6 +1202,8 @@ function ZoneLegend({
         bottom: 12,
         left: 12,
         zIndex: 11,
+        maxHeight: 'min(52vh, 460px)',
+        overflowY: 'auto',
         background: 'rgba(20, 20, 24, 0.88)',
         color: '#fff',
         padding: '8px 10px',

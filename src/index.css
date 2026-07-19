@@ -576,6 +576,7 @@ select:focus {
   background: rgba(18, 23, 33, 0.88);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(12px);
+  transition: left 160ms ease;
 }
 
 .building-draw-guide {
@@ -629,7 +630,8 @@ select:focus {
 .map-layer-control {
   position: absolute;
   left: 12px;
-  bottom: 14px;
+  top: 12px;
+  bottom: auto;
   z-index: 22;
   width: 178px;
   overflow: hidden;
