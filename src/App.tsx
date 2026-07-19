@@ -258,19 +258,29 @@ export default function App() {
         const lod3RootIds = Object.entries(parsedLod3.doc.CityObjects)
           .filter(([, object]) => object.type === 'Building')
           .map(([id]) => id);
+        const lod2GeometryById = new Map(
+          lod3RootIds.map((id) => [id, structuredClone(doc.CityObjects[id]?.geometry ?? [])])
+        );
         for (const id of lod3RootIds) removeCityObjectTree(doc, id);
         const lod3Merge = mergeCityJson(doc, parsedLod3.doc);
         if (!lod3Merge.ok) throw new Error(`LoD3 CityJSON merge failed: ${lod3Merge.reason}`);
+        for (const id of lod3RootIds) {
+          const object = doc.CityObjects[id];
+          const lod2Geometry = lod2GeometryById.get(id);
+          if (object && lod2Geometry?.length) {
+            object.geometry = [...lod2Geometry, ...(object.geometry ?? [])];
+          }
+        }
         if (!doc.metadata) doc.metadata = {};
         doc.metadata.title = 'Hamburg city center LoD2/LoD3 buildings and editable roads';
         doc.metadata.sourceDescription =
-          'Official Hamburg LoD2 context, 24 surveyed textured LoD3 buildings, and precomputed osm2streets CityJSON Transportation roads.';
+          `Official Hamburg LoD2 context, ${lod3RootIds.length} surveyed textured LoD3 buildings, and precomputed osm2streets CityJSON Transportation roads.`;
 
         handleLoadedForApp(doc, HAMBURG_CITY_CENTER_COMBINED_NAME, null);
         coreState.setPrimitiveValidation({
           kind: 'valid',
           message:
-            'The close showcase area contains 24 official textured Hamburg LoD3 buildings; the surrounding city context is LoD2.',
+            `The close showcase area contains ${lod3RootIds.length} official textured Hamburg LoD3 buildings; zoomed-out views use the preserved LoD2 source geometry.`,
         });
         roadEditor.setRoadStatus(
           `Loaded ${Object.values(parsedRoads.doc.CityObjects).filter((object) => object.attributes?._transportationKind !== 'intersection').length} CityJSON roads, ${Object.values(parsedRoads.doc.CityObjects).filter((object) => object.attributes?._transportationKind === 'intersection').length} junctions, and ${lod3RootIds.length} official LoD3 buildings. Tap Roads, then tap a road on the map to edit it.`

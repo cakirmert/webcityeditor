@@ -22,7 +22,7 @@ Open the local address printed in the terminal. The committed Hamburg demo and t
 - The top bar reports the file name, CityJSON version, building, road, and junction counts, highest loaded LoD, texture/opening status, vertex count, CRS, and both validation states.
 - The search bar filters buildings by ID, function, or year. **More filters** adds type, roof, year, height, and storey filters; **List** provides sortable results and map selection.
 - **Roof** and **Usage** recolor the buildings without changing their source attributes.
-- **Map layers** in the upper-left controls the basemap, satellite opacity, road-overlay opacity, and source-detail status.
+- **Map layers** in the upper-left switches between the light map, official BKG **TopPlusOpen**, and satellite imagery; it also controls satellite opacity, road-overlay opacity, and source-detail status.
 - **Planning** loads the supported Hamburg planning overlay for the current, safely bounded view.
 
 ## Inspect and edit buildings
@@ -51,7 +51,7 @@ For a custom building, **Separate editable parts** is optional:
 - **Make floors independent** creates separately editable storeys.
 - **Make side-by-side wings** creates separately editable building sections.
 
-The map uses three clear, non-overlapping stages: LoD0 footprints for the overview, source LoD2 in the middle range, and textured LoD3 only when you are very close. The Hamburg LoD3 subset retains 68 JPG texture atlases, UV coordinates, and detailed installations. Windows can therefore be visible in the facade photographs even when the source does not encode separate semantic Window or Door surfaces. The buildings come from Hamburg's [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5), and close views use its official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729), published by Freie und Hansestadt Hamburg, LGV under Datenlizenz Deutschland – Namensnennung 2.0.
+The map uses three clear, non-overlapping stages: LoD0 footprints for the overview, source LoD2 in the middle range, and textured LoD3 only when you are very close. The Hamburg LoD3 subset retains 68 JPG texture atlases, UV coordinates, and detailed installations. Windows can therefore be visible in the facade photographs even when the source does not encode separate semantic Window or Door surfaces. The buildings come from Hamburg's [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5), and close views add 2,110 measured trees from its official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729), published by Freie und Hansestadt Hamburg, LGV under Datenlizenz Deutschland – Namensnennung 2.0. The optional [TopPlusOpen](https://sg.geodatenzentrum.de/web_public/gdz/dokumentation/deu/TopPlusOpen.pdf) basemap is provided by the Federal Agency for Cartography and Geodesy (BKG).
 
 ## Edit roads and junctions
 

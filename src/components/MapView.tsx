@@ -64,16 +64,21 @@ import {
   BUILDING_BLOCK_MIN_ZOOM,
   BUILDING_DETAIL_FULL_ZOOM,
   BUILDING_DETAIL_MIN_ZOOM,
+  BUILDING_LOD3_MIN_ZOOM,
+  HAMBURG_TREE_MIN_ZOOM,
   smoothZoomStep,
 } from '../lib/lod-transition';
+import {
+  parseHamburgCityTrees,
+  TREE_CROWN_MESH,
+  TREE_TRUNK_MESH,
+  treeCrownColor,
+  type HamburgCityTree,
+} from '../lib/hamburg-trees';
+import type { BasemapMode } from '../lib/basemap';
 import { Layers3, Map as MapIcon, Satellite } from 'lucide-react';
 
-/**
- * Zoom-based LoD thresholds use long overlapping ramps rather than discrete
- * swaps. The block context appears over two zoom levels and the source mesh
- * blends over 3.5 levels, so trackpad and pinch zoom do not pop from LoD0 to
- * LoD2/3 in a single gesture.
- */
+/** Zoom stages keep LoD0, source LoD2, and close textured LoD3 distinct. */
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
@@ -81,6 +86,7 @@ const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
 const EDIT_FOCUS_PADDING_DEGREES = 0.0038;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
+const HAMBURG_CITY_CENTER_TREES_URL = 'data/hamburg/hamburg-city-center-trees.json';
 
 function addCityObjectWithDescendants(
   doc: CityJsonDocument,
@@ -123,7 +129,7 @@ function roadAreaSourceType(area: RoadArea): string | undefined {
 
 function roadAreaFillColor(
   area: RoadArea,
-  basemap: 'map' | 'satellite',
+  basemap: BasemapMode,
   preview = false,
   opacity = 1
 ): Rgba {
@@ -147,7 +153,7 @@ function roadAreaFillColor(
 
 function roadAreaLineColor(
   area: RoadArea,
-  basemap: 'map' | 'satellite',
+  basemap: BasemapMode,
   selected = false,
   preview = false,
   opacity = 1
@@ -173,7 +179,7 @@ function osm2streetsFeatureIsUnderground(feature: any): boolean {
 function osm2streetsDisplayColor(
   color: Rgba,
   feature: any,
-  basemap: 'map' | 'satellite',
+  basemap: BasemapMode,
   opacity = 1
 ): Rgba {
   return roadOverlayColor(color, {
@@ -292,8 +298,8 @@ interface Props {
   zones?: ParcelZone[];
   /** Called when a planning polygon is clicked. */
   onZoneSelect?: (zone: ParcelZone) => void;
-  basemap?: 'map' | 'satellite';
-  onBasemapChange?: (basemap: 'map' | 'satellite') => void;
+  basemap?: BasemapMode;
+  onBasemapChange?: (basemap: BasemapMode) => void;
   satelliteOpacity?: number;
   onSatelliteOpacityChange?: (opacity: number) => void;
   roadOverlayOpacity?: number;
@@ -411,6 +417,9 @@ export default function MapView({
   const [warning, setWarning] = useState<string | null>(null);
   const [drawWarning, setDrawWarning] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(initialView?.zoom ?? DEFAULT_INITIAL_ZOOM);
+  const treeLoadStartedRef = useRef(false);
+  const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[] | null>(null);
+  const [treeDataError, setTreeDataError] = useState<string | null>(null);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
@@ -430,6 +439,23 @@ export default function MapView({
   useEffect(() => {
     onRoadDraftChangeRef.current = onRoadDraftChange;
   }, [onRoadDraftChange]);
+
+  useEffect(() => {
+    if (zoom < HAMBURG_TREE_MIN_ZOOM || treeLoadStartedRef.current) return;
+    treeLoadStartedRef.current = true;
+    void fetch(HAMBURG_CITY_CENTER_TREES_URL)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        return response.json();
+      })
+      .then((value) => {
+        setHamburgTrees(parseHamburgCityTrees(value));
+        setTreeDataError(null);
+      })
+      .catch((error) => {
+        setTreeDataError(error instanceof Error ? error.message : String(error));
+      });
+  }, [zoom]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -612,6 +638,15 @@ export default function MapView({
     [osmPointFeatures, editFocusBbox, zoom]
   );
 
+  const renderedHamburgTrees = useMemo(() => {
+    if (!hamburgTrees || editFocusBbox || zoom < HAMBURG_TREE_MIN_ZOOM) return [];
+    return viewportBbox
+      ? hamburgTrees.filter((tree) =>
+          pointInsideBbox([tree.position[0], tree.position[1]], viewportBbox)
+        )
+      : hamburgTrees;
+  }, [editFocusBbox, hamburgTrees, viewportBbox, zoom]);
+
   const renderedOsm2StreetsResult = useMemo(() => {
     if (!osm2streetsResult || !editFocusBbox) return osm2streetsResult;
     return {
@@ -632,6 +667,16 @@ export default function MapView({
     zoom
   );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
+  const detailLod: 'lod2' | 'lod3' = zoom >= BUILDING_LOD3_MIN_ZOOM ? 'lod3' : 'lod2';
+  const treeDetailLabel = editFocusBbox
+    ? 'street trees hidden while editing'
+    : zoom < HAMBURG_TREE_MIN_ZOOM
+      ? 'official street trees at zoom 16.5'
+      : treeDataError
+        ? 'street-tree data unavailable'
+        : hamburgTrees
+          ? `${renderedHamburgTrees.length} official street trees in view`
+          : 'official street trees loading';
   const detailScopeBbox = editFocusBbox ?? viewportBbox;
   const detailObjectIds = useMemo(() => {
     if (!detailEnabled || !detailScopeBbox) return null;
@@ -665,9 +710,10 @@ export default function MapView({
         ? buildCityJsonMapMesh(cityjson, {
             objectIds: detailObjectIds,
             maxOutputVertices: 160_000,
+            maxLod: detailLod === 'lod2' ? 2.9 : undefined,
           })
         : null,
-    [cityjson, detailObjectIds, reloadToken]
+    [cityjson, detailLod, detailObjectIds, reloadToken]
   );
   const blockFootprints = useMemo(
     () =>
@@ -745,6 +791,15 @@ export default function MapView({
             attribution: '© OpenStreetMap contributors © CARTO',
             maxzoom: 19,
           },
+          topplus: {
+            type: 'raster',
+            tiles: [
+              'https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png',
+            ],
+            tileSize: 256,
+            attribution: '© Bundesamt für Kartographie und Geodäsie — TopPlusOpen',
+            maxzoom: 18,
+          },
           satellite: {
             type: 'raster',
             tiles: [
@@ -757,6 +812,12 @@ export default function MapView({
         },
         layers: [
           { id: 'osm', type: 'raster', source: 'osm' },
+          {
+            id: 'topplus',
+            type: 'raster',
+            source: 'topplus',
+            layout: { visibility: 'none' },
+          },
           {
             id: 'satellite',
             type: 'raster',
@@ -1013,10 +1074,15 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
-      if (!map.getLayer('osm') || !map.getLayer('satellite')) return;
+      if (!map.getLayer('osm') || !map.getLayer('topplus') || !map.getLayer('satellite')) return;
       // Keep the map layer under imagery so the opacity slider becomes a true
       // compare/blend control rather than a binary source switch.
-      map.setLayoutProperty('osm', 'visibility', 'visible');
+      map.setLayoutProperty('osm', 'visibility', basemap === 'topplus' ? 'none' : 'visible');
+      map.setLayoutProperty(
+        'topplus',
+        'visibility',
+        basemap === 'topplus' ? 'visible' : 'none'
+      );
       map.setLayoutProperty(
         'satellite',
         'visibility',
@@ -1137,6 +1203,48 @@ export default function MapView({
         .forEach(({ candidate }) => visibleSnapCandidateMap.set(candidate.id, candidate));
     }
     const visibleSnapCandidates = [...visibleSnapCandidateMap.values()];
+
+    // The official source positions, laser-derived heights, and measured crown
+    // diameters drive two shared low-poly meshes. Instancing keeps thousands of
+    // trees inexpensive, and edit focus removes them entirely.
+    if (renderedHamburgTrees.length > 0) {
+      const treeOpacity = smoothZoomStep(
+        HAMBURG_TREE_MIN_ZOOM,
+        HAMBURG_TREE_MIN_ZOOM + 0.75,
+        zoom
+      );
+      layers.push(
+        new SimpleMeshLayer<HamburgCityTree>({
+          id: 'hamburg-official-tree-trunks',
+          data: renderedHamburgTrees,
+          mesh: TREE_TRUNK_MESH as unknown as never,
+          getPosition: (tree) => tree.position,
+          getScale: (tree) => [tree.trunkRadius, tree.trunkRadius, tree.height * 0.48],
+          getColor: [104, 74, 50, 255],
+          coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+          pickable: false,
+          opacity: treeOpacity,
+          material: { ambient: 0.48, diffuse: 0.72, shininess: 5 },
+        }),
+        new SimpleMeshLayer<HamburgCityTree>({
+          id: 'hamburg-official-tree-crowns',
+          data: renderedHamburgTrees,
+          mesh: TREE_CROWN_MESH as unknown as never,
+          getPosition: (tree) => tree.position,
+          getTranslation: (tree) => [0, 0, tree.height * 0.34],
+          getScale: (tree) => [
+            tree.crownDiameter / 2,
+            tree.crownDiameter / 2,
+            tree.height * 0.66,
+          ],
+          getColor: treeCrownColor,
+          coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+          pickable: false,
+          opacity: treeOpacity,
+          material: { ambient: 0.5, diffuse: 0.78, shininess: 9 },
+        })
+      );
+    }
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
     // thing drawn, at high zoom it still fires picking when clicking a roof edge.
@@ -1923,6 +2031,7 @@ export default function MapView({
     onRoadAreaSelect,
     renderedOsmRoads,
     renderedOsmPointFeatures,
+    renderedHamburgTrees,
     selectedOsmRoadId,
     onOsmRoadSelect,
     renderedOsm2StreetsResult,
@@ -2385,16 +2494,16 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         detailLabel={
           detailMesh
-            ? `Source LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${detailMesh.objectCount} nearby objects · ${
+            ? `Source ${detailLod === 'lod3' ? 'textured LoD3' : 'LoD2'} · ${detailMesh.objectCount} nearby objects · ${
                 detailMesh.texturedSurfaceCount > 0
                   ? detailMesh.explicitOpeningSurfaceCount > 0
                     ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
                     : 'photo-textured facades; windows/doors are painted, not editable geometry'
                   : 'semantic surface colors'
-              }`
+              } · ${treeDetailLabel}`
             : zoom >= BUILDING_DETAIL_MIN_ZOOM
-              ? 'Footprint detail (source mesh unavailable)'
-              : 'Overview geometry · close detail begins gradually at zoom 14.75'
+              ? `Source geometry unavailable here · ${treeDetailLabel}`
+              : `LoD0 overview · source LoD2 at zoom 15.25 · textured LoD3 at 18.25 · ${treeDetailLabel}`
         }
         focusActive={!!editFocusBbox}
         obscuredByInspector={roadWorkspaceOpen || !!selectedId}
@@ -2658,8 +2767,8 @@ function MapLayerControl({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  basemap: 'map' | 'satellite';
-  onBasemapChange?: (basemap: 'map' | 'satellite') => void;
+  basemap: BasemapMode;
+  onBasemapChange?: (basemap: BasemapMode) => void;
   satelliteOpacity: number;
   onSatelliteOpacityChange?: (opacity: number) => void;
   roadOverlayOpacity: number;
@@ -2694,6 +2803,13 @@ function MapLayerControl({
               onClick={() => onBasemapChange?.('map')}
             >
               <MapIcon aria-hidden="true" /> Map
+            </button>
+            <button
+              type="button"
+              className={basemap === 'topplus' ? 'is-active' : ''}
+              onClick={() => onBasemapChange?.('topplus')}
+            >
+              <MapIcon aria-hidden="true" /> TopPlus
             </button>
             <button
               type="button"

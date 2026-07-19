@@ -1,4 +1,5 @@
 import type { RoadBandKind } from './transportation';
+import type { BasemapMode } from './basemap';
 
 export type Rgba = [number, number, number, number];
 
@@ -122,7 +123,7 @@ export function withAlpha(color: Rgba, alpha: number): Rgba {
 export function roadOverlayColor(
   color: Rgba,
   options: {
-    basemap?: 'map' | 'satellite';
+    basemap?: BasemapMode;
     underground?: boolean;
     opacity?: number;
   } = {}

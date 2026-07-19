@@ -73,6 +73,25 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.colors.length).toBe(18);
   });
 
+  it('selects source LoD2 without overlapping the available LoD3 geometry', () => {
+    const doc = detailDocument();
+    const detailed = doc.CityObjects.detailed.geometry as Array<Record<string, unknown>>;
+    detailed.splice(1, 0, {
+      type: 'MultiSurface',
+      lod: '2.0',
+      boundaries: [[[0, 1, 2]]],
+    });
+
+    const mesh = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed']),
+      maxLod: 2.9,
+    });
+
+    expect(mesh?.maxLod).toBe(2);
+    expect(mesh?.triangleCount).toBe(1);
+    expect(mesh?.explicitOpeningSurfaceCount).toBe(0);
+  });
+
   it('builds viewport subsets without rejecting a larger source document', () => {
     const doc = detailDocument();
     doc.vertices.push(...Array.from({ length: 60_000 }, () => [0, 0, 0] as [number, number, number]));

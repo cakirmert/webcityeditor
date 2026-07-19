@@ -35,6 +35,7 @@ import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
+import type { BasemapMode } from '../lib/basemap';
 import { compactVertices } from '../lib/compact';
 
 interface FetchOsmRoadOptions {
@@ -172,7 +173,7 @@ export function useRoadEditor(
   const { pushUndo } = undoRedo;
 
   const [showRoadEditor, setShowRoadEditor] = useState(false);
-  const [basemap, setBasemap] = useState<'map' | 'satellite'>('map');
+  const [basemap, setBasemap] = useState<BasemapMode>('map');
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.82);
   const [roadOverlayOpacity, setRoadOverlayOpacity] = useState(0.92);
   const [osmRoads, setOsmRoads] = useState<OsmRoadFeature[]>([]);

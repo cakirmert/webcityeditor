@@ -5,7 +5,7 @@ This file is the single technical handoff for City Editor. It consolidates the f
 ## What the project guarantees
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
-- The committed Hamburg city-center demo starts by merging its LoD2 context, 24 surveyed textured LoD3 buildings with 395 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
+- The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed textured LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
 - Close building views use the highest geometry LoD available per object, including textured LoD3 surfaces; distant context falls back to outlines or blocks.
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws cheap footprint context; blocks blend in from zoom 13.25 to 15.25. From zoom 14.75 to 18.25 it uses a smooth 3.5-level transition into an indexed mesh of up to 420 nearby buildings plus their child installations. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. It selects the numerically highest `geometry.lod` for each object, including LoD3 when present and LoD2/2.2 as the fallback. Its output limit is 160,000 vertices. The selected-building viewer also retains the full object geometry.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. Textured LoD3 is a separate, non-overlapping close stage beginning at zoom 18.25. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. Its output limit is 160,000 vertices. The selected-building viewer also retains the full object geometry.
 
-The wide Hamburg context is LoD2. The default close-up area replaces 24 matching LoD2 buildings with their surveyed LoD3 counterparts from official Area 1 tile `6433`; 24 JPG atlases, UV coordinates, and 395 BuildingInstallation objects ship with them. The toolbar therefore reports `LoD3 · no openings in source`: textures visibly contain facade detail, but the source does not encode separate semantic Window or Door surfaces. Two additional placeable assets are converted from tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. The close map renderer includes child installations and creates a separate texture mesh for each atlas.
+The wide Hamburg context is LoD2. The default close-up area preserves that LoD2 geometry and adds all 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, and 1,043 BuildingInstallation objects ship with them. The toolbar reports `textured LoD3` only at the very close threshold: textures visibly contain facade detail, but the source does not encode separate semantic Window or Door surfaces. Two additional placeable assets are converted from tile `6431`: source objects `DEHHALKAJ0000oGL` and `DEHHALKAJ0000oWO`. The close map renderer includes child installations and creates a separate texture mesh for each atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, species, planting years, and streets. Edit focus hides that context to preserve interaction performance.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -134,7 +134,10 @@ npm run data:hamburg-lod3-download -- 6433
 # Extract the resulting partial ZIP with a Deflate64-capable ZIP tool.
 tools/citygml-tools-2.4.0/citygml-tools to-cityjson -e 25832 -c -o .tmp/hamburg-lod3-converted/6433 .tmp/hamburg-lod3-source/6433/6433/6433.gml
 npm run data:hamburg-lod3-showcase
+npm run data:hamburg-trees
 ```
+
+`data:hamburg-trees` follows the official summer-tree 3D Tiles hierarchy only for the committed demo bbox, reads the highest-resolution I3DM positions and attributes, converts ECEF positions to WGS84, and writes the compact 2,110-tree browser asset. No 372 MB archive or runtime cross-origin tile requests are required.
 
 The two placement assets were selected from tile `6431` and normalized around local placement origins. With that converted tile and its extracted `images` directory in the documented temporary paths, reproduce them with:
 

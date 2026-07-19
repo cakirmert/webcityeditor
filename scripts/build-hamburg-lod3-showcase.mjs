@@ -18,7 +18,6 @@ const selectedRoots = Object.entries(source.CityObjects)
   .filter(([id, object]) => object.type === 'Building' && baseIds.has(id))
   .map(([id, object]) => ({ id, distance: distanceToObject(source, object, target) }))
   .sort((a, b) => a.distance - b.distance)
-  .slice(0, 24)
   .map(({ id }) => id);
 
 const selectedIds = new Set();

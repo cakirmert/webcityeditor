@@ -32,6 +32,7 @@ import {
   type RoadVerticalPlacement,
 } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
+import type { BasemapMode } from '../lib/basemap';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import Osm2StreetsInspector from './Osm2StreetsInspector';
 import { Button } from './ui/button';
@@ -45,7 +46,7 @@ interface Props {
   exactGeometryStatus?: 'preserved' | 'changed' | null;
   editingRoadId?: string | null;
   status: string | null;
-  basemap: 'map' | 'satellite';
+  basemap: BasemapMode;
   satelliteOpacity: number;
   roadOverlayOpacity: number;
   cityJsonRoadCount: number;
@@ -59,7 +60,7 @@ interface Props {
   osm2streetsSelection?: Osm2StreetsSelection;
   onClose: () => void;
   onFetchOsmRoads: () => void;
-  onBasemapChange: (basemap: 'map' | 'satellite') => void;
+  onBasemapChange: (basemap: BasemapMode) => void;
   onSatelliteOpacityChange: (opacity: number) => void;
   onRoadOverlayOpacityChange: (opacity: number) => void;
   onStartManualDraw: () => void;
@@ -406,6 +407,11 @@ export default function RoadEditorPanel({
                 className={basemap === 'map' ? 'is-active' : ''}
                 onClick={() => onBasemapChange('map')}
               ><Map aria-hidden="true" /> Map</button>
+              <button
+                type="button"
+                className={basemap === 'topplus' ? 'is-active' : ''}
+                onClick={() => onBasemapChange('topplus')}
+              ><Map aria-hidden="true" /> TopPlus</button>
               <button
                 type="button"
                 className={basemap === 'satellite' ? 'is-active' : ''}
