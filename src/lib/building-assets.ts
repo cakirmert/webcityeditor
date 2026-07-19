@@ -25,13 +25,13 @@ export const BUILDING_ASSETS: BuildingAssetDefinition[] = [
     sourceObjectId: 'DEHHALKAJ0000oGL',
   },
   {
-    id: 'hamburg-lod3-industrial-hall',
-    name: 'Industrial hall',
-    description: 'Compact textured Hamburg industrial building with detailed roof equipment.',
-    size: '11 × 20 × 8 m',
-    cityJsonPath: 'data/assets/hamburg-lod3/industrial-hall.city.json',
-    texturePath: 'data/assets/hamburg-lod3/industrial-hall.jpg',
-    sourceObjectId: 'DEHHALKAJ0000oWO',
+    id: 'hamburg-lod3-townhouse',
+    name: 'Hamburg townhouse',
+    description: 'Photo-textured Hamburg house with a surveyed LoD3 roof and windowed facades.',
+    size: '16 × 11 × 21 m',
+    cityJsonPath: 'data/assets/hamburg-lod3/hamburg-townhouse.city.json',
+    texturePath: 'data/assets/hamburg-lod3/hamburg-townhouse.jpg',
+    sourceObjectId: 'DEHHALKAJ0000pIJ',
   },
 ];
 
@@ -49,7 +49,9 @@ export function insertBuildingAsset(
   definition: BuildingAssetDefinition,
   placementWgs84: [number, number]
 ): string {
-  const sourceEntry = Object.entries(assetDoc.CityObjects)[0];
+  const sourceEntry = assetDoc.CityObjects[definition.sourceObjectId]
+    ? [definition.sourceObjectId, assetDoc.CityObjects[definition.sourceObjectId]] as const
+    : Object.entries(assetDoc.CityObjects)[0];
   if (!sourceEntry) throw new Error(`${definition.name} has no CityObject`);
   const [, sourceObject] = sourceEntry;
   const crs = detectCrs(doc);
@@ -70,6 +72,11 @@ export function insertBuildingAsset(
   }
 
   const object = structuredClone(sourceObject) as CityObject;
+  // Asset templates import one self-contained geometry holder. Source parent/
+  // child links would dangle in the host unless the complete hierarchy were
+  // copied too (the former Industrial hall failed for exactly this reason).
+  delete object.children;
+  delete object.parents;
   object.geometry = (object.geometry ?? []).map((geometry) => {
     const cloned = structuredClone(geometry) as any;
     cloned.boundaries = offsetNumbers(cloned.boundaries, vertexOffset);

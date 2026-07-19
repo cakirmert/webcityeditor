@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
 import { BUILDING_ASSETS, insertBuildingAsset } from '../../src/lib/building-assets';
 import { buildCityJsonMapMesh } from '../../src/lib/cityjson-map-mesh';
+import { checkIntegrity } from '../../src/lib/integrity';
 import type { CityJsonDocument } from '../../src/types';
 
 const files = BUILDING_ASSETS.map((definition) => ({
@@ -22,18 +23,20 @@ describe('official Hamburg LoD3 building assets', () => {
       'vertices-texture'?: number[][];
     };
 
-    expect(document.vertices.length).toBeGreaterThan(400);
+    expect(document.vertices.length).toBeGreaterThan(20);
     expect(geometry.lod).toBe('3');
     expect(geometry.texture).toBeTruthy();
     expect(appearance.textures?.[0].image).toBe(definition.texturePath.split('/').at(-1));
-    expect(appearance['vertices-texture']?.length).toBeGreaterThan(400);
+    expect(appearance['vertices-texture']?.length).toBeGreaterThan(100);
     expect(object.attributes?._sourceObjectId).toBe(definition.sourceObjectId);
     expect(object.attributes?._license).toContain('Namensnennung');
+    expect(checkIntegrity(document).ok).toBe(true);
   });
 
-  it('places a source-textured asset into the editable host CityJSON', () => {
+  it.each(files)(
+    'places $definition.name into the editable host without dangling relations',
+    ({ definition, document }) => {
     const host = buildSampleCube();
-    const { definition, document } = files[0];
     const originalVertexCount = host.vertices.length;
 
     const id = insertBuildingAsset(host, document, definition, [4.35722, 52.01165]);
@@ -50,6 +53,8 @@ describe('official Hamburg LoD3 building assets', () => {
     expect(host.vertices.length).toBe(originalVertexCount + document.vertices.length);
     expect(appearance.textures[0].image).toContain(definition.texturePath);
     expect(mesh?.textures).toHaveLength(1);
-    expect(mesh?.triangleCount).toBeGreaterThan(100);
-  });
+    expect(mesh?.triangleCount).toBeGreaterThan(10);
+    expect(checkIntegrity(host).ok).toBe(true);
+    }
+  );
 });

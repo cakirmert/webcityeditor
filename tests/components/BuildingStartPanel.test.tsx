@@ -16,7 +16,7 @@ describe('<BuildingStartPanel />', () => {
 
     expect(screen.getByText('Ready-made LoD3 buildings')).toBeInTheDocument();
     expect(screen.getByText('Round courtyard')).toBeInTheDocument();
-    expect(screen.getByText('Industrial hall')).toBeInTheDocument();
+    expect(screen.getByText('Hamburg townhouse')).toBeInTheDocument();
     expect(screen.getAllByText('Place')).toHaveLength(2);
 
     fireEvent.click(screen.getByText('Draw outline'));

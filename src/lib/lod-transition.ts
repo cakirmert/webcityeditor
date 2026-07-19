@@ -9,6 +9,22 @@ export const BUILDING_DETAIL_FULL_ZOOM = 18;
 /** Textured Hamburg LoD3 is deliberately reserved for a very close street view. */
 export const BUILDING_LOD3_MIN_ZOOM = 18.25;
 
+/**
+ * A pitched map has a much larger visible footprint than a top-down map. Start
+ * with a useful neighbourhood instead of a tiny 24-building island, then widen
+ * the detailed LoD2 region smoothly as the camera moves closer.
+ */
+export const BUILDING_DETAIL_MIN_OBJECTS = 120;
+export const BUILDING_DETAIL_MAX_OBJECTS = 720;
+
+export function buildingDetailObjectLimit(detailOpacity: number): number {
+  const progress = Math.max(0, Math.min(1, detailOpacity));
+  return Math.round(
+    BUILDING_DETAIL_MIN_OBJECTS +
+      progress * (BUILDING_DETAIL_MAX_OBJECTS - BUILDING_DETAIL_MIN_OBJECTS)
+  );
+}
+
 /** Official Hamburg 3D street trees are useful only once individual streets are legible. */
 export const HAMBURG_TREE_MIN_ZOOM = 16.5;
 
