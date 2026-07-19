@@ -1084,6 +1084,9 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
               surface.osm2streetsRoadId ?? object.attributes?._osm2streetsRoadId ?? null
             ) as JsonValue,
             osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
+            osm2streetsIntersectionId: (surface.osm2streetsIntersectionId ?? null) as JsonValue,
+            connectedRoadIds: (surface.connectedRoadIds ?? null) as JsonValue,
+            osmNodeIds: (surface.osmNodeIds ?? null) as JsonValue,
             osmWayIds: (
               surface.osmWayIds ??
               object.attributes?._osmWayIds ??

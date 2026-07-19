@@ -12,6 +12,7 @@ import {
   TextLayer,
 } from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
+import { PathStyleExtension } from '@deck.gl/extensions';
 import { COORDINATE_SYSTEM, type PickingInfo } from '@deck.gl/core';
 import {
   TerraDraw,
@@ -57,6 +58,7 @@ import {
 } from '../lib/road-draft-edit';
 import { osmTrafficSignIcon } from '../lib/osm-street-point-style';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
+import { buildRoadVisuals } from '../lib/road-visuals';
 import {
   BUILDING_BLOCK_FULL_ZOOM,
   BUILDING_BLOCK_MIN_ZOOM,
@@ -125,6 +127,16 @@ function roadAreaFillColor(
   preview = false,
   opacity = 1
 ): Rgba {
+  if (roadAreaKind(area).toLowerCase() === 'intersection') {
+    return roadOverlayColor(
+      osm2streetsIntersectionFillColor(roadAreaSourceType(area) ?? 'intersection'),
+      {
+        basemap,
+        underground: area.vertical?.placement === 'underground',
+        opacity,
+      }
+    );
+  }
   const base = roadBandFillColor(roadAreaKind(area), roadAreaSourceType(area));
   return roadOverlayColor(preview ? withAlpha(base, Math.min(base[3], 218)) : base, {
     basemap,
@@ -550,6 +562,30 @@ export default function MapView({
     [roadAreas, editFocusBbox]
   );
 
+  const roadDecorationAreas = useMemo(() => {
+    const scope = editFocusBbox ?? viewportBbox;
+    return scope
+      ? renderedRoadAreas.filter((area) => polygonIntersectsBbox(area.polygon, scope))
+      : renderedRoadAreas;
+  }, [renderedRoadAreas, editFocusBbox, viewportBbox]);
+  // Keep the thousands of saved CityJSON markings stable while a finger moves
+  // one draft handle. Only the tiny preview decoration is rebuilt per drag.
+  const savedRoadVisuals = useMemo(
+    () => buildRoadVisuals(roadDecorationAreas),
+    [roadDecorationAreas]
+  );
+  const previewRoadVisuals = useMemo(
+    () => buildRoadVisuals(roadPreviewAreas),
+    [roadPreviewAreas]
+  );
+  const roadVisuals = useMemo(
+    () => ({
+      dividers: [...savedRoadVisuals.dividers, ...previewRoadVisuals.dividers],
+      directions: [...savedRoadVisuals.directions, ...previewRoadVisuals.directions],
+    }),
+    [savedRoadVisuals, previewRoadVisuals]
+  );
+
   const renderedZones = useMemo(
     () =>
       editFocusBbox
@@ -590,6 +626,11 @@ export default function MapView({
     };
   }, [osm2streetsResult, editFocusBbox]);
 
+  const detailOpacity = smoothZoomStep(
+    BUILDING_DETAIL_MIN_ZOOM,
+    BUILDING_DETAIL_FULL_ZOOM,
+    zoom
+  );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
   const detailScopeBbox = editFocusBbox ?? viewportBbox;
   const detailObjectIds = useMemo(() => {
@@ -606,13 +647,17 @@ export default function MapView({
         squaredDistanceToPolygon(center, a.polygon) - squaredDistanceToPolygon(center, b.polygon)
     );
     const ids = new Set<string>();
-    for (const footprint of visible.slice(0, 420)) {
+    // More buildings switch to their highest source geometry progressively as
+    // the view closes in. Each building swaps once; two LoDs are never drawn
+    // on top of one another, avoiding z-fighting and doubled walls.
+    const detailLimit = Math.max(24, Math.round(24 + detailOpacity * 396));
+    for (const footprint of visible.slice(0, detailLimit)) {
       addCityObjectWithDescendants(cityjson, footprint.id, ids);
       if (footprint.parentId) addCityObjectWithDescendants(cityjson, footprint.parentId, ids);
     }
     if (selectedId) addCityObjectWithDescendants(cityjson, selectedId, ids);
     return ids.size > 0 ? ids : null;
-  }, [cityjson, detailEnabled, detailScopeBbox, renderedFootprints, selectedId]);
+  }, [cityjson, detailEnabled, detailOpacity, detailScopeBbox, renderedFootprints, selectedId]);
 
   const detailMesh = useMemo(
     () =>
@@ -624,14 +669,22 @@ export default function MapView({
         : null,
     [cityjson, detailObjectIds, reloadToken]
   );
-  const detailOpacity = smoothZoomStep(
-    BUILDING_DETAIL_MIN_ZOOM,
-    BUILDING_DETAIL_FULL_ZOOM,
+  const blockFootprints = useMemo(
+    () =>
+      detailObjectIds
+        ? renderedFootprints.filter(
+            (footprint) =>
+              !detailObjectIds.has(footprint.id) &&
+              (!footprint.parentId || !detailObjectIds.has(footprint.parentId))
+          )
+        : renderedFootprints,
+    [renderedFootprints, detailObjectIds]
+  );
+  const blockOpacity = smoothZoomStep(
+    BUILDING_BLOCK_MIN_ZOOM,
+    BUILDING_BLOCK_FULL_ZOOM,
     zoom
   );
-  const blockOpacity =
-    smoothZoomStep(BUILDING_BLOCK_MIN_ZOOM, BUILDING_BLOCK_FULL_ZOOM, zoom) *
-    (1 - detailOpacity);
 
   // A drawing/editing gesture owns the map until it is saved or discarded.
   // Keeping unrelated pick targets live here caused one finger tap to both add
@@ -1147,7 +1200,7 @@ export default function MapView({
             indices: { value: detailMesh.indices, size: 1 },
           } as unknown as never,
           _instanced: false,
-          opacity: detailOpacity,
+          opacity: 1,
           sizeScale: 1,
           coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
           coordinateOrigin: [detailMesh.anchorLngLat[0], detailMesh.anchorLngLat[1], 0],
@@ -1179,7 +1232,7 @@ export default function MapView({
             } as unknown as never,
             texture: textureMesh.image,
             _instanced: false,
-            opacity: detailOpacity,
+            opacity: 1,
             sizeScale: 1,
             coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
             coordinateOrigin: [detailMesh.anchorLngLat[0], detailMesh.anchorLngLat[1], 0],
@@ -1197,11 +1250,11 @@ export default function MapView({
 
     // Cheap block context fills the middle zoom range; close zoom swaps it for
     // the indexed highest-available CityJSON surface mesh above.
-    if (blockOpacity > 0.001 && (!detailMesh || detailOpacity < 1)) {
+    if (blockOpacity > 0.001 && blockFootprints.length > 0) {
       layers.push(
         new SolidPolygonLayer<Footprint>({
           id: 'building-blocks',
-          data: renderedFootprints,
+          data: blockFootprints,
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
           getFillColor: (d) => {
@@ -1469,6 +1522,61 @@ export default function MapView({
             getLineColor: [basemap, roadOverlayOpacity],
           },
         })
+      );
+    }
+
+    if ((zoom >= 15 || roadWorkspaceOpen) && roadVisuals.dividers.length > 0) {
+      layers.push(
+        new PathLayer({
+          id: 'cityjson-road-lane-markings',
+          data: roadVisuals.dividers,
+          getPath: (d: any) => d.path,
+          getColor: (d: any) =>
+            d.kind === 'lane-divider'
+              ? roadOverlayColor([248, 250, 252, 238], { basemap, opacity: roadOverlayOpacity })
+              : roadOverlayColor([205, 210, 218, 205], { basemap, opacity: roadOverlayOpacity }),
+          getWidth: (d: any) => (d.kind === 'lane-divider' ? 0.14 : 0.1),
+          widthUnits: 'meters',
+          widthMinPixels: 1,
+          getDashArray: (d: any) => d.kind === 'lane-divider' ? [3.2, 2.4] : [1, 0],
+          dashJustified: true,
+          extensions: [new PathStyleExtension({ dash: true })],
+          jointRounded: true,
+          capRounded: true,
+          pickable: false,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          updateTriggers: {
+            getColor: [basemap, roadOverlayOpacity],
+          },
+        } as any)
+      );
+    }
+
+    if ((zoom >= 16 || roadWorkspaceOpen) && roadVisuals.directions.length > 0) {
+      layers.push(
+        new TextLayer({
+          id: 'cityjson-road-direction-arrows',
+          data: roadVisuals.directions,
+          getPosition: (d: any) => d.position,
+          getText: (d: any) => d.label,
+          getAngle: (d: any) => -d.angle,
+          getSize: 18,
+          sizeUnits: 'pixels',
+          getColor: roadOverlayColor([248, 250, 252, 238], {
+            basemap,
+            opacity: roadOverlayOpacity,
+          }),
+          getTextAnchor: 'middle',
+          getAlignmentBaseline: 'center',
+          billboard: true,
+          characterSet: 'auto',
+          fontFamily: 'Arial, sans-serif',
+          fontSettings: { sdf: true, fontSize: 64, buffer: 4 },
+          outlineWidth: 2,
+          outlineColor: [36, 40, 47, 220],
+          pickable: false,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+        } as any)
       );
     }
 
@@ -1793,6 +1901,7 @@ export default function MapView({
     footprints,
     renderedFootprints,
     renderedRoadAreas,
+    blockFootprints,
     renderedZones,
     detailMesh,
     selectedId,
@@ -1803,6 +1912,7 @@ export default function MapView({
     filteredIds,
     onZoneSelect,
     roadPreviewAreas,
+    roadVisuals,
     roadDraft,
     onRoadDraftChange,
     drawMode,
@@ -2267,7 +2377,7 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         detailLabel={
           detailMesh
-            ? `Source LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${Math.round(detailOpacity * 100)}% detail · ${detailMesh.objectCount} nearby objects`
+            ? `Source LoD ${detailMesh.maxLod?.toFixed(1) ?? '?'} · ${Math.round(detailOpacity * 100)}% area coverage · ${detailMesh.objectCount} nearby objects`
             : zoom >= BUILDING_DETAIL_MIN_ZOOM
               ? 'Footprint detail (source mesh unavailable)'
               : 'Overview geometry · close detail begins gradually at zoom 14.75'
@@ -2386,6 +2496,7 @@ function MapRoadCrossSection({
       <div className="map-road-cross-section__bands">
         {section.bands.map((band, index) => {
           const color = roadBandFillColor(band.kind, band.sourceType);
+          const lightBand = color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114 > 155;
           return (
             <button
               type="button"
@@ -2394,6 +2505,8 @@ function MapRoadCrossSection({
               style={{
                 flexGrow: Math.max(0.75, band.widthM),
                 background: `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`,
+                color: lightBand ? '#17202a' : '#ffffff',
+                textShadow: lightBand ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.75)',
               }}
               onClick={() => setActiveBandIndex(index)}
               aria-pressed={index === effectiveBandIndex}

@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.4",
+    "@deck.gl/extensions": "^9.3.7",
     "@deck.gl/layers": "^9.3.4",
     "@deck.gl/mapbox": "^9.3.4",
     "@deck.gl/mesh-layers": "^9.3.4",

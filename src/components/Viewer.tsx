@@ -5,6 +5,7 @@ import { CityJSONLoader, CityJSONParser } from 'cityjson-threejs-loader';
 import type { CityJsonDocument, SelectionInfo } from '../types';
 import type { FloorPlanDivision } from '../lib/subdivision';
 import { normalizeUsage, USAGE_OBJECT_COLORS } from '../lib/footprint-tint';
+import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 
 /**
  * Warm architectural surface palette. Replaces the loader's default Window=
@@ -217,6 +218,14 @@ export default function Viewer({
         ...USAGE_OBJECT_COLORS,
       };
     }
+    const texturedGroup = buildTexturedViewerGroup(docToLoad);
+    if (texturedGroup) {
+      state.loader = null;
+      state.modelGroup.add(texturedGroup);
+      const meshBbox = new THREE.Box3().setFromObject(texturedGroup);
+      if (!meshBbox.isEmpty()) fitCameraToBox(state.camera, state.controls, meshBbox);
+      return;
+    }
     docToLoad = withoutUnsupportedSolidTextures(docToLoad);
 
     setParserPalette(state.parser, objectColors);
@@ -315,6 +324,11 @@ export default function Viewer({
             });
             return;
           }
+        }
+        const texturedObjectId = obj.userData?.cityJsonObjectId;
+        if (typeof texturedObjectId === 'string' && texturedObjectId) {
+          onSelect({ objectId: texturedObjectId });
+          return;
         }
       }
       onSelect(null);
@@ -482,6 +496,64 @@ function withoutUnsupportedSolidTextures(doc: CityJsonDocument): CityJsonDocumen
     }
   }
   return clone;
+}
+
+/** Render valid textured Solids in the close-up inspector without sending
+ * their nested texture indices through cityjson-threejs-loader's flat-surface
+ * texture path. This is the same highest-LoD mesh/UV path used by the map. */
+function buildTexturedViewerGroup(doc: CityJsonDocument): THREE.Group | null {
+  const mesh = buildCityJsonMapMesh(doc, { maxOutputVertices: 500_000 });
+  if (!mesh || mesh.textures.length === 0) return null;
+
+  const group = new THREE.Group();
+  const translate = doc.transform?.translate ?? [0, 0, 0];
+  group.position.set(
+    mesh.originProjected[0] - translate[0],
+    mesh.originProjected[1] - translate[1],
+    mesh.originProjected[2] - translate[2]
+  );
+  const rootId = Object.entries(doc.CityObjects).find(
+    ([, object]) => object.type === 'Building' && !(object.parents?.length)
+  )?.[0] ?? Object.keys(doc.CityObjects)[0];
+
+  if (mesh.positions.length > 0 && mesh.indices.length > 0) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(mesh.colors, 3));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+    geometry.computeVertexNormals();
+    const material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      roughness: 0.82,
+      metalness: 0,
+    });
+    const surfaceMesh = new THREE.Mesh(geometry, material);
+    surfaceMesh.userData.cityJsonObjectId = rootId;
+    group.add(surfaceMesh);
+  }
+
+  const textureLoader = new THREE.TextureLoader();
+  for (const textureMesh of mesh.textures) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(textureMesh.positions, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(textureMesh.texCoords, 2));
+    geometry.setIndex(new THREE.BufferAttribute(textureMesh.indices, 1));
+    geometry.computeVertexNormals();
+    const texture = textureLoader.load(textureMesh.image);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;
+    const material = new THREE.MeshStandardMaterial({
+      map: texture,
+      side: THREE.DoubleSide,
+      roughness: 0.9,
+      metalness: 0,
+    });
+    const texturedMesh = new THREE.Mesh(geometry, material);
+    texturedMesh.userData.cityJsonObjectId = rootId;
+    group.add(texturedMesh);
+  }
+  return group;
 }
 
 function ColorModeButton({

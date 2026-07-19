@@ -49,6 +49,7 @@ interface Props {
   satelliteOpacity: number;
   roadOverlayOpacity: number;
   cityJsonRoadCount: number;
+  cityJsonJunctionCount?: number;
   drawMode: 'none' | 'polygon' | 'road-line';
   backendUrl: string;
   insertedRoadId?: string | null;
@@ -108,6 +109,7 @@ export default function RoadEditorPanel({
   satelliteOpacity,
   roadOverlayOpacity,
   cityJsonRoadCount,
+  cityJsonJunctionCount = 0,
   drawMode,
   backendUrl,
   insertedRoadId,
@@ -365,7 +367,7 @@ export default function RoadEditorPanel({
       )}
 
       <div className="road-editor-quick-status" role="status">
-        <span><b>{cityJsonRoadCount.toLocaleString()}</b> CityJSON roads</span>
+        <span><b>{cityJsonRoadCount.toLocaleString()}</b> roads · <b>{cityJsonJunctionCount.toLocaleString()}</b> junctions</span>
         {draft && <span><b>{draftBandCount}</b> bands · {activeTotalWidth.toFixed(1)} m</span>}
         {roadFitPending ? (
           <span>Checking fit…</span>
@@ -383,7 +385,7 @@ export default function RoadEditorPanel({
           <PanelSectionHeader
             icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
             title="Roads"
-            meta={`${cityJsonRoadCount.toLocaleString()} saved in CityJSON`}
+            meta={`${cityJsonRoadCount.toLocaleString()} roads + ${cityJsonJunctionCount.toLocaleString()} junctions in CityJSON`}
           />
           <p className="road-editor-card__help">
             <b>Tap any road on the map to edit it.</b> Buildings remain selectable; tapping one
@@ -1057,6 +1059,8 @@ function FitConflictCard({
 
 function SelectedRoadAreaCard({ area, onEdit }: { area: RoadArea; onEdit: (area: RoadArea) => void }) {
   const attrs = area.attributes;
+  const isIntersection =
+    String(attrs.transportationUsage ?? area.function).toLowerCase() === 'intersection';
   const osmWayIds = Array.isArray(attrs.osmWayIds)
     ? attrs.osmWayIds.map(String).join(', ')
     : attrs.osmWayIds
@@ -1076,15 +1080,21 @@ function SelectedRoadAreaCard({ area, onEdit }: { area: RoadArea; onEdit: (area:
     <div className="selected-road-card">
       <div className="selected-road-card__title">
         <div>
-          <b>{stringAttr(attrs.roadName) ?? 'Selected CityJSON road'}</b>
+          <b>{isIntersection ? 'Selected CityJSON junction' : stringAttr(attrs.roadName) ?? 'Selected CityJSON road'}</b>
           <span>{stringAttr(attrs.sourceType) ?? area.function} · {stringAttr(attrs.trafficDirection) ?? 'no direction'}</span>
         </div>
         <span>{modes}</span>
       </div>
       <Button className="h-14 w-full text-sm" variant="primary" onClick={() => onEdit(area)}>
-        <PencilLine className="h-5 w-5" aria-hidden="true" /> Edit road
+        <PencilLine className="h-5 w-5" aria-hidden="true" /> {isIntersection ? 'How to connect roads here' : 'Edit road'}
       </Button>
-      {area.geometryMode === 'exact' && (
+      {isIntersection && (
+        <p>
+          Keep this generated junction. Edit an entering road, then drag its yellow endpoint onto
+          a teal target. Saving records the confirmed connection in CityJSON.
+        </p>
+      )}
+      {!isIntersection && area.geometryMode === 'exact' && (
         <p>
           Speed, direction, access, material, and type keep the exact source polygons. Shape or
           width changes rebuild only this road.
