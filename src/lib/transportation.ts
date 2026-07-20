@@ -2145,6 +2145,63 @@ export function synchronizeRoadConnectionMetadata(
   return [...changedTargets];
 }
 
+/**
+ * Delete one CityJSON Road and remove endpoint links to it from every
+ * surviving editable Road. The caller can then compact the orphaned geometry
+ * vertices as part of the same guarded editor mutation.
+ */
+export function deleteRoadFromCityJson(
+  doc: CityJsonDocument,
+  roadId: string
+): { deleted: boolean; disconnectedRoadIds: string[] } {
+  const road = doc.CityObjects[roadId];
+  if (!road || road.type !== 'Road') {
+    return { deleted: false, disconnectedRoadIds: [] };
+  }
+
+  const disconnectedRoadIds = new Set<string>();
+  for (const [candidateId, candidate] of Object.entries(doc.CityObjects)) {
+    if (candidateId === roadId || candidate.type !== 'Road') continue;
+    const draft = readEditableRoadDraftFromCityObject(candidate);
+    if (!draft) continue;
+
+    let changed = false;
+    for (const section of draft.sections) {
+      if (!section.connections) continue;
+      for (const endpoint of ['start', 'end'] as const) {
+        const connection = section.connections[endpoint];
+        if (connection?.target === 'cityjson' && connection.targetId === roadId) {
+          delete section.connections[endpoint];
+          changed = true;
+        }
+      }
+      if (!section.connections.start && !section.connections.end) {
+        delete section.connections;
+      }
+    }
+
+    if (!changed) continue;
+    candidate.attributes = {
+      ...(candidate.attributes ?? {}),
+      _roadLayout: roadDraftToJson(draft),
+      _updatedAt: new Date().toISOString(),
+    };
+    disconnectedRoadIds.add(candidateId);
+  }
+
+  for (const candidate of Object.values(doc.CityObjects)) {
+    if (candidate.children) {
+      candidate.children = candidate.children.filter((id) => id !== roadId);
+    }
+    if (candidate.parents) {
+      candidate.parents = candidate.parents.filter((id) => id !== roadId);
+    }
+  }
+  delete doc.CityObjects[roadId];
+
+  return { deleted: true, disconnectedRoadIds: [...disconnectedRoadIds] };
+}
+
 function readRoadDraft(value: unknown): RoadDraft | null {
   const record = unknownRecord(value);
   if (!record) return null;

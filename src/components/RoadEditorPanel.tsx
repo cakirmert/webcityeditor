@@ -82,6 +82,7 @@ interface Props {
   onPostPayload: () => void;
   onBackendUrlChange: (url: string) => void;
   onEditSelectedRoadArea: (area: RoadArea) => void;
+  onDeleteSelectedRoadArea: (area: RoadArea) => void;
   onEditOsm2StreetsSelection: () => void;
   onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
@@ -148,6 +149,7 @@ export default function RoadEditorPanel({
   onPostPayload,
   onBackendUrlChange,
   onEditSelectedRoadArea,
+  onDeleteSelectedRoadArea,
   onEditOsm2StreetsSelection,
   onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
@@ -538,7 +540,11 @@ export default function RoadEditorPanel({
           onClear={onClearOsm2StreetsSelection}
         />
         {selectedRoadArea && !draft && (
-          <SelectedRoadAreaCard area={selectedRoadArea} onEdit={onEditSelectedRoadArea} />
+          <SelectedRoadAreaCard
+            area={selectedRoadArea}
+            onEdit={onEditSelectedRoadArea}
+            onDelete={onDeleteSelectedRoadArea}
+          />
         )}
 
         {draft && activeSection ? (
@@ -1132,7 +1138,15 @@ function FitConflictCard({
   );
 }
 
-function SelectedRoadAreaCard({ area, onEdit }: { area: RoadArea; onEdit: (area: RoadArea) => void }) {
+function SelectedRoadAreaCard({
+  area,
+  onEdit,
+  onDelete,
+}: {
+  area: RoadArea;
+  onEdit: (area: RoadArea) => void;
+  onDelete: (area: RoadArea) => void;
+}) {
   const attrs = area.attributes;
   const isIntersection =
     String(attrs.transportationUsage ?? area.function).toLowerCase() === 'intersection';
@@ -1162,6 +1176,14 @@ function SelectedRoadAreaCard({ area, onEdit }: { area: RoadArea; onEdit: (area:
       </div>
       <Button className="h-14 w-full text-sm" variant="primary" onClick={() => onEdit(area)}>
         <PencilLine className="h-5 w-5" aria-hidden="true" /> {isIntersection ? 'How to connect roads here' : 'Edit road'}
+      </Button>
+      <Button
+        className="h-12 w-full text-sm"
+        variant="warn"
+        onClick={() => onDelete(area)}
+        aria-label={isIntersection ? 'Delete junction' : 'Delete road'}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" /> {isIntersection ? 'Delete junction' : 'Delete road'}
       </Button>
       {isIntersection && (
         <p>

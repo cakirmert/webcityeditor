@@ -80,6 +80,7 @@ Endpoint editing is deliberate:
 - teal endpoint targets come from other draft sections, editable CityJSON roads, and OSM road endpoints;
 - dropping an endpoint on a teal target stores a confirmed connection;
 - connections between two editable CityJSON roads are written reciprocally.
+- deleting a CityJSON road clears reciprocal endpoint metadata from every surviving editable road.
 
 Connection metadata confirms graph topology. It does not yet synthesize a complete lane-level intersection, turn restrictions, or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
 
@@ -218,7 +219,7 @@ The following work is intentionally not claimed as complete:
 
 1. Generate true intersection surfaces from confirmed connected roads, including lane-to-lane connectors, turns, crossings, and regenerated markings. Exact lane polygons already match osm2streets styling; dynamic junction synthesis is not claimed as complete.
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
-3. Add topology-aware propagation when a connected road is later moved or deleted, with a clear conflict-resolution UI.
+3. Add topology-aware propagation when a connected road is later moved, with a clear conflict-resolution UI. Deleting a road already clears reciprocal endpoint metadata from surviving roads.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
 5. Add a dedicated renderer for Hamburg's CORS-enabled Cesium quantized-mesh DGM terrain and drape the active MapLibre basemap onto it. Per-building grounding fixes floating models now; full terrain is required to preserve surveyed elevation differences and terrain breaklines visually.
 6. Add screenshot-based GPU regression coverage for official 3D Tiles and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural grounding and tile-data regressions already have unit coverage.

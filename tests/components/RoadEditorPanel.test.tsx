@@ -35,6 +35,7 @@ function renderPanel(
     editingRoadId?: string;
     onCancelEdit?: () => void;
     onEditSelectedRoadArea?: (area: RoadArea) => void;
+    onDeleteSelectedRoadArea?: (area: RoadArea) => void;
     onEditOsm2StreetsSelection?: () => void;
     onHighlightConnectedOsm2StreetsRoads?: () => void;
     canUndoDraft?: boolean;
@@ -84,6 +85,7 @@ function renderPanel(
       onPostPayload={() => {}}
       onBackendUrlChange={() => {}}
       onEditSelectedRoadArea={options.onEditSelectedRoadArea ?? vi.fn()}
+      onDeleteSelectedRoadArea={options.onDeleteSelectedRoadArea ?? vi.fn()}
       selectedRoadArea={options.selectedRoadArea ?? null}
       osm2streetsSelection={options.osm2streetsSelection}
       onEditOsm2StreetsSelection={onEditOsm2StreetsSelection}
@@ -118,6 +120,24 @@ describe('<RoadEditorPanel />', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand road editor' }));
     expect(panel).toHaveClass('is-expanded');
     expect(screen.getByRole('button', { name: 'Use compact road editor' })).toBeInTheDocument();
+  });
+
+  it('offers deletion for a selected CityJSON road', () => {
+    const onDeleteSelectedRoadArea = vi.fn();
+    const area = {
+      roadId: 'road-1',
+      function: 'road',
+      attributes: {},
+      polygon: [],
+    } as unknown as RoadArea;
+    renderPanel(vi.fn(), {
+      draft: null,
+      selectedRoadArea: area,
+      onDeleteSelectedRoadArea,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete road' }));
+    expect(onDeleteSelectedRoadArea).toHaveBeenCalledWith(area);
   });
 
   it('shows road bands as draggable side-by-side boxes', () => {

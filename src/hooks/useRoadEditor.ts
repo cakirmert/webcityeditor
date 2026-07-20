@@ -13,6 +13,7 @@ import {
   buildRoadEditPayload,
   buildRoadPreviewAreas,
   createManualRoadDraft,
+  deleteRoadFromCityJson,
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   insertRoadIntoCityJson,
@@ -925,6 +926,67 @@ export function useRoadEditor(
     markGeometryChanged,
   ]);
 
+  const handleDeleteSelectedRoadArea = useCallback((area: RoadArea) => {
+    if (!cityjson) return;
+    const roadId = area.roadId;
+    if (!window.confirm(`Delete ${roadId}? Connected roads will be disconnected.`)) return;
+
+    try {
+      pushUndo(`Delete ${roadId}`);
+      const { value: result } = runStructurallyGuardedMutation(
+        cityjson,
+        `Deleting ${roadId}`,
+        () => {
+          const deletion = deleteRoadFromCityJson(cityjson, roadId);
+          if (deletion.deleted) compactVertices(cityjson);
+          return deletion;
+        }
+      );
+      if (!result.deleted) {
+        setRoadStatus(`${roadId} is no longer available.`);
+        return;
+      }
+      setDirtyIds((previous) => {
+        const next = new Set(previous);
+        next.add(roadId);
+        for (const disconnectedRoadId of result.disconnectedRoadIds) {
+          next.add(disconnectedRoadId);
+        }
+        return next;
+      });
+      clearRoadDraftHistory();
+      setSelectedRoadArea(null);
+      setRoadDraft(null);
+      setRoadEditBaseline(null);
+      setRoadDraftDirty(false);
+      setEditingRoadId(null);
+      setLastInsertedRoadId((current) => current === roadId ? null : current);
+      setSelection(null);
+      setDrawMode('none');
+      setReloadToken((token) => token + 1);
+      markGeometryChanged('Road geometry changed; run Check 3D before export.');
+      setRoadStatus(
+        `Deleted ${roadId}${
+          result.disconnectedRoadIds.length > 0
+            ? ` and cleared ${result.disconnectedRoadIds.length} reciprocal road connection${result.disconnectedRoadIds.length === 1 ? '' : 's'}`
+            : ''
+        }.`
+      );
+    } catch (error) {
+      console.error(error);
+      alert(`Road deletion failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [
+    cityjson,
+    pushUndo,
+    setDirtyIds,
+    clearRoadDraftHistory,
+    setSelection,
+    setDrawMode,
+    setReloadToken,
+    markGeometryChanged,
+  ]);
+
   const handleExportRoadPayload = useCallback(() => {
     if (!roadDraft) return;
     const targetRoadId = editingRoadId ?? lastInsertedRoadId;
@@ -1010,6 +1072,7 @@ export function useRoadEditor(
     handleSplitRoadDraft,
     handleInsertRoad,
     handleInsertOsm2StreetsSelection,
+    handleDeleteSelectedRoadArea,
     handleExportRoadPayload,
     handlePostRoadPayload,
     roadAreas,

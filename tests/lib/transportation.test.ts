@@ -7,6 +7,7 @@ import {
   buildExactRoadAttributePreviewAreas,
   buildRoadPreviewAreas,
   createManualRoadDraft,
+  deleteRoadFromCityJson,
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   inferRoadDraftFromOsmRoad,
@@ -449,6 +450,39 @@ describe('transportation roads', () => {
         },
       ],
     });
+  });
+
+  it('deletes a road and clears reciprocal endpoint metadata on surviving roads', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(delftRoad);
+    insertRoadIntoCityJson(doc, target, { id: 'target-road' });
+
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      delftRoad[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'target-road',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: delftRoad[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'source-road' });
+    synchronizeRoadConnectionMetadata(doc, 'source-road', source);
+
+    expect(deleteRoadFromCityJson(doc, 'target-road')).toEqual({
+      deleted: true,
+      disconnectedRoadIds: ['source-road'],
+    });
+    expect(doc.CityObjects['target-road']).toBeUndefined();
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects['source-road'])?.sections[0].connections
+    ).toBeUndefined();
+    expect(doc.CityObjects['source-road'].attributes?._updatedAt).toEqual(expect.any(String));
   });
 
   it('splits a road section into two building-block sections while preserving bands', () => {

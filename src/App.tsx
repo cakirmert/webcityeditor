@@ -743,6 +743,7 @@ export default function App() {
               roadFitPending={roadEditor.roadFitPending}
               selectedRoadArea={roadEditor.selectedRoadArea}
               onEditSelectedRoadArea={roadEditor.handleEditSelectedRoadArea}
+              onDeleteSelectedRoadArea={roadEditor.handleDeleteSelectedRoadArea}
               osm2streetsSelection={roadEditor.osm2streetsSelection}
               onEditOsm2StreetsSelection={roadEditor.handleInsertOsm2StreetsSelection}
               onHighlightConnectedOsm2StreetsRoads={

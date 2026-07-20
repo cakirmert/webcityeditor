@@ -6,6 +6,7 @@ import {
   createManualRoadDraft,
   extractTransportationAreas,
   insertRoadIntoCityJson,
+  readEditableRoadDraftFromCityObject,
   type RoadDraft,
 } from '../../src/lib/transportation';
 import { useRoadEditor } from '../../src/hooks/useRoadEditor';
@@ -99,6 +100,56 @@ describe('useRoadEditor road-edit lifecycle', () => {
         ?.editableDraft?.sections[0].bands[0].widthM
     ).toBe(4);
     expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
+  });
+
+  it('deletes a selected road and disconnects surviving editable roads', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
+    insertRoadIntoCityJson(doc, target, { id: 'road-target' });
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      roadLine[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'road-target',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: roadLine[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'road-source' });
+    const targetArea = extractTransportationAreas(doc).find(
+      (candidate) => candidate.roadId === 'road-target'
+    );
+    expect(targetArea).toBeDefined();
+    if (!targetArea) return;
+
+    const coreState = coreStateFor(doc);
+    const pushUndo = vi.fn();
+    const { result } = renderHook(() =>
+      useRoadEditor(coreState as never, { pushUndo } as never)
+    );
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => result.current.handleDeleteSelectedRoadArea(targetArea));
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Delete road-target? Connected roads will be disconnected.'
+    );
+    expect(pushUndo).toHaveBeenCalledWith('Delete road-target');
+    expect(doc.CityObjects['road-target']).toBeUndefined();
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects['road-source'])?.sections[0].connections
+    ).toBeUndefined();
+    expect(result.current.roadStatus).toBe(
+      'Deleted road-target and cleared 1 reciprocal road connection.'
+    );
+    expect(coreState.setReloadToken).toHaveBeenCalledTimes(1);
+    expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
+    confirm.mockRestore();
   });
 
   it('undoes and redoes unsaved road-draft changes before CityJSON is saved', () => {
