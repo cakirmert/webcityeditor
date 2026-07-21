@@ -574,6 +574,14 @@ kbd {
   pointer-events: none;
 }
 
+.building-detail-status strong,
+.building-detail-status span {
+  display: block;
+}
+
+.building-detail-status strong { font-size: 10px; }
+.building-detail-status span { margin-top: 3px; color: rgba(247, 248, 251, 0.76); }
+
 .side-panel.wide {
   position: absolute;
   top: 0;

@@ -49,7 +49,10 @@ function detailDocument(): CityJsonDocument {
       },
     },
     appearance: {
-      textures: [{ type: 'JPG', image: 'selected.jpg' }],
+      textures: [
+        { type: 'JPG', image: 'selected.jpg' },
+        { type: 'JPG', image: 'unreferenced.jpg' },
+      ],
       'vertices-texture': [[0, 0], [1, 0], [0, 1]],
     },
   };
@@ -111,6 +114,18 @@ describe('<BuildingDetailPreview />', () => {
     expect(screen.getByText(/Selected building only/)).toHaveTextContent(
       'photo textures'
     );
+    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
+      'Local CityJSON LoD3: 1 object'
+    );
+    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
+      '1 geometry'
+    );
+    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
+      '1 surface'
+    );
+    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
+      '1 photo atlas available'
+    );
 
     fireEvent.click(screen.getByRole('switch', { name: 'Selected building textures' }));
     expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
@@ -121,7 +136,13 @@ describe('<BuildingDetailPreview />', () => {
     expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ lod: 'lod2', texturesEnabled: false })
     );
-    expect(screen.getByRole('switch', { name: 'Selected building textures' })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Selected building textures' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Selected building textures' }));
+    fireEvent.click(screen.getByRole('button', { name: 'LoD3' }));
+    expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ lod: 'lod3', texturesEnabled: true })
+    );
   });
 
   it('enables LoD3 for a matching Hamburg LoD2 building and displays the streamed mesh', async () => {
@@ -154,6 +175,14 @@ describe('<BuildingDetailPreview />', () => {
     expect(screen.getByText(/Hamburg Geoportal untextured geometry/)).toHaveTextContent(
       '59 triangles'
     );
-    expect(screen.getByRole('switch', { name: 'Selected building textures' })).toBeDisabled();
+    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
+      'Hamburg Geoportal streamed LoD3: 59 triangles'
+    );
+    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
+      'untextured; no photo atlas is supplied'
+    );
+    const textureSwitch = screen.getByRole('switch', { name: 'Selected building textures' });
+    expect(textureSwitch).toBeDisabled();
+    expect(textureSwitch).not.toBeChecked();
   });
 });

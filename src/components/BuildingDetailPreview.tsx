@@ -24,6 +24,18 @@ type RemoteLod3State = {
   message?: string;
 };
 
+interface DetailAvailability {
+  lod2: boolean;
+  lod3: boolean;
+  lod3Textures: boolean;
+  lod2GeometryCount: number;
+  lod3GeometryCount: number;
+  lod3ObjectCount: number;
+  lod3InstallationCount: number;
+  lod3SurfaceCount: number;
+  textureAtlasCount: number;
+}
+
 export default function BuildingDetailPreview({
   cityjson,
   buildingId,
@@ -138,21 +150,27 @@ export default function BuildingDetailPreview({
             LoD3
           </DetailButton>
         </div>
-        <label className={!availability.lod3Textures || lod !== 'lod3' ? 'is-disabled' : ''}>
-          <span>Textures</span>
+        <label className={!availability.lod3Textures ? 'is-disabled' : ''}>
+          <span>{availability.lod3Textures ? 'Photo textures' : 'No photo atlas'}</span>
           <input
             type="checkbox"
             role="switch"
             aria-label="Selected building textures"
-            checked={texturesEnabled}
-            disabled={!availability.lod3Textures || lod !== 'lod3'}
+            checked={availability.lod3Textures && texturesEnabled}
+            disabled={!availability.lod3Textures}
             onChange={(event) => setTexturesEnabled(event.target.checked)}
           />
         </label>
       </div>
 
-      <div className="building-detail-status">
-        {detailStatusText(lod, texturesActive, availability.lod3, remoteLod3)}
+      <div className="building-detail-status" aria-label="LoD3 data information">
+        <strong>{detailStatusText(lod, texturesActive, availability.lod3, remoteLod3)}</strong>
+        {lod === 'lod3' && (
+          <>
+            <span>{lod3DataText(availability, remoteLod3)}</span>
+            <span>{lod3TextureText(availability, remoteLod3, texturesEnabled)}</span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -222,6 +240,47 @@ function detailStatusText(
   return 'Selected building only / LoD3 unavailable';
 }
 
+function lod3DataText(
+  availability: DetailAvailability,
+  remote: RemoteLod3State
+): string {
+  if (availability.lod3) {
+    return `Local CityJSON LoD3: ${availability.lod3ObjectCount} object${
+      availability.lod3ObjectCount === 1 ? '' : 's'
+    } · ${availability.lod3GeometryCount} geometr${
+      availability.lod3GeometryCount === 1 ? 'y' : 'ies'
+    } · ${availability.lod3SurfaceCount} surface${
+      availability.lod3SurfaceCount === 1 ? '' : 's'
+    } · ${availability.lod3InstallationCount} installation${
+      availability.lod3InstallationCount === 1 ? '' : 's'
+    }`;
+  }
+  if (remote.status === 'ready') {
+    return `Hamburg Geoportal streamed LoD3: ${remote.model?.triangleCount ?? 0} triangles`;
+  }
+  if (remote.status === 'loading') return 'Hamburg Geoportal LoD3 data is loading';
+  if (remote.status === 'error' || remote.status === 'unavailable') {
+    return `Hamburg Geoportal LoD3: ${remote.message ?? 'unavailable for this object'}`;
+  }
+  return 'No LoD3 source is available for this object';
+}
+
+function lod3TextureText(
+  availability: DetailAvailability,
+  remote: RemoteLod3State,
+  texturesEnabled: boolean
+): string {
+  if (availability.lod3Textures) {
+    return `${availability.textureAtlasCount} photo atlas${
+      availability.textureAtlasCount === 1 ? '' : 'es'
+    } available · textures ${texturesEnabled ? 'on' : 'off'}`;
+  }
+  if (!availability.lod3 && remote.status !== 'idle') {
+    return 'The Hamburg Geoportal LoD3 source is untextured; no photo atlas is supplied for this building';
+  }
+  return 'No photo atlas is supplied for this building; semantic LoD3 materials are used';
+}
+
 function disposeRemoteModel(group: THREE.Group): void {
   group.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -232,28 +291,104 @@ function disposeRemoteModel(group: THREE.Group): void {
   });
 }
 
-function inspectDetailAvailability(doc: CityJsonDocument): {
-  lod2: boolean;
-  lod3: boolean;
-  lod3Textures: boolean;
-} {
+function inspectDetailAvailability(doc: CityJsonDocument): DetailAvailability {
   let lod2 = false;
   let lod3 = false;
   let lod3Textures = false;
-  for (const object of Object.values(doc.CityObjects)) {
+  let lod2GeometryCount = 0;
+  let lod3GeometryCount = 0;
+  let lod3SurfaceCount = 0;
+  let lod3InstallationCount = 0;
+  const lod3ObjectIds = new Set<string>();
+  const lod3TextureAtlasIndices = new Set<number>();
+  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
+    let objectHasLod3 = false;
     for (const geometry of object.geometry ?? []) {
-      const candidate = geometry as { lod?: string | number; texture?: unknown };
+      const candidate = geometry as {
+        type?: string;
+        lod?: string | number;
+        boundaries?: unknown;
+        texture?: unknown;
+      };
       const value = Number.parseFloat(String(candidate.lod ?? ''));
       if (!Number.isFinite(value)) continue;
       if (value >= 3) {
         lod3 = true;
-        if (candidate.texture != null) lod3Textures = true;
+        objectHasLod3 = true;
+        lod3GeometryCount++;
+        lod3SurfaceCount += geometrySurfaceCount(candidate.type, candidate.boundaries);
+        collectTextureAtlasIndices(candidate.texture, lod3TextureAtlasIndices);
       } else {
         lod2 = true;
+        lod2GeometryCount++;
       }
+    }
+    if (objectHasLod3) {
+      lod3ObjectIds.add(objectId);
+      if (object.type === 'BuildingInstallation') lod3InstallationCount++;
     }
   }
   const appearance = doc.appearance as { textures?: unknown[] } | undefined;
-  lod3Textures = lod3Textures && !!appearance?.textures?.length;
-  return { lod2, lod3, lod3Textures };
+  const availableTextureAtlasCount = appearance?.textures?.length ?? 0;
+  const textureAtlasCount = [...lod3TextureAtlasIndices].filter(
+    (index) => index >= 0 && index < availableTextureAtlasCount
+  ).length;
+  lod3Textures = textureAtlasCount > 0;
+  return {
+    lod2,
+    lod3,
+    lod3Textures,
+    lod2GeometryCount,
+    lod3GeometryCount,
+    lod3ObjectCount: lod3ObjectIds.size,
+    lod3InstallationCount,
+    lod3SurfaceCount,
+    textureAtlasCount,
+  };
+}
+
+function geometrySurfaceCount(type: string | undefined, boundaries: unknown): number {
+  if (!Array.isArray(boundaries)) return 0;
+  if (type === 'MultiSurface' || type === 'CompositeSurface') return boundaries.length;
+  if (type === 'Solid') {
+    return boundaries.reduce(
+      (count, shell) => count + (Array.isArray(shell) ? shell.length : 0),
+      0
+    );
+  }
+  if (type === 'MultiSolid' || type === 'CompositeSolid') {
+    return boundaries.reduce(
+      (solidCount, solid) => solidCount + (
+        Array.isArray(solid)
+          ? solid.reduce(
+              (shellCount, shell) => shellCount + (Array.isArray(shell) ? shell.length : 0),
+              0
+            )
+          : 0
+      ),
+      0
+    );
+  }
+  return 0;
+}
+
+function collectTextureAtlasIndices(texture: unknown, target: Set<number>): void {
+  if (!texture || typeof texture !== 'object' || Array.isArray(texture)) return;
+  for (const theme of Object.values(texture as Record<string, unknown>)) {
+    if (!theme || typeof theme !== 'object' || Array.isArray(theme)) continue;
+    const values = (theme as { values?: unknown }).values;
+    collectTextureValueIndices(values, target);
+  }
+}
+
+function collectTextureValueIndices(value: unknown, target: Set<number>): void {
+  if (!Array.isArray(value)) return;
+  if (value.length > 0 && value.every((item) => item === null || typeof item === 'number')) {
+    const atlasIndex = value[0];
+    if (typeof atlasIndex === 'number' && Number.isInteger(atlasIndex)) {
+      target.add(atlasIndex);
+    }
+    return;
+  }
+  for (const child of value) collectTextureValueIndices(child, target);
 }

@@ -2035,6 +2035,38 @@ export default function MapView({
     pushBuildingBlockLayer('building-blocks-context', contextBlockFootprints, blockOpacity);
     pushBuildingBlockLayer('building-blocks-priority', priorityBlockFootprints, 1);
 
+    // Detailed meshes and remote 3D Tiles are deliberately batched and cannot
+    // expose one CityObject per GPU instance. A nearly invisible extruded
+    // footprint volume keeps the visible building body clickable above the
+    // terrain instead of relying on a z-fighting ground outline.
+    layers.push(
+      new SolidPolygonLayer<Footprint>({
+        id: 'building-hit-targets',
+        data: groundedRenderedFootprints,
+        getPolygon: (footprint) => footprint.polygon,
+        getElevation: (footprint) => footprint.height,
+        getFillColor: [0, 0, 0, 1],
+        opacity: 0.01,
+        filled: true,
+        extruded: true,
+        wireframe: false,
+        pickable: buildingSelectionEnabled,
+        material: false,
+        parameters: {
+          depthTest: true,
+          depthMask: false,
+        } as unknown as never,
+        onClick: (info: PickingInfo<Footprint>, event: unknown) => {
+          if (!buildingSelectionEnabled || !info.object) return;
+          const src = (event as { srcEvent?: { ctrlKey?: boolean; metaKey?: boolean } })?.srcEvent;
+          onSelect({
+            objectId: info.object.parentId ?? info.object.id,
+            ctrlKey: !!(src?.ctrlKey || src?.metaKey),
+          });
+        },
+      })
+    );
+
     if (renderedOsm2StreetsResult?.lanes) {
       layers.push(
         new GeoJsonLayer({
@@ -2073,7 +2105,7 @@ export default function MapView({
               onOsm2StreetsSelect?.({ kind: 'lane', feature: info.object });
             }
           },
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
             getLineColor: [osm2streetsSelection, highlightedOsm2StreetsRoadIds],
@@ -2126,7 +2158,7 @@ export default function MapView({
                 onOsm2StreetsSelect?.({ kind: 'intersection', feature: info.object });
               }
             },
-            parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+            parameters: { depthTest: false } as unknown as never,
             updateTriggers: {
               getFillColor: [basemap, roadOverlayOpacity],
               getLineColor: [osm2streetsSelection],
@@ -2181,7 +2213,7 @@ export default function MapView({
               basemap,
               roadOverlayOpacity
             ),
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: { getFillColor: [basemap, roadOverlayOpacity] },
         })
       );
@@ -2204,7 +2236,7 @@ export default function MapView({
               basemap,
               roadOverlayOpacity
             ),
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: { getFillColor: [basemap, roadOverlayOpacity] },
         })
       );
@@ -2258,7 +2290,7 @@ export default function MapView({
           filled: true,
           pickable: roadSelectionEnabled,
           extruded: false,
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
             getFillColor: [
               basemap,
@@ -2395,7 +2427,7 @@ export default function MapView({
           jointRounded: true,
           capRounded: true,
           pickable: false,
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
             getColor: [basemap, roadOverlayOpacity],
           },
@@ -2424,7 +2456,7 @@ export default function MapView({
           filled: true,
           extruded: false,
           pickable: false,
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
             getLineColor: [basemap, roadOverlayOpacity],
@@ -4310,17 +4342,17 @@ function MapLayerControl({
               </button>
             </div>
           </div>
-          <label
-            className={`map-layer-control__switch ${
-              !lod3Visible ? 'is-disabled' : ''
-            }`}
-          >
+          <label className="map-layer-control__switch">
             <span>
               <b>Photo textures</b>
               <small>
                 {lod3Visible
-                  ? 'Overlay on LoD3; geometry stays on'
-                  : 'Zoom in to LoD3'}
+                  ? texturesEnabled
+                    ? 'On for bundled LoD3; geometry stays on'
+                    : 'Off; untextured LoD3 stays on'
+                  : texturesEnabled
+                    ? 'Will turn on when LoD3 appears'
+                    : 'Will stay off when LoD3 appears'}
               </small>
             </span>
             <input
@@ -4328,7 +4360,6 @@ function MapLayerControl({
               role="switch"
               aria-label="Photo textures"
               checked={texturesEnabled}
-              disabled={!lod3Visible}
               onChange={(event) => onTexturesEnabledChange(event.target.checked)}
             />
           </label>
