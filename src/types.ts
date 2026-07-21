@@ -45,7 +45,7 @@ export interface SelectionInfo {
 }
 
 import type { CityJsonSeqLoadedTile } from './lib/cityjsonseq-catalog';
-import type { RoofType } from './lib/generator';
+import type { RoofType, WindowPattern } from './lib/generator';
 import type { SplitAxis } from './lib/subdivision';
 
 export interface CatalogConnection {
@@ -72,6 +72,7 @@ export interface NewBuildingForm {
   splitAxis: SplitAxis;
   addWindows: boolean;
   addDoor: boolean;
+  windowPattern: WindowPattern;
   eaveOverhang: number;
   rakeOverhang: number;
 }

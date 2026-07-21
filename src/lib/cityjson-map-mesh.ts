@@ -35,6 +35,12 @@ interface BuildOptions {
   maxInputVertices?: number;
   /** Place each root object group on the flat map ground without changing its relative heights. */
   groundObjectGroups?: boolean;
+  /** Bind source photographs. False keeps the same highest-LoD geometry but
+   * colours every face from its semantic surface type. */
+  texturesEnabled?: boolean;
+  /** Optional normalized RGB override by CityObject id. Descendants inherit
+   * the colour assigned to their root object. */
+  objectColors?: ReadonlyMap<string, readonly [number, number, number]>;
 }
 
 const DEFAULT_MAX_OUTPUT_VERTICES = 80_000;
@@ -69,6 +75,7 @@ export function buildCityJsonMapMesh(
     surfaceType: string;
     texture: SurfaceTexture | null;
     groundZ: number | null;
+    color: readonly [number, number, number] | null;
   }> = [];
   const referenced = new Set<number>();
   let queuedVertexCount = 0;
@@ -93,6 +100,8 @@ export function buildCityJsonMapMesh(
     if (geometries.length === 0) continue;
     const groupId = rootObjectId(doc, objectId);
     const groundZ = groundByGroup.get(groupId) ?? null;
+    const objectColor =
+      options.objectColors?.get(objectId) ?? options.objectColors?.get(groupId) ?? null;
     let objectQueued = false;
     for (const geomRaw of geometries) {
       const geom = geomRaw as {
@@ -113,8 +122,12 @@ export function buildCityJsonMapMesh(
         queued.push({
           rings,
           surfaceType: surfaceType ?? obj.type,
-          texture: readSurfaceTexture(doc, geom, path, rings),
+          texture:
+            options.texturesEnabled === false
+              ? null
+              : readSurfaceTexture(doc, geom, path, rings),
           groundZ,
+          color: objectColor,
         });
         queuedVertexCount += count;
         objectQueued = true;
@@ -182,6 +195,7 @@ export function buildCityJsonMapMesh(
       addSurface(
         surface.rings,
         surface.surfaceType,
+        surface.color,
         (idx) => localVertex(idx, surface.groundZ),
         positions,
         colors,
@@ -407,6 +421,7 @@ function readFace(face: unknown): number[][] {
 function addSurface(
   rings: number[][],
   surfaceType: string,
+  colorOverride: readonly [number, number, number] | null,
   localVertex: (idx: number) => [number, number, number] | null,
   positions: number[],
   colors: number[],
@@ -417,7 +432,7 @@ function addSurface(
   const vertices3d: [number, number, number][] = [];
   const flat2d: number[] = [];
   const holes: number[] = [];
-  const color = colorForSurface(surfaceType);
+  const color = colorOverride ?? colorForSurface(surfaceType);
   let vertexOffset = 0;
 
   for (let ringIdx = 0; ringIdx < rings.length; ringIdx++) {

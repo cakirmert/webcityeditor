@@ -3,6 +3,7 @@ import {
   generateBuilding,
   type NewBuildingParams,
   type RoofType,
+  type WindowPattern,
 } from './generator';
 import { detectCrs } from './projection';
 
@@ -59,6 +60,7 @@ export interface RegenerateOverrides {
   rakeOverhang?: number;
   addWindows?: boolean;
   addDoor?: boolean;
+  windowPattern?: WindowPattern;
   storeys?: number;
 }
 
@@ -155,7 +157,13 @@ export function regenerateBuilding(
     openings: (() => {
       const w = overrides?.addWindows ?? Boolean(a._addWindows);
       const d = overrides?.addDoor ?? Boolean(a._addDoor);
-      return w || d ? { windows: w, door: d } : undefined;
+      const storedPattern = String(a._windowPattern ?? 'balanced');
+      const windowPattern = overrides?.windowPattern ?? (
+        ['classic', 'balanced', 'modern'].includes(storedPattern)
+          ? storedPattern as WindowPattern
+          : 'balanced'
+      );
+      return w || d ? { windows: w, door: d, windowPattern } : undefined;
     })(),
     // Pass through user-facing attributes (function, year, etc.). We strip the
     // private parametric ones because generator.ts will re-derive and write
@@ -200,6 +208,7 @@ function stripPrivateAttrs(a: Record<string, unknown>): Record<string, string | 
     '_rakeOverhang',
     '_addWindows',
     '_addDoor',
+    '_windowPattern',
     '_createdBy',
     '_createdAt',
     'measuredHeight',

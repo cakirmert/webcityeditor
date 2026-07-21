@@ -53,6 +53,8 @@ interface Props {
   cityjson: CityJsonDocument;
   reloadToken: number;
   onSelect: (info: SelectionInfo | null) => void;
+  lod?: 'highest' | 'lod2' | 'lod3';
+  texturesEnabled?: boolean;
   splitPreview?: SplitPreviewInfo | null;
   /** Drag handler — fires while the user is dragging a split-line ring in 3D.
    *  `ringIndex` is the ring's position in `splitPreview.heights` (0-based);
@@ -67,6 +69,8 @@ export default function Viewer({
   cityjson,
   reloadToken,
   onSelect,
+  lod = 'highest',
+  texturesEnabled = false,
   splitPreview,
   onAdjustSplit,
 }: Props) {
@@ -204,10 +208,10 @@ export default function Viewer({
     // Re-apply custom palette & color mode each load — resetMaterial() builds
     // fresh material instances and they default to objectColors-by-type unless
     // we explicitly pin showSemantics.
-    let docToLoad = cityjson;
+    let docToLoad = documentAtLod(cityjson, lod);
     let objectColors: Record<string, number> = OBJECT_COLORS_DISTINCT;
     if (colorMode === 'usage') {
-      const cloned = JSON.parse(JSON.stringify(cityjson)) as CityJsonDocument;
+      const cloned = JSON.parse(JSON.stringify(docToLoad)) as CityJsonDocument;
       for (const id of Object.keys(cloned.CityObjects)) {
         const obj = cloned.CityObjects[id];
         obj.type = normalizeUsage(obj.attributes?.function) ?? 'unknown';
@@ -218,7 +222,7 @@ export default function Viewer({
         ...USAGE_OBJECT_COLORS,
       };
     }
-    const texturedGroup = buildTexturedViewerGroup(docToLoad);
+    const texturedGroup = texturesEnabled ? buildTexturedViewerGroup(docToLoad) : null;
     if (texturedGroup) {
       state.loader = null;
       state.modelGroup.add(texturedGroup);
@@ -226,7 +230,9 @@ export default function Viewer({
       if (!meshBbox.isEmpty()) fitCameraToBox(state.camera, state.controls, meshBbox);
       return;
     }
-    docToLoad = withoutUnsupportedSolidTextures(docToLoad);
+    docToLoad = texturesEnabled
+      ? withoutUnsupportedSolidTextures(docToLoad)
+      : withoutTextures(docToLoad);
 
     setParserPalette(state.parser, objectColors);
     state.parser.resetMaterial();
@@ -251,7 +257,7 @@ export default function Viewer({
     } catch (e) {
       console.warn('Could not fit camera:', e);
     }
-  }, [cityjson, reloadToken, colorMode]);
+  }, [cityjson, reloadToken, colorMode, lod, texturesEnabled]);
 
   // 2b. Toggle showSemantics live without re-loading the whole model.
   // resetMaterial() → loader.load() rebuilds vertex buffers, which is wasteful
@@ -470,6 +476,50 @@ export default function Viewer({
       </div>
     </div>
   );
+}
+
+/** Keep one geometry tier per CityObject so the inspector never stacks LoD2
+ * and LoD3 shells. Children without geometry in the requested tier remain as
+ * lightweight hierarchy nodes, which preserves selection metadata. */
+function documentAtLod(
+  doc: CityJsonDocument,
+  lod: 'highest' | 'lod2' | 'lod3'
+): CityJsonDocument {
+  if (lod === 'highest') return doc;
+  const clone = structuredClone(doc);
+  for (const object of Object.values(clone.CityObjects)) {
+    const geometries = object.geometry ?? [];
+    const candidates = geometries
+      .map((geometry, index) => ({
+        geometry,
+        index,
+        lod: Number.parseFloat(String((geometry as { lod?: string | number }).lod ?? '')),
+      }))
+      .filter((candidate) =>
+        Number.isFinite(candidate.lod) &&
+        (lod === 'lod3' ? candidate.lod >= 3 : candidate.lod < 3)
+      );
+    if (candidates.length === 0) {
+      object.geometry = [];
+      continue;
+    }
+    const highest = Math.max(...candidates.map((candidate) => candidate.lod));
+    object.geometry = candidates
+      .filter((candidate) => candidate.lod === highest)
+      .map((candidate) => candidate.geometry);
+  }
+  return clone;
+}
+
+function withoutTextures(doc: CityJsonDocument): CityJsonDocument {
+  const clone = structuredClone(doc);
+  delete clone.appearance;
+  for (const object of Object.values(clone.CityObjects)) {
+    for (const geometry of object.geometry ?? []) {
+      delete (geometry as { texture?: unknown }).texture;
+    }
+  }
+  return clone;
 }
 
 /**

@@ -135,6 +135,57 @@ describe('CityJSON close-range map mesh', () => {
     ]);
   });
 
+  it('keeps textured LoD3 faces but renders them with semantic colours when textures are off', () => {
+    const doc = detailDocument();
+    doc.appearance = {
+      textures: [{ type: 'JPG', image: '/assets/sample.jpg' }],
+      'vertices-texture': [[0, 0], [1, 0], [0, 1]],
+    };
+    const geometry = doc.CityObjects.detailed.geometry?.[1] as Record<string, unknown>;
+    geometry.texture = {
+      rgbTexture: {
+        values: [
+          [[0, 0, 1, 2]],
+          [[0, 0, 1, 2]],
+        ],
+      },
+    };
+
+    const mesh = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed']),
+      texturesEnabled: false,
+    });
+
+    expect(mesh?.maxLod).toBe(3);
+    expect(mesh?.triangleCount).toBe(2);
+    expect(mesh?.textures).toHaveLength(0);
+    expect(mesh?.indices).toHaveLength(6);
+    expect(mesh?.explicitOpeningSurfaceCount).toBe(1);
+  });
+
+  it('can colour close-range geometry by the root building usage', () => {
+    const doc = detailDocument();
+    doc.CityObjects.detailed.children = ['detail-installation'];
+    doc.CityObjects['detail-installation'] = {
+      type: 'BuildingInstallation',
+      parents: ['detailed'],
+      geometry: [{ type: 'MultiSurface', lod: '3', boundaries: [[[0, 1, 2]]] }],
+    };
+    const usageColor = [240 / 255, 220 / 255, 60 / 255] as const;
+
+    const mesh = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detail-installation']),
+      objectColors: new Map([['detailed', usageColor]]),
+      texturesEnabled: false,
+    });
+
+    expect(mesh).not.toBeNull();
+    expect(mesh!.colors).toHaveLength(9);
+    [...mesh!.colors].forEach((value, index) => {
+      expect(value).toBeCloseTo(usageColor[index % 3]);
+    });
+  });
+
   it('grounds each root object group independently on a flat map', () => {
     const doc = detailDocument();
     doc.vertices = [

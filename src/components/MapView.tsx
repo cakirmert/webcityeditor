@@ -35,7 +35,7 @@ import {
   groundFootprintsForFlatMap,
   type Footprint,
 } from '../lib/footprints';
-import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
+import { tintByRoofType, tintByUsage, usageRgb } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type {
   OsmPointFeature,
@@ -81,10 +81,15 @@ import {
 } from '../lib/lod-transition';
 import {
   parseHamburgCityTrees,
-  TREE_CROWN_MESH,
+  TREE_CROWN_FORMS,
+  TREE_CROWN_MESHES,
   TREE_TRUNK_MESH,
   treeCrownColor,
+  treeCrownForm,
+  treeCrownScale,
+  treeCrownTranslation,
   treePositionOnFlatGround,
+  treeTrunkScale,
   type HamburgCityTree,
 } from '../lib/hamburg-trees';
 import type { BasemapMode } from '../lib/basemap';
@@ -116,6 +121,18 @@ function addCityObjectWithDescendants(
   for (const child of object.children ?? []) {
     addCityObjectWithDescendants(doc, child, target);
   }
+}
+
+function rootCityObjectId(doc: CityJsonDocument, id: string): string {
+  let currentId = id;
+  const visited = new Set<string>();
+  while (!visited.has(currentId)) {
+    visited.add(currentId);
+    const parentId = doc.CityObjects[currentId]?.parents?.[0];
+    if (!parentId || !doc.CityObjects[parentId]) break;
+    currentId = parentId;
+  }
+  return currentId;
 }
 
 function osmPointFeatureColor(feature: OsmPointFeature): Rgba {
@@ -385,7 +402,7 @@ export default function MapView({
   multiSelectedIds = null,
   zones = [],
   onZoneSelect,
-  basemap = 'map',
+  basemap = 'topplus',
   onBasemapChange,
   satelliteOpacity = 0.82,
   onSatelliteOpacityChange,
@@ -440,7 +457,8 @@ export default function MapView({
     'loading' | 'ready' | 'error'
   >('loading');
   const [officialLod3LoadedTiles, setOfficialLod3LoadedTiles] = useState(0);
-  const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('usage');
+  const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
+  const [texturesEnabled, setTexturesEnabled] = useState(false);
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [detailFocusPoint, setDetailFocusPoint] = useState<[number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
@@ -710,7 +728,8 @@ export default function MapView({
   );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
   const detailLod: 'lod2' | 'lod3' = zoom >= BUILDING_LOD3_MIN_ZOOM ? 'lod3' : 'lod2';
-  const officialLod3Active = detailLod === 'lod3' && officialLod3Status !== 'error';
+  const officialLod3Active =
+    texturesEnabled && detailLod === 'lod3' && officialLod3Status !== 'error';
   const treeDetailLabel = editFocusBbox
     ? 'street trees hidden while editing'
     : zoom < HAMBURG_TREE_MIN_ZOOM
@@ -764,17 +783,38 @@ export default function MapView({
     selectedId,
   ]);
 
+  const detailObjectColors = useMemo(() => {
+    if (mapColorMode !== 'usage' || !detailObjectIds) return undefined;
+    const colors = new Map<string, readonly [number, number, number]>();
+    for (const objectId of detailObjectIds) {
+      const rootId = rootCityObjectId(cityjson, objectId);
+      if (colors.has(rootId)) continue;
+      const [red, green, blue] = usageRgb(cityjson.CityObjects[rootId]?.attributes?.function);
+      colors.set(rootId, [red / 255, green / 255, blue / 255]);
+    }
+    return colors;
+  }, [cityjson, detailObjectIds, mapColorMode]);
+
   const detailMesh = useMemo(
     () =>
       detailObjectIds && !officialLod3Active
         ? buildCityJsonMapMesh(cityjson, {
             objectIds: detailObjectIds,
             maxOutputVertices: 280_000,
-            maxLod: 2.9,
+            maxLod: detailLod === 'lod3' ? 3.9 : 2.9,
             groundObjectGroups: true,
+            texturesEnabled: false,
+            objectColors: detailObjectColors,
           })
         : null,
-    [cityjson, detailObjectIds, officialLod3Active, reloadToken]
+    [
+      cityjson,
+      detailLod,
+      detailObjectColors,
+      detailObjectIds,
+      officialLod3Active,
+      reloadToken,
+    ]
   );
   const blockFootprints = useMemo(
     () =>
@@ -899,13 +939,6 @@ export default function MapView({
       style: {
         version: 8,
         sources: {
-          osm: {
-            type: 'raster',
-            tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            attribution: '© OpenStreetMap contributors © CARTO',
-            maxzoom: 19,
-          },
           topplus: {
             type: 'raster',
             tiles: [
@@ -926,12 +959,10 @@ export default function MapView({
           },
         },
         layers: [
-          { id: 'osm', type: 'raster', source: 'osm' },
           {
             id: 'topplus',
             type: 'raster',
             source: 'topplus',
-            layout: { visibility: 'none' },
           },
           {
             id: 'satellite',
@@ -1196,15 +1227,10 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
-      if (!map.getLayer('osm') || !map.getLayer('topplus') || !map.getLayer('satellite')) return;
-      // Keep the map layer under imagery so the opacity slider becomes a true
+      if (!map.getLayer('topplus') || !map.getLayer('satellite')) return;
+      // Keep TopPlus under imagery so the opacity slider becomes a true
       // compare/blend control rather than a binary source switch.
-      map.setLayoutProperty('osm', 'visibility', basemap === 'topplus' ? 'none' : 'visible');
-      map.setLayoutProperty(
-        'topplus',
-        'visibility',
-        basemap === 'topplus' ? 'visible' : 'none'
-      );
+      map.setLayoutProperty('topplus', 'visibility', 'visible');
       map.setLayoutProperty(
         'satellite',
         'visibility',
@@ -1326,11 +1352,11 @@ export default function MapView({
     }
     const visibleSnapCandidates = [...visibleSnapCandidateMap.values()];
 
-    // The official source positions, laser-derived heights, and measured crown
-    // diameters drive two shared low-poly meshes. Absolute source elevations
-    // are deliberately clamped to the same flat z=0 plane as the editor map.
-    // Instancing keeps thousands of trees inexpensive, and edit focus removes
-    // them entirely.
+    // The official source positions, laser-derived heights, measured crown
+    // diameters, and botanical names drive one detailed trunk plus four
+    // species-informed crown meshes. Absolute source elevations are clamped to
+    // the same flat z=0 plane as the editor map. Instancing keeps thousands of
+    // trees inexpensive, and edit focus removes them entirely.
     if (renderedHamburgTrees.length > 0) {
       const treeOpacity = smoothZoomStep(
         HAMBURG_TREE_MIN_ZOOM,
@@ -1343,31 +1369,33 @@ export default function MapView({
           data: renderedHamburgTrees,
           mesh: TREE_TRUNK_MESH as unknown as never,
           getPosition: treePositionOnFlatGround,
-          getScale: (tree) => [tree.trunkRadius, tree.trunkRadius, tree.height * 0.48],
+          getScale: treeTrunkScale,
           getColor: [104, 74, 50, 255],
           coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
           pickable: false,
           opacity: treeOpacity,
           material: { ambient: 0.48, diffuse: 0.72, shininess: 5 },
-        }),
-        new SimpleMeshLayer<HamburgCityTree>({
-          id: 'hamburg-official-tree-crowns',
-          data: renderedHamburgTrees,
-          mesh: TREE_CROWN_MESH as unknown as never,
-          getPosition: treePositionOnFlatGround,
-          getTranslation: (tree) => [0, 0, tree.height * 0.34],
-          getScale: (tree) => [
-            tree.crownDiameter / 2,
-            tree.crownDiameter / 2,
-            tree.height * 0.66,
-          ],
-          getColor: treeCrownColor,
-          coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-          pickable: false,
-          opacity: treeOpacity,
-          material: { ambient: 0.5, diffuse: 0.78, shininess: 9 },
         })
       );
+      for (const form of TREE_CROWN_FORMS) {
+        const trees = renderedHamburgTrees.filter((tree) => treeCrownForm(tree) === form);
+        if (trees.length === 0) continue;
+        layers.push(
+          new SimpleMeshLayer<HamburgCityTree>({
+            id: `hamburg-official-tree-crowns-${form}`,
+            data: trees,
+            mesh: TREE_CROWN_MESHES[form] as unknown as never,
+            getPosition: treePositionOnFlatGround,
+            getTranslation: treeCrownTranslation,
+            getScale: treeCrownScale,
+            getColor: treeCrownColor,
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            pickable: false,
+            opacity: treeOpacity,
+            material: { ambient: 0.52, diffuse: 0.82, shininess: 7 },
+          })
+        );
+      }
     }
 
     // LoD0 — outlines on the ground. Always on; at low zoom this is the only
@@ -2653,24 +2681,29 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         mapColorMode={mapColorMode}
         onMapColorModeChange={setMapColorMode}
+        texturesEnabled={texturesEnabled}
+        onTexturesEnabledChange={setTexturesEnabled}
+        lod3Visible={detailLod === 'lod3'}
         detailLabel={
-          detailLod === 'lod3' && officialLod3Status === 'error'
-            ? `Official textured LoD3 unavailable · grounded source LoD2 fallback · ${treeDetailLabel}`
+          texturesEnabled && detailLod === 'lod3' && officialLod3Status === 'error'
+            ? `Official textured LoD3 unavailable · untextured semantic fallback · ${treeDetailLabel}`
             : officialLod3Active
               ? officialLod3Status === 'ready'
                 ? `Official Hamburg 20 cm LoD3 3D Tiles · ${officialLod3LoadedTiles} streamed tiles · grounded per building · ${treeDetailLabel}`
                 : `Loading official Hamburg 20 cm LoD3 3D Tiles · ${treeDetailLabel}`
               : detailMesh
-            ? `Source LoD2 · ${detailMesh.objectCount} nearby objects · ${
-                detailMesh.texturedSurfaceCount > 0
-                  ? detailMesh.explicitOpeningSurfaceCount > 0
-                    ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
-                    : 'photo-textured facades; windows/doors are painted, not editable geometry'
-                  : 'semantic surface colors'
+            ? `${(detailMesh.maxLod ?? 0) >= 3 ? 'Untextured source LoD3' : 'Source LoD2'} · ${
+                detailMesh.objectCount
+              } nearby objects · ${
+                mapColorMode === 'usage'
+                  ? 'building usage colours'
+                  : detailMesh.explicitOpeningSurfaceCount > 0
+                  ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
+                  : 'semantic roof, window, and wall colours'
               } · ${treeDetailLabel}`
             : zoom >= BUILDING_DETAIL_MIN_ZOOM
               ? `Source geometry unavailable here · ${treeDetailLabel}`
-              : `LoD0 overview · source LoD2 at zoom 15.25 · textured LoD3 at 18.25 · ${treeDetailLabel}`
+              : `LoD0 overview · source LoD2 at zoom 15.25 · untextured LoD3 at 18.25 · ${treeDetailLabel}`
         }
         focusActive={!!editFocusBbox}
         obscuredByInspector={roadWorkspaceOpen || !!selectedId}
@@ -2898,6 +2931,9 @@ function MapLayerControl({
   onRoadOverlayOpacityChange,
   mapColorMode,
   onMapColorModeChange,
+  texturesEnabled,
+  onTexturesEnabledChange,
+  lod3Visible,
   detailLabel,
   focusActive,
   obscuredByInspector,
@@ -2912,6 +2948,9 @@ function MapLayerControl({
   onRoadOverlayOpacityChange?: (opacity: number) => void;
   mapColorMode: 'roof' | 'usage';
   onMapColorModeChange: (mode: 'roof' | 'usage') => void;
+  texturesEnabled: boolean;
+  onTexturesEnabledChange: (enabled: boolean) => void;
+  lod3Visible: boolean;
   detailLabel: string;
   focusActive: boolean;
   obscuredByInspector: boolean;
@@ -2935,14 +2974,11 @@ function MapLayerControl({
       </button>
       {open && (
         <div className="map-layer-control__body">
-          <div className="map-layer-control__segment" role="group" aria-label="Basemap">
-            <button
-              type="button"
-              className={basemap === 'map' ? 'is-active' : ''}
-              onClick={() => onBasemapChange?.('map')}
-            >
-              <MapIcon aria-hidden="true" /> Map
-            </button>
+          <div
+            className="map-layer-control__segment map-layer-control__segment--two"
+            role="group"
+            aria-label="Basemap"
+          >
             <button
               type="button"
               className={basemap === 'topplus' ? 'is-active' : ''}
@@ -2981,6 +3017,26 @@ function MapLayerControl({
               </button>
             </div>
           </div>
+          <label
+            className={`map-layer-control__switch ${
+              !lod3Visible ? 'is-disabled' : ''
+            }`}
+          >
+            <span>
+              <b>Photo textures</b>
+              <small>
+                {lod3Visible ? 'LoD3 close view only' : 'Zoom in to LoD3'}
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Photo textures"
+              checked={texturesEnabled}
+              disabled={!lod3Visible}
+              onChange={(event) => onTexturesEnabledChange(event.target.checked)}
+            />
+          </label>
           <LayerOpacityControl
             label="Satellite image"
             value={satelliteOpacity}

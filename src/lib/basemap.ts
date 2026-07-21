@@ -1,1 +1,1 @@
-export type BasemapMode = 'map' | 'topplus' | 'satellite';
+export type BasemapMode = 'topplus' | 'satellite';

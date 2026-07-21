@@ -180,7 +180,7 @@ export function useRoadEditor(
   const { pushUndo } = undoRedo;
 
   const [showRoadEditor, setShowRoadEditor] = useState(false);
-  const [basemap, setBasemap] = useState<BasemapMode>('map');
+  const [basemap, setBasemap] = useState<BasemapMode>('topplus');
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.82);
   const [roadOverlayOpacity, setRoadOverlayOpacity] = useState(0.92);
   const [osmRoads, setOsmRoads] = useState<OsmRoadFeature[]>([]);

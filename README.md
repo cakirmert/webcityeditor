@@ -4,7 +4,7 @@ City Editor is a touch-friendly map editor for Hamburg buildings, roads, and pla
 
 **[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
 
-The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms stream Hamburg’s official photo-textured LoD3 buildings; the editable roads, attributes, and saved changes remain in CityJSON.
+The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms show semantic LoD3 geometry without photographs by default; **Photo textures** can stream Hamburg’s official imagery for the LoD3 close view. The editable roads, attributes, and saved changes remain in CityJSON.
 
 ![City Editor showing the Hamburg CityJSON overview](assets/readme/city-overview.jpg)
 
@@ -12,22 +12,22 @@ The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junct
 
 1. Drag the map to move and use the wheel, pinch gesture, or `+` and `−` buttons to zoom.
 2. Tap a building to inspect it, or choose **Roads** and tap a road.
-3. Use **Map layers** for the map, satellite comparison, opacity, and building-colour choices.
+3. Use **Map layers** for TopPlus, satellite comparison, opacity, and building-colour choices.
 4. Unsaved changes are shown in the top bar. Choose **Export CityJSON** when you want a portable snapshot.
 
 ## Change the map view
 
 Open **Map layers** in the upper-left of the map.
 
-- **Map** uses the light street map.
-- **TopPlus** uses the official TopPlusOpen cartographic basemap.
+- **TopPlus** is the default official cartographic basemap.
 - **Satellite** is useful for checking building footprints and road alignment.
 - **Satellite image** and **Road surfaces** have separate opacity sliders.
-- **Building colours** defaults to **Usage**. Choose **Roof type** when roof classification is more useful.
+- **Building colours** defaults to **Roof type**. **Usage** also understands Hamburg’s official ALKIS function codes.
+- **Photo textures** is off by default and becomes available only in the close LoD3 view. With it off, LoD3 roofs, walls, windows, and doors retain distinct semantic colours.
 - The status at the bottom explains which building detail level is currently visible.
 
 > **Screenshot to add — `assets/readme/map-layers.jpg`**
-> Open Map layers over the Hamburg overview. Show the three basemap buttons, Building colours with Usage selected, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps comparison and colour controls together without covering the map.”
+> Open Map layers over a close Hamburg view. Show TopPlus and Satellite, Building colours with Roof type selected, the LoD3 Photo textures switch, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps comparison, semantic colour, and optional LoD3 texture controls together.”
 
 ## Inspect and edit a building
 
@@ -42,20 +42,20 @@ Open **Map layers** in the upper-left of the map.
 
 The loaded source geometry is protected. **Make editable (replace with parametric)** deliberately replaces it with a shape that can change roof geometry, windows, doors, overhangs, and subdivisions. Ordinary attribute edits do not need this conversion.
 
-At close zoom, the viewer uses Hamburg’s live 20 cm photo-textured LoD3 tiles. Their windows and doors are part of the facade photographs; the official source does not provide every opening as separately editable geometry. Buildings are attached to the flat editor map using each building’s surveyed ground height.
+The selected-building viewer loads only the selected CityJSON object. Use its **LoD2 / LoD3** control to compare source tiers and its separate **Textures** switch when that building contains a photo atlas; textures start off. Their photographed windows and doors are not automatically editable openings. Buildings are attached to the flat editor map using each building’s surveyed ground height.
 
 ## Add a new building
 
 1. Choose **New Building** in the top bar.
-2. Pick one of the included LoD3 assets for quick placement, or choose **Draw a custom building**.
+2. Pick one of the four included single-building LoD3 assets for quick placement, or choose **Draw a custom building**.
 3. For an asset, tap the map where its centre should be placed.
 4. For a custom building, tap at least three footprint corners and choose **Use outline**.
-5. Set height, roof, windows, doors, and editable parts while watching the preview.
+5. Set height, roof, classic/balanced/modern window rhythm, doors, and editable parts while watching the preview.
 6. Keep **One building** for the simple default. Choose independent floors or side-by-side wings only when those parts must be edited separately.
 7. Choose **Create Building**. The new building becomes part of the working CityJSON.
 
 > **Screenshot to add — `assets/readme/new-building.jpg`**
-> Show the New Building chooser with the two sample assets and Draw a custom building visible. Keep part of the map visible behind it. Suggested caption: “Start from a reusable LoD3 asset or draw a custom footprint.”
+> Show the New Building chooser with the four sample assets and Draw a custom building visible. Keep part of the map visible behind it. Suggested caption: “Start from a reusable single-building LoD3 asset or draw a custom footprint.”
 
 > **Optional second screenshot — `assets/readme/custom-building.jpg`**
 > Capture a completed custom outline with the creation preview open. Show the roof choices, openings, and the clearly labelled editable-parts choice. Suggested caption: “The preview explains the result before anything is added to CityJSON.”
@@ -118,7 +118,7 @@ Use this list when adding or replacing README images:
 | File | What the image must teach |
 | --- | --- |
 | `city-overview.jpg` | Where the main toolbar, search, map, and Map layers control are located. |
-| `map-layers.jpg` | Basemap choice, Usage/Roof type colouring, and the two opacity controls. |
+| `map-layers.jpg` | TopPlus/Satellite choice, Usage/Roof type colouring, LoD3 textures, and opacity controls. |
 | `building-editor.jpg` | A selected building, its map highlight, preview modes, attributes, and main editing actions. |
 | `new-building.jpg` | The asset list and custom-building choice. |
 | `custom-building.jpg` | A drawn footprint plus the explanatory creation preview. |
@@ -140,4 +140,4 @@ npm run dev
 
 Open the local address printed in the terminal. The committed demo is enough for the default workflow.
 
-The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).
+The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import BuildingStartPanel from '../../src/components/BuildingStartPanel';
 
 describe('<BuildingStartPanel />', () => {
-  it('offers a custom outline and two official touch-ready LoD3 assets', () => {
+  it('offers a custom outline and four official touch-ready LoD3 assets', () => {
     const onDrawCustom = vi.fn();
     const onPlaceAsset = vi.fn();
     render(
@@ -15,16 +15,18 @@ describe('<BuildingStartPanel />', () => {
     );
 
     expect(screen.getByText('Ready-made LoD3 buildings')).toBeInTheDocument();
-    expect(screen.getByText('Round courtyard')).toBeInTheDocument();
-    expect(screen.getByText('Hamburg townhouse')).toBeInTheDocument();
-    expect(screen.getAllByText('Place')).toHaveLength(2);
+    expect(screen.getByText('Gabled townhouse')).toBeInTheDocument();
+    expect(screen.getByText('Urban corner house')).toBeInTheDocument();
+    expect(screen.getByText('Courtyard office')).toBeInTheDocument();
+    expect(screen.getByText('Civic building')).toBeInTheDocument();
+    expect(screen.getAllByText('Place')).toHaveLength(4);
 
     fireEvent.click(screen.getByText('Draw outline'));
     expect(onDrawCustom).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getAllByText('Place')[0]);
     expect(onPlaceAsset).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'hamburg-lod3-round-courtyard' })
+      expect.objectContaining({ id: 'hamburg-lod3-gabled-townhouse' })
     );
   });
 });
