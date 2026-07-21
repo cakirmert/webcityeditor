@@ -117,6 +117,30 @@ describe('procedural openings', () => {
     expect(totalHolesOnWalls).toBe(windowFaceIndices.length);
   });
 
+  it('offers distinct classic and modern facade rhythms', () => {
+    const classic = generateBuilding(
+      buildSampleCube(),
+      baseParams({
+        openings: { windows: true, door: false, windowPattern: 'classic' },
+      })
+    );
+    const modern = generateBuilding(
+      buildSampleCube(),
+      baseParams({
+        openings: { windows: true, door: false, windowPattern: 'modern' },
+      })
+    );
+    const windowCount = (result: ReturnType<typeof generateBuilding>) => {
+      const geometry = geomOf(result);
+      const index = geometry.semantics.surfaces.findIndex((surface) => surface.type === 'Window');
+      return geometry.semantics.values[0].filter((value) => value === index).length;
+    };
+
+    expect(windowCount(classic)).toBeGreaterThan(windowCount(modern));
+    expect(classic.cityObject.attributes?._windowPattern).toBe('classic');
+    expect(modern.cityObject.attributes?._windowPattern).toBe('modern');
+  });
+
   it('hole ring orientation is opposite of outer wall ring', () => {
     const doc = buildSampleCube();
     const r = generateBuilding(

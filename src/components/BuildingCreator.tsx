@@ -4,6 +4,7 @@ import {
   generateBuilding,
   insertBuilding,
   type RoofType,
+  type WindowPattern,
 } from '../lib/generator';
 import type { SplitAxis } from '../lib/subdivision';
 import { detectCrs } from '../lib/projection';
@@ -37,6 +38,7 @@ export interface NewBuildingForm {
   splitAxis: SplitAxis;
   addWindows: boolean;
   addDoor: boolean;
+  windowPattern: WindowPattern;
   eaveOverhang: number;
   rakeOverhang: number;
 }
@@ -82,6 +84,7 @@ export default function BuildingCreator({
   const [splitAxis, setSplitAxis] = useState<SplitAxis>('auto');
   const [addWindows, setAddWindows] = useState(true);
   const [addDoor, setAddDoor] = useState(true);
+  const [windowPattern, setWindowPattern] = useState<WindowPattern>('balanced');
   const [eaveOverhang, setEaveOverhang] = useState(0);
   const [rakeOverhang, setRakeOverhang] = useState(0);
 
@@ -115,6 +118,7 @@ export default function BuildingCreator({
       splitAxis,
       addWindows,
       addDoor,
+      windowPattern,
       eaveOverhang: roofType === 'flat' ? eaveOverhang : 0,
       rakeOverhang: 0,
     }),
@@ -130,6 +134,7 @@ export default function BuildingCreator({
       splitAxis,
       addWindows,
       addDoor,
+      windowPattern,
       eaveOverhang,
       rakeOverhang,
     ]
@@ -366,6 +371,22 @@ export default function BuildingCreator({
                   <span>Door</span>
                 </label>
               </div>
+              <Row label="Window style">
+                <Select
+                  value={windowPattern}
+                  onValueChange={(value) => setWindowPattern(value as WindowPattern)}
+                  disabled={!addWindows}
+                >
+                  <SelectTrigger aria-label="Window style">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="classic">Classic · narrow rhythm</SelectItem>
+                    <SelectItem value="balanced">Balanced · standard</SelectItem>
+                    <SelectItem value="modern">Modern · wide glazing</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Row>
             </Section>
 
             <Section label="Separate editable parts (optional)">
@@ -782,6 +803,7 @@ function hashForm(form: NewBuildingForm): number {
       form.roofHeight * 10 +
       (form.addWindows ? 1 : 0) +
       (form.addDoor ? 2 : 0) +
+      (form.windowPattern === 'classic' ? 11 : form.windowPattern === 'modern' ? 23 : 17) +
       form.eaveOverhang * 5 +
       form.rakeOverhang * 7 +
       (form.roofType === 'flat' ? 1000000 : 0) +
@@ -827,7 +849,11 @@ function buildPreviewDoc(
       attributes: { function: form.function },
       openings:
         form.addWindows || form.addDoor
-          ? { windows: form.addWindows, door: form.addDoor }
+          ? {
+              windows: form.addWindows,
+              door: form.addDoor,
+              windowPattern: form.windowPattern,
+            }
           : undefined,
       eaveOverhang: form.eaveOverhang,
       rakeOverhang: form.rakeOverhang,

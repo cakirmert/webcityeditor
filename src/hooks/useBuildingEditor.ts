@@ -476,7 +476,11 @@ export function useBuildingEditor(
           },
           openings:
             form.addWindows || form.addDoor
-              ? { windows: form.addWindows, door: form.addDoor }
+              ? {
+                  windows: form.addWindows,
+                  door: form.addDoor,
+                  windowPattern: form.windowPattern,
+                }
               : undefined,
           eaveOverhang: form.eaveOverhang,
           rakeOverhang: form.rakeOverhang,

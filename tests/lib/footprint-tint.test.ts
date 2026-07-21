@@ -106,6 +106,17 @@ describe('tintByUsage', () => {
     expect(normalizeUsage('SHOPS')).toBe('commercial');
   });
 
+  it('maps Hamburg ALKIS function codes to useful colour categories', () => {
+    expect(normalizeUsage('31001_1010')).toBe('residential');
+    expect(normalizeUsage('31001_1120')).toBe('mixed');
+    expect(normalizeUsage('31001_2010')).toBe('commercial');
+    expect(normalizeUsage('31001_2020')).toBe('office');
+    expect(normalizeUsage('31001_2100')).toBe('industrial');
+    expect(normalizeUsage('31001_2310')).toBe('mixed');
+    expect(normalizeUsage('31001_3020')).toBe('public');
+    expect(tintByUsage(usageFp('31001_2010'), 255)).toEqual([60, 120, 240, 255]);
+  });
+
   it('falls back to neutral grey for missing or unknown usage', () => {
     const fallback: [number, number, number, number] = [200, 200, 210, 230];
     expect(tintByUsage(usageFp(undefined), 230)).toEqual(fallback);

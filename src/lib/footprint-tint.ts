@@ -1,10 +1,17 @@
 import type { Footprint } from './footprints';
 
-export type UsageKey = 'residential' | 'commercial' | 'office' | 'industrial' | 'public';
+export type UsageKey =
+  | 'residential'
+  | 'mixed'
+  | 'commercial'
+  | 'office'
+  | 'industrial'
+  | 'public';
 type UsageColorKey = UsageKey | 'unknown';
 
 export const USAGE_OPTIONS: UsageKey[] = [
   'residential',
+  'mixed',
   'commercial',
   'office',
   'industrial',
@@ -13,6 +20,7 @@ export const USAGE_OPTIONS: UsageKey[] = [
 
 const USAGE_RGB: Record<UsageColorKey, [number, number, number]> = {
   residential: [240, 220, 60],
+  mixed: [234, 151, 54],
   commercial: [60, 120, 240],
   office: [60, 180, 100],
   industrial: [160, 80, 240],
@@ -22,6 +30,7 @@ const USAGE_RGB: Record<UsageColorKey, [number, number, number]> = {
 
 export const USAGE_OBJECT_COLORS: Record<UsageColorKey, number> = {
   residential: 0xf0dc3c,
+  mixed: 0xea9736,
   commercial: 0x3c78f0,
   office: 0x3cb464,
   industrial: 0xa050f0,
@@ -31,11 +40,33 @@ export const USAGE_OBJECT_COLORS: Record<UsageColorKey, number> = {
 
 export function normalizeUsage(value: unknown): UsageKey | null {
   const key = typeof value === 'string' ? value.trim().toLowerCase() : null;
+  const advCode = key?.match(/^31001_(\d{4})$/)?.[1];
+  if (advCode) {
+    const code = Number(advCode);
+    if (code >= 1000 && code < 1100) return 'residential';
+    if (code >= 1100 && code < 1300) return 'mixed';
+    if (code >= 1300 && code < 2000) return 'commercial';
+    if (code === 2020) return 'office';
+    if (code >= 2000 && code < 2100) return 'commercial';
+    if (code >= 2100 && code < 2300) return 'industrial';
+    if (code >= 2300 && code < 2400) return 'mixed';
+    if (code >= 2400 && code < 2500) return 'commercial';
+    if (code >= 2500 && code < 3000) return 'industrial';
+    if (code >= 3000 && code < 4000) return 'public';
+  }
   switch (key) {
     case 'residential':
+    case 'housing':
       return 'residential';
+    case 'mixed':
+    case 'mixed use':
+    case 'mixed-use':
+      return 'mixed';
     case 'commercial':
     case 'shops':
+    case 'retail':
+    case 'hotel':
+    case 'restaurant':
       return 'commercial';
     case 'office':
     case 'business':
@@ -43,10 +74,19 @@ export function normalizeUsage(value: unknown): UsageKey | null {
     case 'industrial':
       return 'industrial';
     case 'public':
+    case 'civic':
+    case 'education':
+    case 'school':
+    case 'hospital':
+    case 'religious':
       return 'public';
     default:
       return null;
   }
+}
+
+export function usageRgb(value: unknown): [number, number, number] {
+  return USAGE_RGB[normalizeUsage(value) ?? 'unknown'];
 }
 
 /**
@@ -120,7 +160,6 @@ export function tintByUsage(
   d: Footprint,
   alpha: number
 ): [number, number, number, number] {
-  const key = normalizeUsage(d.attributes?.function) ?? 'unknown';
-  const [r, g, b] = USAGE_RGB[key];
+  const [r, g, b] = usageRgb(d.attributes?.function);
   return [r, g, b, alpha];
 }

@@ -4,19 +4,37 @@ import path from 'node:path';
 const [
   ,
   ,
-  inputArg = '.tmp/hamburg-lod3-converted/6431.json',
-  textureDirArg = '.tmp/hamburg-lod3-source/6431/images',
+  inputArg = 'public/data/hamburg/hamburg-lod3-showcase.city.json',
   outputDirArg = 'public/data/assets/hamburg-lod3',
 ] = process.argv;
 
+// Four compact, single-root examples from Hamburg's official web-published
+// LoD3 Area 1 data. Descendant BuildingInstallation objects stay attached so
+// roof equipment and facade detail are not silently discarded.
 const selections = [
   {
-    sourceId: 'DEHHALKAJ0000oGL',
-    id: 'hamburg-lod3-round-courtyard',
-    file: 'round-courtyard.city.json',
-    texture: '64410ec5-4fab-43d1-ae79-e8db00f2bd86.jpg',
-    textureOutput: 'round-courtyard.jpg',
-    name: 'Hamburg round courtyard',
+    sourceId: 'DEHHALKAJ0000pIJ',
+    file: 'gabled-townhouse.city.json',
+    name: 'Gabled townhouse',
+    description: 'Narrow historic city house with a detailed pitched roof.',
+  },
+  {
+    sourceId: 'DEHHALKAJ0000p7C',
+    file: 'urban-corner-house.city.json',
+    name: 'Urban corner house',
+    description: 'Tall corner building with dormers and a complex roofline.',
+  },
+  {
+    sourceId: 'DEHHALKAJ0000p29',
+    file: 'courtyard-office.city.json',
+    name: 'Courtyard office',
+    description: 'Larger office block with a varied roof and facade installations.',
+  },
+  {
+    sourceId: 'DEHHALKAJ0000opW',
+    file: 'civic-building.city.json',
+    name: 'Civic building',
+    description: 'Highly detailed public-scale building with multiple roof forms.',
   },
 ];
 
@@ -25,64 +43,91 @@ const outputDir = path.resolve(outputDirArg);
 await fs.mkdir(outputDir, { recursive: true });
 
 for (const selection of selections) {
-  const object = source.CityObjects?.[selection.sourceId];
-  if (!object) throw new Error(`Missing CityObject ${selection.sourceId}`);
-  const geometry = structuredClone(object.geometry ?? []);
-  const sourceVertexIds = collectBoundaryIndices(geometry.map((item) => item.boundaries));
-  const sourceVertices = [...sourceVertexIds].map((index) => decodeVertex(source, index));
-  const min = [0, 1, 2].map((axis) => Math.min(...sourceVertices.map((vertex) => vertex[axis])));
-  const max = [0, 1, 2].map((axis) => Math.max(...sourceVertices.map((vertex) => vertex[axis])));
+  const root = source.CityObjects?.[selection.sourceId];
+  if (!root) throw new Error(`Missing CityObject ${selection.sourceId}`);
+
+  const objectIds = collectObjectTree(source, selection.sourceId);
+  const objects = Object.fromEntries(
+    objectIds.map((id) => [id, structuredClone(source.CityObjects[id])])
+  );
+  const geometries = Object.values(objects).flatMap((object) => object.geometry ?? []);
+  const sourceVertexIds = collectBoundaryIndices(
+    geometries.map((geometry) => geometry.boundaries)
+  );
+  const decodedVertices = [...sourceVertexIds].map((index) => decodeVertex(source, index));
+  const min = [0, 1, 2].map((axis) =>
+    Math.min(...decodedVertices.map((vertex) => vertex[axis]))
+  );
+  const max = [0, 1, 2].map((axis) =>
+    Math.max(...decodedVertices.map((vertex) => vertex[axis]))
+  );
   const centerX = (min[0] + max[0]) / 2;
   const centerY = (min[1] + max[1]) / 2;
   const vertexMap = new Map([...sourceVertexIds].map((index, local) => [index, local]));
-  for (const item of geometry) item.boundaries = remapBoundaries(item.boundaries, vertexMap);
+  for (const object of Object.values(objects)) {
+    for (const geometry of object.geometry ?? []) {
+      geometry.boundaries = remapBoundaries(geometry.boundaries, vertexMap);
+    }
+  }
 
-  const textureIndex = findTextureIndex(geometry);
-  if (textureIndex == null) throw new Error(`${selection.sourceId} has no texture`);
-  const textureVertexIds = collectTextureVertexIndices(geometry);
+  const textureIds = collectTextureIndices(
+    geometries.map((geometry) => geometry.texture)
+  );
+  const textureVertexIds = collectTextureVertexIndices(
+    geometries.map((geometry) => geometry.texture)
+  );
+  const textureMap = new Map([...textureIds].map((index, local) => [index, local]));
   const textureVertexMap = new Map(
     [...textureVertexIds].map((index, local) => [index, local])
   );
-  for (const item of geometry) {
-    if (item.texture) item.texture = remapTexture(item.texture, textureIndex, textureVertexMap);
+  for (const object of Object.values(objects)) {
+    for (const geometry of object.geometry ?? []) {
+      if (geometry.texture) {
+        geometry.texture = remapTexture(geometry.texture, textureMap, textureVertexMap);
+      }
+    }
   }
 
-  const vertices = [...sourceVertexIds].map((index) => {
-    const [x, y, z] = decodeVertex(source, index);
-    return [round(x - centerX), round(y - centerY), round(z - min[2])];
-  });
   const measuredHeight = round(max[2] - min[2]);
+  objects[selection.sourceId].attributes = {
+    ...structuredClone(objects[selection.sourceId].attributes ?? {}),
+    name: selection.name,
+    measuredHeight,
+    _assetSource: 'Hamburg LoD3.0-HH Area 1 (2023), tile 6433',
+    _sourceObjectId: selection.sourceId,
+    _license: 'Datenlizenz Deutschland – Namensnennung – Version 2.0',
+    _attribution:
+      'Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung',
+  };
+
+  const textures = [];
+  for (const sourceTextureId of textureIds) {
+    const texture = structuredClone(source.appearance.textures[sourceTextureId]);
+    const fileName = path.basename(texture.image);
+    texture.image = fileName;
+    textures.push(texture);
+    await fs.copyFile(
+      path.resolve('public', source.appearance.textures[sourceTextureId].image),
+      path.join(outputDir, fileName)
+    );
+  }
+
   const asset = {
     type: 'CityJSON',
     version: '2.0',
-    CityObjects: {
-      [selection.id]: {
-        ...structuredClone(object),
-        attributes: {
-          ...structuredClone(object.attributes ?? {}),
-          name: selection.name,
-          measuredHeight,
-          _assetSource: 'Hamburg LoD3.0-HH Area 1 (2023), tile 6431',
-          _sourceObjectId: selection.sourceId,
-          _license: 'Datenlizenz Deutschland – Namensnennung – Version 2.0',
-          _attribution: 'Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung',
-        },
-        geometry,
-      },
-    },
-    vertices,
+    CityObjects: objects,
+    vertices: [...sourceVertexIds].map((index) => {
+      const [x, y, z] = decodeVertex(source, index);
+      return [round(x - centerX), round(y - centerY), round(z - min[2])];
+    }),
     appearance: {
-      textures: [
-        {
-          ...structuredClone(source.appearance.textures[textureIndex]),
-          image: selection.textureOutput,
-        },
-      ],
+      textures,
       'vertices-texture': [...textureVertexIds].map(
         (index) => source.appearance['vertices-texture'][index]
       ),
     },
     metadata: {
+      referenceSystem: source.metadata?.referenceSystem,
       geographicalExtent: [
         round(min[0] - centerX),
         round(min[1] - centerY),
@@ -92,19 +137,31 @@ for (const selection of selections) {
         measuredHeight,
       ],
       title: selection.name,
-      source: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5',
+      description: selection.description,
+      source:
+        'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17',
     },
   };
-  delete asset.CityObjects[selection.id].children;
-  delete asset.CityObjects[selection.id].parents;
+
   await fs.writeFile(path.join(outputDir, selection.file), `${JSON.stringify(asset)}\n`);
-  await fs.copyFile(
-    path.resolve(textureDirArg, selection.texture),
-    path.join(outputDir, selection.textureOutput)
-  );
   console.log(
-    `${selection.file}: ${vertices.length} vertices, ${measuredHeight} m high, ${textureVertexIds.size} texture vertices`
+    `${selection.file}: ${objectIds.length} objects, ${asset.vertices.length} vertices, ` +
+      `${measuredHeight} m high, ${textures.length} texture atlas`
   );
+}
+
+function collectObjectTree(doc, rootId) {
+  const result = [];
+  const queue = [rootId];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (seen.has(id) || !doc.CityObjects[id]) continue;
+    seen.add(id);
+    result.push(id);
+    queue.push(...(doc.CityObjects[id].children ?? []));
+  }
+  return result;
 }
 
 function decodeVertex(doc, index) {
@@ -117,7 +174,9 @@ function decodeVertex(doc, index) {
 
 function collectBoundaryIndices(values, result = new Set()) {
   if (Number.isInteger(values)) result.add(values);
-  else if (Array.isArray(values)) values.forEach((value) => collectBoundaryIndices(value, result));
+  else if (Array.isArray(values)) {
+    values.forEach((value) => collectBoundaryIndices(value, result));
+  }
   return result;
 }
 
@@ -128,60 +187,52 @@ function remapBoundaries(values, vertexMap) {
     : values;
 }
 
-function findTextureIndex(geometry) {
-  let found = null;
-  const visit = (value) => {
-    if (found != null || value == null) return;
-    if (!Array.isArray(value)) {
-      if (typeof value === 'object') Object.values(value).forEach(visit);
-      return;
-    }
-    if (value.length > 1 && Number.isInteger(value[0])) {
-      found = value[0];
-      return;
-    }
-    value.forEach(visit);
-  };
-  geometry.forEach((item) => visit(item.texture));
-  return found;
-}
-
-function collectTextureVertexIndices(geometry, result = new Set()) {
-  const visit = (value) => {
-    if (value == null) return;
-    if (!Array.isArray(value)) {
-      if (typeof value === 'object') Object.values(value).forEach(visit);
-      return;
-    }
-    if (value.length > 1 && Number.isInteger(value[0])) {
-      value.slice(1).forEach((index) => {
-        if (Number.isInteger(index)) result.add(index);
-      });
-      return;
-    }
-    value.forEach(visit);
-  };
-  geometry.forEach((item) => visit(item.texture));
+function collectTextureIndices(values, result = new Set()) {
+  visitTextureReferences(values, (reference) => result.add(reference[0]));
   return result;
 }
 
-function remapTexture(value, sourceTextureIndex, textureVertexMap) {
+function collectTextureVertexIndices(values, result = new Set()) {
+  visitTextureReferences(values, (reference) => {
+    reference.slice(1).forEach((index) => {
+      if (Number.isInteger(index)) result.add(index);
+    });
+  });
+  return result;
+}
+
+function visitTextureReferences(value, visit) {
+  if (value == null) return;
+  if (!Array.isArray(value)) {
+    if (typeof value === 'object') Object.values(value).forEach((item) => visitTextureReferences(item, visit));
+    return;
+  }
+  if (value.length > 1 && Number.isInteger(value[0])) {
+    visit(value);
+    return;
+  }
+  value.forEach((item) => visitTextureReferences(item, visit));
+}
+
+function remapTexture(value, textureMap, textureVertexMap) {
   if (value == null || typeof value !== 'object') return value;
   if (!Array.isArray(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        remapTexture(item, sourceTextureIndex, textureVertexMap),
+        remapTexture(item, textureMap, textureVertexMap),
       ])
     );
   }
   if (value.length > 1 && Number.isInteger(value[0])) {
-    if (value[0] !== sourceTextureIndex) return value;
-    return [0, ...value.slice(1).map((index) => (
-      Number.isInteger(index) ? textureVertexMap.get(index) : index
-    ))];
+    return [
+      textureMap.get(value[0]),
+      ...value.slice(1).map((index) =>
+        Number.isInteger(index) ? textureVertexMap.get(index) : index
+      ),
+    ];
   }
-  return value.map((item) => remapTexture(item, sourceTextureIndex, textureVertexMap));
+  return value.map((item) => remapTexture(item, textureMap, textureVertexMap));
 }
 
 function round(value) {

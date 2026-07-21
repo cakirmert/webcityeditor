@@ -57,7 +57,7 @@ for (const object of Object.values(selectedObjects)) {
     ...(object.attributes ?? {}),
     _sourceDataset: 'Hamburg LoD3.0-HH Area 1 (2023), tile 6433',
     _sourceUrl:
-      'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5',
+      'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17',
   };
 }
 
@@ -95,7 +95,7 @@ const output = {
     referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832',
     title: 'Hamburg official textured LoD3 showcase — tile 6433',
     source:
-      'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5',
+      'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17',
     sourceDescription:
       'Official Hamburg LoD3.0 geometry and textures at their surveyed coordinates.',
     rootBuildingCount: selectedRoots.length,

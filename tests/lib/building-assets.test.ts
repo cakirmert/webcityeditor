@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
 import { BUILDING_ASSETS, insertBuildingAsset } from '../../src/lib/building-assets';
@@ -26,7 +26,11 @@ describe('official Hamburg LoD3 building assets', () => {
     expect(document.vertices.length).toBeGreaterThan(20);
     expect(geometry.lod).toBe('3');
     expect(geometry.texture).toBeTruthy();
-    expect(appearance.textures?.[0].image).toBe(definition.texturePath.split('/').at(-1));
+    const textureImage = appearance.textures?.[0].image;
+    const assetDirectory = definition.cityJsonPath.split('/').slice(0, -1).join('/');
+    expect(textureImage).toMatch(/\.jpg$/);
+    expect(existsSync(`public/${assetDirectory}/${textureImage}`)).toBe(true);
+    expect(existsSync(`public/${definition.previewImagePath}`)).toBe(true);
     expect(appearance['vertices-texture']?.length).toBeGreaterThan(100);
     expect(object.attributes?._sourceObjectId).toBe(definition.sourceObjectId);
     expect(object.attributes?._license).toContain('Namensnennung');
@@ -45,13 +49,18 @@ describe('official Hamburg LoD3 building assets', () => {
       textures: Array<{ image: string }>;
       'vertices-texture': number[][];
     };
-    const mesh = buildCityJsonMapMesh(host, { objectIds: new Set([id]) });
+    const insertedIds = new Set([id, ...(inserted.children ?? [])]);
+    const mesh = buildCityJsonMapMesh(host, { objectIds: insertedIds });
 
     expect(inserted.type).toBe('Building');
     expect((inserted.geometry?.[0] as { lod?: string }).lod).toBe('3');
     expect(inserted.attributes?._assetId).toBe(definition.id);
     expect(host.vertices.length).toBe(originalVertexCount + document.vertices.length);
-    expect(appearance.textures[0].image).toContain(definition.texturePath);
+    const sourceTexture = (
+      document.appearance as { textures?: Array<{ image?: string }> }
+    ).textures?.[0].image;
+    expect(appearance.textures[0].image).toContain(sourceTexture);
+    expect(inserted.children?.length ?? 0).toBeGreaterThan(0);
     expect(mesh?.textures).toHaveLength(1);
     expect(mesh?.triangleCount).toBeGreaterThan(10);
     expect(checkIntegrity(host).ok).toBe(true);

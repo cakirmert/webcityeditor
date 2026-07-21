@@ -1,7 +1,9 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument, CityObject } from '../types';
 import type { BuildOut, RectangularWall } from './generator-internal';
-import { applyOpenings } from './openings';
+import { applyOpenings, type WindowPattern } from './openings';
+
+export type { WindowPattern } from './openings';
 
 export type RoofType = 'flat' | 'pyramid' | 'gable' | 'hip';
 
@@ -10,6 +12,8 @@ export interface OpeningOptions {
   windows: boolean;
   /** Add a single ground-floor door on the first rectangular wall. */
   door: boolean;
+  /** Window proportions and spacing. Defaults to balanced. */
+  windowPattern?: WindowPattern;
 }
 
 export interface NewBuildingParams {
@@ -191,6 +195,7 @@ export function generateBuilding(
       {
         windows: params.openings.windows,
         door: params.openings.door,
+        windowPattern: params.openings.windowPattern,
         storeys: params.storeys,
         baseZ,
         eaveZ: hasSoffits ? eaveZAbs - FLAT_ROOF_SLAB_THICKNESS : eaveZAbs,
@@ -227,6 +232,7 @@ export function generateBuilding(
       _rakeOverhang: params.rakeOverhang ?? 0,
       _addWindows: params.openings?.windows ?? false,
       _addDoor: params.openings?.door ?? false,
+      _windowPattern: params.openings?.windowPattern ?? 'balanced',
       ...(params.attributes ?? {}),
     },
     geometry: [

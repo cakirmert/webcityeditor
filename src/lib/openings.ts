@@ -18,11 +18,15 @@
  */
 import type { BuildOut, RectangularWall } from './generator-internal';
 
+export type WindowPattern = 'classic' | 'balanced' | 'modern';
+
 export interface OpeningsConfig {
   /** Add evenly-spaced windows on each rectangular wall, per storey. */
   windows: boolean;
   /** Add one ground-floor door on the first rectangular wall. */
   door: boolean;
+  /** Facade rhythm preset controlling pane proportions and spacing. */
+  windowPattern?: WindowPattern;
   /** Number of storeys above ground (used to space windows vertically). */
   storeys: number;
   /** Ground-level Z (in projected CRS metres). */
@@ -47,11 +51,15 @@ export interface OpeningsResult {
 }
 
 /** Window dimensions and placement parameters. */
-const WINDOW_WIDTH = 1.4; // metres
-const WINDOW_SILL = 0.9; // metres above floor
-const WINDOW_HEIGHT = 1.5; // metres
 const WINDOW_MIN_SIDE_MARGIN = 0.4; // metres from wall edge to nearest window edge
-const WINDOW_TARGET_SPACING = 3.0; // metres between window centres (target)
+const WINDOW_PATTERNS: Record<
+  WindowPattern,
+  { width: number; sill: number; height: number; spacing: number }
+> = {
+  classic: { width: 1.15, sill: 0.95, height: 1.55, spacing: 2.45 },
+  balanced: { width: 1.4, sill: 0.9, height: 1.5, spacing: 3 },
+  modern: { width: 2.05, sill: 0.72, height: 1.75, spacing: 3.65 },
+};
 
 /** Door dimensions and placement parameters. */
 const DOOR_WIDTH = 1.0;
@@ -165,17 +173,23 @@ function placeWindowsOnWall(
   toInt: (x: number, y: number, z: number) => [number, number, number],
   toGlobal: (local: number) => number
 ): OpeningRings[] {
+  const pattern = WINDOW_PATTERNS[cfg.windowPattern ?? 'balanced'];
   const [g0, g1] = wall.corners3D; // ground corners (i, j)
   const dx = g1[0] - g0[0];
   const dy = g1[1] - g0[1];
   const wallLen = Math.hypot(dx, dy);
-  if (wallLen < WINDOW_WIDTH + 2 * WINDOW_MIN_SIDE_MARGIN) return [];
+  if (wallLen < pattern.width + 2 * WINDOW_MIN_SIDE_MARGIN) return [];
 
   // Number of windows per storey: aim for ~WINDOW_TARGET_SPACING centre-to-centre,
   // capped by what fits with minimum side margins.
   const usableLen = wallLen - 2 * WINDOW_MIN_SIDE_MARGIN;
-  const maxByFit = Math.floor((usableLen + (WINDOW_TARGET_SPACING - WINDOW_WIDTH)) / WINDOW_TARGET_SPACING);
-  const targetCount = Math.max(1, Math.min(maxByFit, Math.round(wallLen / WINDOW_TARGET_SPACING)));
+  const maxByFit = Math.floor(
+    (usableLen + (pattern.spacing - pattern.width)) / pattern.spacing
+  );
+  const targetCount = Math.max(
+    1,
+    Math.min(maxByFit, Math.round(wallLen / pattern.spacing))
+  );
   if (targetCount < 1) return [];
 
   const result: OpeningRings[] = [];
@@ -185,15 +199,15 @@ function placeWindowsOnWall(
   for (let storey = 0; storey < cfg.storeys; storey++) {
     if (storey === 0 && skipGroundStorey) continue;
     const floorZ = cfg.baseZ + storey * storeyHeight;
-    const sillZ = floorZ + WINDOW_SILL;
-    const topZ = sillZ + WINDOW_HEIGHT;
+    const sillZ = floorZ + pattern.sill;
+    const topZ = sillZ + pattern.height;
     // Don't pierce the eave: leave at least 0.3m below wall top.
     if (topZ > cfg.eaveZ - 0.3) continue;
 
     for (let w = 0; w < targetCount; w++) {
       const centreU = ((w + 0.5) / targetCount) * wallLen;
-      const leftU = centreU - WINDOW_WIDTH / 2;
-      const rightU = centreU + WINDOW_WIDTH / 2;
+      const leftU = centreU - pattern.width / 2;
+      const rightU = centreU + pattern.width / 2;
 
       // 4 window corners in 3D
       const cornerXY = (u: number): [number, number] => [g0[0] + ux * u, g0[1] + uy * u];

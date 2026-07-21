@@ -57,7 +57,7 @@ function renderPanel(
       draftDirty={options.draftDirty ?? false}
       editingRoadId={options.editingRoadId ?? null}
       status={null}
-      basemap="map"
+      basemap="topplus"
       satelliteOpacity={0.82}
       roadOverlayOpacity={0.92}
       cityJsonRoadCount={1608}

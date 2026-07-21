@@ -47,7 +47,7 @@ export default function BuildingStartPanel({ onDrawCustom, onPlaceAsset, onCance
               onClick={() => onPlaceAsset(asset)}
             >
               <span className="building-asset-image">
-                <img src={publicAssetUrl(asset.texturePath)} alt="" />
+                <img src={publicAssetUrl(asset.previewImagePath)} alt="" />
                 <span><Building2 aria-hidden="true" /> LoD3</span>
               </span>
               <span className="building-asset-copy">

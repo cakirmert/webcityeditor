@@ -475,11 +475,6 @@ export default function RoadEditorPanel({
             <div className="road-map-compare__modes" role="group" aria-label="Basemap">
               <button
                 type="button"
-                className={basemap === 'map' ? 'is-active' : ''}
-                onClick={() => onBasemapChange('map')}
-              ><Map aria-hidden="true" /> Map</button>
-              <button
-                type="button"
                 className={basemap === 'topplus' ? 'is-active' : ''}
                 onClick={() => onBasemapChange('topplus')}
               ><Map aria-hidden="true" /> TopPlus</button>

@@ -64,7 +64,7 @@ const QUICK_SAMPLES: QuickSample[] = [
     label: 'Hamburg - official LoD3.0 source',
     description:
       'Detailed roof geometry and facade textures are available as large tiled CityGML archives. Convert a selected tile to CityJSON before loading it.',
-    url: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg5',
+    url: 'https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17',
     guideOnly: true,
     badge: 'GUIDE',
   },
