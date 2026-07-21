@@ -24,6 +24,38 @@ export interface Footprint {
   attributes: Record<string, unknown>;
 }
 
+/**
+ * Return display copies whose root object groups touch the flat map plane.
+ *
+ * Source elevations remain available through `baseElevation`. BuildingParts
+ * keep their height relative to the lowest part in their root group, so a
+ * subdivided building remains vertically stacked instead of collapsing into
+ * one storey at z=0.
+ */
+export function groundFootprintsForFlatMap(footprints: Footprint[]): Footprint[] {
+  const groupGrounds = new Map<string, number>();
+  for (const footprint of footprints) {
+    if (!Number.isFinite(footprint.baseElevation)) continue;
+    const groupId = footprint.parentId ?? footprint.id;
+    groupGrounds.set(
+      groupId,
+      Math.min(groupGrounds.get(groupId) ?? Infinity, footprint.baseElevation)
+    );
+  }
+
+  return footprints.map((footprint) => {
+    const groupGround = groupGrounds.get(footprint.parentId ?? footprint.id);
+    const displayElevation =
+      groupGround === undefined ? 0 : footprint.baseElevation - groupGround;
+    return {
+      ...footprint,
+      polygon: footprint.polygon.map(
+        ([lng, lat]) => [lng, lat, displayElevation] as [number, number, number]
+      ),
+    };
+  });
+}
+
 export function footprintPolygonToWgs84(polygon: FootprintPolygon): [number, number][] {
   return polygon.map(([lng, lat]) => [lng, lat]);
 }

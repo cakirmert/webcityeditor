@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
-import { extractFootprintForId, extractFootprints, filterToBuilding } from '../../src/lib/footprints';
+import {
+  extractFootprintForId,
+  extractFootprints,
+  filterToBuilding,
+  groundFootprintsForFlatMap,
+} from '../../src/lib/footprints';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import type { CityJsonDocument } from '../../src/types';
 import { generateBuilding, insertBuilding, type NewBuildingParams } from '../../src/lib/generator';
@@ -81,6 +86,27 @@ describe('extractFootprints', () => {
     expect(parts[0].baseElevation).toBeLessThan(parts[1].baseElevation);
     expect(parts[1].baseElevation).toBeLessThan(parts[2].baseElevation);
     expect(parts[2].baseElevation).toBeLessThan(parts[3].baseElevation);
+  });
+
+  it('grounds each map object group while preserving stacked part offsets', () => {
+    const { doc, id } = makeEditableBuilding({ baseElevation: 37 });
+    splitBuildingByFloor(doc, id, 4);
+
+    const source = extractFootprints(doc).filter((fp) => fp.parentId === id);
+    const grounded = groundFootprintsForFlatMap(source);
+    const sourceGround = Math.min(...source.map((fp) => fp.baseElevation));
+
+    expect(grounded[0].polygon.every((point) => point[2] === 0)).toBe(true);
+    expect(
+      grounded.every((footprint) =>
+        footprint.polygon.every(
+          (point) => point[2] === footprint.baseElevation - sourceGround
+        )
+      )
+    ).toBe(true);
+    expect(grounded.map((fp) => fp.baseElevation)).toEqual(
+      source.map((fp) => fp.baseElevation)
+    );
   });
 
   it('keeps a combined parent footprint available for parametrisation', () => {

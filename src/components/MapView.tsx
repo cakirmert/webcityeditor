@@ -30,7 +30,11 @@ import {
   detectCrs,
   projectToWgs84,
 } from '../lib/projection';
-import { extractFootprints, type Footprint } from '../lib/footprints';
+import {
+  extractFootprints,
+  groundFootprintsForFlatMap,
+  type Footprint,
+} from '../lib/footprints';
 import { tintByRoofType, tintByUsage } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type {
@@ -80,6 +84,7 @@ import {
   TREE_CROWN_MESH,
   TREE_TRUNK_MESH,
   treeCrownColor,
+  treePositionOnFlatGround,
   type HamburgCityTree,
 } from '../lib/hamburg-trees';
 import type { BasemapMode } from '../lib/basemap';
@@ -612,6 +617,11 @@ export default function MapView({
     [footprints, editFocusBbox]
   );
 
+  const groundedRenderedFootprints = useMemo(
+    () => groundFootprintsForFlatMap(renderedFootprints),
+    [renderedFootprints]
+  );
+
   const renderedRoadAreas = useMemo(
     () =>
       editFocusBbox
@@ -771,13 +781,13 @@ export default function MapView({
       officialLod3Active
         ? []
         : detailObjectIds
-        ? renderedFootprints.filter(
+        ? groundedRenderedFootprints.filter(
             (footprint) =>
               !detailObjectIds.has(footprint.id) &&
               (!footprint.parentId || !detailObjectIds.has(footprint.parentId))
           )
-        : renderedFootprints,
-    [renderedFootprints, detailObjectIds, officialLod3Active]
+        : groundedRenderedFootprints,
+    [groundedRenderedFootprints, detailObjectIds, officialLod3Active]
   );
   const blockOpacity = smoothZoomStep(
     BUILDING_BLOCK_MIN_ZOOM,
@@ -1317,8 +1327,10 @@ export default function MapView({
     const visibleSnapCandidates = [...visibleSnapCandidateMap.values()];
 
     // The official source positions, laser-derived heights, and measured crown
-    // diameters drive two shared low-poly meshes. Instancing keeps thousands of
-    // trees inexpensive, and edit focus removes them entirely.
+    // diameters drive two shared low-poly meshes. Absolute source elevations
+    // are deliberately clamped to the same flat z=0 plane as the editor map.
+    // Instancing keeps thousands of trees inexpensive, and edit focus removes
+    // them entirely.
     if (renderedHamburgTrees.length > 0) {
       const treeOpacity = smoothZoomStep(
         HAMBURG_TREE_MIN_ZOOM,
@@ -1330,7 +1342,7 @@ export default function MapView({
           id: 'hamburg-official-tree-trunks',
           data: renderedHamburgTrees,
           mesh: TREE_TRUNK_MESH as unknown as never,
-          getPosition: (tree) => tree.position,
+          getPosition: treePositionOnFlatGround,
           getScale: (tree) => [tree.trunkRadius, tree.trunkRadius, tree.height * 0.48],
           getColor: [104, 74, 50, 255],
           coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
@@ -1342,7 +1354,7 @@ export default function MapView({
           id: 'hamburg-official-tree-crowns',
           data: renderedHamburgTrees,
           mesh: TREE_CROWN_MESH as unknown as never,
-          getPosition: (tree) => tree.position,
+          getPosition: treePositionOnFlatGround,
           getTranslation: (tree) => [0, 0, tree.height * 0.34],
           getScale: (tree) => [
             tree.crownDiameter / 2,
@@ -1386,7 +1398,7 @@ export default function MapView({
     layers.push(
       new PolygonLayer<Footprint>({
         id: 'building-outlines',
-        data: renderedFootprints,
+        data: groundedRenderedFootprints,
         getPolygon: (d) => d.polygon,
         getFillColor: (d) => {
           const isSelected = d.id === selectedId || (d.parentId && d.parentId === selectedId);
@@ -2168,6 +2180,7 @@ export default function MapView({
   }, [
     footprints,
     renderedFootprints,
+    groundedRenderedFootprints,
     renderedRoadAreas,
     blockFootprints,
     renderedZones,

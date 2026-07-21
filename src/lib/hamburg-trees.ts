@@ -45,6 +45,17 @@ export function treeCrownColor(tree: HamburgCityTree): [number, number, number, 
   return [42 + Math.round(variation * 0.35), 116 + variation, 58 + Math.round(variation * 0.5), 245];
 }
 
+/**
+ * The tree source stores absolute ellipsoidal elevations, while the editor's
+ * basemap is a flat z=0 plane. Preserve the surveyed value in `tree.position`
+ * but render the instance base on the same plane as roads and buildings.
+ */
+export function treePositionOnFlatGround(
+  tree: HamburgCityTree
+): [number, number, number] {
+  return [tree.position[0], tree.position[1], 0];
+}
+
 function createRingMesh(rings: Array<{ z: number; radius: number }>): TreeMesh {
   const segments = 10;
   const positions: number[] = [];
