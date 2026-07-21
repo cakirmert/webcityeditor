@@ -12,10 +12,12 @@ import {
   buildOverpassRoadQuery,
   buildRoadEditPayload,
   buildRoadPreviewAreas,
+  clearStaleReciprocalRoadConnections,
   createManualRoadDraft,
   deleteRoadFromCityJson,
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
+  findStaleReciprocalRoadConnections,
   insertRoadIntoCityJson,
   parseOsmPointFeaturesFromXml,
   parseOsmRoadsFromXml,
@@ -771,6 +773,25 @@ export function useRoadEditor(
       );
       return;
     }
+    const staleReciprocalConnections = targetRoadId
+      ? findStaleReciprocalRoadConnections(cityjson, targetRoadId, roadDraft)
+      : [];
+    if (
+      staleReciprocalConnections.length > 0 &&
+      !window.confirm(
+        `This edit leaves ${staleReciprocalConnections.length} confirmed reciprocal road join${
+          staleReciprocalConnections.length === 1 ? '' : 's'
+        } stale. Save and disconnect ${
+          new Set(staleReciprocalConnections.map((connection) => connection.roadId)).size
+        } connected road${
+          new Set(staleReciprocalConnections.map((connection) => connection.roadId)).size === 1
+            ? ''
+            : 's'
+        }?`
+      )
+    ) {
+      return;
+    }
     try {
       pushUndo(
         preserveExactGeometry
@@ -794,19 +815,23 @@ export function useRoadEditor(
                 roadDraft,
                 targetRoadId ? { id: targetRoadId } : undefined
               );
+          const disconnected = targetRoadId
+            ? clearStaleReciprocalRoadConnections(cityjson, inserted.id, roadDraft)
+            : { disconnectedRoadIds: [], disconnectedConnectionCount: 0 };
           const connectedRoadIds = synchronizeRoadConnectionMetadata(
             cityjson,
             inserted.id,
             roadDraft
           );
           if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
-          return { ...inserted, connectedRoadIds };
+          return { ...inserted, ...disconnected, connectedRoadIds };
         }
       );
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(result.id);
         for (const connectedRoadId of result.connectedRoadIds) next.add(connectedRoadId);
+        for (const disconnectedRoadId of result.disconnectedRoadIds) next.add(disconnectedRoadId);
         return next;
       });
       setSelection(null);
@@ -839,6 +864,10 @@ export function useRoadEditor(
           ? `Saved changes to ${result.id} with ${result.areas.length} transportation surfaces${
               result.connectedRoadIds.length > 0
                 ? ` and confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
+                : ''
+            }${
+              result.disconnectedConnectionCount > 0
+                ? ` and cleared ${result.disconnectedConnectionCount} stale reciprocal road connection${result.disconnectedConnectionCount === 1 ? '' : 's'}`
                 : ''
             }.`
           : `Inserted ${result.id} with ${result.areas.length} transportation surfaces${

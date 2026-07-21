@@ -2145,6 +2145,101 @@ export function synchronizeRoadConnectionMetadata(
   return [...changedTargets];
 }
 
+export interface StaleReciprocalRoadConnection {
+  roadId: string;
+  sectionId: string;
+  endpoint: 'start' | 'end';
+}
+
+/**
+ * Find editable roads that still point at a source endpoint which no longer
+ * points back. This happens when a user drags a confirmed endpoint away or
+ * reconnects it to a different road.
+ */
+export function findStaleReciprocalRoadConnections(
+  doc: CityJsonDocument,
+  sourceRoadId: string,
+  sourceDraft: RoadDraft
+): StaleReciprocalRoadConnection[] {
+  const stale: StaleReciprocalRoadConnection[] = [];
+  for (const [candidateId, candidate] of Object.entries(doc.CityObjects)) {
+    if (candidateId === sourceRoadId || candidate.type !== 'Road') continue;
+    const candidateDraft = readEditableRoadDraftFromCityObject(candidate);
+    if (!candidateDraft) continue;
+
+    for (const candidateSection of candidateDraft.sections) {
+      for (const candidateEndpoint of ['start', 'end'] as const) {
+        const inbound = candidateSection.connections?.[candidateEndpoint];
+        if (
+          inbound?.target !== 'cityjson' ||
+          inbound.targetId !== sourceRoadId ||
+          !inbound.targetSectionId ||
+          (inbound.targetEndpoint !== 'start' && inbound.targetEndpoint !== 'end')
+        ) {
+          continue;
+        }
+
+        const sourceSection = sourceDraft.sections.find(
+          (section) => section.id === inbound.targetSectionId
+        );
+        const reciprocal = sourceSection?.connections?.[inbound.targetEndpoint];
+        const stillReciprocal =
+          reciprocal?.target === 'cityjson' &&
+          reciprocal.targetId === candidateId &&
+          reciprocal.targetSectionId === candidateSection.id &&
+          reciprocal.targetEndpoint === candidateEndpoint;
+        if (!stillReciprocal) {
+          stale.push({
+            roadId: candidateId,
+            sectionId: candidateSection.id,
+            endpoint: candidateEndpoint,
+          });
+        }
+      }
+    }
+  }
+  return stale;
+}
+
+/** Clear stale peer metadata after the user explicitly accepts disconnection. */
+export function clearStaleReciprocalRoadConnections(
+  doc: CityJsonDocument,
+  sourceRoadId: string,
+  sourceDraft: RoadDraft
+): { disconnectedRoadIds: string[]; disconnectedConnectionCount: number } {
+  const stale = findStaleReciprocalRoadConnections(doc, sourceRoadId, sourceDraft);
+  const staleByRoad = new Map<string, StaleReciprocalRoadConnection[]>();
+  for (const connection of stale) {
+    const entries = staleByRoad.get(connection.roadId) ?? [];
+    entries.push(connection);
+    staleByRoad.set(connection.roadId, entries);
+  }
+
+  for (const [roadId, connections] of staleByRoad) {
+    const object = doc.CityObjects[roadId];
+    const draft = object ? readEditableRoadDraftFromCityObject(object) : null;
+    if (!object || !draft) continue;
+    for (const connection of connections) {
+      const section = draft.sections.find((candidate) => candidate.id === connection.sectionId);
+      if (!section?.connections) continue;
+      delete section.connections[connection.endpoint];
+      if (!section.connections.start && !section.connections.end) {
+        delete section.connections;
+      }
+    }
+    object.attributes = {
+      ...(object.attributes ?? {}),
+      _roadLayout: roadDraftToJson(draft),
+      _updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return {
+    disconnectedRoadIds: [...staleByRoad.keys()],
+    disconnectedConnectionCount: stale.length,
+  };
+}
+
 /**
  * Delete one CityJSON Road and remove endpoint links to it from every
  * surviving editable Road. The caller can then compact the orphaned geometry

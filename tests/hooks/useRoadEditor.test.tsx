@@ -152,6 +152,68 @@ describe('useRoadEditor road-edit lifecycle', () => {
     confirm.mockRestore();
   });
 
+  it('requires confirmation before saving a moved endpoint that disconnects its peer', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
+    insertRoadIntoCityJson(doc, target, { id: 'road-target' });
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      roadLine[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'road-target',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: roadLine[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'road-source' });
+    const targetDraft = readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])!;
+    targetDraft.sections[0].connections = {
+      start: {
+        target: 'cityjson',
+        targetId: 'road-source',
+        targetSectionId: source.sections[0].id,
+        targetEndpoint: 'end',
+        positionWgs84: roadLine[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, targetDraft, { id: 'road-target' });
+
+    const coreState = coreStateFor(doc);
+    const { result } = renderHook(() =>
+      useRoadEditor(coreState as never, { pushUndo: vi.fn() } as never)
+    );
+    const sourceArea = extractTransportationAreas(doc).find(
+      (candidate) => candidate.roadId === 'road-source'
+    )!;
+    act(() => result.current.handleEditSelectedRoadArea(sourceArea));
+    const moved = JSON.parse(JSON.stringify(result.current.roadDraft)) as RoadDraft;
+    moved.sections[0].centerlineWgs84.at(-1)![0] += 0.0001;
+    delete moved.sections[0].connections;
+    act(() => result.current.handleRoadDraftChange(moved));
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    act(() => result.current.handleInsertRoad());
+    expect(confirm).toHaveBeenCalledWith(
+      'This edit leaves 1 confirmed reciprocal road join stale. Save and disconnect 1 connected road?'
+    );
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])?.sections[0].connections
+    ).toBeDefined();
+
+    act(() => result.current.handleInsertRoad());
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])?.sections[0].connections
+    ).toBeUndefined();
+    expect(result.current.roadStatus).toContain('cleared 1 stale reciprocal road connection');
+    confirm.mockRestore();
+  });
+
   it('undoes and redoes unsaved road-draft changes before CityJSON is saved', () => {
     const doc = buildSampleCube();
     const savedDraft = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });

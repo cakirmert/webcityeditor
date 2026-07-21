@@ -7,9 +7,11 @@ import {
   buildExactRoadAttributePreviewAreas,
   buildRoadPreviewAreas,
   createManualRoadDraft,
+  clearStaleReciprocalRoadConnections,
   deleteRoadFromCityJson,
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
+  findStaleReciprocalRoadConnections,
   inferRoadDraftFromOsmRoad,
   inferRoadVerticalProfileFromOsmTags,
   insertRoadIntoCityJson,
@@ -483,6 +485,48 @@ describe('transportation roads', () => {
       readEditableRoadDraftFromCityObject(doc.CityObjects['source-road'])?.sections[0].connections
     ).toBeUndefined();
     expect(doc.CityObjects['source-road'].attributes?._updatedAt).toEqual(expect.any(String));
+  });
+
+  it('finds and clears a stale reciprocal link after a connected endpoint moves away', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(delftRoad);
+    insertRoadIntoCityJson(doc, target, { id: 'target-road' });
+
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      delftRoad[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'target-road',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: delftRoad[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'source-road' });
+    synchronizeRoadConnectionMetadata(doc, 'source-road', source);
+
+    const movedSource = JSON.parse(JSON.stringify(source)) as typeof source;
+    movedSource.sections[0].centerlineWgs84.at(-1)![0] += 0.0001;
+    delete movedSource.sections[0].connections;
+
+    expect(findStaleReciprocalRoadConnections(doc, 'source-road', movedSource)).toEqual([
+      {
+        roadId: 'target-road',
+        sectionId: target.sections[0].id,
+        endpoint: 'start',
+      },
+    ]);
+    expect(clearStaleReciprocalRoadConnections(doc, 'source-road', movedSource)).toEqual({
+      disconnectedRoadIds: ['target-road'],
+      disconnectedConnectionCount: 1,
+    });
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects['target-road'])?.sections[0].connections
+    ).toBeUndefined();
   });
 
   it('splits a road section into two building-block sections while preserving bands', () => {
