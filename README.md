@@ -66,7 +66,7 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
 2. Tap a coloured road surface on the map, then choose **Edit road**.
 3. Tap a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
 4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction arrows update from the road bands.
-5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Drag a road end onto a teal target to confirm a road connection.
+5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Drag the separate purple end connector onto a teal target to confirm a road connection and record its lane pairs.
 6. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
 7. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.
 8. Choose **Save exact attributes** or **Save road changes**. **Discard** leaves the saved CityJSON unchanged.
@@ -82,7 +82,7 @@ Attribute-only changes preserve imported osm2streets polygons and vertices. Movi
 3. Choose the large **Finish road** button. Two or more points are required.
 4. Edit the generated road bands exactly like an existing road.
 5. Compare the shape with **Satellite** and adjust both opacity sliders when needed.
-6. Use the yellow end handles and teal targets to connect it to existing roads.
+6. Use the purple end connectors and teal targets to connect it to existing roads; the translucent curves show the saved lane-to-lane pairs.
 7. Choose **Save new road** to insert it into the working CityJSON.
 
 > **Screenshot to add — `assets/readme/new-road.jpg`**

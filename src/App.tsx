@@ -742,6 +742,8 @@ export default function App() {
               roadFitConflicts={roadEditor.roadFitConflicts}
               roadFitPending={roadEditor.roadFitPending}
               selectedRoadArea={roadEditor.selectedRoadArea}
+              selectedRoadBand={roadEditor.selectedRoadBand}
+              onRoadBandSelect={roadEditor.setSelectedRoadBand}
               onEditSelectedRoadArea={roadEditor.handleEditSelectedRoadArea}
               onDeleteSelectedRoadArea={roadEditor.handleDeleteSelectedRoadArea}
               osm2streetsSelection={roadEditor.osm2streetsSelection}
@@ -809,6 +811,8 @@ export default function App() {
                 coreState.setSelection(null);
               }}
               roadDraft={roadEditor.roadDraft}
+              selectedRoadBand={roadEditor.selectedRoadBand}
+              onSelectedRoadBandChange={roadEditor.setSelectedRoadBand}
               onRoadDraftChange={(draft) =>
                 roadEditor.handleRoadDraftChange(draft, 'Shape road', 'road-shape')
               }

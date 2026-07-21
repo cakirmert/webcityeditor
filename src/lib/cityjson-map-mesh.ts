@@ -81,10 +81,17 @@ export function buildCityJsonMapMesh(
   let queuedVertexCount = 0;
   let objectCount = 0;
   let maxLod: number | null = null;
+  // `objectIds` is an insertion-ordered Set assembled nearest-first by the
+  // map. Honour that order so the output cap cannot be exhausted by farther
+  // LoD2 context before the close LoD3 buildings and their installations are
+  // reached later in the CityJSON object's original document order.
+  const orderedObjectIds = options.objectIds
+    ? [...options.objectIds].filter((objectId) => !!doc.CityObjects[objectId])
+    : Object.keys(doc.CityObjects);
 
   const selectedGeometries = new Map<string, unknown[]>();
-  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
-    if (options.objectIds && !options.objectIds.has(objectId)) continue;
+  for (const objectId of orderedObjectIds) {
+    const object = doc.CityObjects[objectId];
     selectedGeometries.set(
       objectId,
       highestAvailableGeometries(object.geometry ?? [], options.maxLod)
@@ -94,8 +101,8 @@ export function buildCityJsonMapMesh(
     ? computeObjectGroupGrounds(doc, selectedGeometries)
     : new Map<string, number>();
 
-  for (const [objectId, obj] of Object.entries(doc.CityObjects)) {
-    if (options.objectIds && !options.objectIds.has(objectId)) continue;
+  for (const objectId of orderedObjectIds) {
+    const obj = doc.CityObjects[objectId];
     const geometries = selectedGeometries.get(objectId) ?? [];
     if (geometries.length === 0) continue;
     const groupId = rootObjectId(doc, objectId);

@@ -945,14 +945,15 @@ select:focus {
   z-index: 21;
   display: grid;
   max-width: none;
-  max-height: min(380px, calc(100% - 120px));
+  max-height: min(520px, calc(100% - 88px));
   gap: 10px;
+  overflow-y: auto;
   margin: 0 auto;
   border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 18px;
   background: rgba(18, 23, 33, 0.95);
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.42);
-  padding: 14px;
+  padding: 16px;
   backdrop-filter: blur(16px);
 }
 
@@ -989,27 +990,53 @@ select:focus {
   color: var(--text-dim);
 }
 
+.map-road-cross-section__section {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.map-road-cross-section__section select {
+  min-height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
 .map-road-cross-section__bands {
   display: flex;
-  min-height: 76px;
-  gap: 5px;
+  min-height: 106px;
+  gap: 0;
   overflow-x: auto;
   border-radius: 11px;
   background: #24262d;
-  padding: 5px;
+  padding: 7px;
 }
 
 .map-road-cross-section__bands button {
-  min-width: 86px;
-  min-height: 64px;
-  border: 2px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 6px;
+  position: relative;
+  min-width: 104px;
+  min-height: 90px;
+  border: 0;
+  border-right: 3px solid rgba(245, 248, 255, 0.82);
+  border-radius: 0;
+  padding: 9px;
   color: #fff;
   text-align: left;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
   cursor: pointer;
 }
+
+.map-road-cross-section__bands button:first-child { border-radius: 8px 0 0 8px; }
+.map-road-cross-section__bands button:last-child { border-right: 0; border-radius: 0 8px 8px 0; }
+.map-road-cross-section__bands button[data-dragging='true'] { opacity: 0.45; }
 
 .map-road-cross-section__bands button.is-active {
   border-color: #fff;
@@ -1021,6 +1048,89 @@ select:focus {
 .map-road-cross-section__bands button span { display: block; }
 .map-road-cross-section__bands button b { font-size: 12px; }
 .map-road-cross-section__bands button span { margin-top: 5px; font-size: 10px; }
+
+.map-road-cross-section__bands .map-road-band__icon {
+  display: block;
+  min-height: 23px;
+  margin: 0 0 5px;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.map-road-cross-section__connections {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.6fr) minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(168, 85, 247, 0.24);
+  border-radius: 11px;
+  background: rgba(126, 56, 196, 0.08);
+  padding: 9px 10px;
+}
+
+.map-road-cross-section__connections > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.map-road-cross-section__connections b { font-size: 11px; }
+
+.map-road-cross-section__connections > div:first-child span,
+.map-road-cross-section__connections > p {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.map-road-cross-section__connection-list {
+  display: flex;
+  min-width: 0;
+  gap: 7px;
+  overflow-x: auto;
+}
+
+.map-road-cross-section__connection {
+  display: grid;
+  min-width: 220px;
+  gap: 5px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 7px 8px;
+}
+
+.map-road-cross-section__connection strong {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.map-road-cross-section__connection > span {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.map-road-cross-section__connection i {
+  flex: 0 0 auto;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 3px 6px;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.map-road-cross-section__connection i.is-active {
+  border-color: rgba(124, 210, 255, 0.72);
+  background: rgba(77, 163, 255, 0.22);
+  color: #dff3ff;
+}
 
 .map-road-cross-section__actions {
   display: grid;
@@ -1175,6 +1285,13 @@ select:focus {
 .road-guide-dot--snap {
   border-color: #2dd4bf;
   background: rgba(20, 184, 166, 0.18);
+}
+
+.road-guide-dot--connect {
+  border-color: #6d28d9;
+  background: #a855f7;
+  color: #fff;
+  font-size: 9px;
 }
 
 @media (max-width: 900px), (pointer: coarse) {
@@ -1639,7 +1756,7 @@ select:focus {
 
 .road-handle-explainer {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   border: 1px solid rgba(255, 196, 84, 0.18);
   border-radius: 12px;

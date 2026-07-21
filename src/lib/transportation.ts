@@ -31,12 +31,38 @@ export interface RoadCurveSettings {
 
 export type RoadConnectionTarget = 'draft' | 'cityjson' | 'osm';
 
+export interface RoadLaneConnection {
+  /** Stable id when available; index is retained for imported lanes without ids. */
+  sourceBandId?: string;
+  sourceBandIndex: number;
+  targetBandId?: string;
+  targetBandIndex: number;
+  sourceMode?: string;
+  targetMode?: string;
+}
+
+function reverseRoadLaneConnections(
+  connections: RoadLaneConnection[] | undefined
+): RoadLaneConnection[] | undefined {
+  if (!connections?.length) return undefined;
+  return connections.map((connection) => ({
+    ...(connection.targetBandId ? { sourceBandId: connection.targetBandId } : {}),
+    sourceBandIndex: connection.targetBandIndex,
+    ...(connection.sourceBandId ? { targetBandId: connection.sourceBandId } : {}),
+    targetBandIndex: connection.sourceBandIndex,
+    ...(connection.targetMode ? { sourceMode: connection.targetMode } : {}),
+    ...(connection.sourceMode ? { targetMode: connection.sourceMode } : {}),
+  }));
+}
+
 export interface RoadEndpointConnection {
   target: RoadConnectionTarget;
   targetId: string;
   targetSectionId?: string;
   targetEndpoint?: 'start' | 'end' | 'node';
   positionWgs84: [number, number];
+  /** Explicit lane continuity recorded at the moment the road ends are joined. */
+  laneConnections?: RoadLaneConnection[];
   /** Connections are only stored after the user deliberately snaps an endpoint. */
   confirmed: true;
 }
@@ -669,6 +695,22 @@ export function splitRoadSectionAtFraction(
   const sectionAId = `${section.id}-a`;
   const sectionBId = `${section.id}-b`;
   const join = split[0].at(-1)!;
+  const splitLaneConnections: RoadLaneConnection[] = section.bands.flatMap((band, index) => {
+    if (band.kind === 'median' || band.kind === 'green' || band.kind === 'parking') return [];
+    const mode = band.allowedModes?.[0] ??
+      (band.kind === 'bike_lane'
+        ? 'bicycle'
+        : band.kind === 'sidewalk'
+          ? 'pedestrian'
+          : 'car');
+    return [{
+      ...(band.id ? { sourceBandId: band.id, targetBandId: band.id } : {}),
+      sourceBandIndex: index,
+      targetBandIndex: index,
+      sourceMode: mode,
+      targetMode: mode,
+    }];
+  });
   const aConnections: RoadSectionDraft['connections'] = {
     ...(section.connections?.start ? { start: section.connections.start } : {}),
     end: {
@@ -677,6 +719,7 @@ export function splitRoadSectionAtFraction(
       targetSectionId: sectionBId,
       targetEndpoint: 'start',
       positionWgs84: join,
+      laneConnections: splitLaneConnections,
       confirmed: true,
     },
   };
@@ -687,6 +730,7 @@ export function splitRoadSectionAtFraction(
       targetSectionId: sectionAId,
       targetEndpoint: 'end',
       positionWgs84: join,
+      laneConnections: reverseRoadLaneConnections(splitLaneConnections),
       confirmed: true,
     },
     ...(section.connections?.end ? { end: section.connections.end } : {}),
@@ -2131,6 +2175,9 @@ export function synchronizeRoadConnectionMetadata(
           targetSectionId: sourceSection.id,
           targetEndpoint: sourceEndpoint,
           positionWgs84: [...connection.positionWgs84],
+          ...(connection.laneConnections?.length
+            ? { laneConnections: reverseRoadLaneConnections(connection.laneConnections) }
+            : {}),
           confirmed: true,
         },
       };
@@ -2405,6 +2452,11 @@ function readRoadEndpointConnection(value: unknown): RoadEndpointConnection | nu
   }
   const positionWgs84: [number, number] = [rawPosition[0], rawPosition[1]];
   const endpoints: RoadEndpointConnection['targetEndpoint'][] = ['start', 'end', 'node'];
+  const laneConnections = Array.isArray(record.laneConnections)
+    ? record.laneConnections
+        .map(readRoadLaneConnection)
+        .filter((connection): connection is RoadLaneConnection => connection !== null)
+    : [];
   return {
     target: record.target as RoadConnectionTarget,
     targetId: record.targetId,
@@ -2415,7 +2467,39 @@ function readRoadEndpointConnection(value: unknown): RoadEndpointConnection | nu
       ? { targetEndpoint: record.targetEndpoint as RoadEndpointConnection['targetEndpoint'] }
       : {}),
     positionWgs84,
+    ...(laneConnections.length > 0 ? { laneConnections } : {}),
     confirmed: true,
+  };
+}
+
+function readRoadLaneConnection(value: unknown): RoadLaneConnection | null {
+  const record = unknownRecord(value);
+  if (!record) return null;
+  const sourceBandIndex = Number(record.sourceBandIndex);
+  const targetBandIndex = Number(record.targetBandIndex);
+  if (
+    !Number.isInteger(sourceBandIndex) ||
+    sourceBandIndex < 0 ||
+    !Number.isInteger(targetBandIndex) ||
+    targetBandIndex < 0
+  ) {
+    return null;
+  }
+  return {
+    ...(typeof record.sourceBandId === 'string' && record.sourceBandId
+      ? { sourceBandId: record.sourceBandId }
+      : {}),
+    sourceBandIndex,
+    ...(typeof record.targetBandId === 'string' && record.targetBandId
+      ? { targetBandId: record.targetBandId }
+      : {}),
+    targetBandIndex,
+    ...(typeof record.sourceMode === 'string' && record.sourceMode
+      ? { sourceMode: record.sourceMode }
+      : {}),
+    ...(typeof record.targetMode === 'string' && record.targetMode
+      ? { targetMode: record.targetMode }
+      : {}),
   };
 }
 

@@ -59,6 +59,7 @@ interface Props {
   roadFitConflicts?: RoadFitConflict[];
   roadFitPending?: boolean;
   selectedRoadArea?: RoadArea | null;
+  selectedRoadBand?: { sectionId: string; bandIndex: number } | null;
   osm2streetsSelection?: Osm2StreetsSelection;
   canUndoDraft: boolean;
   canRedoDraft: boolean;
@@ -83,6 +84,9 @@ interface Props {
   onBackendUrlChange: (url: string) => void;
   onEditSelectedRoadArea: (area: RoadArea) => void;
   onDeleteSelectedRoadArea: (area: RoadArea) => void;
+  onRoadBandSelect?: (
+    selection: { sectionId: string; bandIndex: number } | null
+  ) => void;
   onEditOsm2StreetsSelection: () => void;
   onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
@@ -126,6 +130,7 @@ export default function RoadEditorPanel({
   roadFitConflicts = [],
   roadFitPending = false,
   selectedRoadArea = null,
+  selectedRoadBand = null,
   osm2streetsSelection = null,
   canUndoDraft,
   canRedoDraft,
@@ -150,6 +155,7 @@ export default function RoadEditorPanel({
   onBackendUrlChange,
   onEditSelectedRoadArea,
   onDeleteSelectedRoadArea,
+  onRoadBandSelect,
   onEditOsm2StreetsSelection,
   onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
@@ -188,6 +194,16 @@ export default function RoadEditorPanel({
     setActiveBandIndex((index) => Math.min(index, activeSection.bands.length - 1));
   }, [activeSection]);
 
+  useEffect(() => {
+    if (!selectedRoadBand) return;
+    const section = draft?.sections.find(
+      (candidate) => candidate.id === selectedRoadBand.sectionId
+    );
+    if (!section?.bands[selectedRoadBand.bandIndex]) return;
+    setActiveSectionId(section.id);
+    setActiveBandIndex(selectedRoadBand.bandIndex);
+  }, [draft, selectedRoadBand]);
+
   const selectedOsm = osmRoads.find((road) => road.id === selectedOsmRoadId);
   const payloadPreview = draft
     ? JSON.stringify(buildRoadEditPayload(draft, insertedRoadId ?? undefined), null, 2)
@@ -213,6 +229,13 @@ export default function RoadEditorPanel({
           : 'none';
   const verticalProfile = draft ? roadVerticalProfileForDraft(draft) : null;
   const activeBand = activeSection?.bands[activeBandIndex] ?? null;
+  useEffect(() => {
+    if (!activeSection || !activeBand) {
+      onRoadBandSelect?.(null);
+      return;
+    }
+    onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: activeBandIndex });
+  }, [activeBand, activeBandIndex, activeSection, onRoadBandSelect]);
   const connectionCount = draft?.sections.reduce(
     (count, section) =>
       count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
@@ -587,7 +610,8 @@ export default function RoadEditorPanel({
             <div className="road-handle-explainer" data-testid="road-centerline-drag-hint">
               <div><i className="road-guide-dot road-guide-dot--anchor" /><span><b>Yellow anchor</b>Drag it to bend the smooth road.</span></div>
               <div><i className="road-guide-dot road-guide-dot--add">+</i><span><b>White +</b>Tap or drag to add another bend.</span></div>
-              <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Teal join</b>Drag a yellow end onto it to connect roads.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--connect">↗</i><span><b>Purple connector</b>Drag it from a road end to make a join.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Teal target</b>Drop the purple connector here.</span></div>
               <p
                 className="col-span-full m-0 text-[11px] leading-5 text-[var(--text-dim)]"
               >
@@ -1182,8 +1206,8 @@ function SelectedRoadAreaCard({
       </Button>
       {isIntersection && (
         <p>
-          Keep this generated junction. Edit an entering road, then drag its yellow endpoint onto
-          a teal target. Saving records the confirmed connection in CityJSON.
+          Keep this generated junction. Edit an entering road, then drag its purple end connector
+          onto a teal target. Saving records the lane pairs in CityJSON.
         </p>
       )}
       {!isIntersection && area.geometryMode === 'exact' && (

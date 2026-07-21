@@ -4,6 +4,7 @@ import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   buildRoadSnapCandidates,
+  connectRoadLanes,
   insertRoadDraftPoint,
   updateRoadDraftPoint,
 } from '../../src/lib/road-draft-edit';
@@ -169,6 +170,28 @@ describe('road draft edit helpers', () => {
       connected: true,
       position: connection.positionWgs84,
     });
+  });
+
+  it('records explicit compatible lane mappings when road ends are connected', () => {
+    const connection = connectRoadLanes(
+      {
+        target: 'cityjson',
+        targetId: 'road-2',
+        positionWgs84: [10.004, 53.006],
+        confirmed: true,
+      },
+      draft.sections[0].bands,
+      [
+        { id: 'target-bike', kind: 'bike_lane', widthM: 1.8, allowedModes: ['bicycle'] },
+        { id: 'target-car-a', kind: 'car_lane', widthM: 3.2, allowedModes: ['car'] },
+        { id: 'target-car-b', kind: 'car_lane', widthM: 3.2, allowedModes: ['car'] },
+      ]
+    );
+
+    expect(connection.laneConnections).toEqual([
+      expect.objectContaining({ sourceBandId: 'lane-1', targetBandId: 'target-car-a', sourceMode: 'car' }),
+      expect.objectContaining({ sourceBandId: 'lane-2', targetBandId: 'target-car-b', sourceMode: 'car' }),
+    ]);
   });
 
   it('offers OSM endpoints as explicit road-network snap targets', () => {

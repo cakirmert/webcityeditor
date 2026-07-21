@@ -73,6 +73,24 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.colors.length).toBe(18);
   });
 
+  it('uses nearest-first object selection order before applying the vertex cap', () => {
+    const doc = detailDocument();
+    doc.CityObjects = {
+      nearby: doc.CityObjects.nearby,
+      detailed: doc.CityObjects.detailed,
+    };
+
+    const mesh = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed', 'nearby']),
+      maxOutputVertices: 6,
+      texturesEnabled: false,
+    });
+
+    expect(mesh?.objectCount).toBe(1);
+    expect(mesh?.maxLod).toBe(3);
+    expect(mesh?.triangleCount).toBe(2);
+  });
+
   it('selects source LoD2 without overlapping the available LoD3 geometry', () => {
     const doc = detailDocument();
     const detailed = doc.CityObjects.detailed.geometry as Array<Record<string, unknown>>;

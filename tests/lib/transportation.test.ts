@@ -430,6 +430,16 @@ describe('transportation roads', () => {
         targetSectionId: target.sections[0].id,
         targetEndpoint: 'start',
         positionWgs84: delftRoad[0],
+        laneConnections: [
+          {
+            sourceBandId: source.sections[0].bands[0].id,
+            sourceBandIndex: 0,
+            targetBandId: target.sections[0].bands[1].id,
+            targetBandIndex: 1,
+            sourceMode: 'pedestrian',
+            targetMode: 'bicycle',
+          },
+        ],
         confirmed: true,
       },
     };
@@ -446,6 +456,16 @@ describe('transportation roads', () => {
               target: 'cityjson',
               targetId: 'source-road',
               targetEndpoint: 'end',
+              laneConnections: [
+                {
+                  sourceBandId: target.sections[0].bands[1].id,
+                  sourceBandIndex: 1,
+                  targetBandId: source.sections[0].bands[0].id,
+                  targetBandIndex: 0,
+                  sourceMode: 'bicycle',
+                  targetMode: 'pedestrian',
+                },
+              ],
               confirmed: true,
             },
           },

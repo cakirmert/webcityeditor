@@ -44,6 +44,7 @@ import {
   RoadDraftHistory,
   type RoadDraftHistorySnapshot,
 } from '../lib/road-draft-history';
+import { reconcileRoadLaneConnectionIndexes } from '../lib/road-draft-edit';
 
 interface FetchOsmRoadOptions {
   source?: 'viewport' | 'loaded-data';
@@ -187,6 +188,10 @@ export function useRoadEditor(
   const [osmPointFeatures, setOsmPointFeatures] = useState<OsmPointFeature[]>([]);
   const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
+  const [selectedRoadBand, setSelectedRoadBand] = useState<{
+    sectionId: string;
+    bandIndex: number;
+  } | null>(null);
   const [roadEditBaseline, setRoadEditBaseline] = useState<RoadEditBaseline | null>(null);
   const [roadDraftDirty, setRoadDraftDirty] = useState(false);
   const [editingRoadId, setEditingRoadId] = useState<string | null>(null);
@@ -201,6 +206,22 @@ export function useRoadEditor(
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
   const roadDraftHistoryRef = useRef(new RoadDraftHistory());
   const [roadDraftHistoryVersion, setRoadDraftHistoryVersion] = useState(0);
+
+  useEffect(() => {
+    setSelectedRoadBand((current) => {
+      if (!roadDraft) return null;
+      if (
+        current &&
+        roadDraft.sections.some(
+          (section) => section.id === current.sectionId && !!section.bands[current.bandIndex]
+        )
+      ) {
+        return current;
+      }
+      const first = roadDraft.sections[0];
+      return first?.bands.length ? { sectionId: first.id, bandIndex: 0 } : null;
+    });
+  }, [roadDraft]);
 
   const clearRoadDraftHistory = useCallback(() => {
     roadDraftHistoryRef.current.clear();
@@ -556,7 +577,7 @@ export function useRoadEditor(
   const handleRoadDraftChange = useCallback(
     (draft: RoadDraft, label = 'Edit road', historyGroup?: string) => {
       recordRoadDraftHistory(roadDraft, roadDraftDirty, label, historyGroup);
-      setRoadDraft(draft);
+      setRoadDraft(reconcileRoadLaneConnectionIndexes(draft));
       setRoadDraftDirty(true);
       setLastInsertedRoadId(null);
     },
@@ -569,7 +590,7 @@ export function useRoadEditor(
         ? area.attributes.connectedRoadIds.length
         : 0;
       setRoadStatus(
-        `This is an exact osm2streets junction surface connected to ${connected} road${connected === 1 ? '' : 's'}. Its shape stays protected; tap a lane entering it, edit that road, then drag its yellow end onto a teal join target to confirm the connection.`
+        `This is an exact osm2streets junction surface connected to ${connected} road${connected === 1 ? '' : 's'}. Its shape stays protected; tap a lane entering it, edit that road, then drag its purple end connector onto a teal join target.`
       );
       return;
     }
@@ -1061,6 +1082,8 @@ export function useRoadEditor(
     setSelectedOsmRoadId,
     roadDraft,
     setRoadDraft,
+    selectedRoadBand,
+    setSelectedRoadBand,
     roadDraftDirty,
     roadDraftHistoryState,
     handleUndoRoadDraft,
