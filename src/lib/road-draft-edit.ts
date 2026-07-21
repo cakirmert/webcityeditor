@@ -36,8 +36,17 @@ export interface RoadSnapCandidate {
   position: [number, number];
   connection: RoadEndpointConnection;
   targetBands?: RoadBand[];
+  targetSection?: RoadSectionDraft;
   compatibleLaneCount?: number;
   distanceMeters?: number;
+}
+
+export interface RoadLaneSnapCandidate extends RoadSnapCandidate {
+  targetSection: RoadSectionDraft;
+  targetEndpoint: 'start' | 'end';
+  targetBand: RoadBand;
+  targetBandIndex: number;
+  sharedMode: string;
 }
 
 export function connectRoadLanes(
@@ -256,6 +265,28 @@ export function reconcileRoadLaneConnectionIndexes(draft: RoadDraft): RoadDraft 
       ...section,
       connections: reconcileSectionConnections(section, sectionsById),
     })),
+    ...(draft.movements
+      ? {
+          movements: draft.movements.flatMap((movement) => {
+            const sourceSection = sectionsById.get(movement.sourceSectionId);
+            if (!sourceSection) return [];
+            const sourceBandIndex = movement.sourceBandId
+              ? sourceSection.bands.findIndex((band) => band.id === movement.sourceBandId)
+              : movement.sourceBandIndex;
+            if (sourceBandIndex < 0 || sourceBandIndex >= sourceSection.bands.length) return [];
+            const targetSection = movement.targetRoadId === draft.id
+              ? sectionsById.get(movement.targetSectionId)
+              : undefined;
+            const targetBandIndex = targetSection && movement.targetBandId
+              ? targetSection.bands.findIndex((band) => band.id === movement.targetBandId)
+              : movement.targetBandIndex;
+            if (targetSection && (targetBandIndex < 0 || targetBandIndex >= targetSection.bands.length)) {
+              return [];
+            }
+            return [{ ...movement, sourceBandIndex, targetBandIndex }];
+          }),
+        }
+      : {}),
   };
 }
 
@@ -308,7 +339,9 @@ export function buildRoadSnapCandidates(
   const add = (candidate: RoadSnapCandidate) => {
     if (!finiteLngLat(candidate.position)) return;
     const coordinateKey = `${candidate.position[0].toFixed(7)}:${candidate.position[1].toFixed(7)}`;
-    const key = `${candidate.connection.target}:${candidate.connection.targetId}:${coordinateKey}`;
+    const key = `${candidate.connection.target}:${candidate.connection.targetId}:${
+      candidate.connection.targetSectionId ?? 'section'
+    }:${candidate.connection.targetEndpoint ?? 'node'}:${coordinateKey}`;
     if (seen.has(key)) return;
     seen.add(key);
     candidates.push(candidate);
@@ -317,8 +350,8 @@ export function buildRoadSnapCandidates(
   for (const section of draft?.sections ?? []) {
     const first = section.centerlineWgs84[0];
     const last = section.centerlineWgs84.at(-1);
-    if (first) addDraftCandidate(section.id, 'start', first, section.bands, add);
-    if (last) addDraftCandidate(section.id, 'end', last, section.bands, add);
+    if (first) addDraftCandidate(section, 'start', first, add);
+    if (last) addDraftCandidate(section, 'end', last, add);
   }
 
   const cityJsonRoads = new Map<string, RoadArea[]>();
@@ -344,17 +377,18 @@ export function buildRoadSnapCandidates(
     for (const section of layout.sections) {
       const first = section.centerlineWgs84[0];
       const last = section.centerlineWgs84.at(-1);
-      if (first) addSavedCandidate(roadId, section.id, 'start', first, section.bands, add);
-      if (last) addSavedCandidate(roadId, section.id, 'end', last, section.bands, add);
+      if (first) addSavedCandidate(roadId, section, 'start', first, add);
+      if (last) addSavedCandidate(roadId, section, 'end', last, add);
     }
   }
 
   for (const road of osmRoads) {
-    const first = road.path[0];
-    const last = road.path.at(-1);
-    const bands = road.inferredDraft.sections[0]?.bands ?? [];
-    if (first) addOsmCandidate(road.id, 'start', first, bands, add);
-    if (last) addOsmCandidate(road.id, 'end', last, bands, add);
+    for (const section of road.inferredDraft.sections) {
+      const first = section.centerlineWgs84[0];
+      const last = section.centerlineWgs84.at(-1);
+      if (first) addOsmCandidate(road.id, section, 'start', first, add);
+      if (last) addOsmCandidate(road.id, section, 'end', last, add);
+    }
   }
   return candidates;
 }
@@ -413,6 +447,102 @@ export function compatibleRoadSnapCandidates(
   );
 }
 
+/**
+ * Expand nearby road ends into individual outgoing-lane targets for one
+ * incoming source lane. The returned marker sits on the target lane centre,
+ * so pointer snapping and the visible teal dot identify the exact saved pair.
+ */
+export function compatibleRoadLaneSnapCandidates(
+  draft: RoadDraft,
+  sectionId: string,
+  endpoint: 'start' | 'end',
+  sourceBandIndex: number,
+  candidates: RoadSnapCandidate[],
+  maxDistanceMeters = 80
+): RoadLaneSnapCandidate[] {
+  const sourceSection = draft.sections.find((section) => section.id === sectionId);
+  const sourceBand = sourceSection?.bands[sourceBandIndex];
+  if (
+    !sourceSection ||
+    !sourceBand ||
+    !roadBandCanArriveAtEndpoint(sourceBand, endpoint)
+  ) {
+    return [];
+  }
+  const sourcePosition = roadLaneEndpointPosition(sourceSection, endpoint, sourceBandIndex);
+  if (!sourcePosition) return [];
+
+  return candidates.flatMap((candidate) => {
+    if (
+      (candidate.connection.target === 'draft' &&
+        candidate.connection.targetSectionId === sectionId) ||
+      (candidate.connection.target === 'cityjson' && draft.id === candidate.connection.targetId)
+    ) {
+      return [];
+    }
+    const targetSection = candidate.targetSection;
+    if (!targetSection) return [];
+    const targetEndpoint = candidate.connection.targetEndpoint === 'start' ||
+      candidate.connection.targetEndpoint === 'end'
+      ? candidate.connection.targetEndpoint
+      : endpoint === 'start' ? 'end' : 'start';
+    return targetSection.bands.flatMap((targetBand, targetBandIndex) => {
+      if (!roadBandCanDepartFromEndpoint(targetBand, targetEndpoint)) return [];
+      const targetModes = new Set(roadBandModes(targetBand));
+      const sharedMode = roadBandModes(sourceBand).find((mode) => targetModes.has(mode));
+      if (!sharedMode) return [];
+      const position = roadLaneEndpointPosition(
+        targetSection,
+        targetEndpoint,
+        targetBandIndex
+      ) ?? candidate.position;
+      const distanceMeters = approximateDistanceMeters(sourcePosition, position);
+      if (distanceMeters > maxDistanceMeters) return [];
+      return [{
+        ...candidate,
+        id: `${candidate.id}:band:${targetBand.id ?? targetBandIndex}`,
+        position,
+        targetSection,
+        targetEndpoint,
+        targetBand,
+        targetBandIndex,
+        sharedMode,
+        compatibleLaneCount: 1,
+        distanceMeters,
+      }];
+    });
+  }).sort((left, right) =>
+    (left.distanceMeters ?? Infinity) - (right.distanceMeters ?? Infinity) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+/** Return the geographic centre of one band at a road-section endpoint. */
+export function roadLaneEndpointPosition(
+  section: RoadSectionDraft,
+  endpoint: 'start' | 'end',
+  bandIndex: number
+): [number, number] | null {
+  const band = section.bands[bandIndex];
+  const line = section.centerlineWgs84;
+  if (!band || line.length < 2) return null;
+  const anchor = endpoint === 'start' ? line[0] : line[line.length - 1];
+  const inner = endpoint === 'start' ? line[1] : line[line.length - 2];
+  const vector = endpoint === 'start'
+    ? localVectorMeters(anchor, inner)
+    : localVectorMeters(inner, anchor);
+  const length = Math.hypot(vector[0], vector[1]);
+  if (length < 1e-6) return [...anchor];
+  const forward: [number, number] = [vector[0] / length, vector[1] / length];
+  const left: [number, number] = [-forward[1], forward[0]];
+  const totalWidth = section.bands.reduce((sum, candidate) => sum + candidate.widthM, 0);
+  const priorWidth = section.bands
+    .slice(0, bandIndex)
+    .reduce((sum, candidate) => sum + candidate.widthM, 0);
+  const leftOffset = totalWidth / 2 - priorWidth - band.widthM / 2;
+  return offsetLngLat(anchor, left[0] * leftOffset, left[1] * leftOffset);
+}
+
 function approximateDistanceMeters(a: [number, number], b: [number, number]): number {
   const latitude = ((a[1] + b[1]) / 2) * Math.PI / 180;
   return Math.hypot(
@@ -422,55 +552,55 @@ function approximateDistanceMeters(a: [number, number], b: [number, number]): nu
 }
 
 function addDraftCandidate(
-  sectionId: string,
+  section: RoadSectionDraft,
   endpoint: 'start' | 'end',
   position: [number, number],
-  targetBands: RoadBand[],
   add: (candidate: RoadSnapCandidate) => void
 ) {
   add({
-    id: `draft:${sectionId}:${endpoint}`,
+    id: `draft:${section.id}:${endpoint}`,
     position,
     connection: {
       target: 'draft',
-      targetId: sectionId,
-      targetSectionId: sectionId,
+      targetId: section.id,
+      targetSectionId: section.id,
       targetEndpoint: endpoint,
       positionWgs84: position,
       confirmed: true,
     },
-    targetBands,
+    targetBands: section.bands,
+    targetSection: section,
   });
 }
 
 function addSavedCandidate(
   roadId: string,
-  sectionId: string,
+  section: RoadSectionDraft,
   endpoint: 'start' | 'end',
   position: [number, number],
-  targetBands: RoadBand[],
   add: (candidate: RoadSnapCandidate) => void
 ) {
   add({
-    id: `cityjson:${roadId}:${sectionId}:${endpoint}`,
+    id: `cityjson:${roadId}:${section.id}:${endpoint}`,
     position,
     connection: {
       target: 'cityjson',
       targetId: roadId,
-      targetSectionId: sectionId,
+      targetSectionId: section.id,
       targetEndpoint: endpoint,
       positionWgs84: position,
       confirmed: true,
     },
-    targetBands,
+    targetBands: section.bands,
+    targetSection: section,
   });
 }
 
 function addOsmCandidate(
   roadId: string,
+  section: RoadSectionDraft,
   endpoint: 'start' | 'end',
   position: [number, number],
-  targetBands: RoadBand[],
   add: (candidate: RoadSnapCandidate) => void
 ) {
   add({
@@ -479,12 +609,37 @@ function addOsmCandidate(
     connection: {
       target: 'osm',
       targetId: roadId,
+      targetSectionId: section.id,
       targetEndpoint: endpoint,
       positionWgs84: position,
       confirmed: true,
     },
-    targetBands,
+    targetBands: section.bands,
+    targetSection: section,
   });
+}
+
+function localVectorMeters(
+  from: [number, number],
+  to: [number, number]
+): [number, number] {
+  const latitude = ((from[1] + to[1]) / 2) * Math.PI / 180;
+  return [
+    (to[0] - from[0]) * 111_320 * Math.max(0.2, Math.cos(latitude)),
+    (to[1] - from[1]) * 110_540,
+  ];
+}
+
+function offsetLngLat(
+  point: [number, number],
+  eastMeters: number,
+  northMeters: number
+): [number, number] {
+  const latitude = point[1] * Math.PI / 180;
+  return [
+    point[0] + eastMeters / (111_320 * Math.max(0.2, Math.cos(latitude))),
+    point[1] + northMeters / 110_540,
+  ];
 }
 
 export function insertRoadDraftPoint(

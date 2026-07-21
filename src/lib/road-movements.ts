@@ -195,6 +195,110 @@ export function updateRoadMovementStatus(
   };
 }
 
+export interface ManualRoadLaneTarget {
+  roadId: string;
+  section: RoadSectionDraft;
+  endpoint: 'start' | 'end';
+  bandIndex: number;
+}
+
+/**
+ * Confirm one deliberate incoming-lane to outgoing-lane movement. Manual
+ * connectors are movements, not road-end snaps: adding a turn must never
+ * move the source road's centreline or silently connect every adjacent lane.
+ */
+export function connectManualRoadLaneMovement(
+  draft: RoadDraft,
+  sourceSectionId: string,
+  sourceEndpoint: 'start' | 'end',
+  sourceBandIndex: number,
+  target: ManualRoadLaneTarget
+): RoadDraft {
+  const sourceSection = draft.sections.find((section) => section.id === sourceSectionId);
+  const sourceBand = sourceSection?.bands[sourceBandIndex];
+  const targetBand = target.section.bands[target.bandIndex];
+  if (
+    !sourceSection ||
+    !sourceBand ||
+    !targetBand ||
+    !roadBandCanArriveAtEndpoint(sourceBand, sourceEndpoint) ||
+    !roadBandCanDepartFromEndpoint(targetBand, target.endpoint)
+  ) {
+    return draft;
+  }
+
+  const targetModes = new Set(roadBandModes(targetBand));
+  const mode = roadBandModes(sourceBand).find((candidate) => targetModes.has(candidate));
+  if (!mode) return draft;
+
+  const sourceRoadId = draft.id ?? 'draft';
+  const sourcePosition = endpointPosition(sourceSection, sourceEndpoint);
+  const targetPosition = endpointPosition(target.section, target.endpoint);
+  const junctionId = `manual:${geometryJunctionId(sourcePosition, targetPosition)}`;
+  const id = movementId({
+    junctionId,
+    sourceRoadId,
+    sourceSectionId,
+    sourceEndpoint,
+    sourceBandId: sourceBand.id,
+    sourceBandIndex,
+    targetRoadId: target.roadId,
+    targetSectionId: target.section.id,
+    targetEndpoint: target.endpoint,
+    targetBandId: targetBand.id,
+    targetBandIndex: target.bandIndex,
+    mode,
+  });
+  const movement: RoadLaneMovement = {
+    id,
+    junctionId,
+    sourceRoadId,
+    sourceSectionId,
+    sourceEndpoint,
+    ...(sourceBand.id ? { sourceBandId: sourceBand.id } : {}),
+    sourceBandIndex,
+    sourceDirection: roadBandDirection(sourceBand),
+    targetRoadId: target.roadId,
+    targetSectionId: target.section.id,
+    targetEndpoint: target.endpoint,
+    ...(targetBand.id ? { targetBandId: targetBand.id } : {}),
+    targetBandIndex: target.bandIndex,
+    targetDirection: roadBandDirection(targetBand),
+    sourceMode: mode,
+    targetMode: mode,
+    turn: classifyRoadMovementTurn(
+      sourceSection,
+      sourceEndpoint,
+      target.section,
+      target.endpoint,
+      mode,
+      sourceRoadId === target.roadId
+    ),
+    status: 'confirmed',
+    provenance: 'manual',
+    semanticEvidence: true,
+  };
+
+  return {
+    ...draft,
+    userVerified: true,
+    movements: [
+      ...(draft.movements ?? []).filter((candidate) => candidate.id !== id),
+      movement,
+    ].sort(compareMovements),
+  };
+}
+
+export function removeRoadMovement(draft: RoadDraft, movementIdValue: string): RoadDraft {
+  return {
+    ...draft,
+    userVerified: true,
+    movements: (draft.movements ?? []).filter(
+      (movement) => movement.id !== movementIdValue
+    ),
+  };
+}
+
 /**
  * Store only explicit decisions on both participant Road objects. Exact lane
  * polygons and their vertices are intentionally untouched.
@@ -204,10 +308,19 @@ export function synchronizeRoadMovementMetadata(
   sourceRoadId: string,
   draft: RoadDraft
 ): string[] {
-  const decisions = (draft.movements ?? []).filter(
-    (movement) =>
-      movement.sourceRoadId === sourceRoadId && movement.status !== 'proposed'
-  );
+  const sourceAliases = new Set([sourceRoadId, draft.id, 'draft'].filter(Boolean));
+  const decisions = (draft.movements ?? [])
+    .filter(
+      (movement) =>
+        sourceAliases.has(movement.sourceRoadId) && movement.status !== 'proposed'
+    )
+    .map((movement) => ({
+      ...movement,
+      sourceRoadId,
+      targetRoadId: sourceAliases.has(movement.targetRoadId)
+        ? sourceRoadId
+        : movement.targetRoadId,
+    }));
   const affected = new Set<string>([sourceRoadId]);
   for (const movement of decisions) affected.add(movement.targetRoadId);
 
@@ -427,6 +540,15 @@ function endpointsForDraft(draft: RoadDraft): ApproachEndpoint[] {
       ...(end ? [{ section, endpoint: 'end' as const, position: end }] : []),
     ];
   });
+}
+
+function endpointPosition(
+  section: RoadSectionDraft,
+  endpoint: 'start' | 'end'
+): [number, number] {
+  return endpoint === 'start'
+    ? section.centerlineWgs84[0]
+    : section.centerlineWgs84[section.centerlineWgs84.length - 1];
 }
 
 function nearestEndpoint(draft: RoadDraft, point: [number, number]): ApproachEndpoint | null {

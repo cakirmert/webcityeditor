@@ -55,6 +55,10 @@ interface Props {
   onSelect: (info: SelectionInfo | null) => void;
   lod?: 'highest' | 'lod2' | 'lod3';
   texturesEnabled?: boolean;
+  /** Already-centred geometry for a streamed LoD3 building that is not
+   * embedded in the active CityJSON document. */
+  externalModel?: THREE.Group | null;
+  externalModelKey?: string;
   splitPreview?: SplitPreviewInfo | null;
   /** Drag handler — fires while the user is dragging a split-line ring in 3D.
    *  `ringIndex` is the ring's position in `splitPreview.heights` (0-based);
@@ -71,6 +75,8 @@ export default function Viewer({
   onSelect,
   lod = 'highest',
   texturesEnabled = false,
+  externalModel = null,
+  externalModelKey,
   splitPreview,
   onAdjustSplit,
 }: Props) {
@@ -205,6 +211,14 @@ export default function Viewer({
         else if (mat) mat.dispose();
       });
     }
+    if (externalModel) {
+      state.loader = null;
+      const model = cloneExternalModel(externalModel);
+      state.modelGroup.add(model);
+      const meshBbox = new THREE.Box3().setFromObject(model);
+      if (!meshBbox.isEmpty()) fitCameraToBox(state.camera, state.controls, meshBbox);
+      return;
+    }
     // Re-apply custom palette & color mode each load — resetMaterial() builds
     // fresh material instances and they default to objectColors-by-type unless
     // we explicitly pin showSemantics.
@@ -257,7 +271,7 @@ export default function Viewer({
     } catch (e) {
       console.warn('Could not fit camera:', e);
     }
-  }, [cityjson, reloadToken, colorMode, lod, texturesEnabled]);
+  }, [cityjson, reloadToken, colorMode, lod, texturesEnabled, externalModel, externalModelKey]);
 
   // 2b. Toggle showSemantics live without re-loading the whole model.
   // resetMaterial() → loader.load() rebuilds vertex buffers, which is wasteful
@@ -283,12 +297,12 @@ export default function Viewer({
       splitOverlayRef.current = null;
     }
 
-    if (!splitPreview || !cityjson) return;
+    if (!splitPreview || !cityjson || externalModel) return;
     const overlay = buildSplitOverlay(cityjson, splitPreview, state.loader);
     if (!overlay) return;
     splitOverlayRef.current = overlay;
     state.modelGroup.add(overlay);
-  }, [cityjson, splitPreview, reloadToken]);
+  }, [cityjson, splitPreview, reloadToken, externalModel]);
 
   // 3. Double-click picking
   useEffect(() => {
@@ -441,7 +455,7 @@ export default function Viewer({
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />
-      <div
+      {!externalModel && <div
         style={{
           position: 'absolute',
           top: 8,
@@ -473,9 +487,23 @@ export default function Viewer({
           onClick={() => setColorMode('usage')}
           label="By usage"
         />
-      </div>
+      </div>}
     </div>
   );
+}
+
+/** Give the viewer ownership of its own GPU resources. It can dispose this
+ * copy when the selection changes without invalidating the cached source. */
+function cloneExternalModel(source: THREE.Group): THREE.Group {
+  const clone = source.clone(true);
+  clone.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry = mesh.geometry.clone();
+    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(material)) mesh.material = material.map((item) => item.clone());
+    else if (material) mesh.material = material.clone();
+  });
+  return clone;
 }
 
 /** Keep one geometry tier per CityObject so the inspector never stacks LoD2

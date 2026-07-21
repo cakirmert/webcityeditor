@@ -8,7 +8,7 @@ This file is the single technical handoff for City Editor. It consolidates the f
 - The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed textured LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close building views use one CityJSON LoD3 object set. Semantic materials are the default; the LoD3-only switch binds the committed Hamburg photo atlases without changing geometry, culling, anchors, or editable-object visibility. Distant context falls back to grounded LoD2, outlines, or blocks.
+- Close untextured map views stream Hamburg Geoportal's official LoD3 3D Tiles from zoom 17. The service shares `DEHH...` IDs with the editable LoD2 context and supports browser CORS. The selected-building viewer uses those IDs to isolate one matching remote mesh when local LoD3 is absent; bundled photo atlases remain available for the committed textured subset.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 18.25 it selects source LoD3 where available, including BuildingInstallation descendants, and colours RoofSurface, WallSurface, Window, and Door faces semantically. The optional photo-texture switch changes only materials on those same LoD3 surfaces and has no effect at lower zooms. One document-wide projected origin and one all-source-LoD ground/anchor per root keep Float32 mesh coordinates small and identical across viewport, LoD, and texture changes. Selected and dirty buildings enter the close-detail budget before context, so new or edited objects remain present at maximum zoom. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. The selected-building viewer filters to one object and offers independent LoD2/LoD3 and texture controls, with textures off by default.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 17, official Hamburg objects switch to the Geoportal's untextured LoD3 3D Tiles. Locally created, dirty, or edited objects remain on the editable CityJSON layer. Enabling photo textures switches back to the committed local detail path, where the 68 matching surveyed LoD3 buildings use their bundled atlases and untextured editable neighbours remain visible. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous.
 
-The wide Hamburg context is LoD2. The editable close-up data preserves that geometry and adds 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, 20,294 surfaces, and 1,043 BuildingInstallation objects ship with the demo. The close map reads that committed CityJSON directly whether photographs are enabled or disabled; it does not replace the editor with a separately streamed duplicate city. Four placeable, single-root assets are extracted from tile `6433` with their complete BuildingInstallation descendants and correct texture atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, genus/species, planting years, and streets. The renderer selects rounded, spreading, columnar, or conical higher-resolution crowns from that botanical data. Edit focus hides the tree context to preserve interaction performance.
+The wide editable Hamburg context is LoD2. The untextured close map reads the whole-city official `LoD3_untexturiert` hierarchy directly. The repository also includes 68 matching surveyed LoD3 counterparts from Area 1 tile `6433`, with 68 JPG atlases, UV coordinates, 20,294 surfaces, and 1,043 BuildingInstallation objects for the textured path and offline assets. Four placeable, single-root assets retain their complete BuildingInstallation descendants and texture atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles. Edit focus hides remote detail and tree context to preserve interaction performance.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -77,9 +77,9 @@ Endpoint editing is deliberate:
 
 - yellow handles move existing bends;
 - white midpoint handles insert a bend;
-- separate purple handles remain visible at both ends of every editable section;
-- every nearby direction- and mode-compatible endpoint from other draft sections, editable CityJSON roads, and OSM roads is shown as a teal target, with candidate curves from the active handle;
-- dropping a purple handle on a teal target stores direction-aware lane pairs and exposes their source/target band, mode, direction, and endpoint in the bottom editor;
+- every incoming connectable lane has a numbered purple handle at its arrival endpoint;
+- every nearby direction- and mode-compatible outgoing lane from other draft sections, editable CityJSON roads, and OSM roads is shown as an exact lane-centre teal target, with candidate curves from the active handle;
+- dropping one purple lane handle on one teal lane target stores only that direction-aware movement and exposes its source/target band, mode, direction, and endpoint in the bottom editor; one source lane can retain multiple target movements;
 - connections between two editable CityJSON roads are written reciprocally;
 - imported osm2streets junction membership seeds editable incoming-to-outgoing lane-movement proposals. Provenance and proposed/confirmed/rejected status are retained, confirmed/rejected decisions are stored reciprocally in `_roadMovements`, and rejected curves stay suppressed after reload;
 - moving a confirmed endpoint away prompts before Save, then clears the stale reciprocal metadata
@@ -132,7 +132,7 @@ The strict CityJSONSeq catalog streams tiles for the visible viewport and suppor
 
 ### Official Hamburg LoD3 data
 
-The close map renders the committed editable CityJSON conversion of official tile `6433`, including its UVs and 68 local JPG atlases. This keeps geometry, textures, object identity, selection, and export on one code path with no runtime dependency on Hamburg's live 3D Tiles service. Reproduce the committed subset by downloading the tile's records from the Area 1 archive, converting with `citygml-tools`, then building it with:
+The untextured close map streams `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_untexturiert/tileset.json`. The service returns permissive CORS headers and B3DM batch IDs matching the `DEHH...` identifiers in Hamburg's LoD2 CityJSON. The selected-building inspector uses the same hierarchy and ID metadata, converts glTF Y-up coordinates to its Z-up scene, and recentres only the isolated building. The committed editable conversion of official tile `6433`, including its UVs and 68 local JPG atlases, remains the textured and offline subset. Reproduce it with:
 
 ```bash
 npm run data:hamburg-lod3-download -- 6433
@@ -231,12 +231,12 @@ Entering road edit mode clears the whole-road selection, and the synchronized si
 - Discarding or saving the draft may select the resulting road again, but that post-edit selection must be deliberate and visually distinct from a band selection.
 - Add a regression test for the transition from selected road to active draft and another for changing the selected band from the bottom editor.
 
-### 2. Make every possible endpoint connection visible and understandable
+### 2. Make every possible lane connection visible and understandable
 
-Every editable section now shows separate purple handles at both ends, all valid nearby teal targets, and candidate curves before a drag begins.
+Every incoming lane now shows its own numbered purple handle at its arrival endpoint, with exact outgoing-lane teal targets and candidate curves before a drag begins.
 
-- Render a distinct purple connection handle at both ends of every active editable road section. Keep these separate from yellow shape anchors and white bend-insertion handles, including when handles overlap in screen space.
-- When edit mode starts, or when a purple handle is pressed, show all compatible nearby road endpoints as teal targets. Do not limit target visibility to the single nearest endpoint before the drag begins.
+- Render a distinct purple connection handle for every connectable incoming lane. Keep these separate from yellow shape anchors and white bend-insertion handles, including when handles overlap in screen space.
+- When edit mode starts, or when a purple handle is pressed, show all compatible nearby outgoing lanes as teal targets. Do not limit target visibility to the single nearest target before the drag begins.
 - Draw lightweight, half-transparent candidate curves from the active purple handle to the available teal targets. Emphasize the currently hovered or nearest valid target without hiding the alternatives.
 - After a connection is confirmed, draw the persisted lane-to-lane curves and expose the source band, target band, direction, and endpoint in the bottom editor.
 - Define deterministic filtering for distance, road identity, direction compatibility, and bands that are actually connectable. Sidewalk, bicycle, car, bus, and shared-use connections must not be silently paired across incompatible modes.
@@ -292,7 +292,7 @@ Newly created, selected, dirty, and parametrically edited buildings have explici
 This task is complete only when all of the following hold in the Hamburg demo:
 
 1. Opening a road draft removes the whole-road highlight; selecting a menu band highlights only that band on the map.
-2. Both purple endpoint handles are visible, all valid nearby teal targets are discoverable, and candidate/confirmed curves explain the available lane movements.
+2. Numbered per-lane purple handles are visible, all valid nearby outgoing-lane targets are discoverable, and candidate/confirmed curves explain the available lane movements.
 3. Imported intersections display editable OSM/osm2streets-derived lane-movement proposals with provenance and deterministic persistence.
 4. Buildings do not slide, jump, or swap horizontal anchors during bearing, pitch, zoom, or LoD transitions.
 5. Close zoom visibly renders genuine detailed LoD3 geometry with textures independently optional.

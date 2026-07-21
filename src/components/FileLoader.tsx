@@ -12,6 +12,7 @@ import {
 import { publicAssetUrl } from '../lib/public-assets';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Trash2 } from 'lucide-react';
 
 interface Props {
   /**
@@ -576,8 +577,9 @@ export default function FileLoader({
                   variant="ghost"
                   onClick={() => handleDeleteLocal(r.name)}
                   title="Delete local save"
+                  aria-label={`Delete local save ${r.name}`}
                 >
-                  ×
+                  <Trash2 size={14} aria-hidden="true" />
                 </Button>
               </div>
             ))}

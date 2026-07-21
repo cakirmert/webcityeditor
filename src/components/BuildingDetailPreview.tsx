@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import * as THREE from 'three';
 import type { CityJsonDocument } from '../types';
-import { filterToBuilding } from '../lib/footprints';
+import { extractFootprints, filterToBuilding } from '../lib/footprints';
+import {
+  hamburgLod3CoversPoint,
+  isHamburgOfficialBuildingId,
+  loadHamburgLod3Building,
+  type HamburgLod3BuildingModel,
+} from '../lib/hamburg-lod3-tiles';
 import Viewer, { type SplitPreviewInfo } from './Viewer';
 
 interface Props {
@@ -10,6 +17,12 @@ interface Props {
   splitPreview: SplitPreviewInfo | null;
   onAdjustSplit?: (index: number, delta: number) => void;
 }
+
+type RemoteLod3State = {
+  status: 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
+  model: HamburgLod3BuildingModel | null;
+  message?: string;
+};
 
 export default function BuildingDetailPreview({
   cityjson,
@@ -26,17 +39,73 @@ export default function BuildingDetailPreview({
     () => inspectDetailAvailability(selectedDocument),
     [selectedDocument]
   );
+  const buildingCenter = useMemo(
+    () => selectedBuildingCenter(selectedDocument),
+    [selectedDocument]
+  );
+  const remoteLod3Eligible = !availability.lod3 &&
+    isHamburgOfficialBuildingId(buildingId) &&
+    buildingCenter !== null &&
+    hamburgLod3CoversPoint(buildingCenter);
+  const [remoteLod3, setRemoteLod3] = useState<RemoteLod3State>({
+    status: 'idle',
+    model: null,
+  });
   const [lod, setLod] = useState<'lod2' | 'lod3'>(
-    availability.lod3 ? 'lod3' : 'lod2'
+    availability.lod3 || remoteLod3Eligible ? 'lod3' : 'lod2'
   );
   const [texturesEnabled, setTexturesEnabled] = useState(false);
 
   useEffect(() => {
-    setLod(availability.lod3 ? 'lod3' : 'lod2');
+    setLod(availability.lod3 || remoteLod3Eligible ? 'lod3' : 'lod2');
     setTexturesEnabled(false);
-  }, [availability.lod3, buildingId]);
+  }, [availability.lod3, remoteLod3Eligible, buildingId]);
+
+  useEffect(() => {
+    if (!remoteLod3Eligible || !buildingCenter) {
+      setRemoteLod3({ status: 'idle', model: null });
+      return;
+    }
+    const controller = new AbortController();
+    let loadedModel: HamburgLod3BuildingModel | null = null;
+    setRemoteLod3({ status: 'loading', model: null });
+    void loadHamburgLod3Building(buildingId, buildingCenter, controller.signal)
+      .then((model) => {
+        if (controller.signal.aborted) return;
+        loadedModel = model;
+        setRemoteLod3(model
+          ? { status: 'ready', model }
+          : {
+              status: 'unavailable',
+              model: null,
+              message: 'Building was not present in the nearby LoD3 tiles.',
+            }
+        );
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setRemoteLod3({
+          status: 'error',
+          model: null,
+          message: error instanceof Error
+            ? error.message
+            : 'Could not load Hamburg LoD3 geometry.',
+        });
+      });
+    return () => {
+      controller.abort();
+      if (loadedModel) disposeRemoteModel(loadedModel.group);
+    };
+  }, [buildingCenter, buildingId, remoteLod3Eligible]);
 
   const texturesActive = lod === 'lod3' && availability.lod3Textures && texturesEnabled;
+  const remoteModel = lod === 'lod3' && remoteLod3.status === 'ready'
+    ? remoteLod3.model
+    : null;
+  const viewerLod = lod === 'lod3' && remoteLod3Eligible && !remoteModel
+    ? 'lod2'
+    : lod;
+  const lod3Available = availability.lod3 || remoteLod3Eligible;
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
@@ -44,8 +113,10 @@ export default function BuildingDetailPreview({
         cityjson={selectedDocument}
         reloadToken={reloadToken}
         onSelect={() => {}}
-        lod={lod}
+        lod={viewerLod}
         texturesEnabled={texturesActive}
+        externalModel={remoteModel?.group}
+        externalModelKey={remoteModel ? `${buildingId}:${remoteModel.tileUrl}` : undefined}
         splitPreview={splitPreview}
         onAdjustSplit={onAdjustSplit}
       />
@@ -61,7 +132,7 @@ export default function BuildingDetailPreview({
           </DetailButton>
           <DetailButton
             active={lod === 'lod3'}
-            disabled={!availability.lod3}
+            disabled={!lod3Available}
             onClick={() => setLod('lod3')}
           >
             LoD3
@@ -81,9 +152,7 @@ export default function BuildingDetailPreview({
       </div>
 
       <div className="building-detail-status">
-        Selected building only · {lod === 'lod3' ? 'LoD3' : 'LoD2'} ·{' '}
-        {texturesActive ? 'photo textures on' : 'semantic surface colours'}
-        {!availability.lod3 && ' · no LoD3 geometry in this object'}
+        {detailStatusText(lod, texturesActive, availability.lod3, remoteLod3)}
       </div>
     </div>
   );
@@ -110,6 +179,57 @@ function DetailButton({
       {children}
     </button>
   );
+}
+
+function selectedBuildingCenter(doc: CityJsonDocument): [number, number] | null {
+  const footprint = extractFootprints(doc)[0];
+  if (!footprint || footprint.polygon.length === 0) return null;
+  const polygon = footprint.polygon;
+  const end = polygon.length > 1 &&
+    polygon[0][0] === polygon[polygon.length - 1][0] &&
+    polygon[0][1] === polygon[polygon.length - 1][1]
+    ? polygon.length - 1
+    : polygon.length;
+  if (end === 0) return null;
+  let lng = 0;
+  let lat = 0;
+  for (let index = 0; index < end; index += 1) {
+    lng += polygon[index][0];
+    lat += polygon[index][1];
+  }
+  return [lng / end, lat / end];
+}
+
+function detailStatusText(
+  lod: 'lod2' | 'lod3',
+  texturesActive: boolean,
+  localLod3: boolean,
+  remote: RemoteLod3State
+): string {
+  if (lod === 'lod2') return 'Selected building only / LoD2 / semantic surface colours';
+  if (localLod3) {
+    return `Selected building only / LoD3 / ${texturesActive ? 'photo textures on' : 'semantic surface colours'}`;
+  }
+  if (remote.status === 'ready') {
+    return `Selected building only / LoD3 / Hamburg Geoportal untextured geometry / ${remote.model?.triangleCount ?? 0} triangles`;
+  }
+  if (remote.status === 'loading') {
+    return 'Selected building only / Loading Hamburg Geoportal LoD3 / showing LoD2 temporarily';
+  }
+  if (remote.status === 'error' || remote.status === 'unavailable') {
+    return `Selected building only / LoD3 unavailable / ${remote.message ?? 'showing LoD2'}`;
+  }
+  return 'Selected building only / LoD3 unavailable';
+}
+
+function disposeRemoteModel(group: THREE.Group): void {
+  group.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(material)) material.forEach((item) => item.dispose());
+    else if (material) material.dispose();
+  });
 }
 
 function inspectDetailAvailability(doc: CityJsonDocument): {

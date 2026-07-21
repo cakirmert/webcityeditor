@@ -4,7 +4,7 @@ City Editor is a touch-friendly map editor for Hamburg buildings, roads, and pla
 
 **[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
 
-The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms show semantic LoD3 geometry without photographs by default; **Photo textures** bind the bundled official Hamburg atlases to those same CityJSON LoD3 surfaces. The editable roads, attributes, and saved changes remain in one CityJSON model.
+The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. From zoom 17, the map streams Hamburg Geoportal's official untextured LoD3 geometry; the browser-ready source uses the same `DEHH...` building IDs as the editable LoD2 context. **Photo textures** switches to the bundled textured LoD3 subset. Editable roads, attributes, and saved changes remain in CityJSON.
 
 ![City Editor showing the Hamburg CityJSON overview](assets/readme/city-overview.jpg)
 
@@ -42,7 +42,7 @@ Open **Map layers** in the upper-left of the map.
 
 The loaded source geometry is protected. **Make editable (replace with parametric)** deliberately replaces it with a shape that can change roof geometry, windows, doors, overhangs, and subdivisions. Ordinary attribute edits do not need this conversion.
 
-The selected-building viewer loads only the selected CityJSON object. Use its **LoD2 / LoD3** control to compare source tiers and its separate **Textures** switch when that building contains a photo atlas; textures start off. Their photographed windows and doors are not automatically editable openings. Buildings are attached to the flat editor map using each building’s surveyed ground height.
+The selected-building viewer loads only the selected object. Use its **LoD2 / LoD3** control to compare source tiers. When the local CityJSON has only LoD2 for an official Hamburg building, LoD3 stays enabled and isolates the matching untextured Geoportal mesh by its `DEHH...` ID. The separate **Textures** switch is available only for buildings with a bundled photo atlas; textures start off. Photographed windows and doors are not automatically editable openings.
 
 ## Add a new building
 
@@ -66,8 +66,8 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
 2. Tap a coloured road surface on the map, then choose **Edit road**.
 3. Tap a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
 4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction arrows update from the road bands.
-5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Both road ends have separate purple connectors; all compatible nearby ends appear as teal targets, and faint curves preview the alternatives.
-6. Drag a purple connector onto a teal target to confirm direction- and mode-compatible lane pairs. Imported junctions also show subdued osm2streets-derived movement proposals; inspect their source/target bands and choose **Confirm** or **Reject** in the bottom editor.
+5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Every incoming lane has its own numbered purple connector; all compatible outgoing lanes appear as teal targets, and faint curves preview the alternatives.
+6. Drag one numbered connector onto one teal lane target to confirm exactly that direction- and mode-compatible movement. Add more targets to the same source lane when it supports multiple turns. Imported junctions also show subdued osm2streets-derived proposals; inspect their source/target bands and choose **Confirm** or **Reject** in the bottom editor.
 7. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
 8. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.
 9. Choose **Save exact attributes** or **Save road changes**. Confirmed/rejected movement decisions are stored reciprocally without changing protected exact polygons. **Discard** leaves the saved CityJSON unchanged.
@@ -83,7 +83,7 @@ Attribute-only changes preserve imported osm2streets polygons and vertices. Movi
 3. Choose the large **Finish road** button. Two or more points are required.
 4. Edit the generated road bands exactly like an existing road.
 5. Compare the shape with **Satellite** and adjust both opacity sliders when needed.
-6. Use either purple end connector and the visible teal targets to connect it to existing roads; faint curves show candidates and stronger curves show saved lane-to-lane pairs.
+6. Use the numbered per-lane purple connectors and visible teal lane targets to connect it to existing roads; faint curves show candidates and stronger curves show saved lane-to-lane movements.
 7. Choose **Save new road** to insert it into the working CityJSON.
 
 > **Screenshot to add — `assets/readme/new-road.jpg`**

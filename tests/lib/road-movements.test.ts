@@ -5,11 +5,14 @@ import {
   deriveEditableRoadDraftFromAreas,
   extractTransportationAreas,
   type RoadBand,
+  type RoadDraft,
 } from '../../src/lib/transportation';
 import {
   compatibleRoadBandPairs,
+  connectManualRoadLaneMovement,
   deriveImportedRoadMovements,
   isRoadBandConnectable,
+  removeRoadMovement,
   synchronizeRoadMovementMetadata,
   updateRoadMovementStatus,
 } from '../../src/lib/road-movements';
@@ -159,5 +162,74 @@ describe('imported road lane movements', () => {
     const reloaded = fixtureDraft(doc);
     const rederived = deriveImportedRoadMovements(reloaded.areas, reloaded.draft);
     expect(rederived.find((movement) => movement.id === rejected.id)?.status).toBe('rejected');
+  });
+
+  it('confirms only the lane pair the user connected and keeps additional turns', () => {
+    const source: RoadDraft = {
+      id: 'source-road',
+      source: 'manual' as const,
+      userVerified: false,
+      sections: [{
+        id: 'source-section',
+        centerlineWgs84: [[10, 53], [10.001, 53]] as [number, number][],
+        bands: [
+          { id: 'source-car', kind: 'car_lane' as const, widthM: 3.2, direction: 'forward' as const, allowedModes: ['car'] },
+          { id: 'source-bike', kind: 'bike_lane' as const, widthM: 1.8, direction: 'forward' as const, allowedModes: ['bicycle'] },
+        ],
+      }],
+    };
+    const targetSection = {
+      id: 'target-section',
+      centerlineWgs84: [[10.001, 53], [10.002, 53.001]] as [number, number][],
+      bands: [
+        { id: 'target-car-left', kind: 'car_lane' as const, widthM: 3.2, direction: 'forward' as const, allowedModes: ['car'] },
+        { id: 'target-car-right', kind: 'car_lane' as const, widthM: 3.2, direction: 'forward' as const, allowedModes: ['car'] },
+        { id: 'target-walk', kind: 'sidewalk' as const, widthM: 2, direction: 'both' as const, allowedModes: ['pedestrian'] },
+      ],
+    };
+
+    const first = connectManualRoadLaneMovement(
+      source,
+      'source-section',
+      'end',
+      0,
+      { roadId: 'target-road', section: targetSection, endpoint: 'start', bandIndex: 0 }
+    );
+    const second = connectManualRoadLaneMovement(
+      first,
+      'source-section',
+      'end',
+      0,
+      { roadId: 'target-road', section: targetSection, endpoint: 'start', bandIndex: 1 }
+    );
+
+    expect(second.movements).toHaveLength(2);
+    expect(second.movements).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceBandId: 'source-car',
+        targetBandId: 'target-car-left',
+        sourceMode: 'car',
+        targetMode: 'car',
+        status: 'confirmed',
+        provenance: 'manual',
+      }),
+      expect.objectContaining({
+        sourceBandId: 'source-car',
+        targetBandId: 'target-car-right',
+      }),
+    ]));
+    expect(source.movements).toBeUndefined();
+
+    const incompatible = connectManualRoadLaneMovement(
+      second,
+      'source-section',
+      'end',
+      1,
+      { roadId: 'target-road', section: targetSection, endpoint: 'start', bandIndex: 2 }
+    );
+    expect(incompatible).toBe(second);
+
+    const removed = removeRoadMovement(second, second.movements![0].id);
+    expect(removed.movements).toHaveLength(1);
   });
 });

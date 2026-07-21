@@ -9,6 +9,7 @@ import BuildingStartPanel from './components/BuildingStartPanel';
 import RoadEditorPanel from './components/RoadEditorPanel';
 import FilterBar from './components/FilterBar';
 import BuildingListPanel from './components/BuildingListPanel';
+import { X } from 'lucide-react';
 
 // Hooks
 import { useCoreState } from './hooks/useCoreState';
@@ -938,7 +939,7 @@ export default function App() {
                   aria-label="Close"
                   style={{ padding: '2px 8px' }}
                 >
-                  ×
+                  <X size={15} aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -1467,9 +1468,13 @@ function IfcPlacementBanner({
             cursor: 'pointer',
             fontFamily: 'inherit',
             fontSize: 'inherit',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
-          ✕ Cancel
+          <X size={14} aria-hidden="true" />
+          Cancel
         </button>
       </div>
     </div>

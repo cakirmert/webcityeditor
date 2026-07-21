@@ -10,6 +10,7 @@ import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   buildRoadSnapCandidates,
+  compatibleRoadLaneSnapCandidates,
   compatibleRoadSnapCandidates,
   connectRoadLanes,
   insertRoadDraftPoint,
@@ -353,5 +354,68 @@ describe('road draft edit helpers', () => {
     expect(compatible.map((candidate) => candidate.distanceMeters)).toEqual(
       [...compatible.map((candidate) => candidate.distanceMeters)].sort((a, b) => a! - b!)
     );
+  });
+
+  it('expands a road end into exact outgoing lane targets for one incoming lane', () => {
+    const source: RoadDraft = {
+      ...draft,
+      sections: [{
+        ...draft.sections[0],
+        centerlineWgs84: [[10, 53], [10.001, 53]],
+        bands: [
+          { id: 'source-car', kind: 'car_lane', widthM: 3.2, direction: 'forward', allowedModes: ['car'] },
+          { id: 'source-bike', kind: 'bike_lane', widthM: 1.8, direction: 'forward', allowedModes: ['bicycle'] },
+        ],
+      }],
+    };
+    const targetSection = {
+      id: 'target-section',
+      centerlineWgs84: [[10.00102, 53], [10.002, 53.001]] as [number, number][],
+      bands: [
+        { id: 'target-car-a', kind: 'car_lane' as const, widthM: 3.2, direction: 'forward' as const, allowedModes: ['car'] },
+        { id: 'target-car-b', kind: 'car_lane' as const, widthM: 3.2, direction: 'forward' as const, allowedModes: ['car'] },
+        { id: 'target-car-in', kind: 'car_lane' as const, widthM: 3.2, direction: 'backward' as const, allowedModes: ['car'] },
+        { id: 'target-walk', kind: 'sidewalk' as const, widthM: 2, direction: 'both' as const, allowedModes: ['pedestrian'] },
+      ],
+    };
+    const candidates: RoadSnapCandidate[] = [{
+      id: 'cityjson:target-road:target-section:start',
+      position: targetSection.centerlineWgs84[0],
+      connection: {
+        target: 'cityjson',
+        targetId: 'target-road',
+        targetSectionId: 'target-section',
+        targetEndpoint: 'start',
+        positionWgs84: targetSection.centerlineWgs84[0],
+        confirmed: true,
+      },
+      targetBands: targetSection.bands,
+      targetSection,
+    }];
+
+    const laneTargets = compatibleRoadLaneSnapCandidates(
+      source,
+      'section-1',
+      'end',
+      0,
+      candidates,
+      80
+    );
+
+    expect(laneTargets).toHaveLength(2);
+    expect(laneTargets.map((candidate) => candidate.targetBand.id)).toEqual([
+      'target-car-b',
+      'target-car-a',
+    ]);
+    expect(laneTargets.every((candidate) => candidate.sharedMode === 'car')).toBe(true);
+    expect(laneTargets[0].position).not.toEqual(laneTargets[1].position);
+    expect(compatibleRoadLaneSnapCandidates(
+      source,
+      'section-1',
+      'start',
+      0,
+      candidates,
+      80
+    )).toEqual([]);
   });
 });

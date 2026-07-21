@@ -9,6 +9,7 @@ import {
 } from '../lib/filter';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 
 interface Props {
   footprints: Footprint[];
@@ -52,7 +53,7 @@ export default function FilterBar({ footprints, filter, onChange, matchCount }: 
   return (
     <div className="flex flex-col gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-[11px]">
       <div className="flex items-center gap-2">
-        <span className="text-[var(--text-dim)]">🔍</span>
+        <Search className="shrink-0 text-[var(--text-dim)]" size={16} aria-hidden="true" />
         <Input
           type="text"
           placeholder="Search id, function, year…"
@@ -75,11 +76,12 @@ export default function FilterBar({ footprints, filter, onChange, matchCount }: 
 
         {!empty && (
           <Button size="sm" variant="ghost" onClick={reset}>
-            ✕ Clear filters
+            <X size={14} aria-hidden="true" />
+            Clear filters
           </Button>
         )}
         <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
-          {open ? 'Less ▴' : 'More filters ▾'}
+          {open ? <><span>Less</span><ChevronUp size={14} aria-hidden="true" /></> : <><span>More filters</span><ChevronDown size={14} aria-hidden="true" /></>}
         </Button>
       </div>
 

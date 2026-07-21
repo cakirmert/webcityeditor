@@ -327,7 +327,7 @@ export function useImportExport(
     lines.push('');
     const max = 12;
     for (const issue of integrity.issues.slice(0, max)) {
-      const tag = issue.severity === 'error' ? '✗' : issue.severity === 'warning' ? '⚠' : 'ℹ';
+      const tag = issue.severity === 'error' ? 'ERROR' : issue.severity === 'warning' ? 'WARNING' : 'INFO';
       lines.push(`${tag} [${issue.code}] ${issue.message}`);
     }
     if (integrity.issues.length > max) {

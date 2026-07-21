@@ -810,6 +810,7 @@ export function insertRoadIntoCityJson(
     throw new Error(`Cannot create road: CRS ${crs.code} is not supported by proj4.`);
   }
   const id = options.id ?? uniqueRoadId(doc);
+  const persistedDraft = roadDraftForPersistedRoadId(draft, id);
   const existingRoad = doc.CityObjects[id];
   const existingAttributes = existingRoad?.type === 'Road' ? existingRoad.attributes ?? {} : {};
   const changedAt = new Date().toISOString();
@@ -882,7 +883,7 @@ export function insertRoadIntoCityJson(
       _roadGeometryMode: 'generated',
       _sourceCenterlineWgs84:
         projectedAreas[0]?.attributes.sourceCenterlineWgs84 ?? null,
-      _roadLayout: roadDraftToJson(draft),
+      _roadLayout: roadDraftToJson(persistedDraft),
     },
     geometry: [
       {
@@ -1075,7 +1076,7 @@ export function updateExactRoadAttributesInCityJson(
     ...(object.attributes ?? {}),
     name: draft.name ?? object.attributes?.name ?? null,
     _roadGeometryMode: 'exact',
-    _roadLayout: roadDraftToJson(draft),
+    _roadLayout: roadDraftToJson(roadDraftForPersistedRoadId(draft, roadId)),
     _updatedAt: new Date().toISOString(),
     _userVerified: draft.userVerified ?? object.attributes?._userVerified ?? false,
   };
@@ -2134,6 +2135,29 @@ function cloneDraft(draft: RoadDraft): RoadDraft {
 
 function roadDraftToJson(draft: RoadDraft): JsonValue {
   return cloneDraft(draft) as unknown as JsonValue;
+}
+
+function roadDraftForPersistedRoadId(draft: RoadDraft, roadId: string): RoadDraft {
+  const previousId = draft.id;
+  return {
+    ...cloneDraft(draft),
+    id: roadId,
+    ...(draft.movements
+      ? {
+          movements: draft.movements.map((movement) => ({
+            ...movement,
+            sourceRoadId:
+              movement.sourceRoadId === previousId || movement.sourceRoadId === 'draft'
+                ? roadId
+                : movement.sourceRoadId,
+            targetRoadId:
+              movement.targetRoadId === previousId || movement.targetRoadId === 'draft'
+                ? roadId
+                : movement.targetRoadId,
+          })),
+        }
+      : {}),
+  };
 }
 
 function jsonRecord(record: Record<string, string>): JsonValue {

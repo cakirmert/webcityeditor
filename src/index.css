@@ -185,6 +185,98 @@
   .building-start-action { min-width: 78px; }
 }
 
+/* Building creation is a primary map workflow, so every interactive control
+   remains comfortably usable with a finger as well as a mouse. */
+.building-creator-form input:not([type='checkbox']),
+.building-creator-form button[role='combobox'] {
+  min-height: 40px;
+}
+
+.building-creator-toggles label {
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  touch-action: manipulation;
+}
+
+.building-creator-toggles input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+}
+
+.building-creator-split-axis button {
+  min-height: 40px;
+  touch-action: manipulation;
+}
+
+.building-creator-select-content [role='option'] { min-height: 40px; }
+
+@media (max-width: 760px) {
+  .building-creator-backdrop { align-items: stretch; }
+  .building-creator-shell { border: 0; }
+  .building-creator-header { padding: 16px; }
+  .building-creator-scroll { padding: 16px; }
+  .building-creator-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 6px;
+    padding-block: 3px;
+  }
+  .building-creator-row > label { font-size: 12px; }
+  .building-creator-form input:not([type='checkbox']),
+  .building-creator-form button[role='combobox'] {
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .building-creator-toggles label { min-height: 48px; font-size: 14px; }
+  .building-creator-roof-choice { min-height: 96px; }
+  .building-creator-part-choice { min-height: 80px; }
+  .building-creator-split-axis {
+    flex-wrap: wrap;
+    padding-left: 0;
+    font-size: 11px;
+  }
+  .building-creator-split-axis button { min-height: 48px; padding-inline: 12px; }
+  .building-creator-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    flex-wrap: wrap;
+    background: var(--surface);
+  }
+  .building-creator-footer > div { width: 100%; max-width: none; }
+  .building-creator-footer > button {
+    flex: 1;
+    min-width: 132px;
+    min-height: 52px;
+    font-size: 14px;
+  }
+  .building-creator-select-content [role='option'] {
+    min-height: 48px;
+    font-size: 14px;
+  }
+}
+
+@media (pointer: coarse) {
+  .building-creator-form input:not([type='checkbox']),
+  .building-creator-form button[role='combobox'] {
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .building-creator-toggles label { min-height: 48px; font-size: 14px; }
+  .building-creator-roof-choice { min-height: 104px; }
+  .building-creator-part-choice { min-height: 88px; }
+  .building-creator-split-axis button { min-height: 48px; padding-inline: 12px; }
+  .building-creator-footer > button { min-height: 52px; font-size: 14px; }
+  .building-creator-select-content [role='option'] {
+    min-height: 48px;
+    font-size: 14px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1056,6 +1148,12 @@ select:focus {
   font-size: 17px;
   font-weight: 900;
   letter-spacing: 0.04em;
+}
+
+.map-road-cross-section__bands .map-road-band__icon svg {
+  width: 21px;
+  height: 21px;
+  stroke-width: 2;
 }
 
 .map-road-cross-section__connections {

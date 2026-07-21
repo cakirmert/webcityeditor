@@ -610,7 +610,7 @@ export default function RoadEditorPanel({
             <div className="road-handle-explainer" data-testid="road-centerline-drag-hint">
               <div><i className="road-guide-dot road-guide-dot--anchor" /><span><b>Yellow anchor</b>Drag it to bend the smooth road.</span></div>
               <div><i className="road-guide-dot road-guide-dot--add">+</i><span><b>White +</b>Tap or drag to add another bend.</span></div>
-              <div><i className="road-guide-dot road-guide-dot--connect">↗</i><span><b>Purple connector</b>Drag it from a road end to make a join.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--connect">1</i><span><b>Numbered lane connector</b>Drag one incoming lane to one outgoing target.</span></div>
               <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Teal target</b>Drop the purple connector here.</span></div>
               <p
                 className="col-span-full m-0 text-[11px] leading-5 text-[var(--text-dim)]"

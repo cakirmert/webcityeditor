@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { TriangleAlert } from 'lucide-react';
 
 /**
  * Form payload the creator emits — same shape as the legacy `NewBuildingDialog`
@@ -170,18 +171,18 @@ export default function BuildingCreator({
   }, [onCancel]);
 
   return (
-    <div className="fixed inset-0 z-[90] flex bg-[rgba(0,0,0,0.55)] backdrop-blur-sm">
-      <div className="m-auto flex h-full w-full max-w-[1600px] overflow-hidden border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_64px_rgba(0,0,0,0.5)] md:h-[92vh] md:w-[94vw] md:rounded-lg">
+    <div className="building-creator-backdrop fixed inset-0 z-[90] flex bg-[rgba(0,0,0,0.55)] backdrop-blur-sm">
+      <div className="building-creator-shell m-auto flex h-full w-full max-w-[1600px] overflow-hidden border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_64px_rgba(0,0,0,0.5)] md:h-[92vh] md:w-[94vw] md:rounded-lg">
         {/* ── Left pane: form ──────────────────────────────────────────── */}
-        <div className="flex w-full shrink-0 flex-col border-r border-[var(--border)] md:w-[420px]">
-          <header className="border-b border-[var(--border)] px-5 py-3">
+        <div className="building-creator-form flex w-full shrink-0 flex-col border-r border-[var(--border)] md:w-[420px]">
+          <header className="building-creator-header border-b border-[var(--border)] px-5 py-3">
             <h2 className="text-[18px] font-semibold">Custom building</h2>
             <p className="mt-1 text-[12px] text-[var(--text-dim)]">
               Your {vertexCount}-corner outline is ready. Changes appear immediately in the preview.
             </p>
           </header>
 
-          <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          <div className="building-creator-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
             <Section label="Roof type">
               <RoofTypePicker value={roofType} onChange={setRoofType} />
             </Section>
@@ -251,7 +252,10 @@ export default function BuildingCreator({
               {validation.warnings.length > 0 && (
                 <div className="rounded-md border border-[var(--warn)] bg-[rgba(251,191,36,0.08)] px-2 py-1.5 text-[11px] text-[var(--warn)]">
                   {validation.warnings.map((w, i) => (
-                    <div key={i}>⚠ {w}</div>
+                    <div key={i} className="flex items-start gap-1.5">
+                      <TriangleAlert size={14} className="mt-px shrink-0" aria-hidden="true" />
+                      <span>{w}</span>
+                    </div>
                   ))}
                 </div>
               )}
@@ -323,7 +327,7 @@ export default function BuildingCreator({
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="building-creator-select-content">
                     <SelectItem value="residential">residential</SelectItem>
                     <SelectItem value="commercial">commercial</SelectItem>
                     <SelectItem value="industrial">industrial</SelectItem>
@@ -351,22 +355,22 @@ export default function BuildingCreator({
               <div className="mb-2 text-[11px] leading-relaxed text-[var(--text-dim)]">
                 Add editable Window and Door surfaces. This does not pretend the custom model came from an official LoD3 survey.
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-                <label className="flex items-center gap-1 cursor-pointer">
+              <div className="building-creator-toggles flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={addWindows}
                     onChange={(e) => setAddWindows(e.target.checked)}
-                    className="h-3.5 w-3.5"
+                    className="h-5 w-5"
                   />
                   <span>Windows</span>
                 </label>
-                <label className="flex items-center gap-1 cursor-pointer">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={addDoor}
                     onChange={(e) => setAddDoor(e.target.checked)}
-                    className="h-3.5 w-3.5"
+                    className="h-5 w-5"
                   />
                   <span>Door</span>
                 </label>
@@ -380,7 +384,7 @@ export default function BuildingCreator({
                   <SelectTrigger aria-label="Window style">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="building-creator-select-content">
                     <SelectItem value="classic">Classic · narrow rhythm</SelectItem>
                     <SelectItem value="balanced">Balanced · standard</SelectItem>
                     <SelectItem value="modern">Modern · wide glazing</SelectItem>
@@ -429,7 +433,7 @@ export default function BuildingCreator({
                     />
                   </Row>
                   {splitMode === 'sides' && (
-                    <div className="flex items-center gap-1 text-[10px] pl-[42%]">
+                    <div className="building-creator-split-axis flex items-center gap-1 text-[10px] pl-[42%]">
                       <span className="text-[var(--text-dim)] mr-1">Cut:</span>
                       {(['auto', 'longer', 'shorter'] as const).map((a) => (
                         <button
@@ -465,7 +469,7 @@ export default function BuildingCreator({
             </Section>
           </div>
 
-          <footer className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+          <footer className="building-creator-footer flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             {error && (
               <div className="mr-auto max-w-[250px] rounded-md border border-[var(--err,#cb4b4b)] bg-[rgba(203,75,75,0.12)] px-2 py-1 text-[11px] text-[var(--err,#ff7b7b)]">
                 {error}
@@ -479,7 +483,7 @@ export default function BuildingCreator({
         </div>
 
         {/* ── Right pane: live 3D preview ─────────────────────────────── */}
-        <div className="relative hidden min-w-0 flex-1 bg-black md:block">
+        <div className="building-creator-preview relative hidden min-w-0 flex-1 bg-black md:block">
           {previewDoc ? (
             <Viewer
               cityjson={previewDoc}
@@ -513,11 +517,11 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div>
+    <div className="building-creator-section">
       <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)]">
         {label}
       </div>
-      <div className="space-y-1.5">{children}</div>
+      <div className="building-creator-section__body space-y-1.5">{children}</div>
     </div>
   );
 }
@@ -538,7 +542,7 @@ function PartChoice({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className={`flex min-h-[58px] items-center gap-3 rounded-lg border px-3 py-2 text-left touch-manipulation ${
+      className={`building-creator-part-choice flex min-h-[72px] items-center gap-3 rounded-lg border px-3 py-2 text-left touch-manipulation ${
         selected
           ? 'border-[var(--accent)] bg-[rgba(76,125,255,0.12)]'
           : 'border-[var(--border)] bg-[var(--bg)]'
@@ -561,7 +565,7 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[42%_1fr] items-center gap-2">
+    <div className="building-creator-row grid grid-cols-[42%_1fr] items-center gap-2">
       <Label className="text-[11px]">{label}</Label>
       {children}
     </div>
@@ -606,7 +610,7 @@ function RoofTypePicker({
     { key: 'hip', label: 'Hip', sub: 'rectangle', icon: <HipIcon /> },
   ];
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="building-creator-roof-grid grid grid-cols-2 gap-2">
       {options.map((o) => {
         const selected = value === o.key;
         return (
@@ -614,7 +618,7 @@ function RoofTypePicker({
             key={o.key}
             type="button"
             onClick={() => onChange(o.key)}
-            className={`group flex flex-col items-center gap-1 rounded-md border px-2 py-2 transition-colors ${
+            className={`building-creator-roof-choice group flex min-h-[82px] flex-col items-center gap-1 rounded-md border px-2 py-2 transition-colors touch-manipulation ${
               selected
                 ? 'border-[var(--accent)] bg-[rgba(76,126,255,0.12)]'
                 : 'border-[var(--border)] bg-[var(--bg)] hover:border-[var(--text-faint)] hover:bg-[var(--surface-2)]'
