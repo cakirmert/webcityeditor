@@ -28,6 +28,7 @@ export function extractOpenings(
   };
 
   const results: OpeningInfo[] = [];
+  const seenOpeningRings = new Set<string>();
 
   for (const geomRaw of obj.geometry) {
     const g = geomRaw as {
@@ -56,6 +57,12 @@ export function extractOpenings(
         if (!openingType) continue;
         const outerRing = shell[f][0];
         if (!outerRing || outerRing.length < 3) continue;
+        // Multiple LoD tiers may intentionally reference the same explicit
+        // opening vertices. Present that physical opening once in the editor;
+        // moveOpening still rewrites every geometry tier that shares them.
+        const openingKey = `${openingType}:${[...outerRing].sort((a, b) => a - b).join(',')}`;
+        if (seenOpeningRings.has(openingKey)) continue;
+        seenOpeningRings.add(openingKey);
         const decoded = outerRing.map(decode);
         const cx = decoded.reduce((a, v) => a + v[0], 0) / decoded.length;
         const cy = decoded.reduce((a, v) => a + v[1], 0) / decoded.length;

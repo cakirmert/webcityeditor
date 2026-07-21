@@ -4,7 +4,7 @@ City Editor is a touch-friendly map editor for Hamburg buildings, roads, and pla
 
 **[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
 
-The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. From zoom 17, the map streams Hamburg Geoportal's official untextured LoD3 geometry; the browser-ready source uses the same `DEHH...` building IDs as the editable LoD2 context. **Photo textures** switches to the bundled textured LoD3 subset. Editable roads, attributes, and saved changes remain in CityJSON.
+The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. From zoom 17, the map streams Hamburg Geoportal's official untextured LoD3 geometry; the browser-ready source uses the same `DEHH...` building IDs as the editable LoD2 context. **Photo textures** starts on and overlays the bundled textured LoD3 subset without turning off the citywide untextured geometry. Hamburg's official DGM hybrid terrain supplies the shared ground elevation for every building tier. Editable roads, attributes, and saved changes remain in CityJSON.
 
 ![City Editor showing the Hamburg CityJSON overview](assets/readme/city-overview.jpg)
 
@@ -23,8 +23,9 @@ Open **Map layers** in the upper-left of the map.
 - **Satellite** is useful for checking building footprints and road alignment.
 - **Satellite image** and **Road surfaces** have separate opacity sliders.
 - **Building colours** defaults to **Roof type**. **Usage** also understands Hamburg’s official ALKIS function codes.
-- **Photo textures** is off by default and becomes available only when LoD3 geometry is actually drawn. Toggling it changes materials, not the visible object set; untextured new or edited buildings stay beside photographed neighbours.
+- **Photo textures** is on by default and becomes available only when LoD3 geometry is actually drawn. Turning it off removes only the photo material; citywide untextured LoD3 and untextured new or edited buildings remain visible.
 - The status at the bottom reports the geometry LoD, drawn objects, buildings, installations, surfaces, and real texture state.
+- The map surface is Hamburg's CORS-enabled quantized-mesh DGM hybrid, with TopPlus or satellite imagery draped onto the same terrain used to clamp LoD0, LoD2, LoD3, previews, and trees.
 
 > **Screenshot to add — `assets/readme/map-layers.jpg`**
 > Open Map layers over a close Hamburg view. Show TopPlus and Satellite, Building colours with Roof type selected, the LoD3 Photo textures switch, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps comparison, semantic colour, and optional LoD3 texture controls together.”
@@ -42,7 +43,7 @@ Open **Map layers** in the upper-left of the map.
 
 The loaded source geometry is protected. **Make editable (replace with parametric)** deliberately replaces it with a shape that can change roof geometry, windows, doors, overhangs, and subdivisions. Ordinary attribute edits do not need this conversion.
 
-The selected-building viewer loads only the selected object. Use its **LoD2 / LoD3** control to compare source tiers. When the local CityJSON has only LoD2 for an official Hamburg building, LoD3 stays enabled and isolates the matching untextured Geoportal mesh by its `DEHH...` ID. The separate **Textures** switch is available only for buildings with a bundled photo atlas; textures start off. Photographed windows and doors are not automatically editable openings.
+The selected-building viewer loads only the selected object. Use its **LoD2 / LoD3** control to compare source tiers. When the local CityJSON has only LoD2 for an official Hamburg building, LoD3 stays enabled and isolates the matching untextured Geoportal mesh by its `DEHH...` ID. The separate **Textures** switch starts on when a bundled photo atlas is available and can be turned off without changing the selected LoD. Photographed windows and doors are not automatically editable openings.
 
 ## Add a new building
 
@@ -52,7 +53,7 @@ The selected-building viewer loads only the selected object. Use its **LoD2 / Lo
 4. For a custom building, tap at least three footprint corners and choose **Use outline**.
 5. Set height, roof, classic/balanced/modern window rhythm, doors, and editable parts while watching the preview.
 6. Keep **One building** for the simple default. Choose independent floors or side-by-side wings only when those parts must be edited separately.
-7. Choose **Create Building**. The new building becomes part of the working CityJSON.
+7. Choose **Create Building**. The new building becomes part of the working CityJSON, gets an explicit LoD3 tier, and remains visible through the overview/detail transition.
 
 > **Screenshot to add — `assets/readme/new-building.jpg`**
 > Show the New Building chooser with the four sample assets and Draw a custom building visible. Keep part of the map visible behind it. Suggested caption: “Start from a reusable single-building LoD3 asset or draw a custom footprint.”
@@ -141,4 +142,4 @@ npm run dev
 
 Open the local address printed in the terminal. The committed demo is enough for the default workflow.
 
-The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).
+The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Ground elevation comes from Hamburg's [DGM hybrid quantized-mesh service](https://daten-hamburg.de/gdi3d/datasource-data/Gelaende/layer.json). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).

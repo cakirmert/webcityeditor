@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
 import { generateBuilding, insertBuilding, type NewBuildingParams } from '../../src/lib/generator';
 import { estimateTerrainSnap, isTerrainMatched, snapTransformToTerrain } from '../../src/lib/terrain';
+import {
+  rememberHamburgTerrainTiles,
+  type HamburgTerrainTile,
+} from '../../src/lib/hamburg-terrain';
 
 const FOOTPRINT: [number, number][] = [
   [4.3571, 52.0116],
@@ -33,6 +37,51 @@ function makeDocWithTerrainProxy() {
 }
 
 describe('terrain snap', () => {
+  afterEach(() => rememberHamburgTerrainTiles([]));
+
+  it('uses the official Hamburg DGM before nearby building proxies', () => {
+    const { doc, movedId } = makeDocWithTerrainProxy();
+    const center: [number, number] = [
+      FOOTPRINT.reduce((sum, point) => sum + point[0], 0) / FOOTPRINT.length,
+      FOOTPRINT.reduce((sum, point) => sum + point[1], 0) / FOOTPRINT.length,
+    ];
+    const tile: HamburgTerrainTile = {
+      descriptor: {
+        key: 'delft-test',
+        level: 0,
+        x: 0,
+        y: 0,
+        bounds: [4.35, 52, 4.37, 52.02],
+        url: 'test.terrain',
+      },
+      anchorLngLat: center,
+      positions: new Float32Array([
+        -100, -100, 6.25,
+        100, -100, 6.25,
+        0, 100, 6.25,
+      ]),
+      indices: new Uint16Array([0, 1, 2]),
+      texCoords: new Float32Array([0, 0, 1, 0, 0.5, 1]),
+      minElevation: 6.25,
+      maxElevation: 6.25,
+    };
+    rememberHamburgTerrainTiles([tile]);
+
+    const snap = estimateTerrainSnap(doc, {
+      id: movedId,
+      dx: 0,
+      dy: 0,
+      dz: 0,
+      angle: 0,
+      autoTerrain: true,
+    });
+
+    expect(snap?.terrainSource).toBe('hamburg-dgm');
+    expect(snap?.matchedBuildingId).toBe('Hamburg DGM hybrid');
+    expect(snap?.terrainElevation).toBeCloseTo(6.25);
+    expect(snap?.requiredDz).toBeCloseTo(6.25);
+  });
+
   it('uses containing ground surfaces as the terrain elevation proxy', () => {
     const { doc, movedId, terrainId } = makeDocWithTerrainProxy();
 

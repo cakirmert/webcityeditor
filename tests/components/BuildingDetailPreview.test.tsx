@@ -90,7 +90,7 @@ describe('<BuildingDetailPreview />', () => {
     lod3LoaderSpy.mockResolvedValue(null);
   });
 
-  it('loads only the selected building and defaults to untextured LoD3', () => {
+  it('loads only the selected building and defaults to textured LoD3', () => {
     render(
       <BuildingDetailPreview
         cityjson={detailDocument()}
@@ -107,14 +107,14 @@ describe('<BuildingDetailPreview />', () => {
     };
     expect(Object.keys(firstProps.cityjson.CityObjects)).toEqual(['selected']);
     expect(firstProps.lod).toBe('lod3');
-    expect(firstProps.texturesEnabled).toBe(false);
+    expect(firstProps.texturesEnabled).toBe(true);
     expect(screen.getByText(/Selected building only/)).toHaveTextContent(
-      'semantic surface colours'
+      'photo textures'
     );
 
     fireEvent.click(screen.getByRole('switch', { name: 'Selected building textures' }));
     expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ lod: 'lod3', texturesEnabled: true })
+      expect.objectContaining({ lod: 'lod3', texturesEnabled: false })
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'LoD2' }));

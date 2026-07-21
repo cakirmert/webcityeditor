@@ -115,6 +115,20 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.explicitOpeningSurfaceCount).toBe(0);
   });
 
+  it('keeps a LoD3-only edited building visible in the middle zoom tier', () => {
+    const doc = detailDocument();
+    doc.CityObjects.detailed.geometry = [doc.CityObjects.detailed.geometry![1]];
+
+    const mesh = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed']),
+      maxLod: 2.9,
+    });
+
+    expect(mesh?.maxLod).toBe(3);
+    expect(mesh?.objectCount).toBe(1);
+    expect(mesh?.triangleCount).toBe(2);
+  });
+
   it('builds viewport subsets without rejecting a larger source document', () => {
     const doc = detailDocument();
     doc.vertices.push(...Array.from({ length: 60_000 }, () => [0, 0, 0] as [number, number, number]));
@@ -245,7 +259,7 @@ describe('CityJSON close-range map mesh', () => {
     expect([...lod3Textured.textures[0].positions]).toEqual([...lod3Semantic.positions]);
   });
 
-  it('grounds LoD transitions from all source geometry instead of re-anchoring each LoD', () => {
+  it('normalizes every LoD tier to the same ground without vertical jumps', () => {
     const doc = detailDocument();
     doc.vertices = [
       [565000, 5935000, 10],
@@ -284,8 +298,41 @@ describe('CityJSON close-range map mesh', () => {
       xyz3.filter((_, index) => index % 3 !== 2)
     );
     expect(xyz2.filter((_, index) => index % 3 === 2)).toEqual([0, 0, 5]);
-    expect(xyz3.filter((_, index) => index % 3 === 2)).toEqual([2, 2, 7]);
+    expect(xyz3.filter((_, index) => index % 3 === 2)).toEqual([0, 0, 5]);
     expect(lod2.objectAnchors).toEqual(lod3.objectAnchors);
+  });
+
+  it('clamps every LoD tier to one explicit terrain elevation', () => {
+    const doc = detailDocument();
+    doc.vertices = [
+      [565000, 5935000, 10],
+      [565010, 5935000, 10],
+      [565000, 5935010, 15],
+      [565000, 5935000, 12],
+      [565010, 5935000, 12],
+      [565000, 5935010, 17],
+    ];
+    doc.CityObjects = {
+      stable: {
+        type: 'Building',
+        geometry: [
+          { type: 'MultiSurface', lod: '2', boundaries: [[[0, 1, 2]]] },
+          { type: 'MultiSurface', lod: '3', boundaries: [[[3, 4, 5]]] },
+        ],
+      },
+    };
+    const options = {
+      objectIds: new Set(['stable']),
+      groundElevationByObject: new Map([['stable', 6.5]]),
+      originProjected: canonicalCityJsonMapOrigin(doc)!,
+    };
+    const lod2 = buildCityJsonMapMesh(doc, { ...options, maxLod: 2.9 })!;
+    const lod3 = buildCityJsonMapMesh(doc, { ...options, maxLod: 3.9 })!;
+
+    expect([...lod2.positions].filter((_, index) => index % 3 === 2)).toEqual([6.5, 6.5, 11.5]);
+    expect([...lod3.positions].filter((_, index) => index % 3 === 2)).toEqual([6.5, 6.5, 11.5]);
+    expect(lod2.originProjected[2]).toBe(0);
+    expect(lod2.objectAnchors[0].projected[2]).toBe(6.5);
   });
 
   it('reports roots, installations, LoDs, and surfaces from the geometry actually drawn', () => {

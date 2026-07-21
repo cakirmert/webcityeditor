@@ -56,6 +56,65 @@ export function groundFootprintsForFlatMap(footprints: Footprint[]): Footprint[]
   });
 }
 
+/**
+ * Clamp each logical building group to a sampled terrain elevation while
+ * preserving the vertical offsets between stacked BuildingParts. If terrain
+ * is not available at a group centre, its surveyed/source ground is retained.
+ */
+export function clampFootprintsToTerrain(
+  footprints: Footprint[],
+  elevationAt: (lngLat: [number, number]) => number | null
+): Footprint[] {
+  const groups = new Map<
+    string,
+    { sourceGround: number; longitudeSum: number; latitudeSum: number; pointCount: number }
+  >();
+  for (const footprint of footprints) {
+    const groupId = footprint.parentId ?? footprint.id;
+    const group = groups.get(groupId) ?? {
+      sourceGround: Infinity,
+      longitudeSum: 0,
+      latitudeSum: 0,
+      pointCount: 0,
+    };
+    if (Number.isFinite(footprint.baseElevation)) {
+      group.sourceGround = Math.min(group.sourceGround, footprint.baseElevation);
+    }
+    const ring = openFootprintRing(footprint.polygon);
+    for (const [lng, lat] of ring) {
+      group.longitudeSum += lng;
+      group.latitudeSum += lat;
+      group.pointCount++;
+    }
+    groups.set(groupId, group);
+  }
+
+  const targetGrounds = new Map<string, number>();
+  for (const [groupId, group] of groups) {
+    const sourceGround = Number.isFinite(group.sourceGround) ? group.sourceGround : 0;
+    const center: [number, number] = group.pointCount > 0
+      ? [group.longitudeSum / group.pointCount, group.latitudeSum / group.pointCount]
+      : [0, 0];
+    targetGrounds.set(groupId, elevationAt(center) ?? sourceGround);
+  }
+
+  return footprints.map((footprint) => {
+    const groupId = footprint.parentId ?? footprint.id;
+    const sourceGround = groups.get(groupId)?.sourceGround;
+    const targetGround = targetGrounds.get(groupId);
+    const offset = Number.isFinite(sourceGround) && targetGround !== undefined
+      ? targetGround - (sourceGround as number)
+      : 0;
+    return {
+      ...footprint,
+      polygon: footprint.polygon.map(
+        ([lng, lat, z]) => [lng, lat, z + offset] as [number, number, number]
+      ),
+      baseElevation: footprint.baseElevation + offset,
+    };
+  });
+}
+
 export function footprintPolygonToWgs84(polygon: FootprintPolygon): [number, number][] {
   return polygon.map(([lng, lat]) => [lng, lat]);
 }
@@ -183,7 +242,14 @@ function buildFootprintForObject(
 
   if (!bestGroundRing) return null;
 
-  const baseElevation = isFinite(minZ) ? minZ : 0;
+  const groundElevations = bestGroundRing
+    .map((index) => vertexCrs(index)?.z)
+    .filter((z): z is number => typeof z === 'number' && Number.isFinite(z));
+  const baseElevation = groundElevations.length > 0
+    ? Math.min(...groundElevations)
+    : isFinite(minZ)
+      ? minZ
+      : 0;
   const polygon: FootprintPolygon = [];
   for (const idx of bestGroundRing) {
     const c = vertexCrs(idx);
@@ -203,7 +269,7 @@ function buildFootprintForObject(
   const attrs = (obj.attributes ?? {}) as Record<string, unknown>;
   const attrHeight =
     typeof attrs.measuredHeight === 'number' ? attrs.measuredHeight : null;
-  const computedHeight = isFinite(minZ) && isFinite(maxZ) ? maxZ - minZ : 10;
+  const computedHeight = isFinite(maxZ) ? Math.max(0, maxZ - baseElevation) : 10;
   const height = attrHeight ?? computedHeight;
 
   return {
@@ -215,6 +281,15 @@ function buildFootprintForObject(
     baseElevation,
     attributes: attrs,
   };
+}
+
+function openFootprintRing(polygon: FootprintPolygon): FootprintPolygon {
+  if (polygon.length < 2) return polygon;
+  const first = polygon[0];
+  const last = polygon[polygon.length - 1];
+  return first[0] === last[0] && first[1] === last[1]
+    ? polygon.slice(0, -1)
+    : polygon;
 }
 
 function collectFootprintObjects(

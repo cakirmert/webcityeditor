@@ -212,6 +212,21 @@ export function generateBuilding(
   }
 
   const id = `bld-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const lod2Geometry = {
+    type: 'Solid',
+    lod: lodLabel,
+    boundaries: [out.shell],
+    semantics: {
+      surfaces,
+      values: [out.semanticsValues],
+    },
+  };
+  // Editor-created buildings retain a middle-zoom LoD2 tier and explicitly
+  // participate in the closest LoD3 tier. The generated shell already carries
+  // detailed roof/soffit/opening semantics; duplicating its references as a
+  // second geometry tier keeps the logical building stable across the switch.
+  const lod3Geometry = structuredClone(lod2Geometry);
+  lod3Geometry.lod = '3.0';
   const cityObject: CityObject = {
     type: 'Building',
     attributes: {
@@ -235,17 +250,7 @@ export function generateBuilding(
       _windowPattern: params.openings?.windowPattern ?? 'balanced',
       ...(params.attributes ?? {}),
     },
-    geometry: [
-      {
-        type: 'Solid',
-        lod: lodLabel,
-        boundaries: [out.shell],
-        semantics: {
-          surfaces,
-          values: [out.semanticsValues],
-        },
-      } as unknown,
-    ] as unknown[],
+    geometry: [lod2Geometry, lod3Geometry] as unknown[],
   };
 
   return { id, cityObject, newVertices: out.newVertices, vertexOffset };

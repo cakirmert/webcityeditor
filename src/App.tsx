@@ -22,7 +22,7 @@ import { useBuildingEditor } from './hooks/useBuildingEditor';
 // Libs
 import { extractFootprints, filterToBuilding } from './lib/footprints';
 import { matchingIds, isFilterEmpty, applyFilter } from './lib/filter';
-import { estimateTerrainSnap } from './lib/terrain';
+import { estimateTerrainElevationAtPoint, estimateTerrainSnap } from './lib/terrain';
 import { buildPreviewMesh } from './lib/preview-mesh';
 import { computeTransformedFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
@@ -838,34 +838,51 @@ export default function App() {
               onFootprintChange={buildingEditor.handleFootprintChange}
               preview={
                 buildingEditor.pendingFootprint && buildingEditor.pendingForm
-                  ? {
-                      mesh:
-                        buildPreviewMesh({
-                          footprintWgs84: buildingEditor.pendingFootprint,
+                  ? (() => {
+                      const footprint = buildingEditor.pendingFootprint!;
+                      const form = buildingEditor.pendingForm!;
+                      const center: [number, number] = [
+                        footprint.reduce((sum, vertex) => sum + vertex[0], 0) / footprint.length,
+                        footprint.reduce((sum, vertex) => sum + vertex[1], 0) / footprint.length,
+                      ];
+                      return {
+                        mesh: buildPreviewMesh({
+                          footprintWgs84: footprint,
                           targetCrs: detectCrs(coreState.cityjson).code,
                           eaveHeight:
-                            buildingEditor.pendingForm.roofType === 'flat'
-                              ? buildingEditor.pendingForm.totalHeight
-                              : buildingEditor.pendingForm.totalHeight - buildingEditor.pendingForm.roofHeight,
-                          ridgeHeight: buildingEditor.pendingForm.totalHeight,
-                          roofType: buildingEditor.pendingForm.roofType,
-                          storeys: buildingEditor.pendingForm.storeys,
-                          eaveOverhang: buildingEditor.pendingForm.eaveOverhang,
+                            form.roofType === 'flat'
+                              ? form.totalHeight
+                              : form.totalHeight - form.roofHeight,
+                          ridgeHeight: form.totalHeight,
+                          roofType: form.roofType,
+                          storeys: form.storeys,
+                          eaveOverhang: form.eaveOverhang,
                           openings:
-                            buildingEditor.pendingForm.addWindows || buildingEditor.pendingForm.addDoor
+                            form.addWindows || form.addDoor
                               ? {
-                                  windows: buildingEditor.pendingForm.addWindows,
-                                  door: buildingEditor.pendingForm.addDoor,
+                                  windows: form.addWindows,
+                                  door: form.addDoor,
                                 }
                               : undefined,
                         }) ?? undefined,
-                      polygon: buildingEditor.pendingFootprint,
-                      height: buildingEditor.pendingForm.totalHeight,
-                    }
+                        polygon: footprint,
+                        height: form.totalHeight,
+                        groundElevation: estimateTerrainElevationAtPoint(coreState.cityjson, center),
+                      };
+                    })()
                   : buildingEditor.pendingTransform
                   ? (() => {
                       const t = computeTransformedFootprint(coreState.cityjson, buildingEditor.pendingTransform);
-                      return t ? { polygon: t.polygon, height: t.height } : null;
+                      if (!t) return null;
+                      const center: [number, number] = [
+                        t.polygon.reduce((sum, vertex) => sum + vertex[0], 0) / t.polygon.length,
+                        t.polygon.reduce((sum, vertex) => sum + vertex[1], 0) / t.polygon.length,
+                      ];
+                      return {
+                        polygon: t.polygon,
+                        height: t.height,
+                        groundElevation: estimateTerrainElevationAtPoint(coreState.cityjson, center),
+                      };
                     })()
                   : null
               }

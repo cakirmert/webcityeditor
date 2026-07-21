@@ -27,6 +27,15 @@ function baseParams(overrides: Partial<NewBuildingParams> = {}): NewBuildingPara
 }
 
 describe('generateBuilding - flat', () => {
+  it('emits explicit LoD2 and LoD3 tiers for map zoom transitions', () => {
+    const doc = buildSampleCube();
+    const result = generateBuilding(doc, baseParams());
+    const geometry = result.cityObject.geometry as Array<{ lod?: string }>;
+
+    expect(geometry.map((item) => item.lod)).toEqual(['2.0', '3.0']);
+    expect(geometry[1]).not.toBe(geometry[0]);
+  });
+
   it('produces a solid with ground, roof, and 4 walls', () => {
     const doc = buildSampleCube();
     const r = generateBuilding(doc, baseParams());

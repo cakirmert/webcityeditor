@@ -31,8 +31,8 @@ import {
   projectToWgs84,
 } from '../lib/projection';
 import {
+  clampFootprintsToTerrain,
   extractFootprints,
-  groundFootprintsForFlatMap,
   type Footprint,
 } from '../lib/footprints';
 import { tintByRoofType, tintByUsage, usageRgb } from '../lib/footprint-tint';
@@ -112,7 +112,7 @@ import {
   treeCrownForm,
   treeCrownScale,
   treeCrownTranslation,
-  treePositionOnFlatGround,
+  treePositionOnTerrain,
   treeTrunkScale,
   type HamburgCityTree,
 } from '../lib/hamburg-trees';
@@ -121,6 +121,14 @@ import {
   HAMBURG_UNTEXTURED_LOD3_TILESET_URL,
   isHamburgOfficialBuildingId,
 } from '../lib/hamburg-lod3-tiles';
+import {
+  hamburgTerrainSurfaceUrl,
+  hamburgTerrainTilesForView,
+  loadHamburgTerrainTile,
+  rememberHamburgTerrainTiles,
+  sampleHamburgTerrainElevation,
+  type HamburgTerrainTile,
+} from '../lib/hamburg-terrain';
 import {
   Bike,
   BusFront,
@@ -310,6 +318,7 @@ interface Props {
   preview?: {
     polygon?: [number, number][];
     height?: number;
+    groundElevation?: number;
     mesh?: {
       positions: Float32Array;
       indices: Uint32Array;
@@ -491,9 +500,13 @@ export default function MapView({
   const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[] | null>(null);
   const [treeDataError, setTreeDataError] = useState<string | null>(null);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
-  const [texturesEnabled, setTexturesEnabled] = useState(false);
+  const [texturesEnabled, setTexturesEnabled] = useState(true);
   const [hamburgLod3Status, setHamburgLod3Status] = useState<
     'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
+  const [terrainTiles, setTerrainTiles] = useState<HamburgTerrainTile[]>([]);
+  const [terrainStatus, setTerrainStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'partial' | 'error'
   >('idle');
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [detailFocusPoint, setDetailFocusPoint] = useState<[number, number] | null>(null);
@@ -592,6 +605,49 @@ export default function MapView({
         setTreeDataError(error instanceof Error ? error.message : String(error));
       });
   }, [zoom]);
+
+  const terrainZoomBucket = Math.floor(zoom);
+  const terrainTileDescriptors = useMemo(
+    () => hamburgTerrainTilesForView(viewportBbox, terrainZoomBucket),
+    [terrainZoomBucket, viewportBbox]
+  );
+  useEffect(() => {
+    let canceled = false;
+    if (terrainTileDescriptors.length === 0) {
+      setTerrainTiles([]);
+      rememberHamburgTerrainTiles([]);
+      setTerrainStatus('idle');
+      return () => {
+        canceled = true;
+      };
+    }
+
+    setTerrainStatus('loading');
+    void Promise.allSettled(terrainTileDescriptors.map(loadHamburgTerrainTile)).then((results) => {
+      if (canceled) return;
+      const loaded = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+      setTerrainTiles(loaded);
+      rememberHamburgTerrainTiles(loaded);
+      setTerrainStatus(
+        loaded.length === terrainTileDescriptors.length
+          ? 'ready'
+          : loaded.length > 0
+            ? 'partial'
+            : 'error'
+      );
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') {
+        console.warn(
+          `Hamburg DGM terrain tile failed: ${
+            failed.reason instanceof Error ? failed.reason.message : String(failed.reason)
+          }`
+        );
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [terrainTileDescriptors]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -717,8 +773,11 @@ export default function MapView({
   );
 
   const groundedRenderedFootprints = useMemo(
-    () => groundFootprintsForFlatMap(renderedFootprints),
-    [renderedFootprints]
+    () => clampFootprintsToTerrain(
+      renderedFootprints,
+      (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+    ),
+    [renderedFootprints, terrainTiles]
   );
 
   const renderedRoadAreas = useMemo(
@@ -816,8 +875,7 @@ export default function MapView({
   const hamburgRemoteLod3Active =
     hamburgRemoteLod3Eligible &&
     detailLod === 'lod3' &&
-    !editFocusBbox &&
-    !texturesEnabled;
+    !editFocusBbox;
   useEffect(() => {
     if (!hamburgRemoteLod3Active) {
       setHamburgLod3Status('idle');
@@ -834,6 +892,15 @@ export default function MapView({
         : hamburgTrees
           ? `${renderedHamburgTrees.length} official street trees in view`
           : 'official street trees loading';
+  const terrainDetailLabel = terrainStatus === 'ready'
+    ? `Hamburg DGM terrain (${terrainTiles.length} tiles)`
+    : terrainStatus === 'partial'
+      ? `Hamburg DGM terrain (${terrainTiles.length} tiles; partial)`
+      : terrainStatus === 'loading'
+        ? 'Hamburg DGM terrain loading'
+        : terrainStatus === 'error'
+          ? 'Hamburg DGM terrain unavailable'
+          : 'Hamburg DGM terrain outside this view';
   const detailScopeBbox = editFocusBbox ?? viewportBbox;
   const detailFocus = editFocusBbox
     ? [
@@ -842,7 +909,10 @@ export default function MapView({
       ] as [number, number]
     : detailFocusPoint;
   const detailOriginProjected = useMemo(
-    () => canonicalCityJsonMapOrigin(cityjson),
+    () => {
+      const origin = canonicalCityJsonMapOrigin(cityjson);
+      return origin ? [origin[0], origin[1], 0] as [number, number, number] : null;
+    },
     [cityjson, reloadToken]
   );
   const detailObjectIds = useMemo(() => {
@@ -910,6 +980,17 @@ export default function MapView({
     return colors;
   }, [cityjson, detailObjectIds, mapColorMode]);
 
+  const terrainGroundByRoot = useMemo(() => {
+    const elevations = new Map<string, number>();
+    for (const footprint of groundedRenderedFootprints) {
+      const rootId = footprint.parentId ?? footprint.id;
+      const ground = Math.min(...footprint.polygon.map((point) => point[2]));
+      if (!Number.isFinite(ground)) continue;
+      elevations.set(rootId, Math.min(elevations.get(rootId) ?? Infinity, ground));
+    }
+    return elevations;
+  }, [groundedRenderedFootprints]);
+
   const detailMesh = useMemo(
     () =>
       detailObjectIds
@@ -917,8 +998,11 @@ export default function MapView({
             objectIds: detailObjectIds,
             maxOutputVertices: 600_000,
             maxLod: detailLod === 'lod3' ? 3.9 : 2.9,
-            groundObjectGroups: true,
-            texturesEnabled: texturesEnabled && detailLod === 'lod3',
+            groundElevationByObject: terrainGroundByRoot,
+            // A LoD3-only asset is deliberately kept visible in the middle
+            // tier. Honour the material preference whenever that source tier
+            // is selected; ordinary LoD2 faces simply have no texture refs.
+            texturesEnabled,
             objectColors: detailObjectColors,
             originProjected: detailOriginProjected ?? undefined,
           })
@@ -930,22 +1014,45 @@ export default function MapView({
       detailObjectIds,
       detailOriginProjected,
       reloadToken,
+      terrainGroundByRoot,
       texturesEnabled,
     ]
   );
+  const drawnDetailRootIds = useMemo(
+    () => new Set(detailMesh?.objectAnchors.map((anchor) => anchor.rootId) ?? []),
+    [detailMesh]
+  );
   const blockFootprints = useMemo(
     () =>
-      (detailObjectIds || hamburgRemoteLod3Active)
+      (drawnDetailRootIds.size > 0 || hamburgRemoteLod3Active)
         ? groundedRenderedFootprints.filter(
-            (footprint) =>
-              !(hamburgRemoteLod3Active && isHamburgOfficialBuildingId(
-                footprint.parentId ?? footprint.id
-              )) &&
-              !detailObjectIds?.has(footprint.id) &&
-              (!footprint.parentId || !detailObjectIds?.has(footprint.parentId))
+            (footprint) => {
+              const rootId = footprint.parentId ?? footprint.id;
+              return !(hamburgRemoteLod3Active && isHamburgOfficialBuildingId(rootId)) &&
+                !drawnDetailRootIds.has(rootId);
+            }
           )
         : groundedRenderedFootprints,
-    [groundedRenderedFootprints, detailObjectIds, hamburgRemoteLod3Active]
+    [drawnDetailRootIds, groundedRenderedFootprints, hamburgRemoteLod3Active]
+  );
+  const priorityRootIds = useMemo(() => {
+    const roots = new Set<string>();
+    for (const objectId of priorityBuildingIds ?? []) {
+      if (cityjson.CityObjects[objectId]) roots.add(rootBuildingObjectId(cityjson, objectId));
+    }
+    return roots;
+  }, [cityjson, priorityBuildingIds, reloadToken]);
+  const priorityBlockFootprints = useMemo(
+    () => blockFootprints.filter((footprint) =>
+      priorityRootIds.has(footprint.parentId ?? footprint.id)
+    ),
+    [blockFootprints, priorityRootIds]
+  );
+  const contextBlockFootprints = useMemo(
+    () => blockFootprints.filter((footprint) =>
+      !priorityRootIds.has(footprint.parentId ?? footprint.id)
+    ),
+    [blockFootprints, priorityRootIds]
   );
   const blockOpacity = smoothZoomStep(
     BUILDING_BLOCK_MIN_ZOOM,
@@ -988,27 +1095,36 @@ export default function MapView({
     ? [
         `Hamburg Geoportal LoD3 untextured (${hamburgLod3Status})`,
         ...localDetailParts,
+        terrainDetailLabel,
         treeDetailLabel,
       ].join(' · ')
     : localDetailParts.length > 0
-      ? [...localDetailParts, treeDetailLabel].join(' · ')
+      ? [...localDetailParts, terrainDetailLabel, treeDetailLabel].join(' · ')
       : zoom >= BUILDING_DETAIL_MIN_ZOOM
-        ? `Source geometry unavailable here · ${treeDetailLabel}`
-        : `LoD0 overview · source LoD2 at zoom 15.25 · source LoD3 at ${BUILDING_LOD3_MIN_ZOOM} · ${treeDetailLabel}`;
+        ? `Source geometry unavailable here · ${terrainDetailLabel} · ${treeDetailLabel}`
+        : `LoD0 overview · source LoD2 at zoom 15.25 · source LoD3 at ${BUILDING_LOD3_MIN_ZOOM} · ${terrainDetailLabel} · ${treeDetailLabel}`;
 
   const inspectedBuildingFootprints = useMemo<Footprint[]>(
     () => {
       const previewPolygon = preview?.polygon ?? footprintEdit?.footprintWgs84;
       if (previewPolygon && previewPolygon.length >= 3) {
+        const sourceFootprint = !preview?.polygon && footprintEdit
+          ? groundedRenderedFootprints.find(
+              (footprint) =>
+                footprint.id === footprintEdit.buildingId ||
+                footprint.parentId === footprintEdit.buildingId
+            )
+          : null;
+        const groundElevation = preview?.groundElevation ?? sourceFootprint?.baseElevation ?? 0;
         return [
           {
             id: preview?.polygon ? '__building_preview__' : footprintEdit!.buildingId,
             type: 'Building',
             polygon: previewPolygon.map(
-              ([lng, lat]) => [lng, lat, 0] as [number, number, number]
+              ([lng, lat]) => [lng, lat, groundElevation] as [number, number, number]
             ),
             height: preview?.height ?? 10,
-            baseElevation: 0,
+            baseElevation: groundElevation,
             attributes: {},
           },
         ];
@@ -1019,7 +1135,15 @@ export default function MapView({
           )
         : [];
     },
-    [footprintEdit, footprints, preview?.height, preview?.polygon, selectedId]
+    [
+      footprintEdit,
+      footprints,
+      groundedRenderedFootprints,
+      preview?.groundElevation,
+      preview?.height,
+      preview?.polygon,
+      selectedId,
+    ]
   );
   const inspectedBuildingRoadConflicts = useMemo(
     () =>
@@ -1622,11 +1746,63 @@ export default function MapView({
         )
       : [];
 
+    // Hamburg's official DGM hybrid terrain owns the map's vertical datum.
+    // TopPlus is always the base terrain texture; satellite is blended over
+    // the identical mesh so the existing comparison opacity remains useful.
+    for (const tile of terrainTiles) {
+      const mesh = {
+        attributes: {
+          positions: { value: tile.positions, size: 3 },
+          texCoords: { value: tile.texCoords, size: 2 },
+        },
+        indices: { value: tile.indices, size: 1 },
+      } as unknown as never;
+      const tileId = tile.descriptor.key.replaceAll('/', '-');
+      layers.push(
+        new SimpleMeshLayer<{ position: [number, number, number] }>({
+          id: `hamburg-dgm-terrain-topplus-${tileId}`,
+          data: [{ position: [0, 0, 0] }],
+          getPosition: (item: { position: [number, number, number] }) => item.position,
+          getColor: [255, 255, 255, 255],
+          mesh,
+          texture: hamburgTerrainSurfaceUrl(tile.descriptor, 'topplus'),
+          _instanced: false,
+          coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+          coordinateOrigin: [tile.anchorLngLat[0], tile.anchorLngLat[1], 0],
+          pickable: false,
+          material: { ambient: 0.82, diffuse: 0.32, shininess: 2 },
+        } as any)
+      );
+      if (basemap === 'satellite' && satelliteOpacity > 0.001) {
+        layers.push(
+          new SimpleMeshLayer<{ position: [number, number, number] }>({
+            id: `hamburg-dgm-terrain-satellite-${tileId}`,
+            data: [{ position: [0, 0, 0] }],
+            getPosition: (item: { position: [number, number, number] }) => item.position,
+            getColor: [255, 255, 255, 255],
+            mesh,
+            texture: hamburgTerrainSurfaceUrl(tile.descriptor, 'satellite'),
+            opacity: satelliteOpacity,
+            _instanced: false,
+            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+            coordinateOrigin: [tile.anchorLngLat[0], tile.anchorLngLat[1], 0],
+            pickable: false,
+            material: { ambient: 0.88, diffuse: 0.24, shininess: 1 },
+            parameters: {
+              depthTest: true,
+              polygonOffsetFill: true,
+              polygonOffset: [-1, -1],
+            } as unknown as never,
+          } as any)
+        );
+      }
+    }
+
     // The official source positions, laser-derived heights, measured crown
     // diameters, and botanical names drive one detailed trunk plus four
-    // species-informed crown meshes. Absolute source elevations are clamped to
-    // the same flat z=0 plane as the editor map. Instancing keeps thousands of
-    // trees inexpensive, and edit focus removes them entirely.
+    // species-informed crown meshes. Their surveyed base elevations share the
+    // official terrain datum. Instancing keeps thousands of trees inexpensive,
+    // and edit focus removes them entirely.
     if (renderedHamburgTrees.length > 0) {
       const treeOpacity = smoothZoomStep(
         HAMBURG_TREE_MIN_ZOOM,
@@ -1638,7 +1814,7 @@ export default function MapView({
           id: 'hamburg-official-tree-trunks',
           data: renderedHamburgTrees,
           mesh: TREE_TRUNK_MESH as unknown as never,
-          getPosition: treePositionOnFlatGround,
+          getPosition: treePositionOnTerrain,
           getScale: treeTrunkScale,
           getColor: [104, 74, 50, 255],
           coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
@@ -1655,7 +1831,7 @@ export default function MapView({
             id: `hamburg-official-tree-crowns-${form}`,
             data: trees,
             mesh: TREE_CROWN_MESHES[form] as unknown as never,
-            getPosition: treePositionOnFlatGround,
+            getPosition: treePositionOnTerrain,
             getTranslation: treeCrownTranslation,
             getScale: treeCrownScale,
             getColor: treeCrownColor,
@@ -1759,6 +1935,11 @@ export default function MapView({
             shininess: 18,
             specularColor: [70, 74, 82],
           },
+          parameters: {
+            depthTest: true,
+            polygonOffsetFill: true,
+            polygonOffset: [-2, -2],
+          } as unknown as never,
         } as any)
       );
     }
@@ -1791,18 +1972,30 @@ export default function MapView({
               shininess: 6,
               specularColor: [30, 30, 30],
             },
+            parameters: {
+              depthTest: true,
+              polygonOffsetFill: true,
+              polygonOffset: [-3, -3],
+            } as unknown as never,
           } as any)
         );
       });
     }
 
     // Cheap block context fills the middle zoom range; close zoom swaps it for
-    // the indexed highest-available CityJSON surface mesh above.
-    if (blockOpacity > 0.001 && blockFootprints.length > 0) {
+    // the indexed highest-available CityJSON surface mesh above. New and dirty
+    // buildings keep a full-opacity block fallback across the overview range,
+    // so they never vanish while the detail budget/zoom tier changes.
+    const pushBuildingBlockLayer = (
+      id: string,
+      data: Footprint[],
+      opacity: number
+    ) => {
+      if (data.length === 0 || opacity <= 0.001) return;
       layers.push(
         new SolidPolygonLayer<Footprint>({
-          id: 'building-blocks',
-          data: blockFootprints,
+          id,
+          data,
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
           getFillColor: (d) => {
@@ -1815,7 +2008,7 @@ export default function MapView({
             return mapColorMode === 'usage' ? tintByUsage(d, 230) : tintByRoofType(d, 230);
           },
           extruded: true,
-          opacity: blockOpacity,
+          opacity,
           wireframe: false,
           pickable: buildingSelectionEnabled,
           material: {
@@ -1838,7 +2031,9 @@ export default function MapView({
           },
         })
       );
-    }
+    };
+    pushBuildingBlockLayer('building-blocks-context', contextBlockFootprints, blockOpacity);
+    pushBuildingBlockLayer('building-blocks-priority', priorityBlockFootprints, 1);
 
     if (renderedOsm2StreetsResult?.lanes) {
       layers.push(
@@ -2575,10 +2770,11 @@ export default function MapView({
 
     // Preview for the in-progress new building (mesh) OR a pending transform (polygon).
     if (preview?.mesh && preview.mesh.positions.length > 0) {
+      const previewGround = preview.groundElevation ?? 0;
       layers.push(
         new SimpleMeshLayer<{ position: [number, number, number] }>({
           id: 'new-building-preview-mesh',
-          data: [{ position: [0, 0, 0] }],
+          data: [{ position: [0, 0, previewGround] }],
           getPosition: (d) => d.position,
           // getColor is a single tint applied per instance; warm orange reads
           // as pending / unsaved against both map and satellite imagery.
@@ -2597,10 +2793,19 @@ export default function MapView({
         })
       );
     } else if (preview?.polygon && preview.polygon.length >= 3) {
+      const previewGround = preview.groundElevation ?? 0;
       layers.push(
-        new SolidPolygonLayer<{ polygon: [number, number][]; height: number }>({
+        new SolidPolygonLayer<{
+          polygon: [number, number, number][];
+          height: number;
+        }>({
           id: 'new-building-preview-poly',
-          data: [{ polygon: preview.polygon, height: preview.height ?? 10 }],
+          data: [{
+            polygon: preview.polygon.map(
+              ([lng, lat]) => [lng, lat, previewGround] as [number, number, number]
+            ),
+            height: preview.height ?? 10,
+          }],
           getPolygon: (d) => d.polygon,
           getElevation: (d) => d.height,
           getFillColor: [255, 180, 80, 200],
@@ -2650,9 +2855,11 @@ export default function MapView({
     renderedFootprints,
     groundedRenderedFootprints,
     renderedRoadAreas,
-    blockFootprints,
+    contextBlockFootprints,
+    priorityBlockFootprints,
     renderedZones,
     detailMesh,
+    terrainTiles,
     selectedId,
     onSelect,
     zoom,
@@ -2687,6 +2894,7 @@ export default function MapView({
     highlightedOsm2StreetsRoadIds,
     onOsm2StreetsSelect,
     basemap,
+    satelliteOpacity,
     roadOverlayOpacity,
     roadSnapCandidates,
     editFocusBbox,
@@ -4110,7 +4318,9 @@ function MapLayerControl({
             <span>
               <b>Photo textures</b>
               <small>
-                {lod3Visible ? 'LoD3 close view only' : 'Zoom in to LoD3'}
+                {lod3Visible
+                  ? 'Overlay on LoD3; geometry stays on'
+                  : 'Zoom in to LoD3'}
               </small>
             </span>
             <input

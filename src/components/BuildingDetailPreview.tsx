@@ -54,11 +54,11 @@ export default function BuildingDetailPreview({
   const [lod, setLod] = useState<'lod2' | 'lod3'>(
     availability.lod3 || remoteLod3Eligible ? 'lod3' : 'lod2'
   );
-  const [texturesEnabled, setTexturesEnabled] = useState(false);
+  const [texturesEnabled, setTexturesEnabled] = useState(true);
 
   useEffect(() => {
     setLod(availability.lod3 || remoteLod3Eligible ? 'lod3' : 'lod2');
-    setTexturesEnabled(false);
+    setTexturesEnabled(true);
   }, [availability.lod3, remoteLod3Eligible, buildingId]);
 
   useEffect(() => {

@@ -22,7 +22,7 @@ import type { IfcImportResult } from '../lib/ifc-import';
 import {
   type PendingTransform,
 } from '../lib/transform-preview';
-import { snapTransformToTerrain } from '../lib/terrain';
+import { estimateTerrainElevationAtPoint, snapTransformToTerrain } from '../lib/terrain';
 import { cloneBuildings } from '../lib/clipboard';
 import { deleteBuildings } from '../lib/delete';
 import { moveOpening } from '../lib/opening-edit';
@@ -443,10 +443,12 @@ export function useBuildingEditor(
     (form: NewBuildingForm) => {
       if (!cityjson || !pendingFootprint) return;
       setCreationError(null);
+      const footprintCenter: [number, number] = [
+        pendingFootprint.reduce((sum, vertex) => sum + vertex[0], 0) / pendingFootprint.length,
+        pendingFootprint.reduce((sum, vertex) => sum + vertex[1], 0) / pendingFootprint.length,
+      ];
       if (zoningEnabled && zones.length > 0) {
-        const cx = pendingFootprint.reduce((a, v) => a + v[0], 0) / pendingFootprint.length;
-        const cy = pendingFootprint.reduce((a, v) => a + v[1], 0) / pendingFootprint.length;
-        const zone = findZoneForPoint(zones, [cx, cy]);
+        const zone = findZoneForPoint(zones, footprintCenter);
         const check = validateBuildingType(zone, form.function);
         if (!check.allowed) {
           setCreationError(`Planning layer conflict: ${check.reason}`);
@@ -470,6 +472,7 @@ export function useBuildingEditor(
           eaveHeight,
           ridgeHeight,
           roofType: form.roofType,
+          baseElevation: estimateTerrainElevationAtPoint(cityjson, footprintCenter),
           attributes: {
             function: form.function,
             yearOfConstruction: form.yearOfConstruction,

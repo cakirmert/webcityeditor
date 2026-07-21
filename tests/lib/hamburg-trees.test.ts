@@ -4,11 +4,11 @@ import {
   TREE_CROWN_MESHES,
   treeCrownForm,
   treeCrownScale,
-  treePositionOnFlatGround,
+  treePositionOnTerrain,
 } from '../../src/lib/hamburg-trees';
 
 describe('Hamburg street-tree display grounding', () => {
-  it('keeps the surveyed elevation in the source data but renders at z=0', () => {
+  it('renders the surveyed elevation in the Hamburg terrain datum', () => {
     const [tree] = parseHamburgCityTrees({
       type: 'HamburgCityCenterTrees',
       trees: [
@@ -27,7 +27,7 @@ describe('Hamburg street-tree display grounding', () => {
     });
 
     expect(tree.position).toEqual([9.99, 53.55, 12.75]);
-    expect(treePositionOnFlatGround(tree)).toEqual([9.99, 53.55, 0]);
+    expect(treePositionOnTerrain(tree)).toEqual([9.99, 53.55, 12.75]);
   });
 
   it('chooses distinct crown forms from official genus data', () => {

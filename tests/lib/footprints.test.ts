@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
 import {
+  clampFootprintsToTerrain,
   extractFootprintForId,
   extractFootprints,
   filterToBuilding,
@@ -106,6 +107,21 @@ describe('extractFootprints', () => {
     ).toBe(true);
     expect(grounded.map((fp) => fp.baseElevation)).toEqual(
       source.map((fp) => fp.baseElevation)
+    );
+  });
+
+  it('clamps each group to terrain while preserving stacked part offsets', () => {
+    const { doc, id } = makeEditableBuilding({ baseElevation: 37 });
+    splitBuildingByFloor(doc, id, 4);
+
+    const source = extractFootprints(doc).filter((fp) => fp.parentId === id);
+    const sourceGround = Math.min(...source.map((fp) => fp.baseElevation));
+    const clamped = clampFootprintsToTerrain(source, () => 8.5);
+
+    expect(Math.min(...clamped.map((fp) => fp.baseElevation))).toBe(8.5);
+    expect(clamped[0].polygon.every((point) => point[2] === 8.5)).toBe(true);
+    expect(clamped.map((fp) => fp.baseElevation - 8.5)).toEqual(
+      source.map((fp) => fp.baseElevation - sourceGround)
     );
   });
 
