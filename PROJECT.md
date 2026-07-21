@@ -215,6 +215,88 @@ npm run dev:hamburg-roads -- --dry-run
 
 Focused regression coverage exists for smooth road preview/export parity, touch handle editing, endpoint snapping, reciprocal CityJSON connections, exact-polygon attribute saves, highest-LoD mesh selection, catalog preparation, and the Hamburg committed fixtures.
 
+## Next implementation task: unified road connectivity and building LoD rendering
+
+Treat this section as the next coordinated implementation task. The behaviors below were observed in the published editor after the lane-connection and untextured-LoD3 work. They supersede any earlier claim in this document that the affected interaction or rendering path is complete. Diagnose the shared state and rendering architecture first, then implement and verify the fixes together rather than adding more independent overlay exceptions.
+
+### 1. Separate road-edit state from lane-selection highlighting
+
+Entering road edit mode must clear the existing whole-road highlight. At present, the road that was selected to open the editor can remain highlighted while a band selected in the bottom cross-section menu is highlighted too, making both states look active.
+
+- Clear the pre-edit road selection/highlight as soon as a `RoadDraft` becomes active.
+- Keep only the active cross-section band highlight when the user selects a lane or other band in either road menu.
+- Keep the side panel, bottom editor, and map selection synchronized without restoring the whole-road selection.
+- Discarding or saving the draft may select the resulting road again, but that post-edit selection must be deliberate and visually distinct from a band selection.
+- Add a regression test for the transition from selected road to active draft and another for changing the selected band from the bottom editor.
+
+### 2. Make every possible endpoint connection visible and understandable
+
+The current editor can appear to show only one purple connection node, and possible destinations are not discoverable until the user already knows where to drag. Both road ends and all valid nearby destinations must be evident.
+
+- Render a distinct purple connection handle at both ends of every active editable road section. Keep these separate from yellow shape anchors and white bend-insertion handles, including when handles overlap in screen space.
+- When edit mode starts, or when a purple handle is pressed, show all compatible nearby road endpoints as teal targets. Do not limit target visibility to the single nearest endpoint before the drag begins.
+- Draw lightweight, half-transparent candidate curves from the active purple handle to the available teal targets. Emphasize the currently hovered or nearest valid target without hiding the alternatives.
+- After a connection is confirmed, draw the persisted lane-to-lane curves and expose the source band, target band, direction, and endpoint in the bottom editor.
+- Define deterministic filtering for distance, road identity, direction compatibility, and bands that are actually connectable. Sidewalk, bicycle, car, bus, and shared-use connections must not be silently paired across incompatible modes.
+- Ensure both handles and all candidate targets remain visible at high pitch, bearing, and zoom and are not clipped or hidden behind the road surface or quick editor.
+
+### 3. Derive intersection connectivity from the existing OSM/osm2streets data
+
+Use imported topology wherever it is available instead of requiring every connection to be drawn manually. The committed OSM and osm2streets data already contain directed road approaches, junction geometry, lane ordering, and shared intersection context that can seed connection proposals.
+
+- Inspect the original OSM connectivity, directed centerlines, osm2streets lane polygons, junction polygons, and any retained provenance before designing a new schema.
+- At each imported intersection, group road endpoints that belong to the same junction and generate explicit candidate lane movements from incoming compatible bands to outgoing compatible bands.
+- Preserve provenance and distinguish `imported/proposed`, `user-confirmed`, and `user-rejected` movements. OSM-derived guesses must remain editable and must not masquerade as confirmed turn restrictions when the source does not provide them.
+- Render the proposed movements as subdued curved lines at the intersection. Confirmed movements should use the stronger persisted connection styling; rejected proposals should remain suppressed across reload/export.
+- Use known direction, access, mode, turn-lane, one-way, and restriction metadata when present. Fall back to deterministic geometry and lane-order matching only when source semantics are absent.
+- Persist confirmed/rejected movement decisions in CityJSON road metadata and maintain reciprocal references without modifying exact imported lane polygons during attribute-only edits.
+- Add fixture-based tests around the committed short Hamburg intersection for through, left/right turn, bicycle, sidewalk/crossing, one-way, and incompatible-mode cases.
+
+### 4. Eliminate building movement during camera changes
+
+Buildings still appear to shift when bearing, pitch, or camera position changes. Do not assume this is only the detail-focus membership issue. Instrument the full coordinate path and identify whether the movement comes from projection conversion, grounding, layer replacement, precision, or multiple causes.
+
+- Trace source coordinates from CityJSON EPSG:25832 through WGS84 conversion, local normalization, per-building ground offset, deck.gl/MapLibre model matrices, and the textured 3D Tiles transforms.
+- Record stable world-space anchor coordinates for representative LoD2, untextured LoD3, textured LoD3, imported, and newly created buildings before and after bearing/pitch-only camera changes.
+- Verify that camera changes never recompute or round source positions, change the projection origin, apply grounding twice, or switch between meshes with different horizontal anchors.
+- Compare corresponding LoD2 and LoD3 building bounds and centroids. If source LoDs use different origins, compute and retain one canonical per-building anchor rather than normalizing each representation independently.
+- Avoid simultaneous cross-fading of misaligned duplicate building layers. A LoD transition may change geometry resolution, but it must retain the same logical object identity, transform, selection state, and world-space anchor.
+- Check GPU precision at Hamburg projected-coordinate magnitudes. Use a stable local origin/high-precision coordinate path if direct large coordinates cause camera-dependent jitter.
+- Add an automated projection/transform regression plus screenshot-based checks at multiple bearings and pitches. The same building corners should reproject consistently within a small pixel tolerance after a camera round trip.
+
+### 5. Restore real detailed LoD3, with textures as a rendering option
+
+The current close view labelled as untextured source LoD3 does not visibly provide the detailed LoD3 representation expected by the user. Treat the missing detail as unresolved even if `maxLod` reports 3. Determine whether geometry selection, parent/child inclusion, vertex budgeting, semantic surfaces, or source merging is dropping the detailed roofs, openings, and `BuildingInstallation` children.
+
+- Verify representative Hamburg objects against the original LoD3 source and count their selected LoD3 solids, surfaces, openings, and installation descendants in the rendered mesh.
+- Keep the detailed LoD3 geometry when textures are disabled; texture state must change materials only, not replace detailed geometry with LoD2 or blocks.
+- Re-enable the official textures if they make the true LoD3 source reliably visible, but fix their material, depth, lighting, resolution, and loading behavior rather than using the textured Tile3D layer as an unrelated duplicate city.
+- Prefer one logical building rendering pipeline in which LoD0/LoD2/LoD3 are resolution choices for the same object set. If separate GPU layer types remain necessary, centralize object identity, transforms, culling, selection, grounding, and transition ownership so the result behaves as one layer.
+- Make the UI report the representation actually drawn: geometry LoD, source, texture state, object count, and whether detailed descendants were included. Do not infer successful LoD3 rendering from a requested `maxLod` alone.
+- Add visual fixtures that clearly distinguish LoD2 from LoD3 through dormers, openings, roof detail, and installations, and fail if the close view silently falls back.
+
+### 6. Keep editable/new buildings visible through every LoD and texture state
+
+Newly created or parametrically edited buildings currently disappear at full zoom when textured LoD3 is enabled. Textured source context must never replace the editable object layer.
+
+- Maintain a single logical set of visible buildings. Official textured source objects may supply a higher-resolution representation for matching imported IDs, but unmatched, new, dirty, selected, or parametrically edited buildings must always remain rendered.
+- Give editable objects explicit precedence over streamed source duplicates. Hide a source counterpart only when the replacement object is loaded and visible at the same canonical anchor.
+- New buildings that have generated LoD3 must remain visible at the closest zoom with textures on or off. If no texture exists, render their semantic/untextured LoD3 material alongside textured neighbors.
+- Selection, hover, edit handles, validation, and save previews must target the same logical object across LoD transitions.
+- Add tests covering a new building and an edited imported building while crossing the LoD2/LoD3 threshold and toggling textures at maximum zoom.
+
+### Completion criteria
+
+This task is complete only when all of the following hold in the Hamburg demo:
+
+1. Opening a road draft removes the whole-road highlight; selecting a menu band highlights only that band on the map.
+2. Both purple endpoint handles are visible, all valid nearby teal targets are discoverable, and candidate/confirmed curves explain the available lane movements.
+3. Imported intersections display editable OSM/osm2streets-derived lane-movement proposals with provenance and deterministic persistence.
+4. Buildings do not slide, jump, or swap horizontal anchors during bearing, pitch, zoom, or LoD transitions.
+5. Close zoom visibly renders genuine detailed LoD3 geometry with textures independently optional.
+6. New and edited buildings remain visible and selectable at maximum zoom whether textures are enabled or disabled.
+7. Focused unit/fixture tests, the full test suite, production build, and browser/GPU visual regression pass without new console warnings.
+
 ## Remaining roadmap
 
 The following work is intentionally not claimed as complete:
