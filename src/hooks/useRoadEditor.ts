@@ -45,6 +45,11 @@ import {
   type RoadDraftHistorySnapshot,
 } from '../lib/road-draft-history';
 import { reconcileRoadLaneConnectionIndexes } from '../lib/road-draft-edit';
+import {
+  deriveImportedRoadMovements,
+  removeRoadMovementReferences,
+  synchronizeRoadMovementMetadata,
+} from '../lib/road-movements';
 
 interface FetchOsmRoadOptions {
   source?: 'viewport' | 'loaded-data';
@@ -301,6 +306,7 @@ export function useRoadEditor(
     clearRoadDraftHistory();
     setRoadEditBaseline(null);
     setRoadDraft(null);
+    setSelectedRoadBand(null);
     setRoadDraftDirty(false);
     setEditingRoadId(null);
     setSelectedRoadArea(null);
@@ -594,13 +600,14 @@ export function useRoadEditor(
       );
       return;
     }
+    const allAreas = cityjson ? extractTransportationAreas(cityjson) : [area];
     const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
     let draft: RoadDraft;
     try {
       draft =
         savedDraft ??
         deriveEditableRoadDraftFromAreas(
-          cityjson ? extractTransportationAreas(cityjson) : [area],
+          allAreas,
           area.roadId
         );
     } catch (error) {
@@ -609,12 +616,23 @@ export function useRoadEditor(
       alert(`CityJSON road editing failed: ${message}`);
       return;
     }
-    const editingDraft = {
+    const editingDraftBase = {
       ...draft,
-      id: draft.id ?? area.roadId,
+      // The embedded draft may retain its pre-insert temporary id. Once the
+      // object exists, every endpoint and movement must use the CityJSON road
+      // id so decisions round-trip against the saved network.
+      id: area.roadId,
+    };
+    const editingDraft = {
+      ...editingDraftBase,
+      movements: deriveImportedRoadMovements(allAreas, editingDraftBase),
     };
     clearRoadDraftHistory();
     setRoadDraft(editingDraft);
+    const firstSection = editingDraft.sections[0];
+    setSelectedRoadBand(
+      firstSection?.bands.length ? { sectionId: firstSection.id, bandIndex: 0 } : null
+    );
     const preservesImportedGeometry = area.geometryMode === 'exact' || !savedDraft;
     setRoadEditBaseline(
       preservesImportedGeometry
@@ -626,7 +644,10 @@ export function useRoadEditor(
         : null
     );
     setRoadDraftDirty(false);
-    setSelectedRoadArea(area);
+    // The source surface was only the chooser that opened this draft. Keeping
+    // it selected also kept the whole-road outline blue while one band was
+    // selected, so draft mode now owns the map highlight exclusively.
+    setSelectedRoadArea(null);
     setEditingRoadId(area.roadId);
     setLastInsertedRoadId(area.roadId);
     setOsm2streetsSelection(null);
@@ -645,6 +666,7 @@ export function useRoadEditor(
     setDrawMode('none');
     setSelection(null);
     setRoadDraft(null);
+    setSelectedRoadBand(null);
     setRoadEditBaseline(null);
     setRoadDraftDirty(false);
     setEditingRoadId(null);
@@ -844,14 +866,28 @@ export function useRoadEditor(
             inserted.id,
             roadDraft
           );
+          const movementRoadIds = synchronizeRoadMovementMetadata(
+            cityjson,
+            inserted.id,
+            roadDraft
+          );
           if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
-          return { ...inserted, ...disconnected, connectedRoadIds };
+          return {
+            ...inserted,
+            ...disconnected,
+            connectedRoadIds,
+            movementRoadIds,
+            movementDecisionCount: (roadDraft.movements ?? []).filter(
+              (movement) => movement.status !== 'proposed'
+            ).length,
+          };
         }
       );
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(result.id);
         for (const connectedRoadId of result.connectedRoadIds) next.add(connectedRoadId);
+        for (const movementRoadId of result.movementRoadIds) next.add(movementRoadId);
         for (const disconnectedRoadId of result.disconnectedRoadIds) next.add(disconnectedRoadId);
         return next;
       });
@@ -897,6 +933,13 @@ export function useRoadEditor(
                 : ''
             }.`
       );
+      if (result.movementDecisionCount > 0) {
+        setRoadStatus((current) =>
+          `${current ?? `Saved ${result.id}.`} Persisted ${result.movementDecisionCount} lane-movement decision${
+            result.movementDecisionCount === 1 ? '' : 's'
+          } with reciprocal road references.`
+        );
+      }
     } catch (error) {
       console.error(error);
       alert(`Road insertion failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -987,9 +1030,15 @@ export function useRoadEditor(
         cityjson,
         `Deleting ${roadId}`,
         () => {
+          const movementRoadIds = removeRoadMovementReferences(cityjson, roadId);
           const deletion = deleteRoadFromCityJson(cityjson, roadId);
           if (deletion.deleted) compactVertices(cityjson);
-          return deletion;
+          return {
+            ...deletion,
+            disconnectedRoadIds: [
+              ...new Set([...deletion.disconnectedRoadIds, ...movementRoadIds]),
+            ],
+          };
         }
       );
       if (!result.deleted) {

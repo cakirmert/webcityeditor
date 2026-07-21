@@ -8,7 +8,7 @@ This file is the single technical handoff for City Editor. It consolidates the f
 - The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed textured LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close building views use semantic, untextured CityJSON LoD3 by default. An explicit LoD3-only switch streams Hamburg's official textured 3D Tiles; editable CityJSON remains the source of truth and distant context falls back to grounded LoD2, outlines, or blocks.
+- Close building views use one CityJSON LoD3 object set. Semantic materials are the default; the LoD3-only switch binds the committed Hamburg photo atlases without changing geometry, culling, anchors, or editable-object visibility. Distant context falls back to grounded LoD2, outlines, or blocks.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 18.25 it selects source LoD3 where available while keeping the same geometry untextured and colouring RoofSurface, WallSurface, Window, and Door faces semantically. Each root building group is normalized by its own minimum source elevation, rather than one viewport-wide minimum, so every building touches the flat editor map while installations remain at the correct relative height. The optional photo-texture switch replaces that close stage with official textured 3D Tiles and has no effect at lower zooms. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. The selected-building viewer filters to one object and offers independent LoD2/LoD3 and texture controls, with textures off by default.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 18.25 it selects source LoD3 where available, including BuildingInstallation descendants, and colours RoofSurface, WallSurface, Window, and Door faces semantically. The optional photo-texture switch changes only materials on those same LoD3 surfaces and has no effect at lower zooms. One document-wide projected origin and one all-source-LoD ground/anchor per root keep Float32 mesh coordinates small and identical across viewport, LoD, and texture changes. Selected and dirty buildings enter the close-detail budget before context, so new or edited objects remain present at maximum zoom. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. The selected-building viewer filters to one object and offers independent LoD2/LoD3 and texture controls, with textures off by default.
 
-The wide Hamburg context is LoD2. The editable close-up data preserves that geometry and adds 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, and 1,043 BuildingInstallation objects ship as an offline/editing fallback. When Photo textures is enabled, the close map streams `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json`, the CORS-enabled PBR hierarchy used by Hamburg's geoportal, at a screen-space error of four pixels. Each b3dm batch feature is shifted by its own `Grundhöhe NN` metadata (or its minimum vertex when missing), which attaches it to the flat map without flattening roof detail. Four placeable, single-root assets are extracted from tile `6433` with their complete BuildingInstallation descendants and correct texture atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, genus/species, planting years, and streets. The renderer selects rounded, spreading, columnar, or conical higher-resolution crowns from that botanical data. Edit focus hides the tree context to preserve interaction performance.
+The wide Hamburg context is LoD2. The editable close-up data preserves that geometry and adds 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, 20,294 surfaces, and 1,043 BuildingInstallation objects ship with the demo. The close map reads that committed CityJSON directly whether photographs are enabled or disabled; it does not replace the editor with a separately streamed duplicate city. Four placeable, single-root assets are extracted from tile `6433` with their complete BuildingInstallation descendants and correct texture atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, genus/species, planting years, and streets. The renderer selects rounded, spreading, columnar, or conical higher-resolution crowns from that botanical data. Edit focus hides the tree context to preserve interaction performance.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -77,14 +77,16 @@ Endpoint editing is deliberate:
 
 - yellow handles move existing bends;
 - white midpoint handles insert a bend;
-- teal endpoint targets come from other draft sections, editable CityJSON roads, and OSM road endpoints;
-- dropping an endpoint on a teal target stores a confirmed connection;
-- connections between two editable CityJSON roads are written reciprocally.
+- separate purple handles remain visible at both ends of every editable section;
+- every nearby direction- and mode-compatible endpoint from other draft sections, editable CityJSON roads, and OSM roads is shown as a teal target, with candidate curves from the active handle;
+- dropping a purple handle on a teal target stores direction-aware lane pairs and exposes their source/target band, mode, direction, and endpoint in the bottom editor;
+- connections between two editable CityJSON roads are written reciprocally;
+- imported osm2streets junction membership seeds editable incoming-to-outgoing lane-movement proposals. Provenance and proposed/confirmed/rejected status are retained, confirmed/rejected decisions are stored reciprocally in `_roadMovements`, and rejected curves stay suppressed after reload;
 - moving a confirmed endpoint away prompts before Save, then clears the stale reciprocal metadata
   from the connected road in the same guarded edit when the user accepts the disconnection;
 - deleting a CityJSON road clears reciprocal endpoint metadata from every surviving editable road.
 
-Connection metadata confirms graph topology. It does not yet synthesize a complete lane-level intersection, turn restrictions, or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
+Connection metadata and imported movement decisions confirm graph topology. They do not yet synthesize new intersection surfaces or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
 
 ## UX and performance decisions
 
@@ -130,7 +132,7 @@ The strict CityJSONSeq catalog streams tiles for the visible viewport and suppor
 
 ### Official Hamburg LoD3 data
 
-The close map streams the official live tileset at `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json`; its JSON and b3dm children return `Access-Control-Allow-Origin: *`. CityJSON remains authoritative for edits and export. The compact tile `6433` conversion is retained as editable/offline source data. Reproduce it by downloading the tile's records from the Area 1 archive, converting with `citygml-tools`, then building the subset with:
+The close map renders the committed editable CityJSON conversion of official tile `6433`, including its UVs and 68 local JPG atlases. This keeps geometry, textures, object identity, selection, and export on one code path with no runtime dependency on Hamburg's live 3D Tiles service. Reproduce the committed subset by downloading the tile's records from the Area 1 archive, converting with `citygml-tools`, then building it with:
 
 ```bash
 npm run data:hamburg-lod3-download -- 6433
@@ -213,15 +215,15 @@ node --check scripts/prepare-hamburg-road-catalog.mjs
 npm run dev:hamburg-roads -- --dry-run
 ```
 
-Focused regression coverage exists for smooth road preview/export parity, touch handle editing, endpoint snapping, reciprocal CityJSON connections, exact-polygon attribute saves, highest-LoD mesh selection, catalog preparation, and the Hamburg committed fixtures.
+Focused regression coverage exists for smooth road preview/export parity, touch handle editing, all-compatible endpoint discovery, direction/mode-safe lane pairs, reciprocal movement decisions, exact-polygon attribute saves, stable map anchors, LoD/texture parity, editable-building precedence, catalog preparation, and the Hamburg committed fixtures.
 
-## Next implementation task: unified road connectivity and building LoD rendering
+## Implemented: unified road connectivity and building LoD rendering
 
-Treat this section as the next coordinated implementation task. The behaviors below were observed in the published editor after the lane-connection and untextured-LoD3 work. They supersede any earlier claim in this document that the affected interaction or rendering path is complete. Diagnose the shared state and rendering architecture first, then implement and verify the fixes together rather than adding more independent overlay exceptions.
+This coordinated implementation replaced the overlapping road-selection states and duplicate close-building renderers. The subsections below are retained as the acceptance record for the unified behavior and its regression coverage.
 
 ### 1. Separate road-edit state from lane-selection highlighting
 
-Entering road edit mode must clear the existing whole-road highlight. At present, the road that was selected to open the editor can remain highlighted while a band selected in the bottom cross-section menu is highlighted too, making both states look active.
+Entering road edit mode clears the whole-road selection, and the synchronized side/bottom editors now leave only the active draft band highlighted.
 
 - Clear the pre-edit road selection/highlight as soon as a `RoadDraft` becomes active.
 - Keep only the active cross-section band highlight when the user selects a lane or other band in either road menu.
@@ -231,7 +233,7 @@ Entering road edit mode must clear the existing whole-road highlight. At present
 
 ### 2. Make every possible endpoint connection visible and understandable
 
-The current editor can appear to show only one purple connection node, and possible destinations are not discoverable until the user already knows where to drag. Both road ends and all valid nearby destinations must be evident.
+Every editable section now shows separate purple handles at both ends, all valid nearby teal targets, and candidate curves before a drag begins.
 
 - Render a distinct purple connection handle at both ends of every active editable road section. Keep these separate from yellow shape anchors and white bend-insertion handles, including when handles overlap in screen space.
 - When edit mode starts, or when a purple handle is pressed, show all compatible nearby road endpoints as teal targets. Do not limit target visibility to the single nearest endpoint before the drag begins.
@@ -242,7 +244,7 @@ The current editor can appear to show only one purple connection node, and possi
 
 ### 3. Derive intersection connectivity from the existing OSM/osm2streets data
 
-Use imported topology wherever it is available instead of requiring every connection to be drawn manually. The committed OSM and osm2streets data already contain directed road approaches, junction geometry, lane ordering, and shared intersection context that can seed connection proposals.
+Imported OSM/osm2streets topology now seeds editable movements instead of requiring every connection to be drawn manually.
 
 - Inspect the original OSM connectivity, directed centerlines, osm2streets lane polygons, junction polygons, and any retained provenance before designing a new schema.
 - At each imported intersection, group road endpoints that belong to the same junction and generate explicit candidate lane movements from incoming compatible bands to outgoing compatible bands.
@@ -254,9 +256,9 @@ Use imported topology wherever it is available instead of requiring every connec
 
 ### 4. Eliminate building movement during camera changes
 
-Buildings still appear to shift when bearing, pitch, or camera position changes. Do not assume this is only the detail-focus membership issue. Instrument the full coordinate path and identify whether the movement comes from projection conversion, grounding, layer replacement, precision, or multiple causes.
+Building meshes now retain a document-wide projected origin and canonical per-root anchor/ground derived from all source LoDs. Camera changes do not choose a different normalization subset or a second textured renderer.
 
-- Trace source coordinates from CityJSON EPSG:25832 through WGS84 conversion, local normalization, per-building ground offset, deck.gl/MapLibre model matrices, and the textured 3D Tiles transforms.
+- Trace source coordinates from CityJSON EPSG:25832 through WGS84 conversion, local normalization, per-building ground offset, deck.gl/MapLibre model matrices, and the local texture/UV path.
 - Record stable world-space anchor coordinates for representative LoD2, untextured LoD3, textured LoD3, imported, and newly created buildings before and after bearing/pitch-only camera changes.
 - Verify that camera changes never recompute or round source positions, change the projection origin, apply grounding twice, or switch between meshes with different horizontal anchors.
 - Compare corresponding LoD2 and LoD3 building bounds and centroids. If source LoDs use different origins, compute and retain one canonical per-building anchor rather than normalizing each representation independently.
@@ -266,26 +268,26 @@ Buildings still appear to shift when bearing, pitch, or camera position changes.
 
 ### 5. Restore real detailed LoD3, with textures as a rendering option
 
-The current close view labelled as untextured source LoD3 does not visibly provide the detailed LoD3 representation expected by the user. Treat the missing detail as unresolved even if `maxLod` reports 3. Determine whether geometry selection, parent/child inclusion, vertex budgeting, semantic surfaces, or source merging is dropping the detailed roofs, openings, and `BuildingInstallation` children.
+The close view now includes the source LoD3 root geometry and every selected BuildingInstallation descendant. Texture state changes material binding only, and diagnostics are calculated from objects and surfaces actually queued for drawing.
 
 - Verify representative Hamburg objects against the original LoD3 source and count their selected LoD3 solids, surfaces, openings, and installation descendants in the rendered mesh.
 - Keep the detailed LoD3 geometry when textures are disabled; texture state must change materials only, not replace detailed geometry with LoD2 or blocks.
-- Re-enable the official textures if they make the true LoD3 source reliably visible, but fix their material, depth, lighting, resolution, and loading behavior rather than using the textured Tile3D layer as an unrelated duplicate city.
+- Bind the committed official photo atlases to the same true LoD3 surfaces, with semantic material fallback for every face or object that has no atlas.
 - Prefer one logical building rendering pipeline in which LoD0/LoD2/LoD3 are resolution choices for the same object set. If separate GPU layer types remain necessary, centralize object identity, transforms, culling, selection, grounding, and transition ownership so the result behaves as one layer.
 - Make the UI report the representation actually drawn: geometry LoD, source, texture state, object count, and whether detailed descendants were included. Do not infer successful LoD3 rendering from a requested `maxLod` alone.
 - Add visual fixtures that clearly distinguish LoD2 from LoD3 through dormers, openings, roof detail, and installations, and fail if the close view silently falls back.
 
 ### 6. Keep editable/new buildings visible through every LoD and texture state
 
-Newly created or parametrically edited buildings currently disappear at full zoom when textured LoD3 is enabled. Textured source context must never replace the editable object layer.
+Newly created, selected, dirty, and parametrically edited buildings have explicit priority in the same close-detail object set used by semantic and textured rendering.
 
-- Maintain a single logical set of visible buildings. Official textured source objects may supply a higher-resolution representation for matching imported IDs, but unmatched, new, dirty, selected, or parametrically edited buildings must always remain rendered.
-- Give editable objects explicit precedence over streamed source duplicates. Hide a source counterpart only when the replacement object is loaded and visible at the same canonical anchor.
+- Maintain a single logical set of visible buildings. Textured source objects use the same higher-resolution representation and matching imported IDs; unmatched, new, dirty, selected, or parametrically edited buildings always remain rendered.
+- Give editable objects explicit precedence in culling and mesh budgets, with no separately streamed source duplicate to hide them.
 - New buildings that have generated LoD3 must remain visible at the closest zoom with textures on or off. If no texture exists, render their semantic/untextured LoD3 material alongside textured neighbors.
 - Selection, hover, edit handles, validation, and save previews must target the same logical object across LoD transitions.
 - Add tests covering a new building and an edited imported building while crossing the LoD2/LoD3 threshold and toggling textures at maximum zoom.
 
-### Completion criteria
+### Verification criteria
 
 This task is complete only when all of the following hold in the Hamburg demo:
 
@@ -308,6 +310,6 @@ The following work is intentionally not claimed as complete:
    from the peer road; automatic movement of the peer geometry is still pending.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
 5. Add a dedicated renderer for Hamburg's CORS-enabled Cesium quantized-mesh DGM terrain and drape the active MapLibre basemap onto it. Per-building grounding fixes floating models now; full terrain is required to preserve surveyed elevation differences and terrain breaklines visually.
-6. Add screenshot-based GPU regression coverage for official 3D Tiles and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural grounding and tile-data regressions already have unit coverage.
+6. Automate screenshot-based GPU regression coverage for local textured CityJSON and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural anchor, texture-parity, and committed-fixture regressions already have unit coverage.
 
 These are continuation tasks, not blockers for the committed demo or the exact attribute-editing workflow.

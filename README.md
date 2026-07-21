@@ -4,7 +4,7 @@ City Editor is a touch-friendly map editor for Hamburg buildings, roads, and pla
 
 **[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
 
-The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms show semantic LoD3 geometry without photographs by default; **Photo textures** can stream Hamburg’s official imagery for the LoD3 close view. The editable roads, attributes, and saved changes remain in CityJSON.
+The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms show semantic LoD3 geometry without photographs by default; **Photo textures** bind the bundled official Hamburg atlases to those same CityJSON LoD3 surfaces. The editable roads, attributes, and saved changes remain in one CityJSON model.
 
 ![City Editor showing the Hamburg CityJSON overview](assets/readme/city-overview.jpg)
 
@@ -23,8 +23,8 @@ Open **Map layers** in the upper-left of the map.
 - **Satellite** is useful for checking building footprints and road alignment.
 - **Satellite image** and **Road surfaces** have separate opacity sliders.
 - **Building colours** defaults to **Roof type**. **Usage** also understands Hamburg’s official ALKIS function codes.
-- **Photo textures** is off by default and becomes available only in the close LoD3 view. With it off, LoD3 roofs, walls, windows, and doors retain distinct semantic colours.
-- The status at the bottom explains which building detail level is currently visible.
+- **Photo textures** is off by default and becomes available only when LoD3 geometry is actually drawn. Toggling it changes materials, not the visible object set; untextured new or edited buildings stay beside photographed neighbours.
+- The status at the bottom reports the geometry LoD, drawn objects, buildings, installations, surfaces, and real texture state.
 
 > **Screenshot to add — `assets/readme/map-layers.jpg`**
 > Open Map layers over a close Hamburg view. Show TopPlus and Satellite, Building colours with Roof type selected, the LoD3 Photo textures switch, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps comparison, semantic colour, and optional LoD3 texture controls together.”
@@ -66,10 +66,11 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
 2. Tap a coloured road surface on the map, then choose **Edit road**.
 3. Tap a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
 4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction arrows update from the road bands.
-5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Drag the separate purple end connector onto a teal target to confirm a road connection and record its lane pairs.
-6. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
-7. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.
-8. Choose **Save exact attributes** or **Save road changes**. **Discard** leaves the saved CityJSON unchanged.
+5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Both road ends have separate purple connectors; all compatible nearby ends appear as teal targets, and faint curves preview the alternatives.
+6. Drag a purple connector onto a teal target to confirm direction- and mode-compatible lane pairs. Imported junctions also show subdued osm2streets-derived movement proposals; inspect their source/target bands and choose **Confirm** or **Reject** in the bottom editor.
+7. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
+8. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.
+9. Choose **Save exact attributes** or **Save road changes**. Confirmed/rejected movement decisions are stored reciprocally without changing protected exact polygons. **Discard** leaves the saved CityJSON unchanged.
 
 ![Exact CityJSON road editing with on-map band controls](assets/readme/road-editor.jpg)
 
@@ -82,7 +83,7 @@ Attribute-only changes preserve imported osm2streets polygons and vertices. Movi
 3. Choose the large **Finish road** button. Two or more points are required.
 4. Edit the generated road bands exactly like an existing road.
 5. Compare the shape with **Satellite** and adjust both opacity sliders when needed.
-6. Use the purple end connectors and teal targets to connect it to existing roads; the translucent curves show the saved lane-to-lane pairs.
+6. Use either purple end connector and the visible teal targets to connect it to existing roads; faint curves show candidates and stronger curves show saved lane-to-lane pairs.
 7. Choose **Save new road** to insert it into the working CityJSON.
 
 > **Screenshot to add — `assets/readme/new-road.jpg`**

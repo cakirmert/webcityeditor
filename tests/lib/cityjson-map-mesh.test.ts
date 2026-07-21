@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { CityJsonDocument } from '../../src/types';
-import { buildCityJsonMapMesh } from '../../src/lib/cityjson-map-mesh';
+import {
+  buildCityJsonMapMesh,
+  canonicalCityJsonMapOrigin,
+} from '../../src/lib/cityjson-map-mesh';
 
 function detailDocument(): CityJsonDocument {
   return {
@@ -89,6 +92,8 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.objectCount).toBe(1);
     expect(mesh?.maxLod).toBe(3);
     expect(mesh?.triangleCount).toBe(2);
+    expect(mesh?.truncated).toBe(true);
+    expect(mesh?.droppedObjectCount).toBe(1);
   });
 
   it('selects source LoD2 without overlapping the available LoD3 geometry', () => {
@@ -125,7 +130,7 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.triangleCount).toBe(1);
   });
 
-  it('preserves CityJSON face textures and UV coordinates for the close map view', () => {
+  it('converts lower-left CityJSON UVs to browser image coordinates', () => {
     const doc = detailDocument();
     doc.appearance = {
       textures: [{ type: 'JPG', image: '/assets/sample.jpg' }],
@@ -146,10 +151,13 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.triangleCount).toBe(2);
     expect(mesh?.indices).toHaveLength(0);
     expect(mesh?.textures).toHaveLength(1);
+    expect(mesh?.surfaceCount).toBe(2);
+    expect(mesh?.availableTexturedSurfaceCount).toBe(2);
+    expect(mesh?.texturedSurfaceCount).toBe(2);
     expect(mesh?.textures[0].image).toBe('/assets/sample.jpg');
     expect([...mesh!.textures[0].texCoords]).toEqual([
-      0, 0, 1, 0, 0, 1,
-      0, 0, 1, 0, 0, 1,
+      0, 1, 1, 1, 0, 0,
+      0, 1, 1, 1, 0, 0,
     ]);
   });
 
@@ -178,7 +186,170 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.triangleCount).toBe(2);
     expect(mesh?.textures).toHaveLength(0);
     expect(mesh?.indices).toHaveLength(6);
+    expect(mesh?.surfaceCount).toBe(2);
+    expect(mesh?.availableTexturedSurfaceCount).toBe(2);
+    expect(mesh?.texturedSurfaceCount).toBe(0);
     expect(mesh?.explicitOpeningSurfaceCount).toBe(1);
+  });
+
+  it('keeps one canonical anchor across viewport subsets, LoDs, and texture states', () => {
+    const doc = detailDocument();
+    const detailed = doc.CityObjects.detailed.geometry as Array<Record<string, unknown>>;
+    detailed.splice(1, 0, {
+      type: 'MultiSurface',
+      lod: '2.0',
+      boundaries: [[[0, 1, 2]]],
+    });
+    doc.appearance = {
+      textures: [{ type: 'JPG', image: '/assets/sample.jpg' }],
+      'vertices-texture': [[0, 0], [1, 0], [0, 1]],
+    };
+    detailed[2].texture = {
+      rgbTexture: { values: [[[0, 0, 1, 2]], [[0, 0, 1, 2]]] },
+    };
+
+    const origin = canonicalCityJsonMapOrigin(doc)!;
+    const lod2 = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed']),
+      maxLod: 2.9,
+      originProjected: origin,
+      groundObjectGroups: true,
+    })!;
+    const lod3Semantic = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed']),
+      maxLod: 3.9,
+      originProjected: origin,
+      groundObjectGroups: true,
+      texturesEnabled: false,
+    })!;
+    const lod3Textured = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed']),
+      maxLod: 3.9,
+      originProjected: origin,
+      groundObjectGroups: true,
+      texturesEnabled: true,
+    })!;
+    const otherSubset = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['nearby']),
+      originProjected: origin,
+      groundObjectGroups: true,
+    })!;
+
+    for (const mesh of [lod2, lod3Semantic, lod3Textured, otherSubset]) {
+      expect(mesh.originProjected).toEqual([origin[0], origin[1], 0]);
+      expect(mesh.anchorLngLat).toEqual(lod2.anchorLngLat);
+    }
+    expect(lod3Semantic.objectAnchors).toEqual(lod3Textured.objectAnchors);
+    expect(lod3Semantic.triangleCount).toBe(lod3Textured.triangleCount);
+    expect(lod3Semantic.surfaceCount).toBe(lod3Textured.surfaceCount);
+    expect([...lod3Textured.textures[0].positions]).toEqual([...lod3Semantic.positions]);
+  });
+
+  it('grounds LoD transitions from all source geometry instead of re-anchoring each LoD', () => {
+    const doc = detailDocument();
+    doc.vertices = [
+      [565000, 5935000, 10],
+      [565010, 5935000, 10],
+      [565000, 5935010, 15],
+      [565000, 5935000, 12],
+      [565010, 5935000, 12],
+      [565000, 5935010, 17],
+    ];
+    doc.CityObjects = {
+      stable: {
+        type: 'Building',
+        geometry: [
+          { type: 'MultiSurface', lod: '2', boundaries: [[[0, 1, 2]]] },
+          { type: 'MultiSurface', lod: '3', boundaries: [[[3, 4, 5]]] },
+        ],
+      },
+    };
+    const origin = canonicalCityJsonMapOrigin(doc)!;
+    const lod2 = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['stable']),
+      maxLod: 2.9,
+      originProjected: origin,
+      groundObjectGroups: true,
+    })!;
+    const lod3 = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['stable']),
+      maxLod: 3.9,
+      originProjected: origin,
+      groundObjectGroups: true,
+    })!;
+    const xyz2 = [...lod2.positions];
+    const xyz3 = [...lod3.positions];
+
+    expect(xyz2.filter((_, index) => index % 3 !== 2)).toEqual(
+      xyz3.filter((_, index) => index % 3 !== 2)
+    );
+    expect(xyz2.filter((_, index) => index % 3 === 2)).toEqual([0, 0, 5]);
+    expect(xyz3.filter((_, index) => index % 3 === 2)).toEqual([2, 2, 7]);
+    expect(lod2.objectAnchors).toEqual(lod3.objectAnchors);
+  });
+
+  it('reports roots, installations, LoDs, and surfaces from the geometry actually drawn', () => {
+    const doc = detailDocument();
+    doc.CityObjects.detailed.children = ['detail-installation'];
+    doc.CityObjects['detail-installation'] = {
+      type: 'BuildingInstallation',
+      parents: ['detailed'],
+      geometry: [{ type: 'MultiSurface', lod: '3', boundaries: [[[0, 1, 2]]] }],
+    };
+
+    const mesh = buildCityJsonMapMesh(doc, {
+      objectIds: new Set(['detailed', 'detail-installation']),
+      maxLod: 3.9,
+      texturesEnabled: false,
+    })!;
+
+    expect(mesh.rootObjectCount).toBe(1);
+    expect(mesh.objectCount).toBe(2);
+    expect(mesh.installationObjectCount).toBe(1);
+    expect(mesh.objectCountByLod).toEqual({ '3': 2 });
+    expect(mesh.surfaceCount).toBe(3);
+    expect(mesh.truncated).toBe(false);
+  });
+
+  it('keeps a new untextured LoD3 building beside textured imported neighbors', () => {
+    const doc = detailDocument();
+    doc.vertices.push(
+      [565040, 5935000, 0],
+      [565050, 5935000, 0],
+      [565040, 5935010, 6]
+    );
+    doc.CityObjects.created = {
+      type: 'Building',
+      attributes: { _createdBy: 'webcityeditor' },
+      geometry: [{ type: 'MultiSurface', lod: '3', boundaries: [[[10, 11, 12]]] }],
+    };
+    doc.appearance = {
+      textures: [{ type: 'JPG', image: '/assets/imported.jpg' }],
+      'vertices-texture': [[0, 0], [1, 0], [0, 1]],
+    };
+    const importedGeometry = doc.CityObjects.detailed.geometry?.[1] as Record<string, unknown>;
+    importedGeometry.texture = {
+      rgbTexture: { values: [[[0, 0, 1, 2]], [[0, 0, 1, 2]]] },
+    };
+    const objectIds = new Set(['created', 'detailed']);
+
+    const textured = buildCityJsonMapMesh(doc, {
+      objectIds,
+      maxLod: 3.9,
+      texturesEnabled: true,
+    })!;
+    const semantic = buildCityJsonMapMesh(doc, {
+      objectIds,
+      maxLod: 3.9,
+      texturesEnabled: false,
+    })!;
+
+    expect(textured.objectCount).toBe(2);
+    expect(textured.textures).toHaveLength(1);
+    expect(textured.indices).toHaveLength(3);
+    expect(textured.triangleCount).toBe(semantic.triangleCount);
+    expect(textured.objectAnchors).toEqual(semantic.objectAnchors);
+    expect(textured.objectCountByLod).toEqual({ '3': 2 });
   });
 
   it('can colour close-range geometry by the root building usage', () => {

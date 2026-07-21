@@ -6,7 +6,7 @@ export const BUILDING_BLOCK_FULL_ZOOM = 15.25;
 export const BUILDING_DETAIL_MIN_ZOOM = 15.25;
 export const BUILDING_DETAIL_FULL_ZOOM = 18;
 
-/** Textured Hamburg LoD3 is deliberately reserved for a very close street view. */
+/** Source LoD3 surfaces are deliberately reserved for a very close street view. */
 export const BUILDING_LOD3_MIN_ZOOM = 18.25;
 
 /**

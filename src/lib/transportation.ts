@@ -35,10 +35,48 @@ export interface RoadLaneConnection {
   /** Stable id when available; index is retained for imported lanes without ids. */
   sourceBandId?: string;
   sourceBandIndex: number;
+  sourceDirection?: RoadDirection;
   targetBandId?: string;
   targetBandIndex: number;
+  targetDirection?: RoadDirection;
   sourceMode?: string;
   targetMode?: string;
+}
+
+export type RoadMovementStatus = 'proposed' | 'confirmed' | 'rejected';
+
+export type RoadMovementTurn = 'through' | 'left' | 'right' | 'uturn' | 'crossing';
+
+export type RoadMovementProvenance = 'osm2streets' | 'osm' | 'geometry' | 'manual';
+
+/**
+ * One directed, lane-level movement through a junction. Imported movements
+ * remain proposals until the user confirms or rejects them; manual endpoint
+ * joins continue to use RoadEndpointConnection because they also move the
+ * road's endpoint geometry.
+ */
+export interface RoadLaneMovement {
+  id: string;
+  junctionId: string;
+  sourceRoadId: string;
+  sourceSectionId: string;
+  sourceEndpoint: 'start' | 'end';
+  sourceBandId?: string;
+  sourceBandIndex: number;
+  sourceDirection?: RoadDirection;
+  targetRoadId: string;
+  targetSectionId: string;
+  targetEndpoint: 'start' | 'end';
+  targetBandId?: string;
+  targetBandIndex: number;
+  targetDirection?: RoadDirection;
+  sourceMode: string;
+  targetMode: string;
+  turn: RoadMovementTurn;
+  status: RoadMovementStatus;
+  provenance: RoadMovementProvenance;
+  /** True when source tags/turn metadata support the movement; false means a deterministic geometry fallback. */
+  semanticEvidence: boolean;
 }
 
 function reverseRoadLaneConnections(
@@ -48,8 +86,10 @@ function reverseRoadLaneConnections(
   return connections.map((connection) => ({
     ...(connection.targetBandId ? { sourceBandId: connection.targetBandId } : {}),
     sourceBandIndex: connection.targetBandIndex,
+    ...(connection.targetDirection ? { sourceDirection: connection.targetDirection } : {}),
     ...(connection.sourceBandId ? { targetBandId: connection.sourceBandId } : {}),
     targetBandIndex: connection.sourceBandIndex,
+    ...(connection.sourceDirection ? { targetDirection: connection.sourceDirection } : {}),
     ...(connection.targetMode ? { sourceMode: connection.targetMode } : {}),
     ...(connection.sourceMode ? { targetMode: connection.sourceMode } : {}),
   }));
@@ -109,6 +149,8 @@ export interface RoadDraft {
   osmTags?: Record<string, string>;
   vertical?: RoadVerticalProfile;
   userVerified?: boolean;
+  /** Imported proposals plus user-confirmed/rejected lane movements. */
+  movements?: RoadLaneMovement[];
   sections: RoadSectionDraft[];
 }
 
@@ -707,6 +749,7 @@ export function splitRoadSectionAtFraction(
       ...(band.id ? { sourceBandId: band.id, targetBandId: band.id } : {}),
       sourceBandIndex: index,
       targetBandIndex: index,
+      ...(band.direction ? { sourceDirection: band.direction, targetDirection: band.direction } : {}),
       sourceMode: mode,
       targetMode: mode,
     }];
@@ -1144,6 +1187,8 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
               null
             ) as JsonValue,
             osm2streetsPropertiesJson: (surface.osm2streetsPropertiesJson ?? null) as JsonValue,
+            osmTags: (object.attributes?._osmTags ?? null) as JsonValue,
+            roadMovements: (object.attributes?._roadMovements ?? null) as JsonValue,
           },
         });
       }
@@ -1194,6 +1239,9 @@ export function deriveEditableRoadDraftFromAreas(
 
   const sourceOsmWayId = firstImportedOsmWayId(roadAreas);
   const vertical = roadAreas.find((area) => area.vertical)?.vertical;
+  const osmTags = roadAreas
+    .map((area) => stringRecord(area.attributes.osmTags))
+    .find((value): value is Record<string, string> => value !== null);
   const isOsmDerived = roadAreas.some(
     (area) => String(area.attributes.source ?? '').toLowerCase() === 'osm2streets'
   );
@@ -1205,6 +1253,7 @@ export function deriveEditableRoadDraftFromAreas(
         .find((value) => value !== undefined) ?? roadId,
     source: isOsmDerived ? 'osm' : 'manual',
     ...(sourceOsmWayId === undefined ? {} : { sourceOsmWayId }),
+    ...(osmTags ? { osmTags: { ...osmTags } } : {}),
     ...(vertical ? { vertical: { ...vertical } } : {}),
     userVerified: false,
     sections,
@@ -2148,6 +2197,7 @@ export function synchronizeRoadConnectionMetadata(
   sourceDraft: RoadDraft
 ): string[] {
   const changedTargets = new Set<string>();
+  let extractedAreas: RoadArea[] | null = null;
   for (const sourceSection of sourceDraft.sections) {
     for (const sourceEndpoint of ['start', 'end'] as const) {
       const connection = sourceSection.connections?.[sourceEndpoint];
@@ -2161,7 +2211,20 @@ export function synchronizeRoadConnectionMetadata(
       }
       const targetObject = doc.CityObjects[connection.targetId];
       if (!targetObject || targetObject.type !== 'Road') continue;
-      const targetDraft = readEditableRoadDraftFromCityObject(targetObject);
+      let targetDraft = readEditableRoadDraftFromCityObject(targetObject);
+      let derivedFromExactSurfaces = false;
+      if (!targetDraft) {
+        extractedAreas ??= extractTransportationAreas(doc);
+        const targetAreas = extractedAreas.filter(
+          (area) => area.roadId === connection.targetId
+        );
+        try {
+          targetDraft = deriveEditableRoadDraftFromAreas(targetAreas, connection.targetId);
+          derivedFromExactSurfaces = true;
+        } catch {
+          targetDraft = null;
+        }
+      }
       if (!targetDraft) continue;
       const targetSection = targetDraft.sections.find(
         (section) => section.id === connection.targetSectionId
@@ -2184,6 +2247,9 @@ export function synchronizeRoadConnectionMetadata(
       targetObject.attributes = {
         ...(targetObject.attributes ?? {}),
         _roadLayout: roadDraftToJson(targetDraft),
+        ...(derivedFromExactSurfaces && targetObject.attributes?._roadGeometryMode === undefined
+          ? { _roadGeometryMode: 'exact' as const }
+          : {}),
         _updatedAt: new Date().toISOString(),
       };
       changedTargets.add(connection.targetId);
@@ -2379,6 +2445,12 @@ function readRoadDraft(value: unknown): RoadDraft | null {
   if (osmTags) draft.osmTags = osmTags;
   if (vertical) draft.vertical = vertical;
   if (typeof record.userVerified === 'boolean') draft.userVerified = record.userVerified;
+  const movements = Array.isArray(record.movements)
+    ? record.movements
+        .map(readRoadLaneMovement)
+        .filter((movement): movement is RoadLaneMovement => movement !== null)
+    : [];
+  if (movements.length > 0) draft.movements = movements;
   return draft;
 }
 
@@ -2477,6 +2549,7 @@ function readRoadLaneConnection(value: unknown): RoadLaneConnection | null {
   if (!record) return null;
   const sourceBandIndex = Number(record.sourceBandIndex);
   const targetBandIndex = Number(record.targetBandIndex);
+  const directions: RoadDirection[] = ['forward', 'backward', 'both', 'none'];
   if (
     !Number.isInteger(sourceBandIndex) ||
     sourceBandIndex < 0 ||
@@ -2490,16 +2563,93 @@ function readRoadLaneConnection(value: unknown): RoadLaneConnection | null {
       ? { sourceBandId: record.sourceBandId }
       : {}),
     sourceBandIndex,
+    ...(directions.includes(record.sourceDirection as RoadDirection)
+      ? { sourceDirection: record.sourceDirection as RoadDirection }
+      : {}),
     ...(typeof record.targetBandId === 'string' && record.targetBandId
       ? { targetBandId: record.targetBandId }
       : {}),
     targetBandIndex,
+    ...(directions.includes(record.targetDirection as RoadDirection)
+      ? { targetDirection: record.targetDirection as RoadDirection }
+      : {}),
     ...(typeof record.sourceMode === 'string' && record.sourceMode
       ? { sourceMode: record.sourceMode }
       : {}),
     ...(typeof record.targetMode === 'string' && record.targetMode
       ? { targetMode: record.targetMode }
       : {}),
+  };
+}
+
+function readRoadLaneMovement(value: unknown): RoadLaneMovement | null {
+  const record = unknownRecord(value);
+  if (!record) return null;
+  const endpoints = ['start', 'end'] as const;
+  const turns: RoadMovementTurn[] = ['through', 'left', 'right', 'uturn', 'crossing'];
+  const statuses: RoadMovementStatus[] = ['proposed', 'confirmed', 'rejected'];
+  const provenances: RoadMovementProvenance[] = ['osm2streets', 'osm', 'geometry', 'manual'];
+  const directions: RoadDirection[] = ['forward', 'backward', 'both', 'none'];
+  const sourceBandIndex = Number(record.sourceBandIndex);
+  const targetBandIndex = Number(record.targetBandIndex);
+  if (
+    typeof record.id !== 'string' ||
+    !record.id ||
+    typeof record.junctionId !== 'string' ||
+    !record.junctionId ||
+    typeof record.sourceRoadId !== 'string' ||
+    !record.sourceRoadId ||
+    typeof record.sourceSectionId !== 'string' ||
+    !record.sourceSectionId ||
+    !endpoints.includes(record.sourceEndpoint as 'start' | 'end') ||
+    !Number.isInteger(sourceBandIndex) ||
+    sourceBandIndex < 0 ||
+    typeof record.targetRoadId !== 'string' ||
+    !record.targetRoadId ||
+    typeof record.targetSectionId !== 'string' ||
+    !record.targetSectionId ||
+    !endpoints.includes(record.targetEndpoint as 'start' | 'end') ||
+    !Number.isInteger(targetBandIndex) ||
+    targetBandIndex < 0 ||
+    typeof record.sourceMode !== 'string' ||
+    !record.sourceMode ||
+    typeof record.targetMode !== 'string' ||
+    !record.targetMode ||
+    !turns.includes(record.turn as RoadMovementTurn) ||
+    !statuses.includes(record.status as RoadMovementStatus) ||
+    !provenances.includes(record.provenance as RoadMovementProvenance)
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    junctionId: record.junctionId,
+    sourceRoadId: record.sourceRoadId,
+    sourceSectionId: record.sourceSectionId,
+    sourceEndpoint: record.sourceEndpoint as 'start' | 'end',
+    ...(typeof record.sourceBandId === 'string' && record.sourceBandId
+      ? { sourceBandId: record.sourceBandId }
+      : {}),
+    sourceBandIndex,
+    ...(directions.includes(record.sourceDirection as RoadDirection)
+      ? { sourceDirection: record.sourceDirection as RoadDirection }
+      : {}),
+    targetRoadId: record.targetRoadId,
+    targetSectionId: record.targetSectionId,
+    targetEndpoint: record.targetEndpoint as 'start' | 'end',
+    ...(typeof record.targetBandId === 'string' && record.targetBandId
+      ? { targetBandId: record.targetBandId }
+      : {}),
+    targetBandIndex,
+    ...(directions.includes(record.targetDirection as RoadDirection)
+      ? { targetDirection: record.targetDirection as RoadDirection }
+      : {}),
+    sourceMode: record.sourceMode,
+    targetMode: record.targetMode,
+    turn: record.turn as RoadMovementTurn,
+    status: record.status as RoadMovementStatus,
+    provenance: record.provenance as RoadMovementProvenance,
+    semanticEvidence: record.semanticEvidence === true,
   };
 }
 

@@ -1,4 +1,5 @@
 import {
+  deriveEditableRoadDraftFromAreas,
   roadSectionPointAt,
   sampleRoadSectionCenterlineWgs84,
   type OsmRoadFeature,
@@ -8,6 +9,13 @@ import {
   type RoadBand,
   type RoadSectionDraft,
 } from './transportation';
+import {
+  isRoadBandConnectable,
+  roadBandCanArriveAtEndpoint,
+  roadBandCanDepartFromEndpoint,
+  roadBandDirection,
+  roadBandModes,
+} from './road-movements';
 
 export interface RoadDraftHandle {
   sectionId: string;
@@ -28,6 +36,8 @@ export interface RoadSnapCandidate {
   position: [number, number];
   connection: RoadEndpointConnection;
   targetBands?: RoadBand[];
+  compatibleLaneCount?: number;
+  distanceMeters?: number;
 }
 
 export function connectRoadLanes(
@@ -38,56 +48,62 @@ export function connectRoadLanes(
 ): RoadEndpointConnection {
   const sourceLanes = sourceBands
     .map((band, index) => ({ band, index }))
-    .filter(({ band }) => isConnectableBand(band));
+    .filter(({ band }) => isRoadBandConnectable(band));
   const targetLanes = targetBands
     .map((band, index) => ({ band, index }))
-    .filter(({ band }) => isConnectableBand(band));
+    .filter(({ band }) => isRoadBandConnectable(band));
   const targetOrder =
     sourceEndpoint && connection.targetEndpoint === sourceEndpoint
       ? [...targetLanes].reverse()
       : targetLanes;
+  const targetEndpoint = connection.targetEndpoint === 'start' || connection.targetEndpoint === 'end'
+    ? connection.targetEndpoint
+    : sourceEndpoint === 'start'
+      ? 'end'
+      : 'start';
   const compatibleTargets = (source: RoadBand) =>
     targetOrder.filter(
-      ({ band }) => band.kind === source.kind || modesOverlap(source, band)
+      ({ band }) =>
+        modesOverlap(source, band) &&
+        (!sourceEndpoint ||
+          (roadBandCanArriveAtEndpoint(source, sourceEndpoint) &&
+            roadBandCanDepartFromEndpoint(band, targetEndpoint)) ||
+          (roadBandCanDepartFromEndpoint(source, sourceEndpoint) &&
+            roadBandCanArriveAtEndpoint(band, targetEndpoint)))
     );
-  const laneConnections = sourceLanes.map(({ band: source, index: sourceBandIndex }, ordinal) => {
+  const laneConnections = sourceLanes.flatMap(({ band: source, index: sourceBandIndex }, ordinal) => {
     const matches = compatibleTargets(source);
+    if (matches.length === 0) return [];
     const targetOrdinal = sourceLanes.length <= 1
       ? 0
       : Math.round((ordinal / (sourceLanes.length - 1)) * Math.max(0, matches.length - 1));
-    const chosen = matches[targetOrdinal] ?? targetOrder[Math.min(ordinal, targetOrder.length - 1)];
-    const targetBandIndex = chosen?.index ?? sourceBandIndex;
+    const chosen = matches[Math.min(targetOrdinal, matches.length - 1)];
+    const targetBandIndex = chosen.index;
     const target = targetBands[targetBandIndex];
-    return {
+    const sharedMode = target
+      ? roadBandModes(source).find((mode) => roadBandModes(target).includes(mode))
+      : undefined;
+    return [{
       sourceBandId: source.id,
       sourceBandIndex,
+      sourceDirection: roadBandDirection(source),
       targetBandId: target?.id,
       targetBandIndex,
-      sourceMode: primaryMode(source),
-      targetMode: target ? primaryMode(target) : primaryMode(source),
-    };
+      ...(target ? { targetDirection: roadBandDirection(target) } : {}),
+      sourceMode: sharedMode ?? primaryMode(source),
+      targetMode: sharedMode ?? (target ? primaryMode(target) : primaryMode(source)),
+    }];
   });
   return { ...connection, laneConnections };
 }
 
 function primaryMode(band: RoadBand): string {
-  return band.allowedModes?.[0] ??
-    (band.kind === 'bike_lane'
-      ? 'bicycle'
-      : band.kind === 'sidewalk'
-        ? 'pedestrian'
-        : band.kind === 'car_lane'
-          ? 'car'
-          : 'none');
-}
-
-function isConnectableBand(band: RoadBand): boolean {
-  return primaryMode(band) !== 'none';
+  return roadBandModes(band)[0] ?? 'none';
 }
 
 function modesOverlap(a: RoadBand, b: RoadBand): boolean {
-  const bModes = new Set(b.allowedModes ?? [primaryMode(b)]);
-  return (a.allowedModes ?? [primaryMode(a)]).some((mode) => bModes.has(mode));
+  const bModes = new Set(roadBandModes(b));
+  return roadBandModes(a).some((mode) => bModes.has(mode));
 }
 
 function finiteLngLat(point: [number, number]): boolean {
@@ -205,8 +221,10 @@ export function updateRoadDraftPoint(
                   laneConnections: connection.laneConnections.map((lane) => ({
                     ...(lane.targetBandId ? { sourceBandId: lane.targetBandId } : {}),
                     sourceBandIndex: lane.targetBandIndex,
+                    ...(lane.targetDirection ? { sourceDirection: lane.targetDirection } : {}),
                     ...(lane.sourceBandId ? { targetBandId: lane.sourceBandId } : {}),
                     targetBandIndex: lane.sourceBandIndex,
+                    ...(lane.sourceDirection ? { targetDirection: lane.sourceDirection } : {}),
                     ...(lane.targetMode ? { sourceMode: lane.targetMode } : {}),
                     ...(lane.sourceMode ? { targetMode: lane.sourceMode } : {}),
                   })),
@@ -276,8 +294,9 @@ function reconcileSectionConnections(
 
 /**
  * Small, visible connection targets for endpoint snapping. OSM way endpoints
- * act as the shared intersection nodes; saved editable CityJSON roads expose
- * their stored start/end anchors. Duplicates are collapsed by coordinate.
+ * act as the shared intersection nodes; every CityJSON road exposes either
+ * its saved layout or a draft derived from its exact imported surfaces.
+ * Duplicates are collapsed by coordinate.
  */
 export function buildRoadSnapCandidates(
   draft: RoadDraft | null,
@@ -302,17 +321,31 @@ export function buildRoadSnapCandidates(
     if (last) addDraftCandidate(section.id, 'end', last, section.bands, add);
   }
 
-  const seenLayouts = new Set<string>();
+  const cityJsonRoads = new Map<string, RoadArea[]>();
   for (const area of roadAreas) {
     if (draft?.id && area.roadId === draft.id) continue;
-    const layout = area.editableDraft;
-    if (!layout || seenLayouts.has(area.roadId)) continue;
-    seenLayouts.add(area.roadId);
+    const grouped = cityJsonRoads.get(area.roadId) ?? [];
+    grouped.push(area);
+    cityJsonRoads.set(area.roadId, grouped);
+  }
+  for (const [roadId, areas] of cityJsonRoads) {
+    if (areas.every((area) =>
+      String(area.function).toLowerCase() === 'intersection' ||
+      String(area.attributes.transportationUsage ?? '').toLowerCase() === 'intersection'
+    )) continue;
+    let layout = areas.find((area) => area.editableDraft)?.editableDraft ?? null;
+    if (!layout) {
+      try {
+        layout = deriveEditableRoadDraftFromAreas(areas, roadId);
+      } catch {
+        continue;
+      }
+    }
     for (const section of layout.sections) {
       const first = section.centerlineWgs84[0];
       const last = section.centerlineWgs84.at(-1);
-      if (first) addSavedCandidate(area.roadId, section.id, 'start', first, section.bands, add);
-      if (last) addSavedCandidate(area.roadId, section.id, 'end', last, section.bands, add);
+      if (first) addSavedCandidate(roadId, section.id, 'start', first, section.bands, add);
+      if (last) addSavedCandidate(roadId, section.id, 'end', last, section.bands, add);
     }
   }
 
@@ -324,6 +357,68 @@ export function buildRoadSnapCandidates(
     if (last) addOsmCandidate(road.id, 'end', last, bands, add);
   }
   return candidates;
+}
+
+/**
+ * Return every nearby target that has at least one direction- and mode-
+ * compatible lane pair with the active endpoint. Sorting is deterministic so
+ * visual emphasis and pointer snapping agree at equal distances.
+ */
+export function compatibleRoadSnapCandidates(
+  draft: RoadDraft,
+  sectionId: string,
+  endpoint: 'start' | 'end',
+  candidates: RoadSnapCandidate[],
+  maxDistanceMeters = 80
+): RoadSnapCandidate[] {
+  const section = draft.sections.find((candidate) => candidate.id === sectionId);
+  if (!section) return [];
+  const sourcePosition = endpoint === 'start'
+    ? section.centerlineWgs84[0]
+    : section.centerlineWgs84.at(-1);
+  if (!sourcePosition) return [];
+  const targetEndpointFallback = endpoint === 'start' ? 'end' : 'start';
+
+  return candidates.flatMap((candidate) => {
+    if (
+      (candidate.connection.target === 'draft' &&
+        candidate.connection.targetSectionId === sectionId) ||
+      (candidate.connection.target === 'cityjson' && draft.id === candidate.connection.targetId)
+    ) {
+      return [];
+    }
+    const targetEndpoint = candidate.connection.targetEndpoint === 'start' ||
+      candidate.connection.targetEndpoint === 'end'
+      ? candidate.connection.targetEndpoint
+      : targetEndpointFallback;
+    const targetBands = candidate.targetBands ?? [];
+    const compatibleLaneCount = section.bands.filter((sourceBand) =>
+      targetBands.some((targetBand) =>
+        modesOverlap(sourceBand, targetBand) &&
+        (
+          (roadBandCanArriveAtEndpoint(sourceBand, endpoint) &&
+            roadBandCanDepartFromEndpoint(targetBand, targetEndpoint)) ||
+          (roadBandCanDepartFromEndpoint(sourceBand, endpoint) &&
+            roadBandCanArriveAtEndpoint(targetBand, targetEndpoint))
+        )
+      )
+    ).length;
+    if (compatibleLaneCount === 0) return [];
+    const distanceMeters = approximateDistanceMeters(sourcePosition, candidate.position);
+    if (distanceMeters > maxDistanceMeters) return [];
+    return [{ ...candidate, compatibleLaneCount, distanceMeters }];
+  }).sort((left, right) =>
+    (left.distanceMeters ?? Infinity) - (right.distanceMeters ?? Infinity) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function approximateDistanceMeters(a: [number, number], b: [number, number]): number {
+  const latitude = ((a[1] + b[1]) / 2) * Math.PI / 180;
+  return Math.hypot(
+    (b[0] - a[0]) * 111_320 * Math.max(0.2, Math.cos(latitude)),
+    (b[1] - a[1]) * 110_540
+  );
 }
 
 function addDraftCandidate(

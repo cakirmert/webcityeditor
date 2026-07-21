@@ -1,12 +1,20 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { RoadDraft } from '../../src/lib/transportation';
+import type { CityJsonDocument } from '../../src/types';
+import {
+  deriveEditableRoadDraftFromAreas,
+  extractTransportationAreas,
+  type RoadDraft,
+} from '../../src/lib/transportation';
 import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   buildRoadSnapCandidates,
+  compatibleRoadSnapCandidates,
   connectRoadLanes,
   insertRoadDraftPoint,
   updateRoadDraftPoint,
+  type RoadSnapCandidate,
 } from '../../src/lib/road-draft-edit';
 
 const draft: RoadDraft = {
@@ -194,6 +202,49 @@ describe('road draft edit helpers', () => {
     ]);
   });
 
+  it('maps only reciprocal lane directions and exact shared transport modes', () => {
+    const connection = connectRoadLanes(
+      {
+        target: 'cityjson',
+        targetId: 'road-2',
+        targetEndpoint: 'start',
+        positionWgs84: [10.004, 53.006],
+        confirmed: true,
+      },
+      [
+        { id: 'source-in', kind: 'car_lane', widthM: 3.2, direction: 'forward', allowedModes: ['car'] },
+        { id: 'source-out', kind: 'car_lane', widthM: 3.2, direction: 'backward', allowedModes: ['bus'] },
+        { id: 'source-shared', kind: 'sidewalk', widthM: 3, direction: 'both', allowedModes: ['pedestrian', 'bicycle'] },
+      ],
+      [
+        { id: 'target-out', kind: 'car_lane', widthM: 3.2, direction: 'forward', allowedModes: ['car'] },
+        { id: 'target-car-in', kind: 'car_lane', widthM: 3.2, direction: 'backward', allowedModes: ['car'] },
+        { id: 'target-bike', kind: 'bike_lane', widthM: 1.8, direction: 'both', allowedModes: ['bicycle'] },
+      ],
+      'end'
+    );
+
+    expect(connection.laneConnections).toEqual([
+      expect.objectContaining({
+        sourceBandId: 'source-in',
+        targetBandId: 'target-out',
+        sourceDirection: 'forward',
+        targetDirection: 'forward',
+        sourceMode: 'car',
+        targetMode: 'car',
+      }),
+      expect.objectContaining({
+        sourceBandId: 'source-shared',
+        targetBandId: 'target-bike',
+        sourceDirection: 'both',
+        targetDirection: 'both',
+        sourceMode: 'bicycle',
+        targetMode: 'bicycle',
+      }),
+    ]);
+    expect(connection.laneConnections?.some((lane) => lane.sourceBandId === 'source-out')).toBe(false);
+  });
+
   it('offers OSM endpoints as explicit road-network snap targets', () => {
     const candidates = buildRoadSnapCandidates(draft, [], [
       {
@@ -219,6 +270,88 @@ describe('road draft edit helpers', () => {
           }),
         }),
       ])
+    );
+  });
+
+  it('offers exact imported CityJSON road endpoints before a layout has been saved', () => {
+    const doc = JSON.parse(readFileSync(
+      'public/data/transportation/osm2streets-hamburg-short-intersection.city.json',
+      'utf8'
+    )) as CityJsonDocument;
+    const areas = extractTransportationAreas(doc);
+    const active = deriveEditableRoadDraftFromAreas(areas, 'osm2streets-road-0');
+
+    const candidates = buildRoadSnapCandidates(active, areas, []);
+
+    expect(candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: expect.stringContaining('cityjson:osm2streets-road-1:'),
+        connection: expect.objectContaining({
+          target: 'cityjson',
+          targetId: 'osm2streets-road-1',
+        }),
+        targetBands: expect.arrayContaining([
+          expect.objectContaining({ kind: 'car_lane', allowedModes: ['car'] }),
+        ]),
+      }),
+    ]));
+  });
+
+  it('keeps every nearby compatible endpoint discoverable and filters incompatible modes', () => {
+    const candidates: RoadSnapCandidate[] = Array.from({ length: 9 }, (_, index) => ({
+      id: `cityjson:target-${index}:section:end`,
+      position: [10 + (index + 1) * 0.00001, 53] as [number, number],
+      connection: {
+        target: 'cityjson' as const,
+        targetId: `target-${index}`,
+        targetSectionId: 'section',
+        targetEndpoint: 'end' as const,
+        positionWgs84: [10 + (index + 1) * 0.00001, 53] as [number, number],
+        confirmed: true as const,
+      },
+      targetBands: [{
+        id: `target-car-${index}`,
+        kind: 'car_lane' as const,
+        widthM: 3.2,
+        direction: 'forward' as const,
+        allowedModes: ['car'],
+      }],
+    }));
+    candidates.push({
+      id: 'cityjson:pedestrian-only:section:end',
+      position: [10.00002, 53],
+      connection: {
+        target: 'cityjson',
+        targetId: 'pedestrian-only',
+        targetSectionId: 'section',
+        targetEndpoint: 'end',
+        positionWgs84: [10.00002, 53],
+        confirmed: true,
+      },
+      targetBands: [{
+        id: 'target-sidewalk',
+        kind: 'sidewalk',
+        widthM: 2,
+        direction: 'both',
+        allowedModes: ['pedestrian'],
+      }],
+    });
+
+    const compatible = compatibleRoadSnapCandidates(
+      draft,
+      'section-1',
+      'start',
+      candidates,
+      80
+    );
+
+    expect(compatible).toHaveLength(9);
+    expect(compatible.every((candidate) => candidate.compatibleLaneCount === 2)).toBe(true);
+    expect(compatible.map((candidate) => candidate.id)).not.toContain(
+      'cityjson:pedestrian-only:section:end'
+    );
+    expect(compatible.map((candidate) => candidate.distanceMeters)).toEqual(
+      [...compatible.map((candidate) => candidate.distanceMeters)].sort((a, b) => a! - b!)
     );
   });
 });

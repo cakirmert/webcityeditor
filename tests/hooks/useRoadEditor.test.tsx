@@ -17,6 +17,38 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('hands map highlighting from a selected whole road to one active draft band', () => {
+    const doc = buildSampleCube();
+    const savedDraft = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
+    insertRoadIntoCityJson(doc, savedDraft, { id: 'road-existing' });
+    const area = extractTransportationAreas(doc).find(
+      (candidate) => candidate.roadId === 'road-existing'
+    )!;
+    const { result } = renderHook(() =>
+      useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never)
+    );
+
+    act(() => result.current.setSelectedRoadArea(area));
+    expect(result.current.selectedRoadArea?.roadId).toBe('road-existing');
+
+    act(() => result.current.handleEditSelectedRoadArea(area));
+
+    expect(result.current.selectedRoadArea).toBeNull();
+    expect(result.current.roadDraft?.id).toBe('road-existing');
+    expect(result.current.selectedRoadBand).toEqual({
+      sectionId: result.current.roadDraft?.sections[0].id,
+      bandIndex: 0,
+    });
+
+    act(() => result.current.setSelectedRoadBand({
+      sectionId: result.current.roadDraft!.sections[0].id,
+      bandIndex: 1,
+    }));
+
+    expect(result.current.selectedRoadArea).toBeNull();
+    expect(result.current.selectedRoadBand?.bandIndex).toBe(1);
+  });
+
   it('clears stale road status when a different dataset is loaded', () => {
     const doc = buildSampleCube();
     const { result } = renderHook(() =>

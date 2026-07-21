@@ -474,6 +474,60 @@ describe('transportation roads', () => {
     });
   });
 
+  it('adds reciprocal metadata to an exact imported target without changing its polygons', () => {
+    const doc = buildSampleCube();
+    const targetSeed = createManualRoadDraft(delftRoad);
+    insertRoadIntoCityJson(doc, targetSeed, { id: 'exact-target-road' });
+    const targetObject = doc.CityObjects['exact-target-road'];
+    delete targetObject.attributes?._roadLayout;
+    if (targetObject.attributes) {
+      targetObject.attributes._roadGeometryMode = 'exact';
+      targetObject.attributes._source = 'osm2streets';
+    }
+    const targetDraft = deriveEditableRoadDraftFromAreas(
+      extractTransportationAreas(doc),
+      'exact-target-road'
+    );
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      delftRoad[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'exact-target-road',
+        targetSectionId: targetDraft.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: delftRoad[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'source-road' });
+    const targetGeometry = targetObject.geometry?.[0] as { boundaries?: unknown };
+    const boundariesBefore = JSON.stringify(targetGeometry.boundaries);
+    const verticesBefore = JSON.stringify(doc.vertices);
+
+    expect(synchronizeRoadConnectionMetadata(doc, 'source-road', source)).toEqual([
+      'exact-target-road',
+    ]);
+
+    expect(targetObject.attributes?._roadGeometryMode).toBe('exact');
+    expect(readEditableRoadDraftFromCityObject(targetObject)).toMatchObject({
+      id: 'exact-target-road',
+      sections: [{
+        connections: {
+          start: expect.objectContaining({
+            targetId: 'source-road',
+            targetEndpoint: 'end',
+            confirmed: true,
+          }),
+        },
+      }],
+    });
+    expect(JSON.stringify(targetGeometry.boundaries)).toBe(boundariesBefore);
+    expect(JSON.stringify(doc.vertices)).toBe(verticesBefore);
+  });
+
   it('deletes a road and clears reciprocal endpoint metadata on surviving roads', () => {
     const doc = buildSampleCube();
     const target = createManualRoadDraft(delftRoad);

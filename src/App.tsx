@@ -760,6 +760,7 @@ export default function App() {
               selectedId={coreState.selection?.objectId ?? null}
               onSelect={handleSelect}
               reloadToken={coreState.reloadToken}
+              priorityBuildingIds={coreState.dirtyIds}
               precomputedFootprints={footprintsForFilter}
               initialView={initialMapView}
               drawMode={coreState.drawMode}
