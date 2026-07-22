@@ -229,8 +229,15 @@ describe('useRoadEditor road-edit lifecycle', () => {
     delete moved.sections[0].connections;
     act(() => result.current.handleRoadDraftChange(moved));
 
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const confirm = vi.spyOn(window, 'confirm')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
     act(() => result.current.handleInsertRoad());
+    expect(confirm).toHaveBeenCalledWith(
+      'This edit moved 1 confirmed connected road endpoint. Move the connected endpoint too and keep the join?'
+    );
     expect(confirm).toHaveBeenCalledWith(
       'This edit leaves 1 confirmed reciprocal road join stale. Save and disconnect 1 connected road?'
     );
@@ -243,6 +250,72 @@ describe('useRoadEditor road-edit lifecycle', () => {
       readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])?.sections[0].connections
     ).toBeUndefined();
     expect(result.current.roadStatus).toContain('cleared 1 stale reciprocal road connection');
+    expect(result.current.roadStatus).not.toContain('moved 1 connected road endpoint');
+    confirm.mockRestore();
+  });
+
+  it('moves a generated peer endpoint when saving a connected road edit', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
+    insertRoadIntoCityJson(doc, target, { id: 'road-target' });
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      roadLine[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'road-target',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: roadLine[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'road-source' });
+    const targetDraft = readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])!;
+    targetDraft.sections[0].connections = {
+      start: {
+        target: 'cityjson',
+        targetId: 'road-source',
+        targetSectionId: source.sections[0].id,
+        targetEndpoint: 'end',
+        positionWgs84: roadLine[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, targetDraft, { id: 'road-target' });
+
+    const coreState = coreStateFor(doc);
+    const { result } = renderHook(() =>
+      useRoadEditor(coreState as never, { pushUndo: vi.fn() } as never)
+    );
+    const sourceArea = extractTransportationAreas(doc).find(
+      (candidate) => candidate.roadId === 'road-source'
+    )!;
+    act(() => result.current.handleEditSelectedRoadArea(sourceArea));
+    const moved = JSON.parse(JSON.stringify(result.current.roadDraft)) as RoadDraft;
+    const movedPosition: [number, number] = [roadLine[0][0] + 0.0001, roadLine[0][1]];
+    moved.sections[0].centerlineWgs84[moved.sections[0].centerlineWgs84.length - 1] = movedPosition;
+    delete moved.sections[0].connections;
+    act(() => result.current.handleRoadDraftChange(moved));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => result.current.handleInsertRoad());
+
+    const savedSource = readEditableRoadDraftFromCityObject(doc.CityObjects['road-source'])!;
+    const savedTarget = readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])!;
+    expect(savedSource.sections[0].connections?.end).toMatchObject({
+      targetId: 'road-target',
+      targetEndpoint: 'start',
+    });
+    expect(savedTarget.sections[0].centerlineWgs84[0]).toEqual(movedPosition);
+    expect(savedTarget.sections[0].connections?.start).toMatchObject({
+      targetId: 'road-source',
+      targetEndpoint: 'end',
+    });
+    expect(result.current.roadStatus).toContain('moved 1 connected road endpoint');
+    expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
     confirm.mockRestore();
   });
 

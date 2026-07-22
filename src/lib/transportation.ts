@@ -2286,6 +2286,8 @@ export interface StaleReciprocalRoadConnection {
   roadId: string;
   sectionId: string;
   endpoint: 'start' | 'end';
+  sourceSectionId: string;
+  sourceEndpoint: 'start' | 'end';
 }
 
 /**
@@ -2330,12 +2332,129 @@ export function findStaleReciprocalRoadConnections(
             roadId: candidateId,
             sectionId: candidateSection.id,
             endpoint: candidateEndpoint,
+            sourceSectionId: inbound.targetSectionId,
+            sourceEndpoint: inbound.targetEndpoint,
           });
         }
       }
     }
   }
   return stale;
+}
+
+export interface RoadConnectionPropagationPlan {
+  sourceDraft: RoadDraft;
+  peerDrafts: Array<{ roadId: string; draft: RoadDraft }>;
+  propagatedConnectionCount: number;
+  unpropagatedConnectionCount: number;
+}
+
+/**
+ * Plan a topology-preserving endpoint move without mutating the document.
+ * Only generated peer geometry is eligible: exact imported polygons need an
+ * explicit regeneration workflow rather than silently losing source detail.
+ * Ambiguous cases where several peers point at one source endpoint are also
+ * left for the existing guarded disconnect path.
+ */
+export function planStaleReciprocalRoadPropagation(
+  doc: CityJsonDocument,
+  sourceRoadId: string,
+  sourceDraft: RoadDraft
+): RoadConnectionPropagationPlan {
+  const stale = findStaleReciprocalRoadConnections(doc, sourceRoadId, sourceDraft);
+  const plannedSource = JSON.parse(JSON.stringify(sourceDraft)) as RoadDraft;
+  const peerDrafts = new Map<string, RoadDraft>();
+  const sourceEndpointCounts = new Map<string, number>();
+  for (const connection of stale) {
+    const key = `${connection.sourceSectionId}:${connection.sourceEndpoint}`;
+    sourceEndpointCounts.set(key, (sourceEndpointCounts.get(key) ?? 0) + 1);
+  }
+
+  let propagatedConnectionCount = 0;
+  for (const connection of stale) {
+    const key = `${connection.sourceSectionId}:${connection.sourceEndpoint}`;
+    if (sourceEndpointCounts.get(key) !== 1) continue;
+
+    const peerObject = doc.CityObjects[connection.roadId];
+    if (
+      !peerObject ||
+      peerObject.type !== 'Road' ||
+      peerObject.attributes?._roadGeometryMode !== 'generated'
+    ) {
+      continue;
+    }
+    const sourceSection = plannedSource.sections.find(
+      (section) => section.id === connection.sourceSectionId
+    );
+    if (!sourceSection || sourceSection.connections?.[connection.sourceEndpoint]) continue;
+    const sourcePosition = connection.sourceEndpoint === 'start'
+      ? sourceSection.centerlineWgs84[0]
+      : sourceSection.centerlineWgs84.at(-1);
+    if (
+      !sourcePosition ||
+      !Number.isFinite(sourcePosition[0]) ||
+      !Number.isFinite(sourcePosition[1])
+    ) {
+      continue;
+    }
+
+    let peerDraft = peerDrafts.get(connection.roadId);
+    if (!peerDraft) {
+      const persistedPeer = readEditableRoadDraftFromCityObject(peerObject);
+      if (!persistedPeer) continue;
+      peerDraft = JSON.parse(JSON.stringify(persistedPeer)) as RoadDraft;
+    }
+    const peerSection = peerDraft.sections.find(
+      (section) => section.id === connection.sectionId
+    );
+    const inbound = peerSection?.connections?.[connection.endpoint];
+    if (
+      !peerSection ||
+      !inbound ||
+      inbound.target !== 'cityjson' ||
+      inbound.targetId !== sourceRoadId ||
+      inbound.targetSectionId !== connection.sourceSectionId ||
+      inbound.targetEndpoint !== connection.sourceEndpoint ||
+      peerSection.centerlineWgs84.length < 2
+    ) {
+      continue;
+    }
+
+    const peerPointIndex = connection.endpoint === 'start'
+      ? 0
+      : peerSection.centerlineWgs84.length - 1;
+    peerSection.centerlineWgs84[peerPointIndex] = [...sourcePosition];
+    peerSection.connections = {
+      ...peerSection.connections,
+      [connection.endpoint]: {
+        ...inbound,
+        positionWgs84: [...sourcePosition],
+      },
+    };
+    sourceSection.connections = {
+      ...sourceSection.connections,
+      [connection.sourceEndpoint]: {
+        target: 'cityjson',
+        targetId: connection.roadId,
+        targetSectionId: connection.sectionId,
+        targetEndpoint: connection.endpoint,
+        positionWgs84: [...sourcePosition],
+        ...(inbound.laneConnections?.length
+          ? { laneConnections: reverseRoadLaneConnections(inbound.laneConnections) }
+          : {}),
+        confirmed: true,
+      },
+    };
+    peerDrafts.set(connection.roadId, peerDraft);
+    propagatedConnectionCount += 1;
+  }
+
+  return {
+    sourceDraft: plannedSource,
+    peerDrafts: [...peerDrafts].map(([roadId, draft]) => ({ roadId, draft })),
+    propagatedConnectionCount,
+    unpropagatedConnectionCount: stale.length - propagatedConnectionCount,
+  };
 }
 
 /** Clear stale peer metadata after the user explicitly accepts disconnection. */

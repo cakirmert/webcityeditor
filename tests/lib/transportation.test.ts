@@ -17,6 +17,7 @@ import {
   insertRoadIntoCityJson,
   parseOsmPointFeaturesFromXml,
   parseOsmRoadsFromOverpass,
+  planStaleReciprocalRoadPropagation,
   readEditableRoadDraftFromCityObject,
   roadDraftPreservesExactGeometry,
   splitRoadSectionAtFraction,
@@ -592,6 +593,8 @@ describe('transportation roads', () => {
         roadId: 'target-road',
         sectionId: target.sections[0].id,
         endpoint: 'start',
+        sourceSectionId: source.sections[0].id,
+        sourceEndpoint: 'end',
       },
     ]);
     expect(clearStaleReciprocalRoadConnections(doc, 'source-road', movedSource)).toEqual({
@@ -601,6 +604,48 @@ describe('transportation roads', () => {
     expect(
       readEditableRoadDraftFromCityObject(doc.CityObjects['target-road'])?.sections[0].connections
     ).toBeUndefined();
+  });
+
+  it('plans a reciprocal generated-road endpoint move without mutating the document', () => {
+    const doc = buildSampleCube();
+    const target = createManualRoadDraft(delftRoad);
+    insertRoadIntoCityJson(doc, target, { id: 'target-road' });
+    const source = createManualRoadDraft([
+      [4.3568, 52.0115],
+      delftRoad[0],
+    ]);
+    source.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: 'target-road',
+        targetSectionId: target.sections[0].id,
+        targetEndpoint: 'start',
+        positionWgs84: delftRoad[0],
+        confirmed: true,
+      },
+    };
+    insertRoadIntoCityJson(doc, source, { id: 'source-road' });
+    synchronizeRoadConnectionMetadata(doc, 'source-road', source);
+    const before = JSON.stringify(doc.CityObjects);
+    const movedSource = JSON.parse(JSON.stringify(source)) as typeof source;
+    const movedPosition: [number, number] = [delftRoad[0][0] + 0.0001, delftRoad[0][1]];
+    movedSource.sections[0].centerlineWgs84[movedSource.sections[0].centerlineWgs84.length - 1] = movedPosition;
+    delete movedSource.sections[0].connections;
+
+    const plan = planStaleReciprocalRoadPropagation(doc, 'source-road', movedSource);
+
+    expect(plan.propagatedConnectionCount).toBe(1);
+    expect(plan.unpropagatedConnectionCount).toBe(0);
+    expect(plan.sourceDraft.sections[0].connections?.end).toMatchObject({
+      targetId: 'target-road',
+      targetEndpoint: 'start',
+      positionWgs84: movedPosition,
+    });
+    expect(plan.peerDrafts[0].draft.sections[0].centerlineWgs84[0]).toEqual(movedPosition);
+    expect(plan.peerDrafts[0].draft.sections[0].connections?.start?.positionWgs84).toEqual(
+      movedPosition
+    );
+    expect(JSON.stringify(doc.CityObjects)).toBe(before);
   });
 
   it('splits a road section into two building-block sections while preserving bands', () => {
