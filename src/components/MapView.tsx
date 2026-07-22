@@ -116,7 +116,7 @@ import {
   treeTrunkScale,
   type HamburgCityTree,
 } from '../lib/hamburg-trees';
-import type { BasemapMode } from '../lib/basemap';
+import { basemapLayerComposition, type BasemapMode } from '../lib/basemap';
 import {
   HAMBURG_UNTEXTURED_LOD3_TILESET_URL,
   isHamburgOfficialBuildingId,
@@ -1307,6 +1307,11 @@ export default function MapView({
         },
         layers: [
           {
+            id: 'basemap-background',
+            type: 'background',
+            paint: { 'background-color': '#30363d' },
+          },
+          {
             id: 'topplus',
             type: 'raster',
             source: 'topplus',
@@ -1647,18 +1652,19 @@ export default function MapView({
     if (!map) return;
     const apply = () => {
       if (!map.getLayer('topplus') || !map.getLayer('satellite')) return;
-      // Keep TopPlus under imagery so the opacity slider becomes a true
-      // compare/blend control rather than a binary source switch.
-      map.setLayoutProperty('topplus', 'visibility', 'visible');
+      // The selected source exclusively owns the raster stack. Otherwise a
+      // slow or missing satellite tile reveals TopPlus labels underneath.
+      const composition = basemapLayerComposition(basemap, satelliteOpacity);
+      map.setLayoutProperty('topplus', 'visibility', composition.topplusVisibility);
       map.setLayoutProperty(
         'satellite',
         'visibility',
-        basemap === 'satellite' ? 'visible' : 'none'
+        composition.satelliteVisibility
       );
       map.setPaintProperty(
         'satellite',
         'raster-opacity',
-        Math.max(0, Math.min(1, satelliteOpacity))
+        composition.satelliteOpacity
       );
     };
     if (map.isStyleLoaded()) apply();
