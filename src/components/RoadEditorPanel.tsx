@@ -36,6 +36,7 @@ import {
 import type { RoadFitConflict } from '../lib/road-fit';
 import type { BasemapMode } from '../lib/basemap';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
+import { removeRoadDraftBand } from '../lib/road-draft-edit';
 import Osm2StreetsInspector from './Osm2StreetsInspector';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -278,12 +279,11 @@ export default function RoadEditorPanel({
   };
 
   const removeBand = (bandIndex: number) => {
-    if (!activeSection || activeSection.bands.length <= 1) return;
-    updateSection(activeSection.id, (section) => ({
-      ...section,
-      bands: section.bands.filter((_, index) => index !== bandIndex),
-    }));
-    setActiveBandIndex((index) => Math.max(0, Math.min(index, activeSection.bands.length - 2)));
+    if (!draft || !activeSection || activeSection.bands.length <= 1) return;
+    const nextBandIndex = Math.min(bandIndex, activeSection.bands.length - 2);
+    setActiveBandIndex(nextBandIndex);
+    onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: nextBandIndex });
+    onDraftChange(removeRoadDraftBand(draft, activeSection.id, bandIndex), 'Remove road band');
   };
 
   const reorderBand = (fromIndex: number, toIndex: number) => {

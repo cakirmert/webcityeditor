@@ -202,6 +202,26 @@ describe('<RoadEditorPanel />', () => {
     expect(screen.getByTestId('road-band-box-1')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('selects a valid surviving band when the active lane is removed', () => {
+    const onDraftChange = vi.fn();
+    const onRoadBandSelect = vi.fn();
+    renderPanel(onDraftChange, {
+      selectedRoadBand: { sectionId: 'section-1', bandIndex: 2 },
+      onRoadBandSelect,
+    });
+
+    onRoadBandSelect.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sidewalk band' }));
+
+    const [nextDraft, label] = onDraftChange.mock.calls.at(-1) as [RoadDraft, string];
+    expect(nextDraft.sections[0].bands.map((band) => band.id)).toEqual(['bike-1', 'car-1']);
+    expect(label).toBe('Remove road band');
+    expect(onRoadBandSelect).toHaveBeenLastCalledWith({
+      sectionId: 'section-1',
+      bandIndex: 1,
+    });
+  });
+
   it('keeps CityJSON and backend actions in one disclosure that starts closed', () => {
     renderPanel();
 

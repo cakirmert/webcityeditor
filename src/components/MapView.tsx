@@ -68,6 +68,7 @@ import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   insertRoadDraftPoint,
+  removeRoadDraftBand,
   roadLaneEndpointPosition,
   updateRoadDraftPoint,
   type RoadDraftHandle,
@@ -93,6 +94,12 @@ import {
   selectBuildingDetailObjectIds,
 } from '../lib/building-detail-selection';
 import { buildRoadVisuals } from '../lib/road-visuals';
+import {
+  elevateRoadPath,
+  elevateRoadPolygon,
+  roadDepthTestEnabled,
+  type RoadRenderPosition,
+} from '../lib/road-rendering';
 import {
   BUILDING_BLOCK_FULL_ZOOM,
   BUILDING_BLOCK_MIN_ZOOM,
@@ -142,7 +149,7 @@ import {
   TrainFront,
 } from 'lucide-react';
 
-/** Zoom stages keep LoD0, source LoD2, and close LoD3 (optionally textured) distinct. */
+/** Zoom stages keep LoD0, source LoD2, and close untextured LoD3 distinct. */
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
@@ -157,6 +164,8 @@ interface TerrainSurfaceTextures {
   basemap: BasemapMode;
   images: Map<string, HTMLImageElement>;
 }
+
+type RenderableRoadArea = RoadArea & { renderPolygon: RoadRenderPosition[] };
 
 function loadTerrainSurfaceImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -517,7 +526,6 @@ export default function MapView({
   const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[] | null>(null);
   const [treeDataError, setTreeDataError] = useState<string | null>(null);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
-  const [texturesEnabled, setTexturesEnabled] = useState(true);
   const [hamburgLod3Status, setHamburgLod3Status] = useState<
     'idle' | 'loading' | 'ready' | 'error'
   >('idle');
@@ -556,8 +564,16 @@ export default function MapView({
   useEffect(() => {
     if (!roadDraft) setSelectedDraftBand(null);
     else if (!selectedDraftBand || !roadDraft.sections.some((section) => section.id === selectedDraftBand.sectionId && !!section.bands[selectedDraftBand.bandIndex])) {
-      const first = roadDraft.sections[0];
-      setSelectedDraftBand(first?.bands.length ? { sectionId: first.id, bandIndex: 0 } : null);
+      const currentSection = selectedDraftBand
+        ? roadDraft.sections.find((section) => section.id === selectedDraftBand.sectionId)
+        : undefined;
+      const fallbackSection = currentSection?.bands.length ? currentSection : roadDraft.sections[0];
+      setSelectedDraftBand(fallbackSection?.bands.length
+        ? {
+            sectionId: fallbackSection.id,
+            bandIndex: Math.min(selectedDraftBand?.bandIndex ?? 0, fallbackSection.bands.length - 1),
+          }
+        : null);
     }
   }, [roadDraft, selectedDraftBand]);
 
@@ -849,6 +865,26 @@ export default function MapView({
         : roadAreas,
     [roadAreas, editFocusBbox]
   );
+  const elevatedRenderedRoadAreas = useMemo<RenderableRoadArea[]>(
+    () => renderedRoadAreas.map((area) => ({
+      ...area,
+      renderPolygon: elevateRoadPolygon(
+        area,
+        (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+      ),
+    })),
+    [renderedRoadAreas, terrainTiles]
+  );
+  const elevatedRoadPreviewAreas = useMemo<RenderableRoadArea[]>(
+    () => roadPreviewAreas.map((area) => ({
+      ...area,
+      renderPolygon: elevateRoadPolygon(
+        area,
+        (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+      ),
+    })),
+    [roadPreviewAreas, terrainTiles]
+  );
 
   const roadDecorationAreas = useMemo(() => {
     const scope = editFocusBbox ?? viewportBbox;
@@ -866,12 +902,33 @@ export default function MapView({
     () => buildRoadVisuals(roadPreviewAreas),
     [roadPreviewAreas]
   );
-  const roadVisuals = useMemo(
+  const roadVisuals2d = useMemo(
     () => ({
       dividers: [...savedRoadVisuals.dividers, ...previewRoadVisuals.dividers],
       directions: [...savedRoadVisuals.directions, ...previewRoadVisuals.directions],
     }),
     [savedRoadVisuals, previewRoadVisuals]
+  );
+  const roadVisuals = useMemo(
+    () => ({
+      dividers: roadVisuals2d.dividers.map((divider) => ({
+        ...divider,
+        renderPath: elevateRoadPath(
+          divider.path,
+          divider.vertical,
+          (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+        ),
+      })),
+      directions: roadVisuals2d.directions.map((direction) => ({
+        ...direction,
+        renderPolygon: elevateRoadPath(
+          direction.polygon,
+          direction.vertical,
+          (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+        ),
+      })),
+    }),
+    [roadVisuals2d, terrainTiles]
   );
 
   const renderedZones = useMemo(
@@ -1003,8 +1060,7 @@ export default function MapView({
       const rootId = rootBuildingObjectId(cityjson, objectId);
       return !isHamburgOfficialBuildingId(rootId) ||
         priorityIds.has(objectId) ||
-        priorityIds.has(rootId) ||
-        (texturesEnabled && buildingHasSourceTextures(cityjson, rootId));
+        priorityIds.has(rootId);
     };
     const selectedForLocalDetail = selectedId && needsLocalDetail(selectedId)
       ? selectedId
@@ -1027,7 +1083,6 @@ export default function MapView({
     priorityBuildingIds,
     renderedFootprints,
     selectedId,
-    texturesEnabled,
   ]);
 
   const detailObjectColors = useMemo(() => {
@@ -1061,10 +1116,7 @@ export default function MapView({
             maxOutputVertices: 600_000,
             maxLod: detailLod === 'lod3' ? 3.9 : 2.9,
             groundElevationByObject: terrainGroundByRoot,
-            // A LoD3-only asset is deliberately kept visible in the middle
-            // tier. Honour the material preference whenever that source tier
-            // is selected; ordinary LoD2 faces simply have no texture refs.
-            texturesEnabled,
+            texturesEnabled: false,
             objectColors: detailObjectColors,
             originProjected: detailOriginProjected ?? undefined,
           })
@@ -1077,7 +1129,6 @@ export default function MapView({
       detailOriginProjected,
       reloadToken,
       terrainGroundByRoot,
-      texturesEnabled,
     ]
   );
   const drawnDetailRootIds = useMemo(
@@ -1139,13 +1190,9 @@ export default function MapView({
           ? `${detailMesh.installationObjectCount} installations`
           : null,
         `${detailMesh.surfaceCount} surfaces`,
-        texturesEnabled && detailMesh.texturedSurfaceCount > 0
-          ? `${detailMesh.texturedSurfaceCount} photo-textured surfaces`
-          : mapColorMode === 'usage'
+        mapColorMode === 'usage'
             ? 'building usage colours drawn on detailed geometry'
-          : detailMesh.availableTexturedSurfaceCount > 0
-            ? `${detailMesh.availableTexturedSurfaceCount} source textures hidden; semantic materials drawn`
-            : detailMesh.explicitOpeningSurfaceCount > 0
+          : detailMesh.explicitOpeningSurfaceCount > 0
               ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
               : 'semantic roof, window, and wall materials',
         detailMesh.truncated
@@ -1746,6 +1793,9 @@ export default function MapView({
     // specific parameterised Layer subclasses here is fine and keeps the
     // type-check honest about which layer classes we feed to MapboxOverlay.
     const layers: any[] = [];
+    const roadSurfaceParameters = {
+      depthTest: roadDepthTestEnabled(roadWorkspaceOpen),
+    } as unknown as never;
     const roadDraftPaths = buildRoadDraftPaths(roadDraft);
     const roadDraftHandles = buildRoadDraftHandles(roadDraft);
     const roadConnectionHandles = buildRoadConnectionHandles(
@@ -2159,7 +2209,7 @@ export default function MapView({
               onOsm2StreetsSelect?.({ kind: 'lane', feature: info.object });
             }
           },
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
             getLineColor: [osm2streetsSelection, highlightedOsm2StreetsRoadIds],
@@ -2212,7 +2262,7 @@ export default function MapView({
                 onOsm2StreetsSelect?.({ kind: 'intersection', feature: info.object });
               }
             },
-            parameters: { depthTest: false } as unknown as never,
+            parameters: roadSurfaceParameters,
             updateTriggers: {
               getFillColor: [basemap, roadOverlayOpacity],
               getLineColor: [osm2streetsSelection],
@@ -2244,7 +2294,7 @@ export default function MapView({
             getLineWidth: 4,
             lineWidthUnits: 'pixels',
             lineWidthMinPixels: 3,
-            parameters: { depthTest: false } as unknown as never,
+            parameters: roadSurfaceParameters,
           })
         );
       }
@@ -2267,7 +2317,7 @@ export default function MapView({
               basemap,
               roadOverlayOpacity
             ),
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: { getFillColor: [basemap, roadOverlayOpacity] },
         })
       );
@@ -2290,7 +2340,7 @@ export default function MapView({
               basemap,
               roadOverlayOpacity
             ),
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: { getFillColor: [basemap, roadOverlayOpacity] },
         })
       );
@@ -2298,10 +2348,10 @@ export default function MapView({
 
     if (renderedRoadAreas.length > 0) {
       layers.push(
-        new PolygonLayer<RoadArea>({
+        new PolygonLayer<RenderableRoadArea>({
           id: 'cityjson-road-areas',
-          data: renderedRoadAreas,
-          getPolygon: (d) => d.polygon,
+          data: elevatedRenderedRoadAreas,
+          getPolygon: (d) => d.renderPolygon,
           getFillColor: (d) => {
             const editingOriginal =
               roadPreviewAreas.length > 0 && !!roadDraft?.id && d.roadId === roadDraft.id;
@@ -2344,7 +2394,7 @@ export default function MapView({
           filled: true,
           pickable: roadSelectionEnabled,
           extruded: false,
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: {
             getFillColor: [
               basemap,
@@ -2363,7 +2413,7 @@ export default function MapView({
             ],
             getLineWidth: [selectedRoadAreaId, roadDraft, selectedDraftBand],
           },
-          onClick: (info: PickingInfo<RoadArea>) => {
+          onClick: (info: PickingInfo<RenderableRoadArea>) => {
             if (roadSelectionEnabled && info.object) onRoadAreaSelect?.(info.object);
           },
         })
@@ -2372,10 +2422,10 @@ export default function MapView({
 
     if (roadPreviewAreas.length > 0) {
       layers.push(
-        new PolygonLayer<RoadArea>({
+        new PolygonLayer<RenderableRoadArea>({
           id: 'road-draft-preview',
-          data: roadPreviewAreas,
-          getPolygon: (d) => d.polygon,
+          data: elevatedRoadPreviewAreas,
+          getPolygon: (d) => d.renderPolygon,
           getFillColor: (d) => {
             const selected = roadAreaMatchesDraftBand(d, roadDraft, selectedDraftBand);
             return selected
@@ -2467,7 +2517,7 @@ export default function MapView({
         new PathLayer({
           id: 'cityjson-road-lane-markings',
           data: roadVisuals.dividers,
-          getPath: (d: any) => d.path,
+          getPath: (d: any) => d.renderPath,
           getColor: (d: any) =>
             d.kind === 'lane-divider'
               ? roadOverlayColor([248, 250, 252, 238], { basemap, opacity: roadOverlayOpacity })
@@ -2481,7 +2531,7 @@ export default function MapView({
           jointRounded: true,
           capRounded: true,
           pickable: false,
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: {
             getColor: [basemap, roadOverlayOpacity],
           },
@@ -2494,7 +2544,7 @@ export default function MapView({
         new PolygonLayer({
           id: 'cityjson-road-direction-arrows',
           data: roadVisuals.directions,
-          getPolygon: (d: any) => d.polygon,
+          getPolygon: (d: any) => d.renderPolygon,
           getFillColor: roadOverlayColor([248, 250, 252, 238], {
             basemap,
             opacity: roadOverlayOpacity,
@@ -2510,7 +2560,7 @@ export default function MapView({
           filled: true,
           extruded: false,
           pickable: false,
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
             getLineColor: [basemap, roadOverlayOpacity],
@@ -2759,7 +2809,11 @@ export default function MapView({
         new PathLayer<OsmRoadFeature>({
           id: 'osm-road-reference',
           data: renderedOsmRoads,
-          getPath: (d) => d.path,
+          getPath: (d) => elevateRoadPath(
+            d.path,
+            d.inferredDraft.vertical,
+            (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+          ),
           getColor: (d) =>
             roadOverlayColor(
               d.id === selectedOsmRoadId
@@ -2777,7 +2831,7 @@ export default function MapView({
           jointRounded: true,
           capRounded: true,
           pickable: false,
-          parameters: { depthTest: false } as unknown as never,
+          parameters: roadSurfaceParameters,
           updateTriggers: {
             getColor: [selectedOsmRoadId, basemap, roadOverlayOpacity],
             getWidth: [selectedOsmRoadId],
@@ -2786,7 +2840,11 @@ export default function MapView({
         new PathLayer<OsmRoadFeature>({
           id: 'osm-road-reference-hit-area',
           data: renderedOsmRoads,
-          getPath: (d) => d.path,
+          getPath: (d) => elevateRoadPath(
+            d.path,
+            d.inferredDraft.vertical,
+            (lngLat) => sampleHamburgTerrainElevation(terrainTiles, lngLat)
+          ),
           /*
            * The displayed OSM centerline is intentionally thin, but a thin
            * deck.gl path is frustrating to pick. This transparent companion
@@ -2941,6 +2999,8 @@ export default function MapView({
     renderedFootprints,
     groundedRenderedFootprints,
     renderedRoadAreas,
+    elevatedRenderedRoadAreas,
+    elevatedRoadPreviewAreas,
     contextBlockFootprints,
     priorityBlockFootprints,
     renderedZones,
@@ -3425,9 +3485,6 @@ export default function MapView({
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
         mapColorMode={mapColorMode}
         onMapColorModeChange={setMapColorMode}
-        texturesEnabled={texturesEnabled}
-        onTexturesEnabledChange={setTexturesEnabled}
-        lod3Visible={hamburgRemoteLod3Active || drawnLod3ObjectCount > 0}
         detailLabel={detailRepresentationLabel}
         focusActive={!!editFocusBbox}
         obscuredByInspector={roadWorkspaceOpen || !!selectedId}
@@ -3854,25 +3911,6 @@ function laneConnectionColor(
   return [94, 181, 255, Math.round(190 * alphaScale)];
 }
 
-function buildingHasSourceTextures(doc: CityJsonDocument, rootId: string): boolean {
-  const pending = [rootId];
-  const visited = new Set<string>();
-  while (pending.length > 0) {
-    const objectId = pending.pop()!;
-    if (visited.has(objectId)) continue;
-    visited.add(objectId);
-    const object = doc.CityObjects[objectId];
-    if (!object) continue;
-    if ((object.geometry ?? []).some((geometry) =>
-      (geometry as { texture?: unknown }).texture != null
-    )) {
-      return true;
-    }
-    pending.push(...(object.children ?? []));
-  }
-  return false;
-}
-
 function localVectorMeters(
   from: [number, number],
   to: [number, number]
@@ -4225,8 +4263,9 @@ function MapRoadCrossSection({
           replaceBands(bands);
         }}>Move right</button>
         <button type="button" className="is-destructive" disabled={section.bands.length <= 1} onClick={() => {
-          replaceBands(section.bands.filter((_, index) => index !== effectiveBandIndex));
-          onSelectionChange({ sectionId: section.id, bandIndex: Math.max(0, effectiveBandIndex - 1) });
+          const nextBandIndex = Math.min(effectiveBandIndex, section.bands.length - 2);
+          onSelectionChange({ sectionId: section.id, bandIndex: nextBandIndex });
+          onChange(removeRoadDraftBand(draft, section.id, effectiveBandIndex));
         }}>Remove</button>
         </div>
       </div>
@@ -4311,9 +4350,6 @@ function MapLayerControl({
   onRoadOverlayOpacityChange,
   mapColorMode,
   onMapColorModeChange,
-  texturesEnabled,
-  onTexturesEnabledChange,
-  lod3Visible,
   detailLabel,
   focusActive,
   obscuredByInspector,
@@ -4328,9 +4364,6 @@ function MapLayerControl({
   onRoadOverlayOpacityChange?: (opacity: number) => void;
   mapColorMode: 'roof' | 'usage';
   onMapColorModeChange: (mode: 'roof' | 'usage') => void;
-  texturesEnabled: boolean;
-  onTexturesEnabledChange: (enabled: boolean) => void;
-  lod3Visible: boolean;
   detailLabel: string;
   focusActive: boolean;
   obscuredByInspector: boolean;
@@ -4397,27 +4430,6 @@ function MapLayerControl({
               </button>
             </div>
           </div>
-          <label className="map-layer-control__switch">
-            <span>
-              <b>Photo textures</b>
-              <small>
-                {lod3Visible
-                  ? texturesEnabled
-                    ? 'On for bundled LoD3; geometry stays on'
-                    : 'Off; untextured LoD3 stays on'
-                  : texturesEnabled
-                    ? 'Will turn on when LoD3 appears'
-                    : 'Will stay off when LoD3 appears'}
-              </small>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="Photo textures"
-              checked={texturesEnabled}
-              onChange={(event) => onTexturesEnabledChange(event.target.checked)}
-            />
-          </label>
           <LayerOpacityControl
             label="Satellite image"
             value={satelliteOpacity}

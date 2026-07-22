@@ -5,10 +5,10 @@ This file is the single technical handoff for City Editor. It consolidates the f
 ## What the project guarantees
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
-- The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed textured LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
+- The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close untextured map views stream Hamburg Geoportal's official LoD3 3D Tiles from zoom 17. The service shares `DEHH...` IDs with the editable LoD2 context and supports browser CORS. The selected-building viewer uses those IDs to isolate one matching remote mesh when local LoD3 is absent; bundled photo atlases remain available for the committed textured subset.
+- Close map views stream Hamburg Geoportal's official untextured LoD3 3D Tiles from zoom 17. The service shares `DEHH...` IDs with the editable LoD2 context and supports browser CORS. The selected-building viewer uses those IDs to isolate one matching remote mesh when local LoD3 is absent. Building photo textures are intentionally not rendered; semantic surface colours keep LoD3 geometry predictable.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
@@ -46,9 +46,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 17, official Hamburg objects switch to the Geoportal's untextured LoD3 3D Tiles. Locally created, dirty, or edited objects have explicit priority on the editable CityJSON layer and retain a block fallback below detailed zoom. Photo textures start on and overlay the 68 matching surveyed local LoD3 buildings while the citywide untextured Geoportal layer remains active; turning textures off removes only that overlay. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous.
+The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 17, official Hamburg objects switch to the Geoportal's untextured LoD3 3D Tiles. Locally created, dirty, or edited objects have explicit priority on the editable CityJSON layer and retain a block fallback below detailed zoom. Detailed local geometry uses semantic roof, wall, window, and door colours; source photo atlases are not rendered. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous.
 
-The wide editable Hamburg context is LoD2. The untextured close map reads the whole-city official `LoD3_untexturiert` hierarchy directly. The repository also includes 68 matching surveyed LoD3 counterparts from Area 1 tile `6433`, with 68 JPG atlases, UV coordinates, 20,294 surfaces, and 1,043 BuildingInstallation objects for the textured path and offline assets. Four placeable, single-root assets retain their complete BuildingInstallation descendants and texture atlas. Custom generated buildings publish explicit LoD2 and LoD3 tiers, and a LoD3-only asset remains eligible for the middle-zoom detail fallback. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles. Edit focus hides remote detail and tree context to preserve interaction performance.
+The wide editable Hamburg context is LoD2. The untextured close map reads the whole-city official `LoD3_untexturiert` hierarchy directly. The repository also includes 68 matching surveyed LoD3 counterparts from Area 1 tile `6433`, with 20,294 surfaces and 1,043 BuildingInstallation objects. Source JPG atlases and UVs remain in the fixture for provenance but are not part of the renderer. Four placeable, single-root assets retain their complete BuildingInstallation descendants. Custom generated buildings publish explicit LoD2 and LoD3 tiers, and a LoD3-only asset remains eligible for the middle-zoom detail fallback. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles. Edit focus hides remote detail and tree context to preserve interaction performance.
 
 Every map representation uses one vertical datum. The renderer reads Hamburg's CORS-enabled `Gelaende` quantized-mesh DGM hybrid service, triangulates its Cesium geographic/TMS tiles, and drapes TopPlus or satellite imagery over that surface. Each selected LoD is independently normalized from its semantic `GroundSurface` to the terrain elevation at its building root, avoiding source-tier Z offsets during LoD changes. Footprints, block extrusions, detail meshes, placement previews, generated buildings, and official trees use the same absolute terrain elevations.
 
@@ -94,6 +94,8 @@ Connection metadata and imported movement decisions confirm graph topology. They
 
 - **Roads** starts as a compact chooser with one existing-road action: tap a CityJSON road, then choose **Edit road**. The sheet expands only after a road is being edited.
 - On desktop, the active road's complete cross-section editor sits over the map along the bottom: matching visual bands plus large type, material, width, direction, order, remove, and add controls. The redundant lane editor in the right sheet is hidden. Touch layouts keep the same complete controls in the bottom sheet.
+- Saved road surfaces sit 12 cm above sampled terrain and use the normal scene depth buffer, so buildings and trees occlude them. Opening **Roads** temporarily draws road surfaces above scene depth for reliable selection and editing.
+- Removing a band selects the nearest surviving band and remaps or drops its lane movements and endpoint mappings; the final band cannot be removed, so both road menus always retain a valid selection.
 - Road curvature is changed by dragging or adding visible map anchors. The UI exposes only the meaningful **Smooth** and **Straight** choice, not an abstract curve-strength percentage.
 - Map/satellite mode, satellite opacity, and road-overlay opacity are directly inside the road sheet. The generic **Map layers** control starts collapsed and closes when another map tool opens.
 - Phone layouts retain only Data, Roads, New Building, and More in the primary toolbar. Planning, list, export, validation, and secondary tools use the touch-sized More menu.
@@ -134,7 +136,7 @@ The strict CityJSONSeq catalog streams tiles for the visible viewport and suppor
 
 ### Official Hamburg LoD3 data
 
-The untextured close map streams `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_untexturiert/tileset.json`. The service returns permissive CORS headers and B3DM batch IDs matching the `DEHH...` identifiers in Hamburg's LoD2 CityJSON. The selected-building inspector uses the same hierarchy and ID metadata, converts glTF Y-up coordinates to its Z-up scene, and recentres only the isolated building. The committed editable conversion of official tile `6433`, including its UVs and 68 local JPG atlases, remains the textured and offline subset. Reproduce it with:
+The untextured close map streams `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_untexturiert/tileset.json`. The service returns permissive CORS headers and B3DM batch IDs matching the `DEHH...` identifiers in Hamburg's LoD2 CityJSON. The selected-building inspector uses the same hierarchy and ID metadata, converts glTF Y-up coordinates to its Z-up scene, and recentres only the isolated building. The committed editable conversion of official tile `6433` retains its source UVs and JPG atlases for provenance, while the application renders semantic materials only. Reproduce it with:
 
 ```bash
 npm run data:hamburg-lod3-download -- 6433
@@ -221,7 +223,7 @@ node --check scripts/prepare-hamburg-road-catalog.mjs
 npm run dev:hamburg-roads -- --dry-run
 ```
 
-Focused regression coverage exists for smooth road preview/export parity, touch handle editing, all-compatible endpoint discovery, direction/mode-safe lane pairs, reciprocal movement decisions, exact-polygon attribute saves, stable map anchors, LoD/texture parity, per-tier terrain clamping, LoD3-only fallback, editable-building precedence, catalog preparation, and the Hamburg committed fixtures.
+Focused regression coverage exists for smooth road preview/export parity, touch handle editing, lane-removal topology cleanup, all-compatible endpoint discovery, direction/mode-safe lane pairs, reciprocal movement decisions, exact-polygon attribute saves, terrain-relative road depth, stable map anchors, semantic LoD parity, per-tier terrain clamping, LoD3-only fallback, editable-building precedence, catalog preparation, and the Hamburg committed fixtures.
 
 ## Implemented: unified road connectivity and building LoD rendering
 
@@ -264,34 +266,33 @@ Imported OSM/osm2streets topology now seeds editable movements instead of requir
 
 Building meshes now retain a document-wide projected origin and canonical per-root anchor. Each selected source tier derives its own source ground and normalizes to the same sampled Hamburg terrain elevation, so camera and LoD changes do not introduce a different world-space ground.
 
-- Trace source coordinates from CityJSON EPSG:25832 through WGS84 conversion, local normalization, per-building ground offset, deck.gl/MapLibre model matrices, and the local texture/UV path.
-- Record stable world-space anchor coordinates for representative LoD2, untextured LoD3, textured LoD3, imported, and newly created buildings before and after bearing/pitch-only camera changes.
+- Trace source coordinates from CityJSON EPSG:25832 through WGS84 conversion, local normalization, per-building ground offset, and deck.gl/MapLibre model matrices.
+- Record stable world-space anchor coordinates for representative LoD2, LoD3, imported, and newly created buildings before and after bearing/pitch-only camera changes.
 - Verify that camera changes never recompute or round source positions, change the projection origin, apply grounding twice, or switch between meshes with different horizontal anchors.
 - Compare corresponding LoD2 and LoD3 building bounds and centroids. If source LoDs use different origins, compute and retain one canonical per-building anchor rather than normalizing each representation independently.
 - Avoid simultaneous cross-fading of misaligned duplicate building layers. A LoD transition may change geometry resolution, but it must retain the same logical object identity, transform, selection state, and world-space anchor.
 - Check GPU precision at Hamburg projected-coordinate magnitudes. Use a stable local origin/high-precision coordinate path if direct large coordinates cause camera-dependent jitter.
 - Add an automated projection/transform regression plus screenshot-based checks at multiple bearings and pitches. The same building corners should reproject consistently within a small pixel tolerance after a camera round trip.
 
-### 5. Restore real detailed LoD3, with textures as a rendering option
+### 5. Keep real detailed LoD3 with semantic materials
 
-The close view now includes the source LoD3 root geometry and every selected BuildingInstallation descendant. Texture state changes material binding only, and diagnostics are calculated from objects and surfaces actually queued for drawing.
+The close view includes the source LoD3 root geometry and every selected BuildingInstallation descendant. Photo-texture rendering and its controls were removed after unreliable atlas output; diagnostics are calculated from objects and surfaces actually queued for semantic drawing.
 
 - Verify representative Hamburg objects against the original LoD3 source and count their selected LoD3 solids, surfaces, openings, and installation descendants in the rendered mesh.
-- Keep the detailed LoD3 geometry when textures are disabled; texture state must change materials only, not replace detailed geometry with LoD2 or blocks.
-- Bind the committed official photo atlases to the same true LoD3 surfaces, with semantic material fallback for every face or object that has no atlas.
+- Keep the detailed LoD3 geometry while rendering semantic roof, wall, window, and door materials.
 - Prefer one logical building rendering pipeline in which LoD0/LoD2/LoD3 are resolution choices for the same object set. If separate GPU layer types remain necessary, centralize object identity, transforms, culling, selection, grounding, and transition ownership so the result behaves as one layer.
-- Make the UI report the representation actually drawn: geometry LoD, source, texture state, object count, and whether detailed descendants were included. Do not infer successful LoD3 rendering from a requested `maxLod` alone.
+- Make the UI report the representation actually drawn: geometry LoD, source, object count, and whether detailed descendants were included. Do not infer successful LoD3 rendering from a requested `maxLod` alone.
 - Add visual fixtures that clearly distinguish LoD2 from LoD3 through dormers, openings, roof detail, and installations, and fail if the close view silently falls back.
 
-### 6. Keep editable/new buildings visible through every LoD and texture state
+### 6. Keep editable/new buildings visible through every LoD
 
-Newly created, selected, dirty, and parametrically edited buildings have explicit priority in the same close-detail object set used by semantic and textured rendering, plus an always-visible block fallback below detail zoom.
+Newly created, selected, dirty, and parametrically edited buildings have explicit priority in the close-detail semantic object set, plus an always-visible block fallback below detail zoom.
 
-- Maintain a single logical set of visible buildings. Textured source objects use the same higher-resolution representation and matching imported IDs; unmatched, new, dirty, selected, or parametrically edited buildings always remain rendered.
+- Maintain a single logical set of visible buildings. Higher-resolution source objects use matching imported IDs; unmatched, new, dirty, selected, or parametrically edited buildings always remain rendered.
 - Give editable objects explicit precedence in culling and mesh budgets, with no separately streamed source duplicate to hide them.
-- New buildings that have generated LoD3 must remain visible at the closest zoom with textures on or off. If no texture exists, render their semantic/untextured LoD3 material alongside textured neighbors.
+- New buildings that have generated LoD3 must remain visible at the closest zoom with semantic LoD3 materials.
 - Selection, hover, edit handles, validation, and save previews must target the same logical object across LoD transitions.
-- Add tests covering a new building and an edited imported building while crossing the LoD2/LoD3 threshold and toggling textures at maximum zoom.
+- Add tests covering a new building and an edited imported building while crossing the LoD2/LoD3 threshold at maximum zoom.
 
 ### Verification criteria
 
@@ -301,8 +302,8 @@ This task is complete only when all of the following hold in the Hamburg demo:
 2. Numbered per-lane purple handles are visible, all valid nearby outgoing-lane targets are discoverable, and candidate/confirmed curves explain the available lane movements.
 3. Imported intersections display editable OSM/osm2streets-derived lane-movement proposals with provenance and deterministic persistence.
 4. Buildings do not slide, jump, or swap horizontal anchors during bearing, pitch, zoom, or LoD transitions.
-5. Close zoom visibly renders genuine detailed LoD3 geometry with textures independently optional.
-6. New and edited buildings remain visible and selectable at maximum zoom whether textures are enabled or disabled.
+5. Close zoom visibly renders genuine detailed LoD3 geometry with semantic materials.
+6. New and edited buildings remain visible and selectable at maximum zoom.
 7. Focused unit/fixture tests, the full test suite, production build, and browser/GPU visual regression pass without new console warnings.
 
 ## Remaining roadmap
@@ -317,6 +318,6 @@ The following work is intentionally not claimed as complete:
    polygons and ambiguous multi-peer joins retain the guarded disconnect path until a deliberate
    regeneration/conflict-resolution workflow is added.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
-5. Automate screenshot-based GPU regression coverage for local textured CityJSON and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural anchor, texture-parity, terrain, and committed-fixture regressions already have unit coverage.
+5. Automate screenshot-based GPU regression coverage for grounded mixed LoD2/LoD3 data and road depth on lower-end mobile devices. Structural anchor, semantic-material, terrain, and committed-fixture regressions already have unit coverage.
 
 These are continuation tasks, not blockers for the committed demo or the exact attribute-editing workflow.

@@ -14,6 +14,7 @@ import {
   compatibleRoadSnapCandidates,
   connectRoadLanes,
   insertRoadDraftPoint,
+  removeRoadDraftBand,
   updateRoadDraftPoint,
   type RoadSnapCandidate,
 } from '../../src/lib/road-draft-edit';
@@ -244,6 +245,75 @@ describe('road draft edit helpers', () => {
       }),
     ]);
     expect(connection.laneConnections?.some((lane) => lane.sourceBandId === 'source-out')).toBe(false);
+  });
+
+  it('removes a lane without corrupting movement and endpoint indexes', () => {
+    const connectedDraft: RoadDraft = {
+      ...draft,
+      id: 'road-1',
+      sections: [
+        {
+          ...draft.sections[0],
+          bands: [
+            { id: 'lane-1', kind: 'car_lane', widthM: 3.25 },
+            { id: 'lane-2', kind: 'car_lane', widthM: 3.25 },
+            { kind: 'bike_lane', widthM: 1.8 },
+          ],
+          connections: {
+            end: {
+              target: 'draft',
+              targetId: 'section-1',
+              targetSectionId: 'section-1',
+              targetEndpoint: 'start',
+              positionWgs84: [10, 53],
+              confirmed: true,
+              laneConnections: [
+                { sourceBandId: 'lane-2', sourceBandIndex: 1, targetBandIndex: 2 },
+                { sourceBandIndex: 2, targetBandId: 'lane-1', targetBandIndex: 0 },
+              ],
+            },
+          },
+        },
+      ],
+      movements: [
+        {
+          id: 'remove-source', junctionId: 'j-1', sourceRoadId: 'road-1',
+          sourceSectionId: 'section-1', sourceEndpoint: 'end', sourceBandId: 'lane-2',
+          sourceBandIndex: 1, targetRoadId: 'road-2', targetSectionId: 'other',
+          targetEndpoint: 'start', targetBandIndex: 0, sourceMode: 'car', targetMode: 'car',
+          turn: 'through', status: 'confirmed', provenance: 'manual', semanticEvidence: true,
+        },
+        {
+          id: 'shift-source', junctionId: 'j-1', sourceRoadId: 'road-1',
+          sourceSectionId: 'section-1', sourceEndpoint: 'end', sourceBandIndex: 2,
+          targetRoadId: 'road-2', targetSectionId: 'other', targetEndpoint: 'start',
+          targetBandIndex: 0, sourceMode: 'bicycle', targetMode: 'bicycle', turn: 'through',
+          status: 'confirmed', provenance: 'manual', semanticEvidence: true,
+        },
+      ],
+    };
+
+    const next = removeRoadDraftBand(connectedDraft, 'section-1', 1);
+
+    expect(next.sections[0].bands.map((band) => band.id ?? band.kind)).toEqual([
+      'lane-1',
+      'bike_lane',
+    ]);
+    expect(next.movements?.map((movement) => [movement.id, movement.sourceBandIndex])).toEqual([
+      ['shift-source', 1],
+    ]);
+    expect(next.sections[0].connections?.end?.laneConnections).toEqual([
+      expect.objectContaining({ sourceBandIndex: 1, targetBandId: 'lane-1', targetBandIndex: 0 }),
+    ]);
+  });
+
+  it('keeps the final remaining lane so the editor always has a valid menu selection', () => {
+    const oneBandDraft: RoadDraft = {
+      ...draft,
+      sections: [{ ...draft.sections[0], bands: [draft.sections[0].bands[0]] }],
+    };
+
+    expect(removeRoadDraftBand(oneBandDraft, 'section-1', 0)).toBe(oneBandDraft);
   });
 
   it('offers OSM endpoints as explicit road-network snap targets', () => {

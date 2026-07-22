@@ -224,8 +224,16 @@ export function useRoadEditor(
       ) {
         return current;
       }
-      const first = roadDraft.sections[0];
-      return first?.bands.length ? { sectionId: first.id, bandIndex: 0 } : null;
+      const currentSection = current
+        ? roadDraft.sections.find((section) => section.id === current.sectionId)
+        : undefined;
+      const fallbackSection = currentSection?.bands.length ? currentSection : roadDraft.sections[0];
+      return fallbackSection?.bands.length
+        ? {
+            sectionId: fallbackSection.id,
+            bandIndex: Math.min(current?.bandIndex ?? 0, fallbackSection.bands.length - 1),
+          }
+        : null;
     });
   }, [roadDraft]);
 

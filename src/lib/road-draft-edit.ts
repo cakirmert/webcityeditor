@@ -290,6 +290,99 @@ export function reconcileRoadLaneConnectionIndexes(draft: RoadDraft): RoadDraft 
   };
 }
 
+/**
+ * Remove one band without leaving lane movements or endpoint mappings pointed
+ * at the wrong array slot. Stable ids remain authoritative; legacy index-only
+ * references are dropped or shifted before the usual reconciliation pass.
+ */
+export function removeRoadDraftBand(
+  draft: RoadDraft,
+  sectionId: string,
+  bandIndex: number
+): RoadDraft {
+  const section = draft.sections.find((candidate) => candidate.id === sectionId);
+  if (!section || section.bands.length <= 1 || !section.bands[bandIndex]) return draft;
+  const removedBandId = section.bands[bandIndex].id;
+
+  const remapReference = (
+    bandId: string | undefined,
+    currentIndex: number
+  ): { bandId?: string; bandIndex: number } | null => {
+    if (bandId) {
+      if (removedBandId && bandId === removedBandId) return null;
+      return { bandId, bandIndex: currentIndex };
+    }
+    if (currentIndex === bandIndex) return null;
+    return { bandIndex: currentIndex > bandIndex ? currentIndex - 1 : currentIndex };
+  };
+
+  const sections = draft.sections.map((candidate) => {
+    const bands = candidate.id === sectionId
+      ? candidate.bands.filter((_, index) => index !== bandIndex)
+      : candidate.bands;
+    if (!candidate.connections) return { ...candidate, bands };
+    const connections: RoadSectionDraft['connections'] = {};
+    for (const endpoint of ['start', 'end'] as const) {
+      const connection = candidate.connections[endpoint];
+      if (!connection) continue;
+      const laneConnections = connection.laneConnections?.flatMap((mapping) => {
+        const source = candidate.id === sectionId
+          ? remapReference(mapping.sourceBandId, mapping.sourceBandIndex)
+          : { bandId: mapping.sourceBandId, bandIndex: mapping.sourceBandIndex };
+        if (!source) return [];
+        const targetsRemovedSection = connection.target === 'draft' &&
+          connection.targetSectionId === sectionId;
+        const target = targetsRemovedSection
+          ? remapReference(mapping.targetBandId, mapping.targetBandIndex)
+          : { bandId: mapping.targetBandId, bandIndex: mapping.targetBandIndex };
+        if (!target) return [];
+        return [{
+          ...mapping,
+          ...(source.bandId ? { sourceBandId: source.bandId } : { sourceBandId: undefined }),
+          sourceBandIndex: source.bandIndex,
+          ...(target.bandId ? { targetBandId: target.bandId } : { targetBandId: undefined }),
+          targetBandIndex: target.bandIndex,
+        }];
+      });
+      connections[endpoint] = {
+        ...connection,
+        ...(laneConnections?.length ? { laneConnections } : { laneConnections: undefined }),
+      };
+    }
+    return {
+      ...candidate,
+      bands,
+      ...(connections.start || connections.end ? { connections } : { connections: undefined }),
+    };
+  });
+
+  const movements = draft.movements?.flatMap((movement) => {
+    const source = movement.sourceSectionId === sectionId
+      ? remapReference(movement.sourceBandId, movement.sourceBandIndex)
+      : { bandId: movement.sourceBandId, bandIndex: movement.sourceBandIndex };
+    if (!source) return [];
+    const targetUsesDraft = !!draft.id && movement.targetRoadId === draft.id &&
+      movement.targetSectionId === sectionId;
+    const target = targetUsesDraft
+      ? remapReference(movement.targetBandId, movement.targetBandIndex)
+      : { bandId: movement.targetBandId, bandIndex: movement.targetBandIndex };
+    if (!target) return [];
+    return [{
+      ...movement,
+      ...(source.bandId ? { sourceBandId: source.bandId } : { sourceBandId: undefined }),
+      sourceBandIndex: source.bandIndex,
+      ...(target.bandId ? { targetBandId: target.bandId } : { targetBandId: undefined }),
+      targetBandIndex: target.bandIndex,
+    }];
+  });
+
+  return reconcileRoadLaneConnectionIndexes({
+    ...draft,
+    sections,
+    ...(movements ? { movements } : {}),
+  });
+}
+
 function reconcileSectionConnections(
   section: RoadSectionDraft,
   sectionsById: ReadonlyMap<string, RoadSectionDraft>

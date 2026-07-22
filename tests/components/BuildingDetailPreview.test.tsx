@@ -93,7 +93,7 @@ describe('<BuildingDetailPreview />', () => {
     lod3LoaderSpy.mockResolvedValue(null);
   });
 
-  it('loads only the selected building and defaults to textured LoD3', () => {
+  it('loads only the selected building and renders LoD3 with semantic colours', () => {
     render(
       <BuildingDetailPreview
         cityjson={detailDocument()}
@@ -110,9 +110,9 @@ describe('<BuildingDetailPreview />', () => {
     };
     expect(Object.keys(firstProps.cityjson.CityObjects)).toEqual(['selected']);
     expect(firstProps.lod).toBe('lod3');
-    expect(firstProps.texturesEnabled).toBe(true);
+    expect(firstProps.texturesEnabled).toBe(false);
     expect(screen.getByText(/Selected building only/)).toHaveTextContent(
-      'photo textures'
+      'semantic surface colours'
     );
     expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
       'Local CityJSON LoD3: 1 object'
@@ -123,25 +123,16 @@ describe('<BuildingDetailPreview />', () => {
     expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
       '1 surface'
     );
-    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
-      '1 photo atlas available'
-    );
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Selected building textures' }));
-    expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ lod: 'lod3', texturesEnabled: false })
-    );
+    expect(screen.queryByRole('switch', { name: 'Selected building textures' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('LoD3 data information')).not.toHaveTextContent('photo atlas');
 
     fireEvent.click(screen.getByRole('button', { name: 'LoD2' }));
     expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ lod: 'lod2', texturesEnabled: false })
     );
-    expect(screen.getByRole('switch', { name: 'Selected building textures' })).toBeEnabled();
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Selected building textures' }));
     fireEvent.click(screen.getByRole('button', { name: 'LoD3' }));
     expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ lod: 'lod3', texturesEnabled: true })
+      expect.objectContaining({ lod: 'lod3', texturesEnabled: false })
     );
   });
 
@@ -178,11 +169,6 @@ describe('<BuildingDetailPreview />', () => {
     expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
       'Hamburg Geoportal streamed LoD3: 59 triangles'
     );
-    expect(screen.getByLabelText('LoD3 data information')).toHaveTextContent(
-      'untextured; no photo atlas is supplied'
-    );
-    const textureSwitch = screen.getByRole('switch', { name: 'Selected building textures' });
-    expect(textureSwitch).toBeDisabled();
-    expect(textureSwitch).not.toBeChecked();
+    expect(screen.queryByRole('switch', { name: 'Selected building textures' })).not.toBeInTheDocument();
   });
 });
