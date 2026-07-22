@@ -1,5 +1,4 @@
 import { QuantizedMeshLoader } from '@loaders.gl/terrain';
-import type { BasemapMode } from './basemap';
 import { localMapMetersFromLngLat } from './cityjson-map-mesh';
 
 export const HAMBURG_TERRAIN_BASE_URL =
@@ -29,14 +28,8 @@ export interface HamburgTerrainTile {
   anchorLngLat: [number, number];
   positions: Float32Array;
   indices: Uint16Array | Uint32Array;
-  texCoords: Float32Array;
   minElevation: number;
   maxElevation: number;
-}
-
-export interface HamburgTerrainSurfaceSelection {
-  basemap: BasemapMode;
-  opacity: number;
 }
 
 const MAX_VIEW_TILES = 28;
@@ -199,69 +192,6 @@ function triangleElevationAt(
   return aWeight * az + bWeight * bz + cWeight * cz;
 }
 
-export function hamburgTerrainSurfaceUrl(
-  descriptor: HamburgTerrainTileDescriptor,
-  basemap: BasemapMode
-): string {
-  const [west, south, east, north] = descriptor.bounds;
-  if (basemap === 'satellite') {
-    const params = new URLSearchParams({
-      bbox: `${west},${south},${east},${north}`,
-      bboxSR: '4326',
-      imageSR: '4326',
-      size: '512,512',
-      format: 'png32',
-      transparent: 'false',
-      f: 'image',
-    });
-    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?${params}`;
-  }
-
-  const params = new URLSearchParams({
-    SERVICE: 'WMS',
-    VERSION: '1.3.0',
-    REQUEST: 'GetMap',
-    LAYERS: 'web',
-    STYLES: '',
-    FORMAT: 'image/png',
-    TRANSPARENT: 'false',
-    CRS: 'EPSG:4326',
-    // WMS 1.3 uses latitude/longitude axis order for EPSG:4326.
-    BBOX: `${south},${west},${north},${east}`,
-    WIDTH: '512',
-    HEIGHT: '512',
-  });
-  return `https://sgx.geodatenzentrum.de/wms_topplus_open?${params}`;
-}
-
-/** One selected basemap owns the terrain mesh; never stack stale TopPlus below satellite. */
-export function hamburgTerrainSurfaceSelection(
-  basemap: BasemapMode,
-  satelliteOpacity: number
-): HamburgTerrainSurfaceSelection {
-  return {
-    basemap,
-    opacity: basemap === 'satellite'
-      ? Math.max(0, Math.min(1, satelliteOpacity))
-      : 1,
-  };
-}
-
-/**
- * Quantized-mesh V coordinates increase from south to north. Browser image
- * rows increase from north to south, so deck.gl otherwise projects every map
- * texture upside down. Return a copy because the decoder-owned array may be
- * shared by its mesh cache.
- */
-export function terrainTextureCoordinates(source: Float32Array): Float32Array {
-  const textureCoordinates = new Float32Array(source.length);
-  for (let index = 0; index + 1 < source.length; index += 2) {
-    textureCoordinates[index] = source[index];
-    textureCoordinates[index + 1] = 1 - source[index + 1];
-  }
-  return textureCoordinates;
-}
-
 async function fetchAndDecodeTerrainTile(
   descriptor: HamburgTerrainTileDescriptor
 ): Promise<HamburgTerrainTile> {
@@ -281,14 +211,12 @@ async function fetchAndDecodeTerrainTile(
   }) as {
     attributes?: {
       POSITION?: { value?: Float32Array };
-      TEXCOORD_0?: { value?: Float32Array };
     };
     indices?: { value?: Uint16Array | Uint32Array };
   };
   const sourcePositions = parsed.attributes?.POSITION?.value;
-  const sourceTexCoords = parsed.attributes?.TEXCOORD_0?.value;
   const indices = parsed.indices?.value;
-  if (!sourcePositions || !sourceTexCoords || !indices) {
+  if (!sourcePositions || !indices) {
     throw new Error('Hamburg terrain tile did not contain a decodable triangle mesh.');
   }
 
@@ -314,7 +242,6 @@ async function fetchAndDecodeTerrainTile(
     anchorLngLat,
     positions,
     indices,
-    texCoords: terrainTextureCoordinates(sourceTexCoords),
     minElevation,
     maxElevation,
   };

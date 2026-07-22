@@ -24,7 +24,7 @@ Open **Map layers** in the upper-left of the map.
 - **Satellite image** and **Road surfaces** have separate opacity sliders.
 - **Building colours** defaults to **Roof type**. **Usage** also understands Hamburg’s official ALKIS function codes.
 - The status at the bottom reports the geometry LoD, drawn objects, buildings, installations, surfaces, and semantic material state.
-- The map surface is Hamburg's CORS-enabled quantized-mesh DGM hybrid, with TopPlus or satellite imagery draped onto the same terrain used to clamp LoD0, LoD2, LoD3, previews, and trees.
+- MapLibre keeps TopPlus or satellite as the single visible basemap. Hamburg's CORS-enabled quantized-mesh DGM hybrid is sampled only for object elevations, so delayed terrain textures cannot wash out the map or add a second mesh to every rendered frame.
 
 > **Screenshot to add — `assets/readme/map-layers.jpg`**
 > Open Map layers over a close Hamburg view. Show TopPlus and Satellite, Building colours with Roof type selected, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps basemap comparison, semantic building colour, and opacity controls together.”

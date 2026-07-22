@@ -61,7 +61,6 @@ describe('terrain snap', () => {
         0, 100, 6.25,
       ]),
       indices: new Uint16Array([0, 1, 2]),
-      texCoords: new Float32Array([0, 0, 1, 0, 0.5, 1]),
       minElevation: 6.25,
       maxElevation: 6.25,
     };
