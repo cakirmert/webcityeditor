@@ -4,6 +4,7 @@ import {
   hamburgTerrainSurfaceUrl,
   hamburgTerrainTilesForView,
   sampleHamburgTerrainElevation,
+  terrainTextureCoordinates,
   type HamburgTerrainTile,
 } from '../../src/lib/hamburg-terrain';
 
@@ -51,5 +52,16 @@ describe('Hamburg quantized-mesh terrain', () => {
     };
 
     expect(sampleHamburgTerrainElevation([tile], [10, 53.5])).toBe(7.25);
+  });
+
+  it('maps south-up quantized-mesh coordinates onto north-up map images', () => {
+    const source = new Float32Array([0, 0, 0.25, 0.4, 1, 1]);
+    const mapped = terrainTextureCoordinates(source);
+
+    expect([mapped[0], mapped[1], mapped[2], mapped[4], mapped[5]]).toEqual([
+      0, 1, 0.25, 1, 0,
+    ]);
+    expect(mapped[3]).toBeCloseTo(0.6);
+    expect(source[3]).toBeCloseTo(0.4);
   });
 });

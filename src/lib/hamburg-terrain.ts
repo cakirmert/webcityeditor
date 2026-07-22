@@ -229,6 +229,21 @@ export function hamburgTerrainSurfaceUrl(
   return `https://sgx.geodatenzentrum.de/wms_topplus_open?${params}`;
 }
 
+/**
+ * Quantized-mesh V coordinates increase from south to north. Browser image
+ * rows increase from north to south, so deck.gl otherwise projects every map
+ * texture upside down. Return a copy because the decoder-owned array may be
+ * shared by its mesh cache.
+ */
+export function terrainTextureCoordinates(source: Float32Array): Float32Array {
+  const textureCoordinates = new Float32Array(source.length);
+  for (let index = 0; index + 1 < source.length; index += 2) {
+    textureCoordinates[index] = source[index];
+    textureCoordinates[index + 1] = 1 - source[index + 1];
+  }
+  return textureCoordinates;
+}
+
 async function fetchAndDecodeTerrainTile(
   descriptor: HamburgTerrainTileDescriptor
 ): Promise<HamburgTerrainTile> {
@@ -242,7 +257,9 @@ async function fetchAndDecodeTerrainTile(
   }
   const arrayBuffer = await response.arrayBuffer();
   const parsed = QuantizedMeshLoader.parseSync(arrayBuffer, {
-    'quantized-mesh': { bounds: [0, 0, 1, 1], skirtHeight: 1.5 },
+    // Adjacent tiles are loaded together. Textured skirts create visible
+    // vertical map-image walls at their boundaries, especially over water.
+    'quantized-mesh': { bounds: [0, 0, 1, 1], skirtHeight: null },
   }) as {
     attributes?: {
       POSITION?: { value?: Float32Array };
@@ -279,7 +296,7 @@ async function fetchAndDecodeTerrainTile(
     anchorLngLat,
     positions,
     indices,
-    texCoords: new Float32Array(sourceTexCoords),
+    texCoords: terrainTextureCoordinates(sourceTexCoords),
     minElevation,
     maxElevation,
   };
