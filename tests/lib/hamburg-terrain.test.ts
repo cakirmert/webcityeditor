@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   geographicTileBounds,
   hamburgTerrainSurfaceUrl,
+  hamburgTerrainSurfaceSelection,
   hamburgTerrainTilesForView,
   sampleHamburgTerrainElevation,
   terrainTextureCoordinates,
@@ -27,6 +28,21 @@ describe('Hamburg quantized-mesh terrain', () => {
 
     expect(topPlus.searchParams.get('BBOX')).toBe(`${south},${west},${north},${east}`);
     expect(satellite.searchParams.get('bbox')).toBe(`${west},${south},${east},${north}`);
+  });
+
+  it('lets only the selected basemap own the terrain surface', () => {
+    expect(hamburgTerrainSurfaceSelection('topplus', 0.2)).toEqual({
+      basemap: 'topplus',
+      opacity: 1,
+    });
+    expect(hamburgTerrainSurfaceSelection('satellite', 0.82)).toEqual({
+      basemap: 'satellite',
+      opacity: 0.82,
+    });
+    expect(hamburgTerrainSurfaceSelection('satellite', 2)).toEqual({
+      basemap: 'satellite',
+      opacity: 1,
+    });
   });
 
   it('samples the closest terrain vertex in the shared absolute datum', () => {

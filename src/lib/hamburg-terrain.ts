@@ -34,6 +34,11 @@ export interface HamburgTerrainTile {
   maxElevation: number;
 }
 
+export interface HamburgTerrainSurfaceSelection {
+  basemap: BasemapMode;
+  opacity: number;
+}
+
 const MAX_VIEW_TILES = 28;
 const terrainTileCache = new Map<string, Promise<HamburgTerrainTile>>();
 let latestTerrainTiles: HamburgTerrainTile[] = [];
@@ -227,6 +232,19 @@ export function hamburgTerrainSurfaceUrl(
     HEIGHT: '512',
   });
   return `https://sgx.geodatenzentrum.de/wms_topplus_open?${params}`;
+}
+
+/** One selected basemap owns the terrain mesh; never stack stale TopPlus below satellite. */
+export function hamburgTerrainSurfaceSelection(
+  basemap: BasemapMode,
+  satelliteOpacity: number
+): HamburgTerrainSurfaceSelection {
+  return {
+    basemap,
+    opacity: basemap === 'satellite'
+      ? Math.max(0, Math.min(1, satelliteOpacity))
+      : 1,
+  };
 }
 
 /**

@@ -123,6 +123,7 @@ import {
 } from '../lib/hamburg-lod3-tiles';
 import {
   hamburgTerrainSurfaceUrl,
+  hamburgTerrainSurfaceSelection,
   hamburgTerrainTilesForView,
   loadHamburgTerrainTile,
   rememberHamburgTerrainTiles,
@@ -151,6 +152,22 @@ const EDIT_FOCUS_PADDING_DEGREES = 0.0038;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
 const ROAD_CONNECTION_HANDLE_OFFSET_PIXELS = 23;
 const HAMBURG_CITY_CENTER_TREES_URL = 'data/hamburg/hamburg-city-center-trees.json';
+
+interface TerrainSurfaceTextures {
+  basemap: BasemapMode;
+  images: Map<string, HTMLImageElement>;
+}
+
+function loadTerrainSurfaceImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.decoding = 'async';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Terrain basemap image failed: ${url}`));
+    image.src = url;
+  });
+}
 
 interface RoadConnectionHandle extends RoadDraftHandle {
   endpoint: 'start' | 'end';
@@ -508,6 +525,8 @@ export default function MapView({
   const [terrainStatus, setTerrainStatus] = useState<
     'idle' | 'loading' | 'ready' | 'partial' | 'error'
   >('idle');
+  const [terrainSurfaceTextures, setTerrainSurfaceTextures] =
+    useState<TerrainSurfaceTextures>({ basemap, images: new Map() });
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [detailFocusPoint, setDetailFocusPoint] = useState<[number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
@@ -611,6 +630,10 @@ export default function MapView({
     () => hamburgTerrainTilesForView(viewportBbox, terrainZoomBucket),
     [terrainZoomBucket, viewportBbox]
   );
+  const terrainSurfaceRequestKey = useMemo(
+    () => `${basemap}:${terrainTileDescriptors.map((descriptor) => descriptor.key).join('|')}`,
+    [basemap, terrainTileDescriptors]
+  );
   useEffect(() => {
     let canceled = false;
     if (terrainTileDescriptors.length === 0) {
@@ -648,6 +671,45 @@ export default function MapView({
       canceled = true;
     };
   }, [terrainTileDescriptors]);
+
+  useEffect(() => {
+    let canceled = false;
+    const requestedBasemap = basemap;
+    // Remove textures from the previous zoom/mode immediately. Until the
+    // selected terrain images are ready, MapLibre's already-selected raster
+    // remains visible instead of a stale TopPlus or white mesh.
+    setTerrainSurfaceTextures({ basemap: requestedBasemap, images: new Map() });
+    if (terrainTileDescriptors.length === 0) {
+      return () => {
+        canceled = true;
+      };
+    }
+
+    void Promise.allSettled(
+      terrainTileDescriptors.map(async (descriptor) => {
+        const image = await loadTerrainSurfaceImage(
+          hamburgTerrainSurfaceUrl(descriptor, requestedBasemap)
+        );
+        return [descriptor.key, image] as const;
+      })
+    ).then((results) => {
+      if (canceled) return;
+      const images = new Map<string, HTMLImageElement>();
+      for (const result of results) {
+        if (result.status === 'fulfilled') images.set(...result.value);
+      }
+      setTerrainSurfaceTextures({ basemap: requestedBasemap, images });
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') {
+        console.warn(
+          failed.reason instanceof Error ? failed.reason.message : String(failed.reason)
+        );
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [terrainSurfaceRequestKey]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -1747,9 +1809,15 @@ export default function MapView({
       : [];
 
     // Hamburg's official DGM hybrid terrain owns the map's vertical datum.
-    // TopPlus is always the base terrain texture; satellite is blended over
-    // the identical mesh so the existing comparison opacity remains useful.
+    // Only the selected basemap may own its surface. Images are preloaded, so
+    // a zoom transition exposes MapLibre's selected raster instead of drawing
+    // a stale TopPlus or an untextured white terrain mesh.
+    const terrainSurface = hamburgTerrainSurfaceSelection(basemap, satelliteOpacity);
     for (const tile of terrainTiles) {
+      const texture = terrainSurfaceTextures.basemap === terrainSurface.basemap
+        ? terrainSurfaceTextures.images.get(tile.descriptor.key)
+        : undefined;
+      if (!texture || terrainSurface.opacity <= 0.001) continue;
       const mesh = {
         attributes: {
           positions: { value: tile.positions, size: 3 },
@@ -1760,42 +1828,22 @@ export default function MapView({
       const tileId = tile.descriptor.key.replaceAll('/', '-');
       layers.push(
         new SimpleMeshLayer<{ position: [number, number, number] }>({
-          id: `hamburg-dgm-terrain-topplus-${tileId}`,
+          id: `hamburg-dgm-terrain-${terrainSurface.basemap}-${tileId}`,
           data: [{ position: [0, 0, 0] }],
           getPosition: (item: { position: [number, number, number] }) => item.position,
           getColor: [255, 255, 255, 255],
           mesh,
-          texture: hamburgTerrainSurfaceUrl(tile.descriptor, 'topplus'),
+          texture,
+          opacity: terrainSurface.opacity,
           _instanced: false,
           coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
           coordinateOrigin: [tile.anchorLngLat[0], tile.anchorLngLat[1], 0],
           pickable: false,
-          material: { ambient: 0.82, diffuse: 0.32, shininess: 2 },
+          material: terrainSurface.basemap === 'satellite'
+            ? { ambient: 0.88, diffuse: 0.24, shininess: 1 }
+            : { ambient: 0.82, diffuse: 0.32, shininess: 2 },
         } as any)
       );
-      if (basemap === 'satellite' && satelliteOpacity > 0.001) {
-        layers.push(
-          new SimpleMeshLayer<{ position: [number, number, number] }>({
-            id: `hamburg-dgm-terrain-satellite-${tileId}`,
-            data: [{ position: [0, 0, 0] }],
-            getPosition: (item: { position: [number, number, number] }) => item.position,
-            getColor: [255, 255, 255, 255],
-            mesh,
-            texture: hamburgTerrainSurfaceUrl(tile.descriptor, 'satellite'),
-            opacity: satelliteOpacity,
-            _instanced: false,
-            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-            coordinateOrigin: [tile.anchorLngLat[0], tile.anchorLngLat[1], 0],
-            pickable: false,
-            material: { ambient: 0.88, diffuse: 0.24, shininess: 1 },
-            parameters: {
-              depthTest: true,
-              polygonOffsetFill: true,
-              polygonOffset: [-1, -1],
-            } as unknown as never,
-          } as any)
-        );
-      }
     }
 
     // The official source positions, laser-derived heights, measured crown
@@ -2892,6 +2940,7 @@ export default function MapView({
     renderedZones,
     detailMesh,
     terrainTiles,
+    terrainSurfaceTextures,
     selectedId,
     onSelect,
     zoom,
