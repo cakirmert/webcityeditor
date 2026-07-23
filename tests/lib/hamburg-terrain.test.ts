@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   geographicTileBounds,
+  hamburgTerrainLevelForMapZoom,
   hamburgTerrainTilesForView,
   sampleHamburgTerrainElevation,
   type HamburgTerrainTile,
 } from '../../src/lib/hamburg-terrain';
 
 describe('Hamburg quantized-mesh terrain', () => {
+  it('defers terrain work until street-level detail is visible', () => {
+    expect(hamburgTerrainLevelForMapZoom(14.85)).toBeNull();
+    expect(hamburgTerrainLevelForMapZoom(15.25)).toBe(14);
+  });
+
   it('resolves geographic TMS tiles at the close-view source level', () => {
     const [tile] = hamburgTerrainTilesForView([9.9899, 53.5499, 9.9901, 53.5501], 17);
 
@@ -39,5 +45,34 @@ describe('Hamburg quantized-mesh terrain', () => {
     };
 
     expect(sampleHamburgTerrainElevation([tile], [10, 53.5])).toBe(7.25);
+  });
+
+  it('interpolates indexed terrain triangles and reuses repeated samples', () => {
+    const tile: HamburgTerrainTile = {
+      descriptor: {
+        key: 'indexed-test',
+        level: 0,
+        x: 0,
+        y: 0,
+        bounds: [9.9, 53.4, 10.1, 53.6],
+        url: 'test.terrain',
+      },
+      anchorLngLat: [10, 53.5],
+      positions: new Float32Array([
+        -100, -100, 0,
+        100, -100, 10,
+        100, 100, 20,
+        -100, 100, 10,
+      ]),
+      indices: new Uint16Array([0, 1, 2, 0, 2, 3]),
+      minElevation: 0,
+      maxElevation: 20,
+    };
+
+    const first = sampleHamburgTerrainElevation([tile], [10, 53.5]);
+    const repeated = sampleHamburgTerrainElevation([tile], [10, 53.5]);
+
+    expect(first).toBeCloseTo(10, 5);
+    expect(repeated).toBe(first);
   });
 });

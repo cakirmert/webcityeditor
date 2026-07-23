@@ -2,7 +2,7 @@ import type { CityJsonDocument, CityObject } from '../types';
 import {
   applyVertexTransform,
   detectCrs,
-  projectToWgs84,
+  projectCityJsonVertexToWgs84,
 } from './projection';
 
 export type FootprintPolygon = [number, number, number][];
@@ -134,9 +134,6 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
   const crs = detectCrs(doc);
   if (!crs.supported) return [];
 
-  const toLngLat = (x: number, y: number, z = 0): [number, number] =>
-    projectToWgs84(crs.code, { x, y, z });
-
   const result: Footprint[] = [];
 
   // Find root-level buildings (no parents)
@@ -158,7 +155,7 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
       [];
     if (partIds.length > 0) {
       for (const childId of partIds) {
-        const fp = buildFootprintForObject(doc, childId, toLngLat, {
+        const fp = buildFootprintForObject(doc, childId, crs.code, {
           parentId: rootId,
         });
         if (fp) {
@@ -166,7 +163,7 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
         }
       }
     } else {
-      const fp = buildFootprintForObject(doc, rootId, toLngLat);
+      const fp = buildFootprintForObject(doc, rootId, crs.code);
       if (fp) result.push(fp);
     }
   }
@@ -176,7 +173,7 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
 function buildFootprintForObject(
   doc: CityJsonDocument,
   id: string,
-  toLngLat: (x: number, y: number, z?: number) => [number, number],
+  crsCode: string,
   options: { parentId?: string; includeBuildingPartChildren?: boolean } = {}
 ): Footprint | null {
   const obj = doc.CityObjects[id];
@@ -191,9 +188,8 @@ function buildFootprintForObject(
 
   // Helper to read a vertex in CRS coords
   const vertexCrs = (idx: number) => {
-    const v = doc.vertices[idx] as [number, number, number] | undefined;
-    if (!v) return null;
-    return applyVertexTransform(v, doc);
+    const vertex = doc.vertices[idx] as [number, number, number] | undefined;
+    return vertex ? applyVertexTransform(vertex, doc) : null;
   };
 
   const recordZ = (ring: number[]) => {
@@ -252,10 +248,9 @@ function buildFootprintForObject(
       : 0;
   const polygon: FootprintPolygon = [];
   for (const idx of bestGroundRing) {
-    const c = vertexCrs(idx);
+    const c = projectCityJsonVertexToWgs84(doc, idx, crsCode);
     if (!c) continue;
-    const [lng, lat] = toLngLat(c.x, c.y, c.z);
-    polygon.push([lng, lat, baseElevation]);
+    polygon.push([c.lng, c.lat, baseElevation]);
   }
   if (polygon.length < 3) return null;
 
@@ -444,10 +439,7 @@ export function extractFootprintForId(doc: CityJsonDocument, id: string): Footpr
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
 
-  const toLngLat = (x: number, y: number, z = 0): [number, number] =>
-    projectToWgs84(crs.code, { x, y, z });
-
-  return buildFootprintForObject(doc, id, toLngLat, {
+  return buildFootprintForObject(doc, id, crs.code, {
     includeBuildingPartChildren: true,
   });
 }

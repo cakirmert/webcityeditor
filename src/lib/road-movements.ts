@@ -475,7 +475,7 @@ function buildRoadApproaches(
       draft = roadId === activeDraft.id
         ? activeDraft
         : areas.find((area) => area.editableDraft)?.editableDraft ??
-          deriveEditableRoadDraftFromAreas(roadAreas, roadId);
+          deriveEditableRoadDraftFromAreas(areas, roadId);
     } catch {
       continue;
     }

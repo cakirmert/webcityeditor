@@ -1,9 +1,9 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument, CityObject, JsonValue } from '../types';
 import {
-  applyVertexTransform,
   computeBbox,
   detectCrs,
+  projectCityJsonVertexToWgs84,
   projectToWgs84,
 } from './projection';
 
@@ -1082,17 +1082,20 @@ export function updateExactRoadAttributesInCityJson(
   };
   return {
     id: roadId,
-    areas: extractTransportationAreas(doc).filter((area) => area.roadId === roadId),
+    areas: extractTransportationAreas(doc, { roadIds: new Set([roadId]) }),
     vertexCount: 0,
   };
 }
 
-export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
+export function extractTransportationAreas(
+  doc: CityJsonDocument,
+  options: { roadIds?: ReadonlySet<string> } = {}
+): RoadArea[] {
   const crs = detectCrs(doc);
   if (!crs.supported) return [];
   const areas: RoadArea[] = [];
   for (const [roadId, object] of Object.entries(doc.CityObjects)) {
-    if (object.type !== 'Road') continue;
+    if (object.type !== 'Road' || (options.roadIds && !options.roadIds.has(roadId))) continue;
     const objectVertical = roadVerticalProfileFromCityObject(object);
     const editableDraft = readEditableRoadDraftFromCityObject(object);
     const geometryMode = roadGeometryModeFromCityObject(object, editableDraft);
@@ -1119,10 +1122,9 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
         let minElevation = Infinity;
         let maxElevation = -Infinity;
         for (const vertexIndex of ring) {
-          const vertex = doc.vertices[vertexIndex];
-          if (!vertex) continue;
-          const c = applyVertexTransform(vertex, doc);
-          polygon.push(projectToWgs84(crs.code, c));
+          const c = projectCityJsonVertexToWgs84(doc, vertexIndex, crs.code);
+          if (!c) continue;
+          polygon.push([c.lng, c.lat]);
           minElevation = Math.min(minElevation, c.z);
           maxElevation = Math.max(maxElevation, c.z);
         }
@@ -2221,7 +2223,7 @@ export function synchronizeRoadConnectionMetadata(
   sourceDraft: RoadDraft
 ): string[] {
   const changedTargets = new Set<string>();
-  let extractedAreas: RoadArea[] | null = null;
+  const extractedAreasByRoad = new Map<string, RoadArea[]>();
   for (const sourceSection of sourceDraft.sections) {
     for (const sourceEndpoint of ['start', 'end'] as const) {
       const connection = sourceSection.connections?.[sourceEndpoint];
@@ -2238,10 +2240,13 @@ export function synchronizeRoadConnectionMetadata(
       let targetDraft = readEditableRoadDraftFromCityObject(targetObject);
       let derivedFromExactSurfaces = false;
       if (!targetDraft) {
-        extractedAreas ??= extractTransportationAreas(doc);
-        const targetAreas = extractedAreas.filter(
-          (area) => area.roadId === connection.targetId
-        );
+        let targetAreas = extractedAreasByRoad.get(connection.targetId);
+        if (!targetAreas) {
+          targetAreas = extractTransportationAreas(doc, {
+            roadIds: new Set([connection.targetId]),
+          });
+          extractedAreasByRoad.set(connection.targetId, targetAreas);
+        }
         try {
           targetDraft = deriveEditableRoadDraftFromAreas(targetAreas, connection.targetId);
           derivedFromExactSurfaces = true;

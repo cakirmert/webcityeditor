@@ -511,6 +511,7 @@ export default function MapView({
   const [hamburgLod3Status, setHamburgLod3Status] = useState<
     'idle' | 'loading' | 'ready' | 'error'
   >('idle');
+  const [hamburgRemoteLod3Mounted, setHamburgRemoteLod3Mounted] = useState(false);
   const [terrainTiles, setTerrainTiles] = useState<HamburgTerrainTile[]>([]);
   const [terrainStatus, setTerrainStatus] = useState<
     'idle' | 'loading' | 'ready' | 'partial' | 'error'
@@ -605,7 +606,13 @@ export default function MapView({
   }, [onRoadDraftChange]);
 
   useEffect(() => {
-    if (zoom < HAMBURG_TREE_MIN_ZOOM || treeLoadStartedRef.current) return;
+    if (
+      roadWorkspaceOpen ||
+      zoom < HAMBURG_TREE_MIN_ZOOM ||
+      treeLoadStartedRef.current
+    ) {
+      return;
+    }
     treeLoadStartedRef.current = true;
     void fetch(HAMBURG_CITY_CENTER_TREES_URL)
       .then((response) => {
@@ -619,17 +626,30 @@ export default function MapView({
       .catch((error) => {
         setTreeDataError(error instanceof Error ? error.message : String(error));
       });
-  }, [zoom]);
+  }, [roadWorkspaceOpen, zoom]);
 
   const terrainZoomBucket = Math.floor(zoom);
   const terrainTileDescriptors = useMemo(
-    () => hamburgTerrainTilesForView(viewportBbox, terrainZoomBucket),
-    [terrainZoomBucket, viewportBbox]
+    () =>
+      roadWorkspaceOpen
+        ? []
+        : hamburgTerrainTilesForView(viewportBbox, terrainZoomBucket),
+    [roadWorkspaceOpen, terrainZoomBucket, viewportBbox]
   );
+  const terrainTileDescriptorKey = terrainTileDescriptors
+    .map((descriptor) => descriptor.key)
+    .join('|');
   useEffect(() => {
     let canceled = false;
     if (terrainTileDescriptors.length === 0) {
-      setTerrainTiles([]);
+      // Retain already-grounded elevations while Roads is open, but do not
+      // fetch/decode new terrain as the user pans or edits.
+      if (roadWorkspaceOpen) {
+        return () => {
+          canceled = true;
+        };
+      }
+      setTerrainTiles((current) => current.length === 0 ? current : []);
       rememberHamburgTerrainTiles([]);
       setTerrainStatus('idle');
       return () => {
@@ -662,7 +682,11 @@ export default function MapView({
     return () => {
       canceled = true;
     };
-  }, [terrainTileDescriptors]);
+    // Descriptor objects are recreated with viewport state. Tile keys are the
+    // stable identity; depending on the array retriggered the entire terrain
+    // grounding pipeline after equivalent zoomend + moveend events.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roadWorkspaceOpen, terrainTileDescriptorKey]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -731,15 +755,6 @@ export default function MapView({
     []
   );
 
-  const roadSnapCandidates = useMemo(
-    () => buildRoadSnapCandidates(roadDraft, roadAreas, osmRoads),
-    [roadDraft, roadAreas, osmRoads]
-  );
-  const roadSnapCandidatesRef = useRef(roadSnapCandidates);
-  useEffect(() => {
-    roadSnapCandidatesRef.current = roadSnapCandidates;
-  }, [roadSnapCandidates]);
-
   const rawEditFocusBbox = useMemo(() => {
     if (roadDraft) {
       const points = roadDraft.sections.flatMap((section) => section.centerlineWgs84);
@@ -779,12 +794,18 @@ export default function MapView({
     [editFocusKey]
   );
 
+  const viewportRenderBbox = useMemo(
+    () => expandLngLatBbox(viewportBbox, EDIT_FOCUS_PADDING_DEGREES),
+    [viewportBbox]
+  );
+  const renderScopeBbox = editFocusBbox ?? viewportRenderBbox;
+
   const renderedFootprints = useMemo(
     () =>
-      editFocusBbox
-        ? footprints.filter((footprint) => polygonIntersectsBbox(footprint.polygon, editFocusBbox))
+      renderScopeBbox
+        ? footprints.filter((footprint) => polygonIntersectsBbox(footprint.polygon, renderScopeBbox))
         : footprints,
-    [footprints, editFocusBbox]
+    [footprints, renderScopeBbox]
   );
 
   const groundedRenderedFootprints = useMemo(
@@ -797,10 +818,10 @@ export default function MapView({
 
   const renderedRoadAreas = useMemo(
     () =>
-      editFocusBbox
-        ? roadAreas.filter((area) => polygonIntersectsBbox(area.polygon, editFocusBbox))
+      renderScopeBbox
+        ? roadAreas.filter((area) => polygonIntersectsBbox(area.polygon, renderScopeBbox))
         : roadAreas,
-    [roadAreas, editFocusBbox]
+    [roadAreas, renderScopeBbox]
   );
   const elevatedRenderedRoadAreas = useMemo<RenderableRoadArea[]>(
     () => renderedRoadAreas.map((area) => ({
@@ -878,30 +899,67 @@ export default function MapView({
 
   const renderedOsmRoads = useMemo(
     () =>
-      editFocusBbox
-        ? osmRoads.filter((road) => lineIntersectsBbox(road.path, editFocusBbox))
+      renderScopeBbox
+        ? osmRoads.filter((road) => lineIntersectsBbox(road.path, renderScopeBbox))
         : osmRoads,
-    [osmRoads, editFocusBbox]
+    [osmRoads, renderScopeBbox]
   );
+
+  // Connection targets are only needed while a draft exists. The previous
+  // path derived editable drafts for every loaded road at startup and again on
+  // every pointer frame. Build nearby saved targets only when the scoped road
+  // set changes; updating the active draft then adds just its own endpoints.
+  const externalRoadSnapCandidates = useMemo(
+    () =>
+      roadDraft
+        ? buildRoadSnapCandidates(null, renderedRoadAreas, renderedOsmRoads)
+        : [],
+    // The draft id changes when entering/leaving or switching road edits, but
+    // ordinary handle movement must not rebuild every external candidate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roadDraft?.id, renderedRoadAreas, renderedOsmRoads]
+  );
+  const roadSnapCandidates = useMemo(() => {
+    if (!roadDraft) return [];
+    const draftCandidates = buildRoadSnapCandidates(roadDraft, [], []);
+    return [
+      ...draftCandidates,
+      ...externalRoadSnapCandidates.filter(
+        (candidate) => candidate.connection.targetId !== roadDraft.id
+      ),
+    ];
+  }, [externalRoadSnapCandidates, roadDraft]);
+  const roadSnapCandidatesRef = useRef(roadSnapCandidates);
+  useEffect(() => {
+    roadSnapCandidatesRef.current = roadSnapCandidates;
+  }, [roadSnapCandidates]);
 
   const renderedOsmPointFeatures = useMemo(
     () => {
+      if (roadWorkspaceOpen) return [];
       if (!editFocusBbox && zoom < 16) return [];
       return editFocusBbox
         ? osmPointFeatures.filter((feature) => pointInsideBbox(feature.position, editFocusBbox))
         : osmPointFeatures;
     },
-    [osmPointFeatures, editFocusBbox, zoom]
+    [osmPointFeatures, editFocusBbox, roadWorkspaceOpen, zoom]
   );
 
   const renderedHamburgTrees = useMemo(() => {
-    if (!hamburgTrees || editFocusBbox || zoom < HAMBURG_TREE_MIN_ZOOM) return [];
+    if (
+      !hamburgTrees ||
+      editFocusBbox ||
+      roadWorkspaceOpen ||
+      zoom < HAMBURG_TREE_MIN_ZOOM
+    ) {
+      return [];
+    }
     return viewportBbox
       ? hamburgTrees.filter((tree) =>
           pointInsideBbox([tree.position[0], tree.position[1]], viewportBbox)
         )
       : hamburgTrees;
-  }, [editFocusBbox, hamburgTrees, viewportBbox, zoom]);
+  }, [editFocusBbox, hamburgTrees, roadWorkspaceOpen, viewportBbox, zoom]);
 
   const renderedOsm2StreetsResult = useMemo(() => {
     if (!osm2streetsResult || !editFocusBbox) return osm2streetsResult;
@@ -922,24 +980,31 @@ export default function MapView({
     BUILDING_DETAIL_FULL_ZOOM,
     zoom
   );
-  const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
+  const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM && !roadWorkspaceOpen;
   const detailLod: 'lod2' | 'lod3' = zoom >= BUILDING_LOD3_MIN_ZOOM ? 'lod3' : 'lod2';
   const hamburgRemoteLod3Eligible = useMemo(
     () => Object.keys(cityjson.CityObjects).some(isHamburgOfficialBuildingId),
     [cityjson, reloadToken]
   );
+  const hamburgRemoteLod3Available =
+    hamburgRemoteLod3Eligible && detailLod === 'lod3';
   const hamburgRemoteLod3Active =
-    hamburgRemoteLod3Eligible &&
-    detailLod === 'lod3' &&
-    !editFocusBbox;
+    hamburgRemoteLod3Available &&
+    !editFocusBbox &&
+    !roadWorkspaceOpen;
+  // Do not start the remote tileset while Roads is already open. Once it has
+  // been visible, keep the layer mounted (but hidden) so road actions do not
+  // destroy and recreate its GPU/network state.
   useEffect(() => {
-    if (!hamburgRemoteLod3Active) {
+    if (!hamburgRemoteLod3Available) {
+      setHamburgRemoteLod3Mounted(false);
       setHamburgLod3Status('idle');
-    } else {
+    } else if (hamburgRemoteLod3Active) {
+      setHamburgRemoteLod3Mounted(true);
       setHamburgLod3Status((current) => current === 'ready' ? current : 'loading');
     }
-  }, [hamburgRemoteLod3Active]);
-  const treeDetailLabel = editFocusBbox
+  }, [hamburgRemoteLod3Active, hamburgRemoteLod3Available]);
+  const treeDetailLabel = editFocusBbox || roadWorkspaceOpen
     ? 'street trees hidden while editing'
     : zoom < HAMBURG_TREE_MIN_ZOOM
       ? 'official street trees at zoom 16.5'
@@ -1333,18 +1398,29 @@ export default function MapView({
     const syncSettledView = () => {
       setZoom(map.getZoom());
       const bounds = map.getBounds();
-      setViewportBbox([
+      const nextBbox: [number, number, number, number] = [
         bounds.getWest(),
         bounds.getSouth(),
         bounds.getEast(),
         bounds.getNorth(),
-      ]);
+      ];
+      setViewportBbox((current) =>
+        current?.every((value, index) => Math.abs(value - nextBbox[index]) < 1e-9)
+          ? current
+          : nextBbox
+      );
       // Keep the LoD membership anchored to the geographic camera centre.
       // A pitch-dependent screen sample changed when only bearing/pitch moved,
       // swapping nearby buildings between block and source geometry and making
       // them appear to slide under a stationary camera target.
       const center = map.getCenter();
-      setDetailFocusPoint([center.lng, center.lat]);
+      setDetailFocusPoint((current) =>
+        current &&
+        Math.abs(current[0] - center.lng) < 1e-9 &&
+        Math.abs(current[1] - center.lat) < 1e-9
+          ? current
+          : [center.lng, center.lat]
+      );
     };
     map.on('zoom', syncLiveZoom);
     map.on('zoomend', syncSettledView);
@@ -1790,8 +1866,8 @@ export default function MapView({
       : [];
     const laneConnectionPaths = buildLaneConnectionPaths(
       roadDraft,
-      roadAreas,
-      osmRoads,
+      renderedRoadAreas,
+      renderedOsmRoads,
       selectedDraftBand
     );
     const connectionDragPath = roadConnectionDragPreview
@@ -1851,11 +1927,12 @@ export default function MapView({
       }
     }
 
-    if (hamburgRemoteLod3Active) {
+    if (hamburgRemoteLod3Available && hamburgRemoteLod3Mounted) {
       layers.push(
         new Tile3DLayer({
           id: 'hamburg-geoportal-lod3-untextured',
           data: HAMBURG_UNTEXTURED_LOD3_TILESET_URL,
+          visible: hamburgRemoteLod3Active,
           pickable: false,
           opacity: 1,
           onTilesetLoad: () => setHamburgLod3Status('ready'),
@@ -2934,7 +3011,9 @@ export default function MapView({
     renderedOsmRoads,
     renderedOsmPointFeatures,
     renderedHamburgTrees,
+    hamburgRemoteLod3Available,
     hamburgRemoteLod3Active,
+    hamburgRemoteLod3Mounted,
     selectedOsmRoadId,
     onOsmRoadSelect,
     renderedOsm2StreetsResult,

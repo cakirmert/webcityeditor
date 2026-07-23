@@ -40,7 +40,6 @@ import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
 import type { BasemapMode } from '../lib/basemap';
-import { compactVertices } from '../lib/compact';
 import {
   RoadDraftHistory,
   type RoadDraftHistorySnapshot,
@@ -212,6 +211,14 @@ export function useRoadEditor(
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
   const roadDraftHistoryRef = useRef(new RoadDraftHistory());
   const [roadDraftHistoryVersion, setRoadDraftHistoryVersion] = useState(0);
+  const buildingFootprints = useMemo(
+    () => (cityjson ? extractFootprints(cityjson) : []),
+    [cityjson, reloadToken]
+  );
+  const roadAreas = useMemo(() => {
+    if (!cityjson) return [];
+    return extractTransportationAreas(cityjson);
+  }, [cityjson, reloadToken]);
 
   useEffect(() => {
     setSelectedRoadBand((current) => {
@@ -609,7 +616,7 @@ export function useRoadEditor(
       );
       return;
     }
-    const allAreas = cityjson ? extractTransportationAreas(cityjson) : [area];
+    const allAreas = roadAreas.length > 0 ? roadAreas : [area];
     const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
     let draft: RoadDraft;
     try {
@@ -667,7 +674,7 @@ export function useRoadEditor(
         ? `Loaded editable layout from ${area.roadId}. Changes stay in the draft until you save them.`
         : `Editing ${area.roadId} on its exact CityJSON polygons. Type, direction, material, access and speed edits preserve them; moving handles, changing widths or restructuring bands rebuilds editable ribbons.`
     );
-  }, [cityjson, clearRoadDraftHistory]);
+  }, [clearRoadDraftHistory, roadAreas]);
 
   const handleCancelRoadEdit = useCallback((force = false) => {
     if (!force && roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
@@ -700,14 +707,6 @@ export function useRoadEditor(
     }
   }, [recordRoadDraftHistory, roadDraft, roadDraftDirty]);
 
-  const buildingFootprints = useMemo(
-    () => (cityjson ? extractFootprints(cityjson) : []),
-    [cityjson, reloadToken]
-  );
-  const roadAreas = useMemo(() => {
-    if (!cityjson) return [];
-    return extractTransportationAreas(cityjson);
-  }, [cityjson, reloadToken]);
   const [roadPreviewAreas, setRoadPreviewAreas] = useState<RoadArea[]>([]);
   const [roadFitConflicts, setRoadFitConflicts] = useState<RoadFitConflict[]>([]);
   const [roadFitPending, setRoadFitPending] = useState(false);
@@ -923,7 +922,6 @@ export function useRoadEditor(
             inserted.id,
             savedRoadDraft
           );
-          if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
           return {
             ...inserted,
             ...disconnected,
@@ -1092,7 +1090,6 @@ export function useRoadEditor(
         () => {
           const movementRoadIds = removeRoadMovementReferences(cityjson, roadId);
           const deletion = deleteRoadFromCityJson(cityjson, roadId);
-          if (deletion.deleted) compactVertices(cityjson);
           return {
             ...deletion,
             disconnectedRoadIds: [

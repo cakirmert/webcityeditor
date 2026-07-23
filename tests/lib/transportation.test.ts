@@ -196,6 +196,19 @@ describe('transportation roads', () => {
     expect(areas.some((area) => area.function === 'bike_lane')).toBe(true);
   });
 
+  it('can extract only the requested road without rebuilding the full network', () => {
+    const doc = buildSampleCube();
+    const first = createManualRoadDraft(delftRoad);
+    const second = createManualRoadDraft(delftRoad.map(([lng, lat]) => [lng, lat + 0.001]));
+    insertRoadIntoCityJson(doc, first, { id: 'road-one' });
+    insertRoadIntoCityJson(doc, second, { id: 'road-two' });
+
+    const areas = extractTransportationAreas(doc, { roadIds: new Set(['road-two']) });
+
+    expect(areas.length).toBeGreaterThan(0);
+    expect(new Set(areas.map((area) => area.roadId))).toEqual(new Set(['road-two']));
+  });
+
   it('uses the same sampled smooth curve for preview and saved CityJSON ribbons', () => {
     const doc = buildSampleCube();
     const draft = createManualRoadDraft(delftRoad, { maxspeedKmh: 30 });
