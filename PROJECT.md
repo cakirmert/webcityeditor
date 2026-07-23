@@ -215,6 +215,41 @@ npm run dev:hamburg-roads -- --dry-run
 
 Focused regression coverage exists for smooth road preview/export parity, touch handle editing, endpoint snapping, reciprocal CityJSON connections, exact-polygon attribute saves, highest-LoD mesh selection, catalog preparation, and the Hamburg committed fixtures.
 
+## Next guided patch: lane-order-aware intersection continuations
+
+Implement this patch from the current `main` state. Keep the existing endpoint snapping,
+reciprocal CityJSON road metadata, exact imported polygons, and current map-performance behavior.
+Do not bring back a terrain mesh or change TopPlus/satellite rendering as part of this work.
+
+The problem is lane ordering, not missing road geometry. Bands are stored left-to-right relative
+to each road section's directed centreline. Pairing two connected sections by raw array index can
+therefore draw crossing movements: a physical straight continuation from lanes 1, 2, 3 is sometimes
+shown as 1→3, 2→2, 3→1. The crossed guides also leave the junction looking like an unresolved grey
+area.
+
+Required behavior:
+
+1. Derive lane-level movements from CityJSON road layouts, band semantics, directed centrelines,
+   endpoint connections, and imported intersection membership. Use original OSM/osm2streets output
+   only as a fallback when the committed CityJSON lacks information; CityJSON remains authoritative.
+2. Pair only direction- and mode-compatible bands. Normalize the target order using the connected
+   endpoint kinds: preserve target order for opposite endpoints (`start`↔`end`) and reverse it for
+   equal endpoints (`start`↔`start` or `end`↔`end`). Thus a three-lane `end`→`start` connection is
+   1→1, 2→2, 3→3, while `end`→`end` is 1→3, 2→2, 3→1.
+3. Classify physically aligned movements as `through`. Render those as temporary, metre-width,
+   road-coloured continuation bands over the junction so the road reads as continuous. Keep actual
+   left, right, U-turn, bicycle, sidewalk/crossing, and ambiguous movements as subdued editable
+   guide curves. These display bands must not rewrite exact osm2streets polygons or pretend that
+   exportable intersection geometry has been synthesized.
+4. Preserve proposed, confirmed, and rejected lane-movement decisions in CityJSON metadata, including
+   reciprocal references and provenance. A rejected imported proposal must remain hidden after
+   reload/export, and removing or reordering a lane must remap or remove stale movement references.
+5. Add focused tests for both three-lane endpoint orientations, compatible-mode/direction filtering,
+   `through` classification, reciprocal persistence, and the committed short Hamburg intersection
+   fixture. In the browser, verify that straight lanes no longer cross, the grey gap is visually
+   filled, real turns remain understandable, TopPlus stays sharp, and interaction performance does
+   not drop after the map settles.
+
 ## Remaining roadmap
 
 The following work is intentionally not claimed as complete:
