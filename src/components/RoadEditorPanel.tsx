@@ -237,11 +237,13 @@ export default function RoadEditorPanel({
     }
     onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: activeBandIndex });
   }, [activeBand, activeBandIndex, activeSection, onRoadBandSelect]);
-  const connectionCount = draft?.sections.reduce(
-    (count, section) =>
-      count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
-    0
-  ) ?? 0;
+  const connectionCount = draft
+    ? draft.sections.reduce(
+        (count, section) =>
+          count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
+        0
+      ) + (draft.movements ?? []).filter((movement) => movement.status === 'confirmed').length
+    : 0;
 
   const updateSection = (
     sectionId: string,
@@ -578,7 +580,9 @@ export default function RoadEditorPanel({
                 <span>{activeSection.centerlineWgs84.length} curve anchors · {activeTotalWidth.toFixed(2)} m wide</span>
               </div>
               <span className={connectionCount > 0 ? 'is-connected' : ''}>
-                {connectionCount > 0 ? `${connectionCount} joins confirmed` : 'No joins yet'}
+                {connectionCount > 0
+                  ? `${connectionCount} connection${connectionCount === 1 ? '' : 's'} confirmed`
+                  : 'No joins yet'}
               </span>
             </div>
 
@@ -610,8 +614,8 @@ export default function RoadEditorPanel({
             <div className="road-handle-explainer" data-testid="road-centerline-drag-hint">
               <div><i className="road-guide-dot road-guide-dot--anchor" /><span><b>Yellow anchor</b>Drag it to bend the smooth road.</span></div>
               <div><i className="road-guide-dot road-guide-dot--add">+</i><span><b>White +</b>Tap or drag to add another bend.</span></div>
-              <div><i className="road-guide-dot road-guide-dot--connect">1</i><span><b>Numbered lane connector</b>Drag one incoming lane to one outgoing target.</span></div>
-              <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Teal target</b>Drop the purple connector here.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--connect">E1</i><span><b>Selected lane end</b>Choose start or end below; only that lane's connector appears.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Numbered teal target</b>Pick the exact road and lane in the list or on the map.</span></div>
               <p
                 className="col-span-full m-0 text-[11px] leading-5 text-[var(--text-dim)]"
               >
@@ -1206,8 +1210,8 @@ function SelectedRoadAreaCard({
       </Button>
       {isIntersection && (
         <p>
-          Keep this generated junction. Edit an entering road, then drag its purple end connector
-          onto a teal target. Saving records the lane pairs in CityJSON.
+          Keep this generated junction. Edit an entering road, select one lane and its start or end,
+          then pick the exact numbered teal lane target. Saving records that lane pair in CityJSON.
         </p>
       )}
       {!isIntersection && area.geometryMode === 'exact' && (

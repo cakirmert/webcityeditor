@@ -220,6 +220,28 @@ describe('imported road lane movements', () => {
     ]));
     expect(source.movements).toBeUndefined();
 
+    const importedProposal = {
+      ...first.movements![0],
+      id: 'imported-proposal',
+      junctionId: 'imported-junction',
+      status: 'proposed' as const,
+      provenance: 'osm2streets' as const,
+    };
+    const confirmedProposal = connectManualRoadLaneMovement(
+      { ...source, movements: [importedProposal] },
+      'source-section',
+      'end',
+      0,
+      { roadId: 'target-road', section: targetSection, endpoint: 'start', bandIndex: 0 }
+    );
+    expect(confirmedProposal.movements).toEqual([
+      expect.objectContaining({
+        id: 'imported-proposal',
+        status: 'confirmed',
+        provenance: 'osm2streets',
+      }),
+    ]);
+
     const incompatible = connectManualRoadLaneMovement(
       second,
       'source-section',

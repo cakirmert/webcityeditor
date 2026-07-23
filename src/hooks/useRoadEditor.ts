@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import type { CityJsonDocument, CityObject } from '../types';
 import type {
   OsmPointFeature,
   OsmRoadFeature,
@@ -154,6 +155,68 @@ async function fetchOsmRoadXml(
 
 function cloneRoadDraft(draft: RoadDraft): RoadDraft {
   return JSON.parse(JSON.stringify(draft)) as RoadDraft;
+}
+
+function cloneCityObject(object: CityObject): CityObject {
+  return typeof structuredClone === 'function'
+    ? structuredClone(object)
+    : JSON.parse(JSON.stringify(object)) as CityObject;
+}
+
+function cityObjectMayReferenceRoad(
+  objectId: string,
+  object: CityObject,
+  roadId: string
+): boolean {
+  if (objectId === roadId) return true;
+  if (object.children?.includes(roadId) || object.parents?.includes(roadId)) {
+    return true;
+  }
+  if (object.type !== 'Road') return false;
+  const attributes = object.attributes;
+  if (!attributes) return false;
+  const roadIdToken = JSON.stringify(roadId);
+  return [attributes._roadLayout, attributes._roadMovements].some(
+    (value) => value !== undefined && JSON.stringify(value).includes(roadIdToken)
+  );
+}
+
+function captureRoadDeletionObjects(
+  doc: CityJsonDocument,
+  roadId: string
+): Map<string, CityObject> {
+  const snapshots = new Map<string, CityObject>();
+  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
+    if (cityObjectMayReferenceRoad(objectId, object, roadId)) {
+      snapshots.set(objectId, cloneCityObject(object));
+    }
+  }
+  return snapshots;
+}
+
+function restoreRoadDeletionObjects(
+  doc: CityJsonDocument,
+  snapshots: Map<string, CityObject>
+): void {
+  for (const [objectId, object] of snapshots) {
+    doc.CityObjects[objectId] = object;
+  }
+}
+
+function assertRoadDeletionReferencesCleared(
+  doc: CityJsonDocument,
+  roadId: string
+): void {
+  const remaining = Object.entries(doc.CityObjects)
+    .filter(([objectId, object]) =>
+      cityObjectMayReferenceRoad(objectId, object, roadId)
+    )
+    .map(([objectId]) => objectId);
+  if (remaining.length > 0) {
+    throw new Error(
+      `Road references remain on ${remaining.slice(0, 4).join(', ')}`
+    );
+  }
 }
 
 function downloadJson(value: unknown, fileName: string): void {
@@ -711,6 +774,19 @@ export function useRoadEditor(
   const [roadFitConflicts, setRoadFitConflicts] = useState<RoadFitConflict[]>([]);
   const [roadFitPending, setRoadFitPending] = useState(false);
   const lastPreviewAtRef = useRef(0);
+  const fitResultReadyRef = useRef(false);
+  const fitDraftKey = roadDraft
+    ? `${editingRoadId ?? roadDraft.id ?? 'new-road'}:${exactGeometryStatus}`
+    : null;
+  const fitDraftKeyRef = useRef<string | null>(fitDraftKey);
+
+  useEffect(() => {
+    if (fitDraftKeyRef.current === fitDraftKey) return;
+    fitDraftKeyRef.current = fitDraftKey;
+    fitResultReadyRef.current = false;
+    setRoadFitConflicts([]);
+    setRoadFitPending(false);
+  }, [fitDraftKey]);
 
   // Geometry preview is capped at roughly 20 fps during a drag. The previous
   // path cloned the entire CityJSON document and reran fit validation for every
@@ -766,7 +842,10 @@ export function useRoadEditor(
       setRoadFitPending(false);
       return;
     }
-    setRoadFitPending(true);
+    // Only the first result for a road owns the visible pending state. Once a
+    // settled result exists, keep it on screen while the trailing check is
+    // rescheduled during a drag. Commit still performs a synchronous check.
+    if (!fitResultReadyRef.current) setRoadFitPending(true);
     const timer = window.setTimeout(() => {
       setRoadFitConflicts(
         validateRoadFit({
@@ -778,8 +857,9 @@ export function useRoadEditor(
           buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
         })
       );
+      fitResultReadyRef.current = true;
       setRoadFitPending(false);
-    }, 140);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [
     cityjson,
@@ -1082,22 +1162,22 @@ export function useRoadEditor(
     const roadId = area.roadId;
     if (!window.confirm(`Delete ${roadId}? Connected roads will be disconnected.`)) return;
 
+    const rollbackObjects = captureRoadDeletionObjects(cityjson, roadId);
     try {
       pushUndo(`Delete ${roadId}`);
-      const { value: result } = runStructurallyGuardedMutation(
-        cityjson,
-        `Deleting ${roadId}`,
-        () => {
-          const movementRoadIds = removeRoadMovementReferences(cityjson, roadId);
-          const deletion = deleteRoadFromCityJson(cityjson, roadId);
-          return {
-            ...deletion,
-            disconnectedRoadIds: [
-              ...new Set([...deletion.disconnectedRoadIds, ...movementRoadIds]),
-            ],
-          };
-        }
-      );
+      // Deleting a road never writes vertices or geometry boundaries. A full
+      // document clone plus two 133k-vertex integrity scans made this simple
+      // edit visibly freeze. Snapshot only objects that can be touched, then
+      // verify every hierarchy/layout/movement reference to the road is gone.
+      const movementRoadIds = removeRoadMovementReferences(cityjson, roadId);
+      const deletion = deleteRoadFromCityJson(cityjson, roadId);
+      const result = {
+        ...deletion,
+        disconnectedRoadIds: [
+          ...new Set([...deletion.disconnectedRoadIds, ...movementRoadIds]),
+        ],
+      };
+      if (result.deleted) assertRoadDeletionReferencesCleared(cityjson, roadId);
       if (!result.deleted) {
         setRoadStatus(`${roadId} is no longer available.`);
         return;
@@ -1129,6 +1209,7 @@ export function useRoadEditor(
         }.`
       );
     } catch (error) {
+      restoreRoadDeletionObjects(cityjson, rollbackObjects);
       console.error(error);
       alert(`Road deletion failed: ${error instanceof Error ? error.message : String(error)}`);
     }

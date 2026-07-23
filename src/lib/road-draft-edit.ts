@@ -49,6 +49,40 @@ export interface RoadLaneSnapCandidate extends RoadSnapCandidate {
   sharedMode: string;
 }
 
+/**
+ * Keep the connection picker legible in dense junctions. Candidates arrive
+ * distance-sorted, so this preserves the nearest road ends and their nearest
+ * compatible lanes without allowing one large intersection to flood the map.
+ */
+export function limitRoadLaneSnapCandidates(
+  candidates: RoadLaneSnapCandidate[],
+  maxTargetRoads = 5,
+  maxLanesPerTarget = 3
+): RoadLaneSnapCandidate[] {
+  if (maxTargetRoads <= 0 || maxLanesPerTarget <= 0) return [];
+  const targetCounts = new Map<string, number>();
+  const visible: RoadLaneSnapCandidate[] = [];
+  for (const candidate of candidates) {
+    const targetKey = [
+      candidate.connection.target,
+      candidate.connection.targetId,
+      candidate.targetSection.id,
+      candidate.targetEndpoint,
+    ].join(':');
+    const currentCount = targetCounts.get(targetKey);
+    if (currentCount === undefined) {
+      if (targetCounts.size >= maxTargetRoads) continue;
+      targetCounts.set(targetKey, 1);
+      visible.push(candidate);
+      continue;
+    }
+    if (currentCount >= maxLanesPerTarget) continue;
+    targetCounts.set(targetKey, currentCount + 1);
+    visible.push(candidate);
+  }
+  return visible;
+}
+
 export function connectRoadLanes(
   connection: RoadEndpointConnection,
   sourceBands: RoadBand[],

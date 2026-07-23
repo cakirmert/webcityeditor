@@ -14,8 +14,10 @@ import {
   compatibleRoadSnapCandidates,
   connectRoadLanes,
   insertRoadDraftPoint,
+  limitRoadLaneSnapCandidates,
   removeRoadDraftBand,
   updateRoadDraftPoint,
+  type RoadLaneSnapCandidate,
   type RoadSnapCandidate,
 } from '../../src/lib/road-draft-edit';
 
@@ -487,5 +489,57 @@ describe('road draft edit helpers', () => {
       candidates,
       80
     )).toEqual([]);
+  });
+
+  it('limits dense lane targets by road end while preserving nearest choices', () => {
+    const candidate = (
+      roadIndex: number,
+      bandIndex: number,
+      distanceMeters: number
+    ): RoadLaneSnapCandidate => {
+      const targetSection = {
+        id: `section-${roadIndex}`,
+        centerlineWgs84: [[10.001, 53], [10.002, 53]] as [number, number][],
+        bands: Array.from({ length: 5 }, (_, index) => ({
+          id: `road-${roadIndex}-lane-${index}`,
+          kind: 'car_lane' as const,
+          widthM: 3.2,
+          direction: 'forward' as const,
+        })),
+      };
+      return {
+        id: `road-${roadIndex}:lane-${bandIndex}`,
+        position: [10.001 + roadIndex * 0.00001, 53],
+        connection: {
+          target: 'cityjson',
+          targetId: `road-${roadIndex}`,
+          targetSectionId: targetSection.id,
+          targetEndpoint: 'start',
+          positionWgs84: targetSection.centerlineWgs84[0],
+          confirmed: true,
+        },
+        targetSection,
+        targetEndpoint: 'start',
+        targetBand: targetSection.bands[bandIndex],
+        targetBandIndex: bandIndex,
+        sharedMode: 'car',
+        distanceMeters,
+      };
+    };
+    const candidates = [
+      candidate(0, 0, 2),
+      candidate(0, 1, 3),
+      candidate(0, 2, 4),
+      candidate(1, 0, 5),
+      candidate(1, 1, 6),
+      candidate(2, 0, 7),
+    ];
+
+    expect(limitRoadLaneSnapCandidates(candidates, 2, 2).map(({ id }) => id)).toEqual([
+      'road-0:lane-0',
+      'road-0:lane-1',
+      'road-1:lane-0',
+      'road-1:lane-1',
+    ]);
   });
 });

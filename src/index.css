@@ -1166,22 +1166,29 @@ select:focus {
 
 .map-road-cross-section__connections {
   display: grid;
-  grid-template-columns: minmax(170px, 0.6fr) minmax(0, 1.4fr);
-  gap: 10px;
-  align-items: center;
-  border: 1px solid rgba(168, 85, 247, 0.24);
+  gap: 8px;
+  align-items: stretch;
+  border: 1px solid rgba(45, 212, 191, 0.28);
   border-radius: 11px;
-  background: rgba(126, 56, 196, 0.08);
+  background: rgba(12, 87, 79, 0.08);
   padding: 9px 10px;
 }
 
-.map-road-cross-section__connections > div:first-child {
+.map-road-cross-section__connections-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-road-cross-section__connections-header > div:first-child {
   display: grid;
   gap: 2px;
 }
 
 .map-road-cross-section__movement-summary {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -1195,12 +1202,212 @@ select:focus {
   font-size: 9px;
 }
 
+.map-road-cross-section__connector-workspace {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.62fr) minmax(0, 1.38fr);
+  min-height: 116px;
+  gap: 8px;
+}
+
+.map-road-cross-section__connector-source,
+.map-road-cross-section__connector-targets {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 8px;
+}
+
+.map-road-cross-section__connector-source {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+
+.map-road-cross-section__connector-source > div:first-child,
+.map-road-cross-section__connection-empty {
+  display: grid;
+  gap: 2px;
+}
+
+.map-road-cross-section__connector-source strong {
+  overflow: hidden;
+  color: #e6fffb;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-road-cross-section__connector-source span,
+.map-road-cross-section__connector-source p,
+.map-road-cross-section__connector-targets p,
+.map-road-cross-section__connection-empty span {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.map-road-cross-section__endpoint-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.map-road-cross-section__endpoint-buttons button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(168, 85, 247, 0.48);
+  border-radius: 8px;
+  background: rgba(126, 56, 196, 0.13);
+  padding: 0 8px;
+  color: #e9d5ff;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.map-road-cross-section__endpoint-buttons button > span {
+  color: inherit;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.map-road-cross-section__endpoint-buttons button.is-active {
+  border-color: #c084fc;
+  background: rgba(147, 51, 234, 0.34);
+  box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.15);
+  color: #fff;
+}
+
+.map-road-cross-section__endpoint-buttons button.is-clear {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  font-weight: 650;
+}
+
+.map-road-cross-section__connector-targets {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+
+.map-road-cross-section__target-list {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.map-road-cross-section__target {
+  display: grid;
+  grid-template-columns: auto minmax(125px, 1fr);
+  flex: 0 0 auto;
+  min-width: 255px;
+  gap: 3px 7px;
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  border-radius: 8px;
+  background: rgba(20, 184, 166, 0.08);
+  padding: 6px;
+}
+
+.map-road-cross-section__target > i {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  grid-row: 1 / span 2;
+  place-items: center;
+  border-radius: 999px;
+  background: #14b8a6;
+  color: #062f2a;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.map-road-cross-section__target > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.map-road-cross-section__target strong {
+  overflow: hidden;
+  color: #ddfff9;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-road-cross-section__target > div:nth-child(2) span {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.map-road-cross-section__target-lanes {
+  grid-column: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.map-road-cross-section__target-lanes button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(45, 212, 191, 0.4);
+  border-radius: 6px;
+  background: rgba(20, 184, 166, 0.12);
+  padding: 0 6px;
+  color: #bffcf2;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.map-road-cross-section__target-lanes button:hover,
+.map-road-cross-section__target-lanes button:focus-visible {
+  border-color: #85fff0;
+  background: rgba(20, 184, 166, 0.28);
+}
+
+.map-road-cross-section__target-lanes button span {
+  color: var(--text-dim);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.map-road-cross-section__connection-empty {
+  align-content: center;
+  min-height: 82px;
+}
+
+.map-road-cross-section__movement-panel {
+  display: grid;
+  min-height: 57px;
+  gap: 6px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  padding-top: 7px;
+}
+
 .map-road-cross-section__movement-list {
-  grid-column: 1 / -1;
   display: flex;
   gap: 7px;
   overflow-x: auto;
   padding-bottom: 2px;
+}
+
+.map-road-cross-section__movement-empty {
+  min-height: 30px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 9px;
 }
 
 .map-road-cross-section__movement {
@@ -1274,12 +1481,20 @@ select:focus {
 
 .map-road-cross-section__connections b { font-size: 11px; }
 
-.map-road-cross-section__connections > div:first-child span,
-.map-road-cross-section__connections > p {
-  margin: 0;
+.map-road-cross-section__legacy-connections {
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  padding-top: 6px;
   color: var(--text-faint);
   font-size: 9px;
-  line-height: 1.4;
+}
+
+.map-road-cross-section__legacy-connections summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.map-road-cross-section__legacy-connections[open] summary {
+  margin-bottom: 6px;
 }
 
 .map-road-cross-section__connection-list {

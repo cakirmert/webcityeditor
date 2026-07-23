@@ -68,6 +68,7 @@ import {
   buildRoadDraftHandles,
   buildRoadDraftPaths,
   insertRoadDraftPoint,
+  limitRoadLaneSnapCandidates,
   removeRoadDraftBand,
   roadLaneEndpointPosition,
   updateRoadDraftPoint,
@@ -173,6 +174,26 @@ interface RoadConnectionDragPreview {
   to: [number, number];
   snapped: boolean;
   candidateId?: string;
+}
+
+interface RoadConnectionFocus {
+  sectionId: string;
+  endpoint: 'start' | 'end';
+  bandIndex: number;
+}
+
+interface RoadConnectionTargetGroup {
+  id: string;
+  roadId: string;
+  roadLabel: string;
+  endpoint: 'start' | 'end';
+  distanceMeters: number;
+  candidates: RoadLaneSnapCandidate[];
+}
+
+interface RoadConnectionTargetMarker extends RoadLaneSnapCandidate {
+  mapLabel: string;
+  targetRoadId: string;
 }
 
 function osmPointFeatureColor(feature: OsmPointFeature): Rgba {
@@ -521,11 +542,8 @@ export default function MapView({
   const [layerControlOpen, setLayerControlOpen] = useState(false);
   const [roadConnectionDragPreview, setRoadConnectionDragPreview] =
     useState<RoadConnectionDragPreview | null>(null);
-  const [activeRoadConnectionEndpoint, setActiveRoadConnectionEndpoint] = useState<{
-    sectionId: string;
-    endpoint: 'start' | 'end';
-    bandIndex: number;
-  } | null>(null);
+  const [activeRoadConnectionEndpoint, setActiveRoadConnectionEndpoint] =
+    useState<RoadConnectionFocus | null>(null);
   const [hoveredRoadSnapCandidateId, setHoveredRoadSnapCandidateId] = useState<string | null>(null);
   const [internalSelectedDraftBand, setInternalSelectedDraftBand] = useState<{
     sectionId: string;
@@ -560,9 +578,10 @@ export default function MapView({
 
   useEffect(() => {
     setActiveRoadConnectionEndpoint((current) => {
-      if (!roadDraft) return null;
+      if (!roadDraft || !current) return null;
       if (
-        current &&
+        selectedDraftBand?.sectionId === current.sectionId &&
+        selectedDraftBand.bandIndex === current.bandIndex &&
         roadDraft.sections.some(
           (section) =>
             section.id === current.sectionId &&
@@ -576,18 +595,9 @@ export default function MapView({
       ) {
         return current;
       }
-      for (const section of roadDraft.sections) {
-        if (section.centerlineWgs84.length < 2) continue;
-        for (const endpoint of ['start', 'end'] as const) {
-          const bandIndex = section.bands.findIndex((band) =>
-            roadBandCanArriveAtEndpoint(band, endpoint)
-          );
-          if (bandIndex >= 0) return { sectionId: section.id, endpoint, bandIndex };
-        }
-      }
       return null;
     });
-  }, [roadDraft]);
+  }, [roadDraft, selectedDraftBand]);
 
   useEffect(() => {
     // Keep this compact control behind its button whenever another map tool
@@ -745,6 +755,36 @@ export default function MapView({
       if (pending) onRoadDraftChangeRef.current?.(pending);
     });
   }, []);
+
+  const connectRoadLaneCandidate = useCallback(
+    (candidate: RoadLaneSnapCandidate) => {
+      const draft = roadDraftRef.current;
+      const focus = activeRoadConnectionEndpoint;
+      if (!draft || !focus) return;
+      const sourceSection = draft.sections.find(
+        (section) => section.id === focus.sectionId
+      );
+      const sourceBand = sourceSection?.bands[focus.bandIndex];
+      if (!sourceBand || !roadBandCanArriveAtEndpoint(sourceBand, focus.endpoint)) {
+        return;
+      }
+      commitRoadDraft(
+        connectManualRoadLaneMovement(
+          draft,
+          focus.sectionId,
+          focus.endpoint,
+          focus.bandIndex,
+          {
+            roadId: roadLaneCandidateRoadId(candidate, draft),
+            section: candidate.targetSection,
+            endpoint: candidate.targetEndpoint,
+            bandIndex: candidate.targetBandIndex,
+          }
+        )
+      );
+    },
+    [activeRoadConnectionEndpoint, commitRoadDraft]
+  );
 
   useEffect(
     () => () => {
@@ -933,6 +973,94 @@ export default function MapView({
   useEffect(() => {
     roadSnapCandidatesRef.current = roadSnapCandidates;
   }, [roadSnapCandidates]);
+
+  const roadConnectionLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const area of roadAreas) {
+      if (labels.has(area.roadId)) continue;
+      const label = roadAreaConnectionLabel(area);
+      if (label) labels.set(area.roadId, label);
+    }
+    for (const road of osmRoads) {
+      const label = road.tags.name ?? road.inferredDraft.name;
+      if (label) labels.set(road.id, label);
+    }
+    if (roadDraft?.id && roadDraft.name) {
+      labels.set(roadDraft.id, roadDraft.name);
+    }
+    return labels;
+  }, [osmRoads, roadAreas, roadDraft?.id, roadDraft?.name]);
+
+  const activeRoadLaneSnapCandidates = useMemo(() => {
+    if (!roadDraft || !activeRoadConnectionEndpoint) return [];
+    return limitRoadLaneSnapCandidates(
+      compatibleRoadLaneSnapCandidates(
+        roadDraft,
+        activeRoadConnectionEndpoint.sectionId,
+        activeRoadConnectionEndpoint.endpoint,
+        activeRoadConnectionEndpoint.bandIndex,
+        roadSnapCandidates,
+        80
+      ).filter(
+        (candidate) =>
+          !editFocusBbox || pointInsideBbox(candidate.position, editFocusBbox)
+      ),
+      5,
+      3
+    );
+  }, [
+    activeRoadConnectionEndpoint,
+    editFocusBbox,
+    roadDraft,
+    roadSnapCandidates,
+  ]);
+
+  const roadConnectionTargetGroups = useMemo(
+    () =>
+      buildRoadConnectionTargetGroups(
+        activeRoadLaneSnapCandidates,
+        roadConnectionLabels,
+        roadDraft
+      ),
+    [activeRoadLaneSnapCandidates, roadConnectionLabels, roadDraft]
+  );
+  const roadConnectionTargetMarkers = useMemo<RoadConnectionTargetMarker[]>(
+    () =>
+      roadConnectionTargetGroups.flatMap((group, groupIndex) =>
+        group.candidates.map((candidate, laneIndex) => ({
+          ...candidate,
+          mapLabel: `${groupIndex + 1}.${laneIndex + 1}`,
+          targetRoadId: group.roadId,
+        }))
+      ),
+    [roadConnectionTargetGroups]
+  );
+  const roadConnectionTargetRoadIds = useMemo(
+    () => new Set(roadConnectionTargetGroups.map((group) => group.roadId)),
+    [roadConnectionTargetGroups]
+  );
+  useEffect(() => {
+    setHoveredRoadSnapCandidateId((current) =>
+      current && !roadConnectionTargetMarkers.some((candidate) => candidate.id === current)
+        ? null
+        : current
+    );
+  }, [roadConnectionTargetMarkers]);
+  const roadConnectionTargetKey = useMemo(
+    () => [...roadConnectionTargetRoadIds].sort().join('|'),
+    [roadConnectionTargetRoadIds]
+  );
+  const selectedHighlightBand = roadDraft?.sections
+    .find((section) => section.id === selectedDraftBand?.sectionId)
+    ?.bands[selectedDraftBand?.bandIndex ?? -1];
+  const roadSelectionHighlightKey = [
+    roadDraft?.id ?? 'none',
+    selectedDraftBand?.sectionId ?? 'none',
+    selectedDraftBand?.bandIndex ?? -1,
+    selectedHighlightBand?.id ??
+      `${selectedHighlightBand?.kind ?? 'none'}:${selectedHighlightBand?.sourceType ?? ''}`,
+    roadPreviewAreas.length > 0 ? 'preview' : 'saved',
+  ].join(':');
 
   const renderedOsmPointFeatures = useMemo(
     () => {
@@ -1813,50 +1941,15 @@ export default function MapView({
     const roadDraftHandles = buildRoadDraftHandles(roadDraft);
     const roadConnectionHandles = buildRoadConnectionHandles(
       map,
-      roadDraft
+      roadDraft,
+      activeRoadConnectionEndpoint
     );
     const midpointHandles = roadDraftHandles.filter((handle) => handle.kind === 'midpoint');
-    const visibleSnapCandidateMap = new Map<string, RoadLaneSnapCandidate>();
-    if (roadDraft) {
-      // Every incoming lane has its own purple connector and advertises every
-      // compatible outgoing lane. Target dots are lane centres, not one
-      // ambiguous marker for an entire road end.
-      for (const handle of roadConnectionHandles) {
-        for (const candidate of compatibleRoadLaneSnapCandidates(
-          roadDraft,
-          handle.sectionId,
-          handle.endpoint,
-          handle.bandIndex,
-          roadSnapCandidates,
-          80
-        )) {
-          if (!editFocusBbox || pointInsideBbox(candidate.position, editFocusBbox)) {
-            visibleSnapCandidateMap.set(candidate.id, candidate);
-          }
-        }
-      }
-    }
-    const visibleSnapCandidates = [...visibleSnapCandidateMap.values()];
-    const activeConnectionHandle = roadConnectionHandles.find(
-      (handle) =>
-        handle.sectionId === activeRoadConnectionEndpoint?.sectionId &&
-        handle.endpoint === activeRoadConnectionEndpoint.endpoint &&
-        handle.bandIndex === activeRoadConnectionEndpoint.bandIndex
-    );
-    const activeSnapCandidates = roadDraft && activeConnectionHandle
-      ? compatibleRoadLaneSnapCandidates(
-          roadDraft,
-          activeConnectionHandle.sectionId,
-          activeConnectionHandle.endpoint,
-          activeConnectionHandle.bandIndex,
-          roadSnapCandidates,
-          80
-        ).filter(
-          (candidate) => !editFocusBbox || pointInsideBbox(candidate.position, editFocusBbox)
-        )
-      : [];
+    const visibleSnapCandidates = roadConnectionTargetMarkers;
+    const activeConnectionHandle = roadConnectionHandles[0];
+    const activeSnapCandidates = roadConnectionTargetMarkers;
     const emphasizedSnapCandidateId =
-      roadConnectionDragPreview?.candidateId ?? hoveredRoadSnapCandidateId ?? activeSnapCandidates[0]?.id;
+      roadConnectionDragPreview?.candidateId ?? hoveredRoadSnapCandidateId;
     const candidateConnectionPaths = activeConnectionHandle
       ? activeSnapCandidates.map((candidate) => ({
           id: candidate.id,
@@ -2347,11 +2440,23 @@ export default function MapView({
                 opacity: roadOverlayOpacity,
               });
             }
+            if (roadConnectionTargetRoadIds.has(d.roadId)) {
+              return roadOverlayColor([20, 184, 166, 170], {
+                basemap,
+                opacity: roadOverlayOpacity,
+              });
+            }
             return roadAreaFillColor(d, basemap, false, roadOverlayOpacity);
           },
           getLineColor: (d) => {
             if (roadPreviewAreas.length > 0 && roadDraft?.id && d.roadId === roadDraft.id) {
               return roadOverlayColor([210, 62, 73, 150], {
+                basemap,
+                opacity: roadOverlayOpacity,
+              });
+            }
+            if (roadConnectionTargetRoadIds.has(d.roadId)) {
+              return roadOverlayColor([94, 234, 214, 255], {
                 basemap,
                 opacity: roadOverlayOpacity,
               });
@@ -2366,7 +2471,9 @@ export default function MapView({
             );
           },
           getLineWidth: (d) =>
-            d.id === selectedRoadAreaId || roadAreaMatchesDraftBand(d, roadDraft, selectedDraftBand)
+            roadConnectionTargetRoadIds.has(d.roadId)
+              ? 3
+              : d.id === selectedRoadAreaId || roadAreaMatchesDraftBand(d, roadDraft, selectedDraftBand)
               ? 3
               : 1,
           lineWidthMinPixels: 1,
@@ -2379,19 +2486,21 @@ export default function MapView({
             getFillColor: [
               basemap,
               roadOverlayOpacity,
-              roadDraft,
-              roadPreviewAreas.length,
-              selectedDraftBand,
+              roadSelectionHighlightKey,
+              roadConnectionTargetKey,
             ],
             getLineColor: [
               selectedRoadAreaId,
               basemap,
               roadOverlayOpacity,
-              roadDraft,
-              roadPreviewAreas.length,
-              selectedDraftBand,
+              roadSelectionHighlightKey,
+              roadConnectionTargetKey,
             ],
-            getLineWidth: [selectedRoadAreaId, roadDraft, selectedDraftBand],
+            getLineWidth: [
+              selectedRoadAreaId,
+              roadSelectionHighlightKey,
+              roadConnectionTargetKey,
+            ],
           },
           onClick: (info: PickingInfo<RenderableRoadArea>) => {
             if (roadSelectionEnabled && info.object) onRoadAreaSelect?.(info.object);
@@ -2422,7 +2531,11 @@ export default function MapView({
           extruded: false,
           parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
-            getFillColor: [basemap, roadOverlayOpacity, selectedDraftBand, roadDraft],
+            getFillColor: [
+              basemap,
+              roadOverlayOpacity,
+              roadSelectionHighlightKey,
+            ],
             getLineColor: [basemap, roadOverlayOpacity],
           },
         })
@@ -2660,7 +2773,8 @@ export default function MapView({
           id: 'road-lane-connection-labels',
           data: roadConnectionHandles,
           getPosition: (handle) => handle.position,
-          getText: (handle) => String(handle.bandIndex + 1),
+          getText: (handle) =>
+            `${handle.endpoint === 'start' ? 'S' : 'E'}${handle.bandIndex + 1}`,
           getSize: 12,
           sizeUnits: 'pixels',
           getColor: [255, 255, 255, 255],
@@ -2675,32 +2789,54 @@ export default function MapView({
 
     if (roadDraft && visibleSnapCandidates.length > 0) {
       layers.push(
-        new ScatterplotLayer<RoadLaneSnapCandidate>({
+        new ScatterplotLayer<RoadConnectionTargetMarker>({
           id: 'road-connection-snap-targets',
           data: visibleSnapCandidates,
           getPosition: (candidate) => candidate.position,
           getFillColor: (candidate) =>
             candidate.id === emphasizedSnapCandidateId
-              ? [45, 212, 191, 155]
-              : [20, 184, 166, 38],
+              ? [45, 212, 191, 205]
+              : [20, 184, 166, 135],
           getLineColor: (candidate) =>
             candidate.id === emphasizedSnapCandidateId
               ? [204, 255, 246, 255]
               : [45, 212, 191, 225],
           getLineWidth: 2,
-          getRadius: (candidate) => candidate.id === emphasizedSnapCandidateId ? 10 : 7,
+          getRadius: (candidate) => candidate.id === emphasizedSnapCandidateId ? 11 : 9,
           radiusUnits: 'pixels',
-          radiusMinPixels: 7,
-          radiusMaxPixels: 9,
+          radiusMinPixels: 9,
+          radiusMaxPixels: 12,
           stroked: true,
           filled: true,
           pickable: true,
-          onHover: (info) => setHoveredRoadSnapCandidateId(info.object?.id ?? null),
+          onHover: (info) => {
+            const nextId = info.object?.id ?? null;
+            setHoveredRoadSnapCandidateId((current) =>
+              current === nextId ? current : nextId
+            );
+          },
+          onClick: (info) => {
+            if (info.object) connectRoadLaneCandidate(info.object);
+          },
           updateTriggers: {
             getFillColor: [emphasizedSnapCandidateId],
             getLineColor: [emphasizedSnapCandidateId],
             getRadius: [emphasizedSnapCandidateId],
           },
+          parameters: { depthTest: false } as unknown as never,
+        }),
+        new TextLayer<RoadConnectionTargetMarker>({
+          id: 'road-connection-snap-target-labels',
+          data: visibleSnapCandidates,
+          getPosition: (candidate) => candidate.position,
+          getText: (candidate) => candidate.mapLabel,
+          getSize: 10,
+          sizeUnits: 'pixels',
+          getColor: [225, 255, 250, 255],
+          getTextAnchor: 'middle',
+          getAlignmentBaseline: 'center',
+          billboard: true,
+          pickable: false,
           parameters: { depthTest: false } as unknown as never,
         })
       );
@@ -2798,6 +2934,8 @@ export default function MapView({
             roadOverlayColor(
               d.id === selectedOsmRoadId
                 ? [255, 170, 40, 255]
+                : roadConnectionTargetRoadIds.has(d.id)
+                  ? [45, 212, 191, 255]
                 : [250, 210, 80, 220],
               {
                 basemap,
@@ -2805,7 +2943,12 @@ export default function MapView({
                 opacity: roadOverlayOpacity,
               }
             ),
-          getWidth: (d) => (d.id === selectedOsmRoadId ? 6 : 3),
+          getWidth: (d) =>
+            d.id === selectedOsmRoadId
+              ? 6
+              : roadConnectionTargetRoadIds.has(d.id)
+                ? 5
+                : 3,
           widthUnits: 'pixels',
           widthMinPixels: 2,
           jointRounded: true,
@@ -2813,8 +2956,13 @@ export default function MapView({
           pickable: false,
           parameters: roadSurfaceParameters,
           updateTriggers: {
-            getColor: [selectedOsmRoadId, basemap, roadOverlayOpacity],
-            getWidth: [selectedOsmRoadId],
+            getColor: [
+              selectedOsmRoadId,
+              basemap,
+              roadOverlayOpacity,
+              roadConnectionTargetKey,
+            ],
+            getWidth: [selectedOsmRoadId, roadConnectionTargetKey],
           },
         }),
         new PathLayer<OsmRoadFeature>({
@@ -3002,6 +3150,11 @@ export default function MapView({
     roadConnectionDragPreview,
     activeRoadConnectionEndpoint,
     hoveredRoadSnapCandidateId,
+    roadConnectionTargetMarkers,
+    roadConnectionTargetRoadIds,
+    roadConnectionTargetKey,
+    roadSelectionHighlightKey,
+    connectRoadLaneCandidate,
     drawMode,
     conflictingSavedRoadAreas,
     visibleRoadFitConflicts,
@@ -3429,6 +3582,11 @@ export default function MapView({
               onChange={onRoadDraftChange}
               selection={selectedDraftBand}
               onSelectionChange={setSelectedDraftBand}
+              connectionFocus={activeRoadConnectionEndpoint}
+              connectionTargetGroups={roadConnectionTargetGroups}
+              roadConnectionLabels={roadConnectionLabels}
+              onConnectionFocusChange={setActiveRoadConnectionEndpoint}
+              onConnectCandidate={connectRoadLaneCandidate}
             />
           )}
         </>
@@ -3481,7 +3639,7 @@ function RoadHandleGuide({ draft }: { draft: RoadDraft }) {
     0
   );
   const connections = legacyConnections + (draft.movements ?? []).filter(
-    (movement) => movement.provenance === 'manual' && movement.status === 'confirmed'
+    (movement) => movement.status === 'confirmed'
   ).length;
   const smooth = draft.sections.some((section) => section.curve?.mode !== 'straight');
   return (
@@ -3493,8 +3651,8 @@ function RoadHandleGuide({ draft }: { draft: RoadDraft }) {
       <div className="road-handle-guide__items">
         <span><i className="road-guide-dot road-guide-dot--anchor" />Drag yellow to bend</span>
         <span><i className="road-guide-dot road-guide-dot--add">+</i>Tap white to add a bend</span>
-        <span><i className="road-guide-dot road-guide-dot--connect">1</i>Drag a purple lane number to connect</span>
-        <span><i className="road-guide-dot road-guide-dot--snap" />Drop on a teal target</span>
+        <span><i className="road-guide-dot road-guide-dot--connect">E1</i>Choose a lane end below</span>
+        <span><i className="road-guide-dot road-guide-dot--snap" />Pick its numbered teal target</span>
       </div>
     </div>
   );
@@ -3514,19 +3672,86 @@ function roadAreaMatchesDraftBand(
   return !!band && area.bandId === (band.id ?? `band-${selection.bandIndex + 1}`);
 }
 
+function roadAreaConnectionLabel(area: RoadArea): string | null {
+  if (area.editableDraft?.name) return area.editableDraft.name;
+  for (const key of ['name', 'roadName', 'streetName']) {
+    const value = area.attributes[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  const osmTags = area.attributes.osmTags;
+  if (osmTags && typeof osmTags === 'object' && !Array.isArray(osmTags)) {
+    const value = osmTags.name;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function compactRoadId(roadId: string): string {
+  if (roadId.length <= 34) return roadId;
+  return `${roadId.slice(0, 21)}…${roadId.slice(-9)}`;
+}
+
+function roadLaneCandidateRoadId(
+  candidate: RoadLaneSnapCandidate,
+  draft: RoadDraft | null
+): string {
+  return candidate.connection.target === 'draft'
+    ? draft?.id ?? 'draft'
+    : candidate.connection.targetId;
+}
+
+function buildRoadConnectionTargetGroups(
+  candidates: RoadLaneSnapCandidate[],
+  labels: Map<string, string>,
+  draft: RoadDraft | null
+): RoadConnectionTargetGroup[] {
+  const groups = new Map<string, RoadConnectionTargetGroup>();
+  for (const candidate of candidates) {
+    const roadId = roadLaneCandidateRoadId(candidate, draft);
+    const id = [
+      candidate.connection.target,
+      roadId,
+      candidate.targetSection.id,
+      candidate.targetEndpoint,
+    ].join(':');
+    const existing = groups.get(id);
+    if (existing) {
+      existing.candidates.push(candidate);
+      existing.distanceMeters = Math.min(
+        existing.distanceMeters,
+        candidate.distanceMeters ?? existing.distanceMeters
+      );
+      continue;
+    }
+    groups.set(id, {
+      id,
+      roadId,
+      roadLabel: labels.get(roadId) ?? compactRoadId(roadId),
+      endpoint: candidate.targetEndpoint,
+      distanceMeters: candidate.distanceMeters ?? 0,
+      candidates: [candidate],
+    });
+  }
+  return [...groups.values()];
+}
+
 function buildRoadConnectionHandles(
   map: maplibregl.Map,
-  draft: RoadDraft | null
+  draft: RoadDraft | null,
+  focus: RoadConnectionFocus | null
 ): RoadConnectionHandle[] {
-  if (!draft) return [];
+  if (!draft || !focus) return [];
   const result: RoadConnectionHandle[] = [];
   for (const section of draft.sections) {
+    if (section.id !== focus.sectionId) continue;
     if (section.centerlineWgs84.length < 2) continue;
     for (const endpoint of ['start', 'end'] as const) {
+      if (endpoint !== focus.endpoint) continue;
       const inside = endpoint === 'start'
         ? section.centerlineWgs84[1]
         : section.centerlineWgs84[section.centerlineWgs84.length - 2];
       for (let bandIndex = 0; bandIndex < section.bands.length; bandIndex++) {
+        if (bandIndex !== focus.bandIndex) continue;
         const band = section.bands[bandIndex];
         if (
           !isRoadBandConnectable(band) ||
@@ -3656,11 +3881,12 @@ function buildLaneConnectionPaths(
         const targetKey = `${target?.roadId ?? connection.targetId}:${
           target?.section.id ?? connection.targetSectionId ?? 'node'
         }:${target?.endpoint ?? connection.targetEndpoint ?? 'node'}:${targetBandIndex}`;
+        const selected =
+          selection?.sectionId === section.id && selection.bandIndex === sourceBandIndex;
+        if (!selected) continue;
         const key = [sourceKey, targetKey].sort().join('|');
         if (seen.has(key)) continue;
         seen.add(key);
-        const selected =
-          selection?.sectionId === section.id && selection.bandIndex === sourceBandIndex;
         paths.push({
           path: cubicLaneConnectionPath(
             source.point,
@@ -3723,6 +3949,7 @@ function buildLaneConnectionPaths(
     if (!source || !target) continue;
     const selected =
       selection?.sectionId === sourceSection.id && selection.bandIndex === sourceBandIndex;
+    if (!selected) continue;
     paths.push({
       path: cubicLaneConnectionPath(
         source.point,
@@ -3922,11 +4149,21 @@ function MapRoadCrossSection({
   onChange,
   selection,
   onSelectionChange,
+  connectionFocus,
+  connectionTargetGroups,
+  roadConnectionLabels,
+  onConnectionFocusChange,
+  onConnectCandidate,
 }: {
   draft: RoadDraft;
   onChange: (draft: RoadDraft) => void;
   selection: { sectionId: string; bandIndex: number } | null;
   onSelectionChange: (selection: { sectionId: string; bandIndex: number }) => void;
+  connectionFocus: RoadConnectionFocus | null;
+  connectionTargetGroups: RoadConnectionTargetGroup[];
+  roadConnectionLabels: Map<string, string>;
+  onConnectionFocusChange: (focus: RoadConnectionFocus | null) => void;
+  onConnectCandidate: (candidate: RoadLaneSnapCandidate) => void;
 }) {
   const [newBandKind, setNewBandKind] = useState<RoadBandKind>('car_lane');
   const [draggingBandIndex, setDraggingBandIndex] = useState<number | null>(null);
@@ -3941,6 +4178,14 @@ function MapRoadCrossSection({
   if (!section || !activeBand) return null;
 
   const patchActiveBand = (patch: Partial<typeof activeBand>) => {
+    if (
+      'kind' in patch ||
+      'sourceType' in patch ||
+      'direction' in patch ||
+      'allowedModes' in patch
+    ) {
+      onConnectionFocusChange(null);
+    }
     onChange({
       ...draft,
       sections: draft.sections.map((candidate) =>
@@ -3957,6 +4202,7 @@ function MapRoadCrossSection({
   };
 
   const replaceBands = (bands: typeof section.bands) => {
+    onConnectionFocusChange(null);
     onChange({
       ...draft,
       sections: draft.sections.map((candidate) =>
@@ -3980,6 +4226,27 @@ function MapRoadCrossSection({
   const activeMovements = sectionMovements.filter(
     (movement) => movement.sourceBandIndex === effectiveBandIndex
   );
+  const eligibleConnectionEndpoints = (['start', 'end'] as const).filter(
+    (endpoint) => roadBandCanArriveAtEndpoint(activeBand, endpoint)
+  );
+  const activeConnectionFocus =
+    connectionFocus?.sectionId === section.id &&
+    connectionFocus.bandIndex === effectiveBandIndex
+      ? connectionFocus
+      : null;
+  const activeRoadLabel =
+    draft.name ?? (draft.id ? roadConnectionLabels.get(draft.id) : undefined) ??
+    compactRoadId(draft.id ?? 'Unsaved road');
+  const selectBand = (sectionId: string, bandIndex: number) => {
+    if (
+      connectionFocus &&
+      (connectionFocus.sectionId !== sectionId ||
+        connectionFocus.bandIndex !== bandIndex)
+    ) {
+      onConnectionFocusChange(null);
+    }
+    onSelectionChange({ sectionId, bandIndex });
+  };
 
   return (
     <section className="map-road-cross-section" aria-label="Road cross-section quick editor">
@@ -3994,9 +4261,7 @@ function MapRoadCrossSection({
             <select
               value={section.id}
               aria-label="Active road section"
-              onChange={(event) =>
-                onSelectionChange({ sectionId: event.target.value, bandIndex: 0 })
-              }
+              onChange={(event) => selectBand(event.target.value, 0)}
             >
               {draft.sections.map((candidate, index) => (
                 <option key={candidate.id} value={candidate.id}>Part {index + 1}</option>
@@ -4022,7 +4287,7 @@ function MapRoadCrossSection({
                 color: lightBand ? '#17202a' : '#ffffff',
                 textShadow: lightBand ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.75)',
               }}
-              onClick={() => onSelectionChange({ sectionId: section.id, bandIndex: index })}
+              onClick={() => selectBand(section.id, index)}
               onDragStart={(event) => {
                 setDraggingBandIndex(index);
                 event.dataTransfer.effectAllowed = 'move';
@@ -4037,7 +4302,7 @@ function MapRoadCrossSection({
                 const [moved] = bands.splice(from, 1);
                 bands.splice(index, 0, moved);
                 replaceBands(bands);
-                onSelectionChange({ sectionId: section.id, bandIndex: index });
+                selectBand(section.id, index);
                 setDraggingBandIndex(null);
               }}
               onDragEnd={() => setDraggingBandIndex(null)}
@@ -4052,20 +4317,149 @@ function MapRoadCrossSection({
         })}
       </div>
       <div className="map-road-cross-section__connections">
-        <div>
-          <b>Lane movements</b>
-          <span>Imported proposals are subdued until confirmed. Rejected movements stay suppressed after save.</span>
-        </div>
-        {sectionMovements.length > 0 && (
-          <div className="map-road-cross-section__movement-summary" aria-label="Lane movement status">
-            <span>{sectionMovements.filter((movement) => movement.status === 'proposed').length} proposed</span>
-            <span>{sectionMovements.filter((movement) => movement.status === 'confirmed').length} confirmed</span>
-            <span>{sectionMovements.filter((movement) => movement.status === 'rejected').length} rejected</span>
+        <div className="map-road-cross-section__connections-header">
+          <div>
+            <b>Connections for lane {effectiveBandIndex + 1}</b>
+            <span>Only this lane's links are shown on the map.</span>
           </div>
-        )}
-        {activeMovements.length > 0 ? (
-          <div className="map-road-cross-section__movement-list">
-            {activeMovements.map((movement) => (
+          <div className="map-road-cross-section__movement-summary" aria-label="Lane movement status">
+            <span>{activeMovements.filter((movement) => movement.status === 'proposed').length} proposed</span>
+            <span>{activeMovements.filter((movement) => movement.status === 'confirmed').length} confirmed</span>
+            <span>{activeMovements.filter((movement) => movement.status === 'rejected').length} rejected</span>
+          </div>
+        </div>
+
+        <div className="map-road-cross-section__connector-workspace">
+          <div className="map-road-cross-section__connector-source">
+            <div>
+              <strong>{activeRoadLabel} · lane {effectiveBandIndex + 1}</strong>
+              <span>
+                {mapRoadBandLabel(activeBand.kind, activeBand.sourceType)}
+                {' · '}
+                {activeBand.direction ?? 'none'}
+              </span>
+            </div>
+            {eligibleConnectionEndpoints.length > 0 ? (
+              <>
+                <span>Which end of this exact lane enters the junction?</span>
+                <div className="map-road-cross-section__endpoint-buttons">
+                  {eligibleConnectionEndpoints.map((endpoint) => {
+                    const active = activeConnectionFocus?.endpoint === endpoint;
+                    return (
+                      <button
+                        key={endpoint}
+                        type="button"
+                        className={active ? 'is-active' : ''}
+                        aria-pressed={active}
+                        onClick={() =>
+                          onConnectionFocusChange(
+                            active
+                              ? null
+                              : {
+                                  sectionId: section.id,
+                                  endpoint,
+                                  bandIndex: effectiveBandIndex,
+                                }
+                          )
+                        }
+                      >
+                        {endpoint === 'start' ? 'S' : 'E'}
+                        <span>Connect from {endpoint}</span>
+                      </button>
+                    );
+                  })}
+                  {activeConnectionFocus && (
+                    <button
+                      type="button"
+                      className="is-clear"
+                      onClick={() => onConnectionFocusChange(null)}
+                    >
+                      Clear targets
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p>
+                {mapRoadBandLabel(activeBand.kind, activeBand.sourceType)} does not
+                carry traffic into a junction. Select a car, bike, sidewalk, bus,
+                or rail lane.
+              </p>
+            )}
+          </div>
+
+          <div className="map-road-cross-section__connector-targets">
+            {activeConnectionFocus ? (
+              <>
+                <div className="map-road-cross-section__connection-heading">
+                  <b>
+                    {connectionTargetGroups.length} nearby road end
+                    {connectionTargetGroups.length === 1 ? '' : 's'}
+                  </b>
+                  <span>
+                    Teal roads and labels 1.1, 1.2… match these exact outgoing lanes.
+                    Click here or on the map.
+                  </span>
+                </div>
+                {connectionTargetGroups.length > 0 ? (
+                  <div className="map-road-cross-section__target-list">
+                    {connectionTargetGroups.map((group, groupIndex) => (
+                      <div key={group.id} className="map-road-cross-section__target">
+                        <i>{groupIndex + 1}</i>
+                        <div>
+                          <strong>{group.roadLabel}</strong>
+                          <span>
+                            {group.endpoint} · {Math.round(group.distanceMeters)} m ·{' '}
+                            {group.candidates.length} compatible lane
+                            {group.candidates.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <div className="map-road-cross-section__target-lanes">
+                          {group.candidates.map((candidate, laneIndex) => (
+                            <button
+                              key={candidate.id}
+                              type="button"
+                              title={`${group.roadLabel}, ${group.endpoint}, lane ${candidate.targetBandIndex + 1}`}
+                              onClick={() => onConnectCandidate(candidate)}
+                            >
+                              {groupIndex + 1}.{laneIndex + 1}
+                              <span>
+                                lane {candidate.targetBandIndex + 1} ·{' '}
+                                {mapRoadBandLabel(
+                                  candidate.targetBand.kind,
+                                  candidate.targetBand.sourceType
+                                )}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p>No compatible outgoing lane was found within 80 m of this endpoint.</p>
+                )}
+              </>
+            ) : (
+              <div className="map-road-cross-section__connection-empty">
+                <b>Choose this lane's start or end</b>
+                <span>
+                  Targets stay hidden until you choose an endpoint, so unrelated
+                  roads cannot cover the map.
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="map-road-cross-section__movement-panel">
+          <div className="map-road-cross-section__connection-heading">
+            <b>Saved and imported movements</b>
+            <span>Proposals stay dashed until confirmed; rejected links stay hidden.</span>
+          </div>
+          {activeMovements.length > 0 ? (
+            <div className="map-road-cross-section__movement-list">
+              {activeMovements.map((movement) => (
               <div
                 key={movement.id}
                 className={`map-road-cross-section__movement is-${movement.status}`}
@@ -4082,9 +4476,12 @@ function MapRoadCrossSection({
                     {movement.turn} · {movement.sourceMode}
                   </strong>
                   <span>
-                    {movement.sourceEndpoint} band {movement.sourceBandIndex + 1}
+                    This lane · {movement.sourceEndpoint}
                     {movement.sourceDirection ? ` (${movement.sourceDirection})` : ''} →{' '}
-                    {movement.targetRoadId} {movement.targetEndpoint} band {movement.targetBandIndex + 1}
+                    {roadConnectionLabels.get(movement.targetRoadId) ??
+                      compactRoadId(movement.targetRoadId)}
+                    {' · '}
+                    {movement.targetEndpoint} lane {movement.targetBandIndex + 1}
                     {movement.targetDirection ? ` (${movement.targetDirection})` : ''}
                   </span>
                   <small>
@@ -4121,67 +4518,51 @@ function MapRoadCrossSection({
                       )}
                     </>
                   )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : sectionMovements.length > 0 ? (
-          <p>Select a band with imported junction proposals to inspect its target, direction, and endpoint.</p>
-        ) : null}
-        <div className="map-road-cross-section__connection-heading">
-          <b>Lane connectors</b>
-          <span>Each numbered purple handle belongs to one incoming lane. Drag it to one compatible teal outgoing lane.</span>
+              ))}
+            </div>
+          ) : (
+            <p className="map-road-cross-section__movement-empty">
+              No saved or imported movement belongs to this lane yet.
+            </p>
+          )}
         </div>
-        {(draft.movements ?? []).some((movement) =>
-          movement.provenance === 'manual' && movement.sourceSectionId === section.id
-        ) ? (
-          <p>Manual lane connections are listed above and can be removed individually.</p>
-        ) : (
-          <p>Select a lane, then drag its purple numbered handle to an exact teal lane target.</p>
-        )}
+
         {endpointConnections.length > 0 && (
-          <>
-          <div className="map-road-cross-section__connection-heading">
-            <b>Legacy road-end joins</b>
-            <span>Older files remain readable; new connections are stored per lane.</span>
-          </div>
-          <div className="map-road-cross-section__connection-list">
-            {endpointConnections.map(({ endpoint, connection }) => (
-              <div key={endpoint} className="map-road-cross-section__connection">
-                <strong>{endpoint} → {connection.targetId}</strong>
-                <span>
-                  {(connection.laneConnections ?? []).length > 0
-                    ? connection.laneConnections!.map((mapping) => {
-                        const sourceIndex = bandIndexForConnection(
-                          section.bands,
-                          mapping.sourceBandId,
-                          mapping.sourceBandIndex
-                        );
-                        return (
-                          <i
-                            key={`${sourceIndex}-${mapping.targetBandIndex}`}
-                            className={sourceIndex === effectiveBandIndex ? 'is-active' : ''}
-                          >
-                            <span className="map-road-band__icon" aria-hidden="true">
-                              <MapRoadBandIcon
-                                kind={section.bands[sourceIndex]?.kind ?? 'car_lane'}
-                                sourceType={section.bands[sourceIndex]?.sourceType}
-                              />
-                            </span>{' '}
-                            {endpoint} band {sourceIndex + 1} ({mapping.sourceMode ?? 'mode'}
-                            {mapping.sourceDirection ? `, ${mapping.sourceDirection}` : ''}) →{' '}
-                            {connection.targetEndpoint ?? 'road end'} band {mapping.targetBandIndex + 1}{' '}
-                            ({mapping.targetMode ?? 'mode'}
-                            {mapping.targetDirection ? `, ${mapping.targetDirection}` : ''})
-                          </i>
-                        );
-                      })
-                    : <i>Road end joined · lane pairs will be derived on the next save</i>}
-                </span>
-              </div>
-            ))}
-          </div>
-          </>
+          <details className="map-road-cross-section__legacy-connections">
+            <summary>{endpointConnections.length} older road-end join{endpointConnections.length === 1 ? '' : 's'}</summary>
+            <div className="map-road-cross-section__connection-list">
+              {endpointConnections.map(({ endpoint, connection }) => (
+                <div key={endpoint} className="map-road-cross-section__connection">
+                  <strong>
+                    {endpoint} →{' '}
+                    {roadConnectionLabels.get(connection.targetId) ??
+                      compactRoadId(connection.targetId)}
+                  </strong>
+                  <span>
+                    {(connection.laneConnections ?? []).length > 0
+                      ? connection.laneConnections!.map((mapping) => {
+                          const sourceIndex = bandIndexForConnection(
+                            section.bands,
+                            mapping.sourceBandId,
+                            mapping.sourceBandIndex
+                          );
+                          return (
+                            <i
+                              key={`${sourceIndex}-${mapping.targetBandIndex}`}
+                              className={sourceIndex === effectiveBandIndex ? 'is-active' : ''}
+                            >
+                              lane {sourceIndex + 1} → lane {mapping.targetBandIndex + 1}
+                            </i>
+                          );
+                        })
+                      : <i>Lane pairs will be derived on save</i>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
       <div className="map-road-cross-section__actions">
@@ -4234,18 +4615,18 @@ function MapRoadCrossSection({
         <button type="button" disabled={effectiveBandIndex === 0} onClick={() => {
           const bands = section.bands.slice();
           [bands[effectiveBandIndex - 1], bands[effectiveBandIndex]] = [bands[effectiveBandIndex], bands[effectiveBandIndex - 1]];
-          onSelectionChange({ sectionId: section.id, bandIndex: effectiveBandIndex - 1 });
+          selectBand(section.id, effectiveBandIndex - 1);
           replaceBands(bands);
         }}>Move left</button>
         <button type="button" disabled={effectiveBandIndex === section.bands.length - 1} onClick={() => {
           const bands = section.bands.slice();
           [bands[effectiveBandIndex], bands[effectiveBandIndex + 1]] = [bands[effectiveBandIndex + 1], bands[effectiveBandIndex]];
-          onSelectionChange({ sectionId: section.id, bandIndex: effectiveBandIndex + 1 });
+          selectBand(section.id, effectiveBandIndex + 1);
           replaceBands(bands);
         }}>Move right</button>
         <button type="button" className="is-destructive" disabled={section.bands.length <= 1} onClick={() => {
           const nextBandIndex = Math.min(effectiveBandIndex, section.bands.length - 2);
-          onSelectionChange({ sectionId: section.id, bandIndex: nextBandIndex });
+          selectBand(section.id, nextBandIndex);
           onChange(removeRoadDraftBand(draft, section.id, effectiveBandIndex));
         }}>Remove</button>
         </div>
@@ -4254,7 +4635,7 @@ function MapRoadCrossSection({
         <label><span>Add a band</span><select value={newBandKind} onChange={(event) => setNewBandKind(event.target.value as RoadBandKind)}>{MAP_ROAD_BAND_KINDS.map((kind) => <option key={kind} value={kind}>{mapRoadBandLabel(kind)}</option>)}</select></label>
         <button type="button" onClick={() => {
           replaceBands([...section.bands, { id: nextMapRoadBandId(section.bands, newBandKind), kind: newBandKind, widthM: MAP_ROAD_DEFAULT_WIDTH[newBandKind], direction: newBandKind === 'car_lane' || newBandKind === 'bike_lane' ? 'forward' : 'none', surface: newBandKind === 'green' ? 'grass' : 'asphalt' }]);
-          onSelectionChange({ sectionId: section.id, bandIndex: section.bands.length });
+          selectBand(section.id, section.bands.length);
         }}>Add band</button>
       </div>
     </section>

@@ -232,6 +232,26 @@ export function connectManualRoadLaneMovement(
   if (!mode) return draft;
 
   const sourceRoadId = draft.id ?? 'draft';
+  const existingMovement = (draft.movements ?? []).find(
+    (movement) =>
+      movement.sourceSectionId === sourceSectionId &&
+      movement.sourceEndpoint === sourceEndpoint &&
+      (sourceBand.id
+        ? movement.sourceBandId === sourceBand.id
+        : movement.sourceBandIndex === sourceBandIndex) &&
+      movement.targetRoadId === target.roadId &&
+      movement.targetSectionId === target.section.id &&
+      movement.targetEndpoint === target.endpoint &&
+      (targetBand.id
+        ? movement.targetBandId === targetBand.id
+        : movement.targetBandIndex === target.bandIndex) &&
+      movement.sourceMode === mode &&
+      movement.targetMode === mode
+  );
+  if (existingMovement) {
+    return updateRoadMovementStatus(draft, existingMovement.id, 'confirmed');
+  }
+
   const sourcePosition = endpointPosition(sourceSection, sourceEndpoint);
   const targetPosition = endpointPosition(target.section, target.endpoint);
   const junctionId = `manual:${geometryJunctionId(sourcePosition, targetPosition)}`;
