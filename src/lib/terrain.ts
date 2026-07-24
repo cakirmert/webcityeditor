@@ -3,6 +3,7 @@ import type { CityJsonDocument } from '../types';
 import { extractFootprints, footprintPolygonToWgs84, type Footprint } from './footprints';
 import { detectCrs } from './projection';
 import { computeTransformedFootprint, type PendingTransform } from './transform-preview';
+import { sampleCachedHamburgTerrainElevation } from './hamburg-terrain';
 
 export interface TerrainSnap {
   sourceBaseElevation: number;
@@ -11,6 +12,7 @@ export interface TerrainSnap {
   currentGroundElevation: number;
   difference: number;
   terrainSource:
+    | 'hamburg-dgm'
     | 'containing-building-ground'
     | 'nearest-building-ground'
     | 'current-building-ground';
@@ -30,10 +32,10 @@ const TERRAIN_MATCH_TOLERANCE_METERS = 0.01;
 /**
  * Estimate the ground elevation for a pending building transform.
  *
- * The editor does not have a dedicated DTM/terrain grid yet. The best
- * available terrain proxy is the CityJSON ground surface data already loaded:
- * first a footprint containing the moved building's centre, then the nearest
- * building ground, and finally the selected building's own current ground.
+ * Hamburg's loaded DGM is authoritative. Outside a loaded terrain tile, fall
+ * back to the CityJSON ground surfaces already available: first a footprint
+ * containing the moved building's centre, then the nearest building ground,
+ * and finally the selected building's own current ground.
  */
 export function estimateTerrainSnap(
   doc: CityJsonDocument,
@@ -48,6 +50,23 @@ export function estimateTerrainSnap(
 
   const target = computeTransformedFootprint(doc, pending);
   if (!target) return null;
+
+  const targetLngLatCenter = centroid(target.polygon);
+  const officialTerrainElevation = sampleCachedHamburgTerrainElevation(targetLngLatCenter);
+  if (officialTerrainElevation !== null) {
+    const currentDz = pending.dz ?? 0;
+    const currentGroundElevation = source.baseElevation + currentDz;
+    return {
+      sourceBaseElevation: source.baseElevation,
+      terrainElevation: officialTerrainElevation,
+      requiredDz: officialTerrainElevation - source.baseElevation,
+      currentGroundElevation,
+      difference: officialTerrainElevation - currentGroundElevation,
+      terrainSource: 'hamburg-dgm',
+      matchedBuildingId: 'Hamburg DGM hybrid',
+      distanceMeters: 0,
+    };
+  }
 
   const targetRing = projectRing(target.polygon, crs.code);
   if (!targetRing || targetRing.length < 3) return null;
@@ -110,6 +129,9 @@ export function estimateTerrainElevationAtPoint(
   doc: CityJsonDocument,
   lngLat: [number, number]
 ): number {
+  const officialTerrainElevation = sampleCachedHamburgTerrainElevation(lngLat);
+  if (officialTerrainElevation !== null) return officialTerrainElevation;
+
   const crs = detectCrs(doc);
   if (!crs.supported) return 0;
 

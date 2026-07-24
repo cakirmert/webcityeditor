@@ -359,8 +359,8 @@ export async function parseIfc(file: File): Promise<IfcImportResult> {
     // Sanity check on FZK-Haus: pre-rotation Y range = 6.52 (the actual
     // building height, ground at y≈-3.2, gable peak at y≈+3.2);
     // pre-rotation Z range = 11.0 (the building's plan-depth, slab's
-    // local Y direction). Post-rotation: Z range = 6.52 (height ✓),
-    // Y range = 11.0 (plan-depth ✓).
+    // local Y direction). Post-rotation: Z range = 6.52 (height verified),
+    // Y range = 11.0 (plan-depth verified).
     for (let i = 0; i < positions.length; i += 3) {
       const oldY = positions[i + 1];
       const oldZ = positions[i + 2];

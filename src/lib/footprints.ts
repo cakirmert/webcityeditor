@@ -2,7 +2,7 @@ import type { CityJsonDocument, CityObject } from '../types';
 import {
   applyVertexTransform,
   detectCrs,
-  projectToWgs84,
+  projectCityJsonVertexToWgs84,
 } from './projection';
 
 export type FootprintPolygon = [number, number, number][];
@@ -56,6 +56,65 @@ export function groundFootprintsForFlatMap(footprints: Footprint[]): Footprint[]
   });
 }
 
+/**
+ * Clamp each logical building group to a sampled terrain elevation while
+ * preserving the vertical offsets between stacked BuildingParts. If terrain
+ * is not available at a group centre, its surveyed/source ground is retained.
+ */
+export function clampFootprintsToTerrain(
+  footprints: Footprint[],
+  elevationAt: (lngLat: [number, number]) => number | null
+): Footprint[] {
+  const groups = new Map<
+    string,
+    { sourceGround: number; longitudeSum: number; latitudeSum: number; pointCount: number }
+  >();
+  for (const footprint of footprints) {
+    const groupId = footprint.parentId ?? footprint.id;
+    const group = groups.get(groupId) ?? {
+      sourceGround: Infinity,
+      longitudeSum: 0,
+      latitudeSum: 0,
+      pointCount: 0,
+    };
+    if (Number.isFinite(footprint.baseElevation)) {
+      group.sourceGround = Math.min(group.sourceGround, footprint.baseElevation);
+    }
+    const ring = openFootprintRing(footprint.polygon);
+    for (const [lng, lat] of ring) {
+      group.longitudeSum += lng;
+      group.latitudeSum += lat;
+      group.pointCount++;
+    }
+    groups.set(groupId, group);
+  }
+
+  const targetGrounds = new Map<string, number>();
+  for (const [groupId, group] of groups) {
+    const sourceGround = Number.isFinite(group.sourceGround) ? group.sourceGround : 0;
+    const center: [number, number] = group.pointCount > 0
+      ? [group.longitudeSum / group.pointCount, group.latitudeSum / group.pointCount]
+      : [0, 0];
+    targetGrounds.set(groupId, elevationAt(center) ?? sourceGround);
+  }
+
+  return footprints.map((footprint) => {
+    const groupId = footprint.parentId ?? footprint.id;
+    const sourceGround = groups.get(groupId)?.sourceGround;
+    const targetGround = targetGrounds.get(groupId);
+    const offset = Number.isFinite(sourceGround) && targetGround !== undefined
+      ? targetGround - (sourceGround as number)
+      : 0;
+    return {
+      ...footprint,
+      polygon: footprint.polygon.map(
+        ([lng, lat, z]) => [lng, lat, z + offset] as [number, number, number]
+      ),
+      baseElevation: footprint.baseElevation + offset,
+    };
+  });
+}
+
 export function footprintPolygonToWgs84(polygon: FootprintPolygon): [number, number][] {
   return polygon.map(([lng, lat]) => [lng, lat]);
 }
@@ -74,9 +133,6 @@ export function footprintPolygonToWgs84(polygon: FootprintPolygon): [number, num
 export function extractFootprints(doc: CityJsonDocument): Footprint[] {
   const crs = detectCrs(doc);
   if (!crs.supported) return [];
-
-  const toLngLat = (x: number, y: number, z = 0): [number, number] =>
-    projectToWgs84(crs.code, { x, y, z });
 
   const result: Footprint[] = [];
 
@@ -99,7 +155,7 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
       [];
     if (partIds.length > 0) {
       for (const childId of partIds) {
-        const fp = buildFootprintForObject(doc, childId, toLngLat, {
+        const fp = buildFootprintForObject(doc, childId, crs.code, {
           parentId: rootId,
         });
         if (fp) {
@@ -107,7 +163,7 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
         }
       }
     } else {
-      const fp = buildFootprintForObject(doc, rootId, toLngLat);
+      const fp = buildFootprintForObject(doc, rootId, crs.code);
       if (fp) result.push(fp);
     }
   }
@@ -117,7 +173,7 @@ export function extractFootprints(doc: CityJsonDocument): Footprint[] {
 function buildFootprintForObject(
   doc: CityJsonDocument,
   id: string,
-  toLngLat: (x: number, y: number, z?: number) => [number, number],
+  crsCode: string,
   options: { parentId?: string; includeBuildingPartChildren?: boolean } = {}
 ): Footprint | null {
   const obj = doc.CityObjects[id];
@@ -132,9 +188,8 @@ function buildFootprintForObject(
 
   // Helper to read a vertex in CRS coords
   const vertexCrs = (idx: number) => {
-    const v = doc.vertices[idx] as [number, number, number] | undefined;
-    if (!v) return null;
-    return applyVertexTransform(v, doc);
+    const vertex = doc.vertices[idx] as [number, number, number] | undefined;
+    return vertex ? applyVertexTransform(vertex, doc) : null;
   };
 
   const recordZ = (ring: number[]) => {
@@ -183,13 +238,19 @@ function buildFootprintForObject(
 
   if (!bestGroundRing) return null;
 
-  const baseElevation = isFinite(minZ) ? minZ : 0;
+  const groundElevations = bestGroundRing
+    .map((index) => vertexCrs(index)?.z)
+    .filter((z): z is number => typeof z === 'number' && Number.isFinite(z));
+  const baseElevation = groundElevations.length > 0
+    ? Math.min(...groundElevations)
+    : isFinite(minZ)
+      ? minZ
+      : 0;
   const polygon: FootprintPolygon = [];
   for (const idx of bestGroundRing) {
-    const c = vertexCrs(idx);
+    const c = projectCityJsonVertexToWgs84(doc, idx, crsCode);
     if (!c) continue;
-    const [lng, lat] = toLngLat(c.x, c.y, c.z);
-    polygon.push([lng, lat, baseElevation]);
+    polygon.push([c.lng, c.lat, baseElevation]);
   }
   if (polygon.length < 3) return null;
 
@@ -203,7 +264,7 @@ function buildFootprintForObject(
   const attrs = (obj.attributes ?? {}) as Record<string, unknown>;
   const attrHeight =
     typeof attrs.measuredHeight === 'number' ? attrs.measuredHeight : null;
-  const computedHeight = isFinite(minZ) && isFinite(maxZ) ? maxZ - minZ : 10;
+  const computedHeight = isFinite(maxZ) ? Math.max(0, maxZ - baseElevation) : 10;
   const height = attrHeight ?? computedHeight;
 
   return {
@@ -215,6 +276,15 @@ function buildFootprintForObject(
     baseElevation,
     attributes: attrs,
   };
+}
+
+function openFootprintRing(polygon: FootprintPolygon): FootprintPolygon {
+  if (polygon.length < 2) return polygon;
+  const first = polygon[0];
+  const last = polygon[polygon.length - 1];
+  return first[0] === last[0] && first[1] === last[1]
+    ? polygon.slice(0, -1)
+    : polygon;
 }
 
 function collectFootprintObjects(
@@ -369,10 +439,7 @@ export function extractFootprintForId(doc: CityJsonDocument, id: string): Footpr
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
 
-  const toLngLat = (x: number, y: number, z = 0): [number, number] =>
-    projectToWgs84(crs.code, { x, y, z });
-
-  return buildFootprintForObject(doc, id, toLngLat, {
+  return buildFootprintForObject(doc, id, crs.code, {
     includeBuildingPartChildren: true,
   });
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { activeMetricCrsForCityJson, detectCrs, projectToWgs84 } from '../../src/lib/projection';
+import {
+  activeMetricCrsForCityJson,
+  detectCrs,
+  projectCityJsonVertexToWgs84,
+  projectToWgs84,
+} from '../../src/lib/projection';
 import { buildSampleCube } from '../../src/lib/cityjson';
 
 describe('detectCrs', () => {
@@ -104,5 +109,20 @@ describe('projectToWgs84', () => {
     expect(lng).toBeLessThan(12);
     expect(lat).toBeGreaterThan(48);
     expect(lat).toBeLessThan(49);
+  });
+});
+
+describe('projectCityJsonVertexToWgs84', () => {
+  it('reuses unchanged projections and invalidates an in-place vertex edit', () => {
+    const doc = buildSampleCube();
+    const first = projectCityJsonVertexToWgs84(doc, 0);
+    const cached = projectCityJsonVertexToWgs84(doc, 0);
+
+    expect(cached).toBe(first);
+    doc.vertices[0][0] += 100;
+
+    const changed = projectCityJsonVertexToWgs84(doc, 0);
+    expect(changed).not.toBe(first);
+    expect(changed?.lng).not.toBe(first?.lng);
   });
 });

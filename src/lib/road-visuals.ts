@@ -1,10 +1,11 @@
-import type { RoadArea, RoadDirection } from './transportation';
+import type { RoadArea, RoadDirection, RoadVerticalProfile } from './transportation';
 
 export interface RoadLaneDivider {
   id: string;
   roadId: string;
   path: [number, number][];
   kind: 'lane-divider' | 'edge-line';
+  vertical?: RoadVerticalProfile;
 }
 
 export interface RoadDirectionMarker {
@@ -14,6 +15,7 @@ export interface RoadDirectionMarker {
   polygon: [number, number][];
   angle: number;
   direction: RoadDirection;
+  vertical?: RoadVerticalProfile;
 }
 
 export interface RoadVisuals {
@@ -58,6 +60,7 @@ export function buildRoadVisuals(areas: RoadArea[]): RoadVisuals {
         roadId: area.roadId,
         path,
         kind: laneDivider ? 'lane-divider' : 'edge-line',
+        vertical: area.vertical,
       });
     }
   }
@@ -109,6 +112,7 @@ function directionMarker(
       : forwardArrowPolygon(position, travelTangent),
     angle,
     direction,
+    vertical: area.vertical,
   };
 }
 

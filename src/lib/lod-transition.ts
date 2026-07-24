@@ -6,8 +6,8 @@ export const BUILDING_BLOCK_FULL_ZOOM = 15.25;
 export const BUILDING_DETAIL_MIN_ZOOM = 15.25;
 export const BUILDING_DETAIL_FULL_ZOOM = 18;
 
-/** Textured Hamburg LoD3 is deliberately reserved for a very close street view. */
-export const BUILDING_LOD3_MIN_ZOOM = 18.25;
+/** Streamed source LoD3 becomes useful once individual building detail is legible. */
+export const BUILDING_LOD3_MIN_ZOOM = 17;
 
 /**
  * A pitched map has a much larger visible footprint than a top-down map. Start

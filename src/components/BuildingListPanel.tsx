@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Footprint } from '../lib/footprints';
 import { Button } from './ui/button';
+import { ArrowDown, ArrowUp, X } from 'lucide-react';
 
 type SortKey = 'id' | 'year' | 'height' | 'function';
 
@@ -56,9 +57,9 @@ export default function BuildingListPanel({
         <button
           onClick={onClose}
           aria-label="Close list"
-          className="text-[16px] leading-none text-[var(--text-dim)] hover:text-[var(--text)]"
+          className="grid h-10 w-10 place-items-center rounded-md text-[var(--text-dim)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
         >
-          ×
+          <X size={17} aria-hidden="true" />
         </button>
       </header>
 
@@ -81,7 +82,9 @@ export default function BuildingListPanel({
             }
           >
             {k}
-            {sortKey === k && (sortDesc ? ' ↓' : ' ↑')}
+            {sortKey === k && (sortDesc
+              ? <ArrowDown size={11} className="inline" aria-hidden="true" />
+              : <ArrowUp size={11} className="inline" aria-hidden="true" />)}
           </button>
         ))}
       </div>

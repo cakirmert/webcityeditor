@@ -15,6 +15,7 @@ import { isTerrainMatched, type TerrainSnap } from '../lib/terrain';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Check, Move3d, Pencil, RotateCcw, TriangleAlert, X } from 'lucide-react';
 
 interface Props {
   buildingId: string;
@@ -272,7 +273,8 @@ export default function AttributePanel({
           variant="outline"
           className="w-full"
         >
-          ⎌ Revert this building
+          <RotateCcw size={15} aria-hidden="true" />
+          Revert this building
         </Button>
         <div className="mt-2 text-[11px] text-[var(--text-faint)]">
           Changes stay local until you export CityJSON. Revert restores this building's loaded
@@ -297,7 +299,8 @@ export default function AttributePanel({
               onClick={() => onStartTransform?.(buildingId)}
               className="w-full"
             >
-              ✦ Start editing position
+              <Move3d size={15} aria-hidden="true" />
+              Start editing position
             </Button>
           ) : (
             <>
@@ -471,10 +474,12 @@ export default function AttributePanel({
                     (!!terrainSnap && !terrainMatched)
                   }
                 >
-                  ✓ Place
+                  <Check size={15} aria-hidden="true" />
+                  Place
                 </Button>
                 <Button onClick={onCancelTransform} className="flex-1">
-                  ✕ Cancel
+                  <X size={15} aria-hidden="true" />
+                  Cancel
                 </Button>
               </div>
             </>
@@ -504,7 +509,8 @@ export default function AttributePanel({
                 onClick={() => onStartFootprintEdit?.(buildingId)}
                 className="w-full"
               >
-                ✦ Edit footprint corners
+                <Pencil size={15} aria-hidden="true" />
+                Edit footprint corners
               </Button>
             ) : onMakeEditable ? (
               <div className="space-y-1.5">
@@ -519,7 +525,8 @@ export default function AttributePanel({
                   className="w-full"
                   title="Replaces the imported geometry with a parametric regeneration inferred from its attributes (roof type, height, storeys). Original detail is lost; the building becomes fully editable."
                 >
-                  ✦ Make editable (replace with parametric)
+                  <Pencil size={15} aria-hidden="true" />
+                  Make editable (replace with parametric)
                 </Button>
               </div>
             ) : (
@@ -535,10 +542,12 @@ export default function AttributePanel({
               </div>
               <div className="mt-3 flex gap-2 border-t border-[var(--border)] pt-3">
                 <Button variant="primary" onClick={onSaveFootprintEdit} className="flex-1">
-                  ✓ Save shape
+                  <Check size={15} aria-hidden="true" />
+                  Save shape
                 </Button>
                 <Button onClick={onCancelFootprintEdit} className="flex-1">
-                  ✕ Cancel
+                  <X size={15} aria-hidden="true" />
+                  Cancel
                 </Button>
               </div>
             </>
@@ -748,7 +757,7 @@ export default function AttributePanel({
           {obj?.type ?? 'Unknown'}
         </h3>
         <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close">
-          ×
+          <X size={16} aria-hidden="true" />
         </Button>
       </div>
       {content}
@@ -852,7 +861,7 @@ function FloorSplitEditor({
         )}
         {onApplyCustom && (
           <Button size="sm" variant="ghost" onClick={customMode ? leaveCustom : enterCustom}>
-            {customMode ? '✕ Equal' : 'Custom heights…'}
+            {customMode ? <><X size={14} aria-hidden="true" /> Equal</> : 'Custom heights…'}
           </Button>
         )}
       </div>
@@ -884,7 +893,10 @@ function FloorSplitEditor({
                 />
                 <span className="text-[10px] text-[var(--text-faint)]">m</span>
                 {h < MIN_STOREY_HEIGHT && (
-                  <span className="text-[10px] text-[var(--warn)]">⚠ &lt; {MIN_STOREY_HEIGHT} m</span>
+                  <span className="flex items-center gap-1 text-[10px] text-[var(--warn)]">
+                    <TriangleAlert size={12} aria-hidden="true" />
+                    &lt; {MIN_STOREY_HEIGHT} m
+                  </span>
                 )}
               </div>
             ))}

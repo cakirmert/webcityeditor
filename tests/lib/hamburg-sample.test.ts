@@ -72,6 +72,11 @@ describe('Hamburg committed city-center demo', () => {
       objectIds: selectedIds,
       maxOutputVertices: 160_000,
     });
+    const semanticMesh = buildCityJsonMapMesh(parsedLod3.doc, {
+      objectIds: selectedIds,
+      maxOutputVertices: 160_000,
+      texturesEnabled: false,
+    });
 
     expect(roots).toHaveLength(68);
     expect(roots.every((id) => doc.CityObjects[id]?.type === 'Building')).toBe(true);
@@ -81,6 +86,16 @@ describe('Hamburg committed city-center demo', () => {
     expect(mesh?.textures).toHaveLength(68);
     expect(mesh?.texturedSurfaceCount).toBeGreaterThan(4_000);
     expect(mesh?.explicitOpeningSurfaceCount).toBe(0);
+    expect(mesh?.rootObjectCount).toBe(68);
+    expect(mesh?.installationObjectCount).toBe(1_043);
+    expect(mesh?.objectCount).toBe(1_111);
+    expect(mesh?.objectCountByLod).toEqual({ '3': 1_111 });
+    expect(mesh?.surfaceCount).toBe(20_294);
+    expect(mesh?.truncated).toBe(false);
+    expect(semanticMesh?.textures).toHaveLength(0);
+    expect(semanticMesh?.triangleCount).toBe(mesh?.triangleCount);
+    expect(semanticMesh?.surfaceCount).toBe(mesh?.surfaceCount);
+    expect(semanticMesh?.objectAnchors).toEqual(mesh?.objectAnchors);
     expect(parsedLod3.doc.metadata?.geographicalExtent).toEqual(
       expect.arrayContaining([
         expect.any(Number),

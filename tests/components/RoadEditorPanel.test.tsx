@@ -44,6 +44,10 @@ function renderPanel(
     redoDraftLabel?: string;
     onUndoDraft?: () => void;
     onRedoDraft?: () => void;
+    selectedRoadBand?: { sectionId: string; bandIndex: number } | null;
+    onRoadBandSelect?: (
+      selection: { sectionId: string; bandIndex: number } | null
+    ) => void;
   } = {}
 ) {
   const onEditOsm2StreetsSelection = options.onEditOsm2StreetsSelection ?? vi.fn();
@@ -87,6 +91,8 @@ function renderPanel(
       onEditSelectedRoadArea={options.onEditSelectedRoadArea ?? vi.fn()}
       onDeleteSelectedRoadArea={options.onDeleteSelectedRoadArea ?? vi.fn()}
       selectedRoadArea={options.selectedRoadArea ?? null}
+      selectedRoadBand={options.selectedRoadBand ?? null}
+      onRoadBandSelect={options.onRoadBandSelect}
       osm2streetsSelection={options.osm2streetsSelection}
       onEditOsm2StreetsSelection={onEditOsm2StreetsSelection}
       onHighlightConnectedOsm2StreetsRoads={onHighlightConnectedOsm2StreetsRoads}
@@ -177,6 +183,43 @@ describe('<RoadEditorPanel />', () => {
     const [nextDraft] = onDraftChange.mock.calls.at(-1) as [RoadDraft];
     expect(nextDraft.sections[0].bands[1].widthM).toBe(3.8);
     expect(nextDraft.sections[0].bands[0].widthM).toBe(1.75);
+  });
+
+  it('publishes bottom-menu band changes as the single synchronized map highlight', () => {
+    const onRoadBandSelect = vi.fn();
+    renderPanel(vi.fn(), {
+      selectedRoadBand: { sectionId: 'section-1', bandIndex: 0 },
+      onRoadBandSelect,
+    });
+
+    onRoadBandSelect.mockClear();
+    fireEvent.click(screen.getByTestId('road-band-box-1'));
+
+    expect(onRoadBandSelect).toHaveBeenLastCalledWith({
+      sectionId: 'section-1',
+      bandIndex: 1,
+    });
+    expect(screen.getByTestId('road-band-box-1')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('selects a valid surviving band when the active lane is removed', () => {
+    const onDraftChange = vi.fn();
+    const onRoadBandSelect = vi.fn();
+    renderPanel(onDraftChange, {
+      selectedRoadBand: { sectionId: 'section-1', bandIndex: 2 },
+      onRoadBandSelect,
+    });
+
+    onRoadBandSelect.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sidewalk band' }));
+
+    const [nextDraft, label] = onDraftChange.mock.calls.at(-1) as [RoadDraft, string];
+    expect(nextDraft.sections[0].bands.map((band) => band.id)).toEqual(['bike-1', 'car-1']);
+    expect(label).toBe('Remove road band');
+    expect(onRoadBandSelect).toHaveBeenLastCalledWith({
+      sectionId: 'section-1',
+      bandIndex: 1,
+    });
   });
 
   it('keeps CityJSON and backend actions in one disclosure that starts closed', () => {

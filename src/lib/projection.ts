@@ -126,6 +126,29 @@ export interface CityCoord {
   z: number;
 }
 
+export interface ProjectedCityJsonVertex extends CityCoord {
+  lng: number;
+  lat: number;
+}
+
+interface CachedProjectedVertex {
+  rawX: number;
+  rawY: number;
+  rawZ: number;
+  value: ProjectedCityJsonVertex;
+}
+
+interface CityJsonVertexProjectionCache {
+  crsCode: string;
+  transformKey: string;
+  entries: Array<CachedProjectedVertex | undefined>;
+}
+
+const vertexProjectionCaches = new WeakMap<
+  CityJsonDocument,
+  CityJsonVertexProjectionCache
+>();
+
 /** Apply CityJSON vertex transform: real = int * scale + translate */
 export function applyVertexTransform(
   vertex: [number, number, number],
@@ -201,6 +224,64 @@ export function projectToWgs84(code: string, coord: CityCoord): [number, number]
   }
   const [lng, lat] = proj4(code, 'EPSG:4326', [coord.x, coord.y]) as [number, number];
   return [lng, lat];
+}
+
+/**
+ * Project one document vertex while reusing the result across map rebuilds.
+ *
+ * Editor mutations keep the CityJSON document identity stable and signal a
+ * reload token. Re-running proj4 over tens of thousands of unchanged road
+ * vertices on every attribute edit made those otherwise tiny edits stall the
+ * UI. The raw tuple and transform signature are checked on every lookup, so
+ * in-place vertex edits, compaction, and transform changes invalidate only the
+ * entries that actually changed.
+ */
+export function projectCityJsonVertexToWgs84(
+  doc: CityJsonDocument,
+  vertexIndex: number,
+  crsCode = detectCrs(doc).code
+): ProjectedCityJsonVertex | null {
+  const raw = doc.vertices[vertexIndex] as [number, number, number] | undefined;
+  if (!raw) return null;
+
+  const transformKey = cityJsonTransformKey(doc);
+  let cache = vertexProjectionCaches.get(doc);
+  if (
+    !cache ||
+    cache.crsCode !== crsCode ||
+    cache.transformKey !== transformKey
+  ) {
+    cache = { crsCode, transformKey, entries: [] };
+    vertexProjectionCaches.set(doc, cache);
+  }
+
+  const cached = cache.entries[vertexIndex];
+  if (
+    cached &&
+    cached.rawX === raw[0] &&
+    cached.rawY === raw[1] &&
+    cached.rawZ === raw[2]
+  ) {
+    return cached.value;
+  }
+
+  const projected = applyVertexTransform(raw, doc);
+  const [lng, lat] = projectToWgs84(crsCode, projected);
+  const value: ProjectedCityJsonVertex = { ...projected, lng, lat };
+  cache.entries[vertexIndex] = {
+    rawX: raw[0],
+    rawY: raw[1],
+    rawZ: raw[2],
+    value,
+  };
+  return value;
+}
+
+function cityJsonTransformKey(doc: CityJsonDocument): string {
+  const transform = doc.transform;
+  return transform
+    ? `${transform.scale.join(',')}|${transform.translate.join(',')}`
+    : 'identity';
 }
 
 export function projectWgs84BboxToCrs(bbox: Bbox2D, crs: string): Bbox2D {

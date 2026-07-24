@@ -36,6 +36,7 @@ import {
 import type { RoadFitConflict } from '../lib/road-fit';
 import type { BasemapMode } from '../lib/basemap';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
+import { removeRoadDraftBand } from '../lib/road-draft-edit';
 import Osm2StreetsInspector from './Osm2StreetsInspector';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -59,6 +60,7 @@ interface Props {
   roadFitConflicts?: RoadFitConflict[];
   roadFitPending?: boolean;
   selectedRoadArea?: RoadArea | null;
+  selectedRoadBand?: { sectionId: string; bandIndex: number } | null;
   osm2streetsSelection?: Osm2StreetsSelection;
   canUndoDraft: boolean;
   canRedoDraft: boolean;
@@ -83,6 +85,9 @@ interface Props {
   onBackendUrlChange: (url: string) => void;
   onEditSelectedRoadArea: (area: RoadArea) => void;
   onDeleteSelectedRoadArea: (area: RoadArea) => void;
+  onRoadBandSelect?: (
+    selection: { sectionId: string; bandIndex: number } | null
+  ) => void;
   onEditOsm2StreetsSelection: () => void;
   onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
@@ -126,6 +131,7 @@ export default function RoadEditorPanel({
   roadFitConflicts = [],
   roadFitPending = false,
   selectedRoadArea = null,
+  selectedRoadBand = null,
   osm2streetsSelection = null,
   canUndoDraft,
   canRedoDraft,
@@ -150,6 +156,7 @@ export default function RoadEditorPanel({
   onBackendUrlChange,
   onEditSelectedRoadArea,
   onDeleteSelectedRoadArea,
+  onRoadBandSelect,
   onEditOsm2StreetsSelection,
   onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
@@ -188,6 +195,16 @@ export default function RoadEditorPanel({
     setActiveBandIndex((index) => Math.min(index, activeSection.bands.length - 1));
   }, [activeSection]);
 
+  useEffect(() => {
+    if (!selectedRoadBand) return;
+    const section = draft?.sections.find(
+      (candidate) => candidate.id === selectedRoadBand.sectionId
+    );
+    if (!section?.bands[selectedRoadBand.bandIndex]) return;
+    setActiveSectionId(section.id);
+    setActiveBandIndex(selectedRoadBand.bandIndex);
+  }, [draft, selectedRoadBand]);
+
   const selectedOsm = osmRoads.find((road) => road.id === selectedOsmRoadId);
   const payloadPreview = draft
     ? JSON.stringify(buildRoadEditPayload(draft, insertedRoadId ?? undefined), null, 2)
@@ -213,11 +230,20 @@ export default function RoadEditorPanel({
           : 'none';
   const verticalProfile = draft ? roadVerticalProfileForDraft(draft) : null;
   const activeBand = activeSection?.bands[activeBandIndex] ?? null;
-  const connectionCount = draft?.sections.reduce(
-    (count, section) =>
-      count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
-    0
-  ) ?? 0;
+  useEffect(() => {
+    if (!activeSection || !activeBand) {
+      onRoadBandSelect?.(null);
+      return;
+    }
+    onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: activeBandIndex });
+  }, [activeBand, activeBandIndex, activeSection, onRoadBandSelect]);
+  const connectionCount = draft
+    ? draft.sections.reduce(
+        (count, section) =>
+          count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
+        0
+      ) + (draft.movements ?? []).filter((movement) => movement.status === 'confirmed').length
+    : 0;
 
   const updateSection = (
     sectionId: string,
@@ -255,12 +281,11 @@ export default function RoadEditorPanel({
   };
 
   const removeBand = (bandIndex: number) => {
-    if (!activeSection || activeSection.bands.length <= 1) return;
-    updateSection(activeSection.id, (section) => ({
-      ...section,
-      bands: section.bands.filter((_, index) => index !== bandIndex),
-    }));
-    setActiveBandIndex((index) => Math.max(0, Math.min(index, activeSection.bands.length - 2)));
+    if (!draft || !activeSection || activeSection.bands.length <= 1) return;
+    const nextBandIndex = Math.min(bandIndex, activeSection.bands.length - 2);
+    setActiveBandIndex(nextBandIndex);
+    onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: nextBandIndex });
+    onDraftChange(removeRoadDraftBand(draft, activeSection.id, bandIndex), 'Remove road band');
   };
 
   const reorderBand = (fromIndex: number, toIndex: number) => {
@@ -555,7 +580,9 @@ export default function RoadEditorPanel({
                 <span>{activeSection.centerlineWgs84.length} curve anchors · {activeTotalWidth.toFixed(2)} m wide</span>
               </div>
               <span className={connectionCount > 0 ? 'is-connected' : ''}>
-                {connectionCount > 0 ? `${connectionCount} joins confirmed` : 'No joins yet'}
+                {connectionCount > 0
+                  ? `${connectionCount} connection${connectionCount === 1 ? '' : 's'} confirmed`
+                  : 'No joins yet'}
               </span>
             </div>
 
@@ -587,7 +614,8 @@ export default function RoadEditorPanel({
             <div className="road-handle-explainer" data-testid="road-centerline-drag-hint">
               <div><i className="road-guide-dot road-guide-dot--anchor" /><span><b>Yellow anchor</b>Drag it to bend the smooth road.</span></div>
               <div><i className="road-guide-dot road-guide-dot--add">+</i><span><b>White +</b>Tap or drag to add another bend.</span></div>
-              <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Teal join</b>Drag a yellow end onto it to connect roads.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--connect">E1</i><span><b>Selected lane end</b>Choose start or end below; only that lane's connector appears.</span></div>
+              <div><i className="road-guide-dot road-guide-dot--snap" /><span><b>Numbered teal target</b>Pick the exact road and lane in the list or on the map.</span></div>
               <p
                 className="col-span-full m-0 text-[11px] leading-5 text-[var(--text-dim)]"
               >
@@ -1182,8 +1210,8 @@ function SelectedRoadAreaCard({
       </Button>
       {isIntersection && (
         <p>
-          Keep this generated junction. Edit an entering road, then drag its yellow endpoint onto
-          a teal target. Saving records the confirmed connection in CityJSON.
+          Keep this generated junction. Edit an entering road, select one lane and its start or end,
+          then pick the exact numbered teal lane target. Saving records that lane pair in CityJSON.
         </p>
       )}
       {!isIntersection && area.geometryMode === 'exact' && (

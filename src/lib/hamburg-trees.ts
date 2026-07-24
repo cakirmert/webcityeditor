@@ -137,15 +137,11 @@ export function treeTrunkScale(
   return [tree.trunkRadius, tree.trunkRadius, crownBase + tree.height * 0.14];
 }
 
-/**
- * The tree source stores absolute ellipsoidal elevations, while the editor's
- * basemap is a flat z=0 plane. Preserve the surveyed value in `tree.position`
- * but render the instance base on the same plane as roads and buildings.
- */
-export function treePositionOnFlatGround(
+/** Keep the surveyed tree base in the same vertical datum as Hamburg terrain. */
+export function treePositionOnTerrain(
   tree: HamburgCityTree
 ): [number, number, number] {
-  return [tree.position[0], tree.position[1], 0];
+  return tree.position;
 }
 
 function createRingMesh(

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import type { CityJsonDocument, CityObject } from '../types';
 import type {
   OsmPointFeature,
   OsmRoadFeature,
@@ -21,6 +22,7 @@ import {
   insertRoadIntoCityJson,
   parseOsmPointFeaturesFromXml,
   parseOsmRoadsFromXml,
+  planStaleReciprocalRoadPropagation,
   splitRoadSectionAtFraction,
   summarizeRoadDraft,
   synchronizeRoadConnectionMetadata,
@@ -39,11 +41,16 @@ import { runStructurallyGuardedMutation } from '../lib/editor-actions';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
 import type { BasemapMode } from '../lib/basemap';
-import { compactVertices } from '../lib/compact';
 import {
   RoadDraftHistory,
   type RoadDraftHistorySnapshot,
 } from '../lib/road-draft-history';
+import { reconcileRoadLaneConnectionIndexes } from '../lib/road-draft-edit';
+import {
+  deriveImportedRoadMovements,
+  removeRoadMovementReferences,
+  synchronizeRoadMovementMetadata,
+} from '../lib/road-movements';
 
 interface FetchOsmRoadOptions {
   source?: 'viewport' | 'loaded-data';
@@ -150,6 +157,68 @@ function cloneRoadDraft(draft: RoadDraft): RoadDraft {
   return JSON.parse(JSON.stringify(draft)) as RoadDraft;
 }
 
+function cloneCityObject(object: CityObject): CityObject {
+  return typeof structuredClone === 'function'
+    ? structuredClone(object)
+    : JSON.parse(JSON.stringify(object)) as CityObject;
+}
+
+function cityObjectMayReferenceRoad(
+  objectId: string,
+  object: CityObject,
+  roadId: string
+): boolean {
+  if (objectId === roadId) return true;
+  if (object.children?.includes(roadId) || object.parents?.includes(roadId)) {
+    return true;
+  }
+  if (object.type !== 'Road') return false;
+  const attributes = object.attributes;
+  if (!attributes) return false;
+  const roadIdToken = JSON.stringify(roadId);
+  return [attributes._roadLayout, attributes._roadMovements].some(
+    (value) => value !== undefined && JSON.stringify(value).includes(roadIdToken)
+  );
+}
+
+function captureRoadDeletionObjects(
+  doc: CityJsonDocument,
+  roadId: string
+): Map<string, CityObject> {
+  const snapshots = new Map<string, CityObject>();
+  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
+    if (cityObjectMayReferenceRoad(objectId, object, roadId)) {
+      snapshots.set(objectId, cloneCityObject(object));
+    }
+  }
+  return snapshots;
+}
+
+function restoreRoadDeletionObjects(
+  doc: CityJsonDocument,
+  snapshots: Map<string, CityObject>
+): void {
+  for (const [objectId, object] of snapshots) {
+    doc.CityObjects[objectId] = object;
+  }
+}
+
+function assertRoadDeletionReferencesCleared(
+  doc: CityJsonDocument,
+  roadId: string
+): void {
+  const remaining = Object.entries(doc.CityObjects)
+    .filter(([objectId, object]) =>
+      cityObjectMayReferenceRoad(objectId, object, roadId)
+    )
+    .map(([objectId]) => objectId);
+  if (remaining.length > 0) {
+    throw new Error(
+      `Road references remain on ${remaining.slice(0, 4).join(', ')}`
+    );
+  }
+}
+
 function downloadJson(value: unknown, fileName: string): void {
   const text = JSON.stringify(value, null, 2);
   const blob = new Blob([text], { type: 'application/json' });
@@ -187,6 +256,10 @@ export function useRoadEditor(
   const [osmPointFeatures, setOsmPointFeatures] = useState<OsmPointFeature[]>([]);
   const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
+  const [selectedRoadBand, setSelectedRoadBand] = useState<{
+    sectionId: string;
+    bandIndex: number;
+  } | null>(null);
   const [roadEditBaseline, setRoadEditBaseline] = useState<RoadEditBaseline | null>(null);
   const [roadDraftDirty, setRoadDraftDirty] = useState(false);
   const [editingRoadId, setEditingRoadId] = useState<string | null>(null);
@@ -201,6 +274,38 @@ export function useRoadEditor(
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
   const roadDraftHistoryRef = useRef(new RoadDraftHistory());
   const [roadDraftHistoryVersion, setRoadDraftHistoryVersion] = useState(0);
+  const buildingFootprints = useMemo(
+    () => (cityjson ? extractFootprints(cityjson) : []),
+    [cityjson, reloadToken]
+  );
+  const roadAreas = useMemo(() => {
+    if (!cityjson) return [];
+    return extractTransportationAreas(cityjson);
+  }, [cityjson, reloadToken]);
+
+  useEffect(() => {
+    setSelectedRoadBand((current) => {
+      if (!roadDraft) return null;
+      if (
+        current &&
+        roadDraft.sections.some(
+          (section) => section.id === current.sectionId && !!section.bands[current.bandIndex]
+        )
+      ) {
+        return current;
+      }
+      const currentSection = current
+        ? roadDraft.sections.find((section) => section.id === current.sectionId)
+        : undefined;
+      const fallbackSection = currentSection?.bands.length ? currentSection : roadDraft.sections[0];
+      return fallbackSection?.bands.length
+        ? {
+            sectionId: fallbackSection.id,
+            bandIndex: Math.min(current?.bandIndex ?? 0, fallbackSection.bands.length - 1),
+          }
+        : null;
+    });
+  }, [roadDraft]);
 
   const clearRoadDraftHistory = useCallback(() => {
     roadDraftHistoryRef.current.clear();
@@ -280,6 +385,7 @@ export function useRoadEditor(
     clearRoadDraftHistory();
     setRoadEditBaseline(null);
     setRoadDraft(null);
+    setSelectedRoadBand(null);
     setRoadDraftDirty(false);
     setEditingRoadId(null);
     setSelectedRoadArea(null);
@@ -556,7 +662,7 @@ export function useRoadEditor(
   const handleRoadDraftChange = useCallback(
     (draft: RoadDraft, label = 'Edit road', historyGroup?: string) => {
       recordRoadDraftHistory(roadDraft, roadDraftDirty, label, historyGroup);
-      setRoadDraft(draft);
+      setRoadDraft(reconcileRoadLaneConnectionIndexes(draft));
       setRoadDraftDirty(true);
       setLastInsertedRoadId(null);
     },
@@ -569,17 +675,18 @@ export function useRoadEditor(
         ? area.attributes.connectedRoadIds.length
         : 0;
       setRoadStatus(
-        `This is an exact osm2streets junction surface connected to ${connected} road${connected === 1 ? '' : 's'}. Its shape stays protected; tap a lane entering it, edit that road, then drag its yellow end onto a teal join target to confirm the connection.`
+        `This is an exact osm2streets junction surface connected to ${connected} road${connected === 1 ? '' : 's'}. Its shape stays protected; tap a lane entering it, edit that road, then drag its purple end connector onto a teal join target.`
       );
       return;
     }
+    const allAreas = roadAreas.length > 0 ? roadAreas : [area];
     const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
     let draft: RoadDraft;
     try {
       draft =
         savedDraft ??
         deriveEditableRoadDraftFromAreas(
-          cityjson ? extractTransportationAreas(cityjson) : [area],
+          allAreas,
           area.roadId
         );
     } catch (error) {
@@ -588,12 +695,23 @@ export function useRoadEditor(
       alert(`CityJSON road editing failed: ${message}`);
       return;
     }
-    const editingDraft = {
+    const editingDraftBase = {
       ...draft,
-      id: draft.id ?? area.roadId,
+      // The embedded draft may retain its pre-insert temporary id. Once the
+      // object exists, every endpoint and movement must use the CityJSON road
+      // id so decisions round-trip against the saved network.
+      id: area.roadId,
+    };
+    const editingDraft = {
+      ...editingDraftBase,
+      movements: deriveImportedRoadMovements(allAreas, editingDraftBase),
     };
     clearRoadDraftHistory();
     setRoadDraft(editingDraft);
+    const firstSection = editingDraft.sections[0];
+    setSelectedRoadBand(
+      firstSection?.bands.length ? { sectionId: firstSection.id, bandIndex: 0 } : null
+    );
     const preservesImportedGeometry = area.geometryMode === 'exact' || !savedDraft;
     setRoadEditBaseline(
       preservesImportedGeometry
@@ -605,7 +723,10 @@ export function useRoadEditor(
         : null
     );
     setRoadDraftDirty(false);
-    setSelectedRoadArea(area);
+    // The source surface was only the chooser that opened this draft. Keeping
+    // it selected also kept the whole-road outline blue while one band was
+    // selected, so draft mode now owns the map highlight exclusively.
+    setSelectedRoadArea(null);
     setEditingRoadId(area.roadId);
     setLastInsertedRoadId(area.roadId);
     setOsm2streetsSelection(null);
@@ -616,7 +737,7 @@ export function useRoadEditor(
         ? `Loaded editable layout from ${area.roadId}. Changes stay in the draft until you save them.`
         : `Editing ${area.roadId} on its exact CityJSON polygons. Type, direction, material, access and speed edits preserve them; moving handles, changing widths or restructuring bands rebuilds editable ribbons.`
     );
-  }, [cityjson, clearRoadDraftHistory]);
+  }, [clearRoadDraftHistory, roadAreas]);
 
   const handleCancelRoadEdit = useCallback((force = false) => {
     if (!force && roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
@@ -624,6 +745,7 @@ export function useRoadEditor(
     setDrawMode('none');
     setSelection(null);
     setRoadDraft(null);
+    setSelectedRoadBand(null);
     setRoadEditBaseline(null);
     setRoadDraftDirty(false);
     setEditingRoadId(null);
@@ -648,18 +770,23 @@ export function useRoadEditor(
     }
   }, [recordRoadDraftHistory, roadDraft, roadDraftDirty]);
 
-  const buildingFootprints = useMemo(
-    () => (cityjson ? extractFootprints(cityjson) : []),
-    [cityjson, reloadToken]
-  );
-  const roadAreas = useMemo(() => {
-    if (!cityjson) return [];
-    return extractTransportationAreas(cityjson);
-  }, [cityjson, reloadToken]);
   const [roadPreviewAreas, setRoadPreviewAreas] = useState<RoadArea[]>([]);
   const [roadFitConflicts, setRoadFitConflicts] = useState<RoadFitConflict[]>([]);
   const [roadFitPending, setRoadFitPending] = useState(false);
   const lastPreviewAtRef = useRef(0);
+  const fitResultReadyRef = useRef(false);
+  const fitDraftKey = roadDraft
+    ? `${editingRoadId ?? roadDraft.id ?? 'new-road'}:${exactGeometryStatus}`
+    : null;
+  const fitDraftKeyRef = useRef<string | null>(fitDraftKey);
+
+  useEffect(() => {
+    if (fitDraftKeyRef.current === fitDraftKey) return;
+    fitDraftKeyRef.current = fitDraftKey;
+    fitResultReadyRef.current = false;
+    setRoadFitConflicts([]);
+    setRoadFitPending(false);
+  }, [fitDraftKey]);
 
   // Geometry preview is capped at roughly 20 fps during a drag. The previous
   // path cloned the entire CityJSON document and reran fit validation for every
@@ -715,7 +842,10 @@ export function useRoadEditor(
       setRoadFitPending(false);
       return;
     }
-    setRoadFitPending(true);
+    // Only the first result for a road owns the visible pending state. Once a
+    // settled result exists, keep it on screen while the trailing check is
+    // rescheduled during a drag. Commit still performs a synchronous check.
+    if (!fitResultReadyRef.current) setRoadFitPending(true);
     const timer = window.setTimeout(() => {
       setRoadFitConflicts(
         validateRoadFit({
@@ -727,8 +857,9 @@ export function useRoadEditor(
           buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
         })
       );
+      fitResultReadyRef.current = true;
       setRoadFitPending(false);
-    }, 140);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [
     cityjson,
@@ -773,23 +904,62 @@ export function useRoadEditor(
       );
       return;
     }
-    const staleReciprocalConnections = targetRoadId
-      ? findStaleReciprocalRoadConnections(cityjson, targetRoadId, roadDraft)
+    const propagationPlan = targetRoadId
+      ? planStaleReciprocalRoadPropagation(cityjson, targetRoadId, roadDraft)
+      : null;
+    let savedRoadDraft = roadDraft;
+    let propagatedPeerDrafts: Array<{ roadId: string; draft: RoadDraft }> = [];
+    let propagatedConnectionCount = 0;
+    if (
+      propagationPlan &&
+      propagationPlan.propagatedConnectionCount > 0 &&
+      window.confirm(
+        `This edit moved ${propagationPlan.propagatedConnectionCount} confirmed connected road endpoint${
+          propagationPlan.propagatedConnectionCount === 1 ? '' : 's'
+        }. Move ${propagationPlan.propagatedConnectionCount === 1 ? 'the connected endpoint' : 'those connected endpoints'} too and keep ${
+          propagationPlan.propagatedConnectionCount === 1 ? 'the join' : 'the joins'
+        }?`
+      )
+    ) {
+      savedRoadDraft = propagationPlan.sourceDraft;
+      propagatedPeerDrafts = propagationPlan.peerDrafts;
+      propagatedConnectionCount = propagationPlan.propagatedConnectionCount;
+    }
+    const remainingStaleConnections = targetRoadId
+      ? findStaleReciprocalRoadConnections(cityjson, targetRoadId, savedRoadDraft)
       : [];
     if (
-      staleReciprocalConnections.length > 0 &&
+      remainingStaleConnections.length > 0 &&
       !window.confirm(
-        `This edit leaves ${staleReciprocalConnections.length} confirmed reciprocal road join${
-          staleReciprocalConnections.length === 1 ? '' : 's'
+        `This edit leaves ${remainingStaleConnections.length} confirmed reciprocal road join${
+          remainingStaleConnections.length === 1 ? '' : 's'
         } stale. Save and disconnect ${
-          new Set(staleReciprocalConnections.map((connection) => connection.roadId)).size
+          new Set(remainingStaleConnections.map((connection) => connection.roadId)).size
         } connected road${
-          new Set(staleReciprocalConnections.map((connection) => connection.roadId)).size === 1
+          new Set(remainingStaleConnections.map((connection) => connection.roadId)).size === 1
             ? ''
             : 's'
         }?`
       )
     ) {
+      return;
+    }
+    const propagatedBlockingConflicts = propagatedPeerDrafts.flatMap(({ roadId, draft }) =>
+      validateRoadFit({
+        roadAreas: buildRoadPreviewAreas(cityjson, draft, { id: roadId }),
+        buildingFootprints,
+        affectedLand: affectedZones,
+        metricCrs: activeMetricCrsForCityJson(cityjson),
+        buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
+        buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
+      }).filter((conflict) => conflict.severity === 'error')
+    );
+    if (propagatedBlockingConflicts.length > 0) {
+      alert(
+        `Connected-road movement is blocked by ${propagatedBlockingConflicts.length} fit conflict${
+          propagatedBlockingConflicts.length === 1 ? '' : 's'
+        }:\n\n${propagatedBlockingConflicts.slice(0, 5).map((conflict) => conflict.label).join('\n')}`
+      );
       return;
     }
     try {
@@ -809,28 +979,48 @@ export function useRoadEditor(
             : 'Inserting CityJSON road',
         () => {
           const inserted = preserveExactGeometry
-            ? updateExactRoadAttributesInCityJson(cityjson, targetRoadId!, roadDraft)
+            ? updateExactRoadAttributesInCityJson(cityjson, targetRoadId!, savedRoadDraft)
             : insertRoadIntoCityJson(
                 cityjson,
-                roadDraft,
+                savedRoadDraft,
                 targetRoadId ? { id: targetRoadId } : undefined
               );
+          const propagatedRoadIds = propagatedPeerDrafts.map(({ roadId, draft }) => {
+            insertRoadIntoCityJson(cityjson, draft, { id: roadId });
+            return roadId;
+          });
           const disconnected = targetRoadId
-            ? clearStaleReciprocalRoadConnections(cityjson, inserted.id, roadDraft)
+            ? clearStaleReciprocalRoadConnections(cityjson, inserted.id, savedRoadDraft)
             : { disconnectedRoadIds: [], disconnectedConnectionCount: 0 };
           const connectedRoadIds = synchronizeRoadConnectionMetadata(
             cityjson,
             inserted.id,
-            roadDraft
+            savedRoadDraft
           );
-          if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
-          return { ...inserted, ...disconnected, connectedRoadIds };
+          const movementRoadIds = synchronizeRoadMovementMetadata(
+            cityjson,
+            inserted.id,
+            savedRoadDraft
+          );
+          return {
+            ...inserted,
+            ...disconnected,
+            connectedRoadIds,
+            propagatedRoadIds,
+            propagatedConnectionCount,
+            movementRoadIds,
+            movementDecisionCount: (savedRoadDraft.movements ?? []).filter(
+              (movement) => movement.status !== 'proposed'
+            ).length,
+          };
         }
       );
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(result.id);
         for (const connectedRoadId of result.connectedRoadIds) next.add(connectedRoadId);
+        for (const propagatedRoadId of result.propagatedRoadIds) next.add(propagatedRoadId);
+        for (const movementRoadId of result.movementRoadIds) next.add(movementRoadId);
         for (const disconnectedRoadId of result.disconnectedRoadIds) next.add(disconnectedRoadId);
         return next;
       });
@@ -838,13 +1028,14 @@ export function useRoadEditor(
       setSelectedRoadArea(null);
       setLastInsertedRoadId(result.id);
       setEditingRoadId(result.id);
+      setRoadDraft(cloneRoadDraft(savedRoadDraft));
       setRoadDraftDirty(false);
       clearRoadDraftHistory();
       setRoadEditBaseline(
         preserveExactGeometry
           ? {
               roadId: result.id,
-              draft: cloneRoadDraft(roadDraft),
+              draft: cloneRoadDraft(savedRoadDraft),
               exactGeometry: true,
             }
           : null
@@ -866,6 +1057,10 @@ export function useRoadEditor(
                 ? ` and confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
                 : ''
             }${
+              result.propagatedConnectionCount > 0
+                ? ` and moved ${result.propagatedConnectionCount} connected road endpoint${result.propagatedConnectionCount === 1 ? '' : 's'}`
+                : ''
+            }${
               result.disconnectedConnectionCount > 0
                 ? ` and cleared ${result.disconnectedConnectionCount} stale reciprocal road connection${result.disconnectedConnectionCount === 1 ? '' : 's'}`
                 : ''
@@ -876,6 +1071,13 @@ export function useRoadEditor(
                 : ''
             }.`
       );
+      if (result.movementDecisionCount > 0) {
+        setRoadStatus((current) =>
+          `${current ?? `Saved ${result.id}.`} Persisted ${result.movementDecisionCount} lane-movement decision${
+            result.movementDecisionCount === 1 ? '' : 's'
+          } with reciprocal road references.`
+        );
+      }
     } catch (error) {
       console.error(error);
       alert(`Road insertion failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -960,17 +1162,22 @@ export function useRoadEditor(
     const roadId = area.roadId;
     if (!window.confirm(`Delete ${roadId}? Connected roads will be disconnected.`)) return;
 
+    const rollbackObjects = captureRoadDeletionObjects(cityjson, roadId);
     try {
       pushUndo(`Delete ${roadId}`);
-      const { value: result } = runStructurallyGuardedMutation(
-        cityjson,
-        `Deleting ${roadId}`,
-        () => {
-          const deletion = deleteRoadFromCityJson(cityjson, roadId);
-          if (deletion.deleted) compactVertices(cityjson);
-          return deletion;
-        }
-      );
+      // Deleting a road never writes vertices or geometry boundaries. A full
+      // document clone plus two 133k-vertex integrity scans made this simple
+      // edit visibly freeze. Snapshot only objects that can be touched, then
+      // verify every hierarchy/layout/movement reference to the road is gone.
+      const movementRoadIds = removeRoadMovementReferences(cityjson, roadId);
+      const deletion = deleteRoadFromCityJson(cityjson, roadId);
+      const result = {
+        ...deletion,
+        disconnectedRoadIds: [
+          ...new Set([...deletion.disconnectedRoadIds, ...movementRoadIds]),
+        ],
+      };
+      if (result.deleted) assertRoadDeletionReferencesCleared(cityjson, roadId);
       if (!result.deleted) {
         setRoadStatus(`${roadId} is no longer available.`);
         return;
@@ -1002,6 +1209,7 @@ export function useRoadEditor(
         }.`
       );
     } catch (error) {
+      restoreRoadDeletionObjects(cityjson, rollbackObjects);
       console.error(error);
       alert(`Road deletion failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1061,6 +1269,8 @@ export function useRoadEditor(
     setSelectedOsmRoadId,
     roadDraft,
     setRoadDraft,
+    selectedRoadBand,
+    setSelectedRoadBand,
     roadDraftDirty,
     roadDraftHistoryState,
     handleUndoRoadDraft,

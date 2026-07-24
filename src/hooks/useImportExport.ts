@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { CityJsonDocument, CatalogConnection } from '../types';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
@@ -292,9 +292,24 @@ export function useImportExport(
     );
   }, [cityjson, pushUndo, undoRef, dirtyIds, selection, setReloadToken, setSaveStatus, setUndoVersion]);
 
-  const integrity = useMemo(() => {
-    if (!cityjson) return null;
-    return checkIntegrity(cityjson);
+  const [integrity, setIntegrity] = useState<ReturnType<typeof checkIntegrity> | null>(null);
+  useEffect(() => {
+    if (!cityjson) {
+      setIntegrity(null);
+      return;
+    }
+    // Let the mutation render before scanning a city-scale document. This
+    // keeps delete/save controls responsive and coalesces quick consecutive
+    // edits into one current-state integrity pass.
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const report = checkIntegrity(cityjson);
+      if (!cancelled) setIntegrity(report);
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [cityjson, reloadToken]);
 
   const handleShowIntegrity = useCallback(() => {
@@ -327,7 +342,7 @@ export function useImportExport(
     lines.push('');
     const max = 12;
     for (const issue of integrity.issues.slice(0, max)) {
-      const tag = issue.severity === 'error' ? '✗' : issue.severity === 'warning' ? '⚠' : 'ℹ';
+      const tag = issue.severity === 'error' ? 'ERROR' : issue.severity === 'warning' ? 'WARNING' : 'INFO';
       lines.push(`${tag} [${issue.code}] ${issue.message}`);
     }
     if (integrity.issues.length > max) {

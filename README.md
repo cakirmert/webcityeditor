@@ -4,7 +4,7 @@ City Editor is a touch-friendly map editor for Hamburg buildings, roads, and pla
 
 **[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
 
-The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms show semantic LoD3 geometry without photographs by default; **Photo textures** can stream Hamburg’s official imagery for the LoD3 close view. The editable roads, attributes, and saved changes remain in CityJSON.
+The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. From zoom 17, the map streams Hamburg Geoportal's official untextured LoD3 geometry; the browser-ready source uses the same `DEHH...` building IDs as the editable LoD2 context. Detailed buildings use semantic surface colours. Hamburg's official DGM hybrid terrain supplies the shared ground elevation for every building tier and road surface. Editable roads, attributes, and saved changes remain in CityJSON.
 
 ![City Editor showing the Hamburg CityJSON overview](assets/readme/city-overview.jpg)
 
@@ -23,11 +23,11 @@ Open **Map layers** in the upper-left of the map.
 - **Satellite** is useful for checking building footprints and road alignment.
 - **Satellite image** and **Road surfaces** have separate opacity sliders.
 - **Building colours** defaults to **Roof type**. **Usage** also understands Hamburg’s official ALKIS function codes.
-- **Photo textures** is off by default and becomes available only in the close LoD3 view. With it off, LoD3 roofs, walls, windows, and doors retain distinct semantic colours.
-- The status at the bottom explains which building detail level is currently visible.
+- The status at the bottom reports the geometry LoD, drawn objects, buildings, installations, surfaces, and semantic material state.
+- MapLibre keeps TopPlus or satellite as the single visible basemap. Hamburg's CORS-enabled quantized-mesh DGM hybrid is sampled only for object elevations, so delayed terrain textures cannot wash out the map or add a second mesh to every rendered frame.
 
 > **Screenshot to add — `assets/readme/map-layers.jpg`**
-> Open Map layers over a close Hamburg view. Show TopPlus and Satellite, Building colours with Roof type selected, the LoD3 Photo textures switch, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps comparison, semantic colour, and optional LoD3 texture controls together.”
+> Open Map layers over a close Hamburg view. Show TopPlus and Satellite, Building colours with Roof type selected, both opacity controls, and enough map on the right to make their effect obvious. Suggested caption: “Map layers keeps basemap comparison, semantic building colour, and opacity controls together.”
 
 ## Inspect and edit a building
 
@@ -42,7 +42,7 @@ Open **Map layers** in the upper-left of the map.
 
 The loaded source geometry is protected. **Make editable (replace with parametric)** deliberately replaces it with a shape that can change roof geometry, windows, doors, overhangs, and subdivisions. Ordinary attribute edits do not need this conversion.
 
-The selected-building viewer loads only the selected CityJSON object. Use its **LoD2 / LoD3** control to compare source tiers and its separate **Textures** switch when that building contains a photo atlas; textures start off. Their photographed windows and doors are not automatically editable openings. Buildings are attached to the flat editor map using each building’s surveyed ground height.
+The selected-building viewer loads only the selected object. Use its **LoD2 / LoD3** control to compare source tiers. When the local CityJSON has only LoD2 for an official Hamburg building, LoD3 stays enabled and isolates the matching untextured Geoportal mesh by its `DEHH...` ID. Both tiers use semantic surface colours; photographed windows and doors are not automatically editable openings.
 
 ## Add a new building
 
@@ -52,7 +52,7 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
 4. For a custom building, tap at least three footprint corners and choose **Use outline**.
 5. Set height, roof, classic/balanced/modern window rhythm, doors, and editable parts while watching the preview.
 6. Keep **One building** for the simple default. Choose independent floors or side-by-side wings only when those parts must be edited separately.
-7. Choose **Create Building**. The new building becomes part of the working CityJSON.
+7. Choose **Create Building**. The new building becomes part of the working CityJSON, gets an explicit LoD3 tier, and remains visible through the overview/detail transition.
 
 > **Screenshot to add — `assets/readme/new-building.jpg`**
 > Show the New Building chooser with the four sample assets and Draw a custom building visible. Keep part of the map visible behind it. Suggested caption: “Start from a reusable single-building LoD3 asset or draw a custom footprint.”
@@ -66,14 +66,18 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
 2. Tap a coloured road surface on the map, then choose **Edit road**.
 3. Tap a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
 4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction arrows update from the road bands.
-5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Drag a road end onto a teal target to confirm a road connection.
-6. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
-7. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.
-8. Choose **Save exact attributes** or **Save road changes**. **Discard** leaves the saved CityJSON unchanged.
+5. Removing a band selects the nearest survivor and cleans up its saved lane connections. The final band remains so the editor always has an active menu.
+6. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Every incoming lane has its own numbered purple connector; all compatible outgoing lanes appear as teal targets, and faint curves preview the alternatives.
+7. Drag one numbered connector onto one teal lane target to confirm exactly that direction- and mode-compatible movement. Add more targets to the same source lane when it supports multiple turns. Imported junctions also show subdued osm2streets-derived proposals; inspect their source/target bands and choose **Confirm** or **Reject** in the bottom editor.
+8. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
+9. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.
+10. Choose **Save exact attributes** or **Save road changes**. Confirmed/rejected movement decisions are stored reciprocally without changing protected exact polygons. **Discard** leaves the saved CityJSON unchanged.
 
 ![Exact CityJSON road editing with on-map band controls](assets/readme/road-editor.jpg)
 
 Attribute-only changes preserve imported osm2streets polygons and vertices. Moving handles, changing widths or band order, adding or removing a band, splitting a section, or changing the curve mode rebuilds only that road as editable ribbons.
+
+Outside the **Roads** workspace, saved road surfaces sit just above the sampled terrain and can be hidden by buildings and trees. Opening **Roads** temporarily brings them to the foreground for reliable selection and editing.
 
 ## Draw a new road
 
@@ -82,7 +86,7 @@ Attribute-only changes preserve imported osm2streets polygons and vertices. Movi
 3. Choose the large **Finish road** button. Two or more points are required.
 4. Edit the generated road bands exactly like an existing road.
 5. Compare the shape with **Satellite** and adjust both opacity sliders when needed.
-6. Use the yellow end handles and teal targets to connect it to existing roads.
+6. Use the numbered per-lane purple connectors and visible teal lane targets to connect it to existing roads; faint curves show candidates and stronger curves show saved lane-to-lane movements.
 7. Choose **Save new road** to insert it into the working CityJSON.
 
 > **Screenshot to add — `assets/readme/new-road.jpg`**
@@ -118,7 +122,7 @@ Use this list when adding or replacing README images:
 | File | What the image must teach |
 | --- | --- |
 | `city-overview.jpg` | Where the main toolbar, search, map, and Map layers control are located. |
-| `map-layers.jpg` | TopPlus/Satellite choice, Usage/Roof type colouring, LoD3 textures, and opacity controls. |
+| `map-layers.jpg` | TopPlus/Satellite choice, Usage/Roof type colouring, and opacity controls. |
 | `building-editor.jpg` | A selected building, its map highlight, preview modes, attributes, and main editing actions. |
 | `new-building.jpg` | The asset list and custom-building choice. |
 | `custom-building.jpg` | A drawn footprint plus the explanatory creation preview. |
@@ -140,4 +144,4 @@ npm run dev
 
 Open the local address printed in the terminal. The committed demo is enough for the default workflow.
 
-The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).
+The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Ground elevation comes from Hamburg's [DGM hybrid quantized-mesh service](https://daten-hamburg.de/gdi3d/datasource-data/Gelaende/layer.json). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).

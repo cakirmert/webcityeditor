@@ -14,7 +14,22 @@ export interface CityJsonMapMesh {
   objectCount: number;
   maxLod: number | null;
   texturedSurfaceCount: number;
+  availableTexturedSurfaceCount: number;
   explicitOpeningSurfaceCount: number;
+  surfaceCount: number;
+  rootObjectCount: number;
+  installationObjectCount: number;
+  objectCountByLod: Record<string, number>;
+  droppedObjectCount: number;
+  truncated: boolean;
+  /** Canonical per-root anchors computed from all source LoDs, never the active camera subset. */
+  objectAnchors: CityJsonObjectMapAnchor[];
+}
+
+export interface CityJsonObjectMapAnchor {
+  rootId: string;
+  projected: [number, number, number];
+  lngLat: [number, number];
 }
 
 export interface CityJsonTextureMesh {
@@ -24,7 +39,7 @@ export interface CityJsonTextureMesh {
   texCoords: Float32Array;
 }
 
-interface BuildOptions {
+export interface CityJsonMapBuildOptions {
   /** Only include these CityObject ids (usually the current close viewport). */
   objectIds?: ReadonlySet<string>;
   /** Select the highest source geometry at or below this LoD. */
@@ -35,12 +50,17 @@ interface BuildOptions {
   maxInputVertices?: number;
   /** Place each root object group on the flat map ground without changing its relative heights. */
   groundObjectGroups?: boolean;
+  /** Clamp each root to an absolute terrain elevation. Keys are root building
+   * ids; selected LoDs are independently normalized to the same terrain. */
+  groundElevationByObject?: ReadonlyMap<string, number>;
   /** Bind source photographs. False keeps the same highest-LoD geometry but
    * colours every face from its semantic surface type. */
   texturesEnabled?: boolean;
   /** Optional normalized RGB override by CityObject id. Descendants inherit
    * the colour assigned to their root object. */
   objectColors?: ReadonlyMap<string, readonly [number, number, number]>;
+  /** Stable projected origin shared by every LoD/texture representation. */
+  originProjected?: readonly [number, number, number];
 }
 
 const DEFAULT_MAX_OUTPUT_VERTICES = 80_000;
@@ -55,13 +75,13 @@ const SURFACE_COLORS: Record<string, [number, number, number]> = {
 };
 
 /**
- * Build one combined triangle mesh from CityJSON surfaces for small documents.
- * The map still uses footprint polygons for picking; this mesh is purely a
- * visual LoD2-ish context layer so roof geometry is visible in the map.
+ * Build one combined highest-available triangle mesh from CityJSON surfaces.
+ * The map still uses footprint polygons for picking; this mesh owns the
+ * camera-independent LoD2/LoD3 semantic and photo-textured representation.
  */
 export function buildCityJsonMapMesh(
   doc: CityJsonDocument,
-  options: BuildOptions = {}
+  options: CityJsonMapBuildOptions = {}
 ): CityJsonMapMesh | null {
   const maxOutputVertices =
     options.maxOutputVertices ?? options.maxInputVertices ?? DEFAULT_MAX_OUTPUT_VERTICES;
@@ -74,35 +94,58 @@ export function buildCityJsonMapMesh(
     rings: number[][];
     surfaceType: string;
     texture: SurfaceTexture | null;
-    groundZ: number | null;
+    availableTexture: boolean;
+    sourceGroundZ: number | null;
+    targetGroundZ: number | null;
     color: readonly [number, number, number] | null;
+    lod: number | null;
   }> = [];
   const referenced = new Set<number>();
   let queuedVertexCount = 0;
   let objectCount = 0;
   let maxLod: number | null = null;
+  const queuedObjectIds = new Set<string>();
+  const droppedObjectIds = new Set<string>();
+  const queuedRootIds = new Set<string>();
+  const objectCountByLod: Record<string, number> = {};
+  let installationObjectCount = 0;
+  let truncated = false;
+  // `objectIds` is an insertion-ordered Set assembled nearest-first by the
+  // map. Honour that order so the output cap cannot be exhausted by farther
+  // LoD2 context before the close LoD3 buildings and their installations are
+  // reached later in the CityJSON object's original document order.
+  const orderedObjectIds = options.objectIds
+    ? [...options.objectIds].filter((objectId) => !!doc.CityObjects[objectId])
+    : Object.keys(doc.CityObjects);
 
   const selectedGeometries = new Map<string, unknown[]>();
-  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
-    if (options.objectIds && !options.objectIds.has(objectId)) continue;
+  for (const objectId of orderedObjectIds) {
+    const object = doc.CityObjects[objectId];
     selectedGeometries.set(
       objectId,
       highestAvailableGeometries(object.geometry ?? [], options.maxLod)
     );
   }
-  const groundByGroup = options.groundObjectGroups
-    ? computeObjectGroupGrounds(doc, selectedGeometries)
-    : new Map<string, number>();
+  const selectedRootIds = new Set(orderedObjectIds.map((objectId) => rootObjectId(doc, objectId)));
+  const groupMetrics = computeObjectGroupMetrics(doc, selectedRootIds);
+  const selectedGroundByGroup = computeSelectedGroundByGroup(doc, selectedGeometries);
 
-  for (const [objectId, obj] of Object.entries(doc.CityObjects)) {
-    if (options.objectIds && !options.objectIds.has(objectId)) continue;
+  for (const objectId of orderedObjectIds) {
+    const obj = doc.CityObjects[objectId];
     const geometries = selectedGeometries.get(objectId) ?? [];
     if (geometries.length === 0) continue;
     const groupId = rootObjectId(doc, objectId);
-    const groundZ = groundByGroup.get(groupId) ?? null;
+    const sourceGroundZ = selectedGroundByGroup.get(groupId) ?? null;
+    const requestedTerrainElevation = options.groundElevationByObject?.get(groupId);
+    const targetGroundZ = options.groundObjectGroups
+      ? 0
+      : Number.isFinite(requestedTerrainElevation)
+        ? requestedTerrainElevation as number
+        : null;
     const objectColor =
       options.objectColors?.get(objectId) ?? options.objectColors?.get(groupId) ?? null;
     let objectQueued = false;
+    let objectMaxLod: number | null = null;
     for (const geomRaw of geometries) {
       const geom = geomRaw as {
         type?: string;
@@ -115,51 +158,55 @@ export function buildCityJsonMapMesh(
         texture?: unknown;
       };
       const lod = numericLod(geom.lod);
-      if (lod !== null) maxLod = Math.max(maxLod ?? lod, lod);
       forEachSurface(geom, (rings, surfaceType, path) => {
         const count = rings.reduce((sum, ring) => sum + ring.length, 0);
-        if (count < 3 || queuedVertexCount + count > maxOutputVertices) return;
+        if (count < 3) return;
+        if (queuedVertexCount + count > maxOutputVertices) {
+          truncated = true;
+          droppedObjectIds.add(objectId);
+          return;
+        }
+        const availableTexture = readSurfaceTexture(doc, geom, path, rings);
         queued.push({
           rings,
           surfaceType: surfaceType ?? obj.type,
           texture:
             options.texturesEnabled === false
               ? null
-              : readSurfaceTexture(doc, geom, path, rings),
-          groundZ,
+              : availableTexture,
+          availableTexture: availableTexture !== null,
+          sourceGroundZ,
+          targetGroundZ,
           color: objectColor,
+          lod,
         });
         queuedVertexCount += count;
         objectQueued = true;
+        if (lod !== null) {
+          maxLod = Math.max(maxLod ?? lod, lod);
+          objectMaxLod = Math.max(objectMaxLod ?? lod, lod);
+        }
         for (const ring of rings) for (const index of ring) referenced.add(index);
       });
     }
-    if (objectQueued) objectCount++;
-    if (queuedVertexCount >= maxOutputVertices) break;
+    if (objectQueued) {
+      objectCount++;
+      queuedObjectIds.add(objectId);
+      queuedRootIds.add(groupId);
+      if (obj.type === 'BuildingInstallation') installationObjectCount++;
+      const lodKey = objectMaxLod === null ? 'unknown' : String(objectMaxLod);
+      objectCountByLod[lodKey] = (objectCountByLod[lodKey] ?? 0) + 1;
+    }
   }
 
   if (queued.length === 0 || referenced.size === 0) return null;
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let minZ = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const idx of referenced) {
-    const vertex = doc.vertices[idx];
-    if (!vertex) continue;
-    const coordinate = applyVertexTransform(vertex, doc);
-    minX = Math.min(minX, coordinate.x);
-    minY = Math.min(minY, coordinate.y);
-    minZ = Math.min(minZ, coordinate.z);
-    maxX = Math.max(maxX, coordinate.x);
-    maxY = Math.max(maxY, coordinate.y);
-  }
-  if (![minX, minY, minZ, maxX, maxY].every(Number.isFinite)) return null;
+  const canonicalOrigin = options.originProjected ?? canonicalCityJsonMapOrigin(doc);
+  if (!canonicalOrigin) return null;
   const origin = {
-    x: (minX + maxX) / 2,
-    y: (minY + maxY) / 2,
-    z: options.groundObjectGroups ? 0 : minZ,
+    x: canonicalOrigin[0],
+    y: canonicalOrigin[1],
+    z: options.groundObjectGroups || options.groundElevationByObject ? 0 : canonicalOrigin[2],
   };
   const anchorLngLat = projectToWgs84(crs.code, origin);
 
@@ -171,11 +218,20 @@ export function buildCityJsonMapMesh(
     { image: string; positions: number[]; indices: number[]; texCoords: number[] }
   >();
 
-  const localVertex = (idx: number, groundZ: number | null): [number, number, number] | null => {
+  const localVertex = (
+    idx: number,
+    sourceGroundZ: number | null,
+    targetGroundZ: number | null
+  ): [number, number, number] | null => {
     const v = doc.vertices[idx];
     if (!v) return null;
     const c = applyVertexTransform(v, doc);
-    return [c.x - origin.x, c.y - origin.y, c.z - (groundZ ?? origin.z)];
+    const lngLat = projectToWgs84(crs.code, c);
+    const [east, north] = localMapMetersFromLngLat(anchorLngLat, lngLat);
+    const z = sourceGroundZ !== null && targetGroundZ !== null
+      ? c.z - sourceGroundZ + targetGroundZ
+      : c.z - origin.z;
+    return [east, north, z];
   };
 
   for (const surface of queued) {
@@ -188,7 +244,7 @@ export function buildCityJsonMapMesh(
       addTexturedSurface(
         surface.rings,
         surface.texture.uvRings,
-        (idx) => localVertex(idx, surface.groundZ),
+        (idx) => localVertex(idx, surface.sourceGroundZ, surface.targetGroundZ),
         target
       );
     } else {
@@ -196,7 +252,7 @@ export function buildCityJsonMapMesh(
         surface.rings,
         surface.surfaceType,
         surface.color,
-        (idx) => localVertex(idx, surface.groundZ),
+        (idx) => localVertex(idx, surface.sourceGroundZ, surface.targetGroundZ),
         positions,
         colors,
         indices
@@ -225,31 +281,166 @@ export function buildCityJsonMapMesh(
     objectCount,
     maxLod,
     texturedSurfaceCount: queued.filter((surface) => surface.texture !== null).length,
+    availableTexturedSurfaceCount: queued.filter((surface) => surface.availableTexture).length,
     explicitOpeningSurfaceCount: queued.filter(
       (surface) => surface.surfaceType === 'Window' || surface.surfaceType === 'Door'
     ).length,
+    surfaceCount: queued.length,
+    rootObjectCount: queuedRootIds.size,
+    installationObjectCount,
+    objectCountByLod,
+    droppedObjectCount: [...droppedObjectIds].filter((objectId) => !queuedObjectIds.has(objectId)).length,
+    truncated,
+    objectAnchors: [...queuedRootIds].flatMap((rootId) => {
+      const metrics = groupMetrics.get(rootId);
+      if (!metrics) return [];
+      const projected: [number, number, number] = [
+        (metrics.minX + metrics.maxX) / 2,
+        (metrics.minY + metrics.maxY) / 2,
+        options.groundObjectGroups
+          ? 0
+          : options.groundElevationByObject?.get(rootId) ?? metrics.minZ,
+      ];
+      return [{ rootId, projected, lngLat: projectToWgs84(crs.code, {
+        x: projected[0], y: projected[1], z: projected[2],
+      }) }];
+    }),
   };
 }
 
-function computeObjectGroupGrounds(
+interface ObjectGroupMetrics {
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
+/**
+ * One camera-independent origin for every viewport subset, LoD, and texture
+ * state. Metadata extent is authoritative when present; otherwise all
+ * geometry-referenced vertices (not unused tail vertices) define the origin.
+ */
+export function canonicalCityJsonMapOrigin(
+  doc: CityJsonDocument
+): [number, number, number] | null {
+  const extent = doc.metadata?.geographicalExtent;
+  if (
+    Array.isArray(extent) &&
+    extent.length >= 6 &&
+    extent.slice(0, 6).every((value) => typeof value === 'number' && Number.isFinite(value))
+  ) {
+    return [
+      (extent[0] + extent[3]) / 2,
+      (extent[1] + extent[4]) / 2,
+      extent[2],
+    ];
+  }
+  const roots = new Set(Object.keys(doc.CityObjects).map((id) => rootObjectId(doc, id)));
+  const metrics = [...computeObjectGroupMetrics(doc, roots).values()];
+  if (metrics.length === 0) return null;
+  return [
+    (Math.min(...metrics.map((entry) => entry.minX)) +
+      Math.max(...metrics.map((entry) => entry.maxX))) / 2,
+    (Math.min(...metrics.map((entry) => entry.minY)) +
+      Math.max(...metrics.map((entry) => entry.maxY))) / 2,
+    Math.min(...metrics.map((entry) => entry.minZ)),
+  ];
+}
+
+/** Convert WGS84 positions to stable east/north offsets expected by deck.gl. */
+export function localMapMetersFromLngLat(
+  anchor: readonly [number, number],
+  point: readonly [number, number]
+): [number, number] {
+  const latitude = ((anchor[1] + point[1]) / 2) * Math.PI / 180;
+  return [
+    (point[0] - anchor[0]) * 111_320 * Math.max(0.2, Math.cos(latitude)),
+    (point[1] - anchor[1]) * 110_540,
+  ];
+}
+
+function computeObjectGroupMetrics(
   doc: CityJsonDocument,
-  geometriesByObject: ReadonlyMap<string, unknown[]>
-): Map<string, number> {
-  const groundByGroup = new Map<string, number>();
-  for (const [objectId, geometries] of geometriesByObject) {
+  selectedRootIds: ReadonlySet<string>
+): Map<string, ObjectGroupMetrics> {
+  const metricsByGroup = new Map<string, ObjectGroupMetrics>();
+  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
     const groupId = rootObjectId(doc, objectId);
-    for (const geometry of geometries) {
-      const indices = collectBoundaryIndices((geometry as { boundaries?: unknown }).boundaries);
+    if (!selectedRootIds.has(groupId)) continue;
+    for (const geometry of object.geometry ?? []) {
+      const indices = collectBoundaryIndices(
+        (geometry as { boundaries?: unknown }).boundaries
+      );
       for (const index of indices) {
         const vertex = doc.vertices[index];
         if (!vertex) continue;
-        const z = applyVertexTransform(vertex, doc).z;
-        if (!Number.isFinite(z)) continue;
-        groundByGroup.set(groupId, Math.min(groundByGroup.get(groupId) ?? Infinity, z));
+        const coordinate = applyVertexTransform(vertex, doc);
+        if (![coordinate.x, coordinate.y, coordinate.z].every(Number.isFinite)) continue;
+        const current = metricsByGroup.get(groupId) ?? {
+          minX: Infinity,
+          minY: Infinity,
+          minZ: Infinity,
+          maxX: -Infinity,
+          maxY: -Infinity,
+          maxZ: -Infinity,
+        };
+        current.minX = Math.min(current.minX, coordinate.x);
+        current.minY = Math.min(current.minY, coordinate.y);
+        current.minZ = Math.min(current.minZ, coordinate.z);
+        current.maxX = Math.max(current.maxX, coordinate.x);
+        current.maxY = Math.max(current.maxY, coordinate.y);
+        current.maxZ = Math.max(current.maxZ, coordinate.z);
+        metricsByGroup.set(groupId, current);
       }
     }
   }
-  return groundByGroup;
+  return metricsByGroup;
+}
+
+/** Resolve the actual ground of the geometry tier selected for this frame.
+ * LoD2 and LoD3 may have slightly different source Z values; normalizing each
+ * selected tier prevents a vertical jump while keeping one horizontal anchor. */
+function computeSelectedGroundByGroup(
+  doc: CityJsonDocument,
+  selectedGeometries: ReadonlyMap<string, readonly unknown[]>
+): Map<string, number> {
+  const values = new Map<string, { semantic: number[]; fallback: number[] }>();
+  for (const [objectId, geometries] of selectedGeometries) {
+    const groupId = rootObjectId(doc, objectId);
+    const target = values.get(groupId) ?? { semantic: [], fallback: [] };
+    for (const geometry of geometries) {
+      forEachSurface(
+        geometry as {
+          type?: string;
+          boundaries?: unknown;
+          semantics?: { surfaces?: Array<{ type?: string }>; values?: unknown };
+          texture?: unknown;
+        },
+        (rings, surfaceType) => {
+          for (const ring of rings) {
+            for (const index of ring) {
+              const vertex = doc.vertices[index];
+              if (!vertex) continue;
+              const z = applyVertexTransform(vertex, doc).z;
+              if (!Number.isFinite(z)) continue;
+              target.fallback.push(z);
+              if (surfaceType === 'GroundSurface') target.semantic.push(z);
+            }
+          }
+        }
+      );
+    }
+    values.set(groupId, target);
+  }
+
+  const result = new Map<string, number>();
+  for (const [groupId, candidates] of values) {
+    const source = candidates.semantic.length > 0 ? candidates.semantic : candidates.fallback;
+    if (source.length > 0) result.set(groupId, Math.min(...source));
+  }
+  return result;
 }
 
 function rootObjectId(doc: CityJsonDocument, objectId: string): string {
@@ -278,7 +469,13 @@ function highestAvailableGeometries<T>(geometries: T[], maxLod?: number): T[] {
   const numeric = lods.filter((lod): lod is number => lod !== null);
   if (numeric.length === 0) return [geometries.at(-1)!];
   const eligible = maxLod === undefined ? numeric : numeric.filter((lod) => lod <= maxLod);
-  if (eligible.length === 0) return [];
+  // A newly placed ready-made building can legitimately contain only LoD3.
+  // Keep its lowest available source geometry visible in the middle zoom band
+  // instead of removing its block fallback and then returning no mesh.
+  if (eligible.length === 0) {
+    const lowest = Math.min(...numeric);
+    return geometries.filter((_, index) => lods[index] === lowest);
+  }
   const highest = Math.max(...eligible);
   return geometries.filter((_, index) => lods[index] === highest);
 }
@@ -500,7 +697,10 @@ function addTexturedSurface(
   const vertexOffset = target.positions.length / 3;
   for (const point of vertices3d) target.positions.push(point[0], point[1], point[2]);
   for (const uv of uvCoordinates) {
-    target.texCoords.push(uv[0], uv[1]);
+    // CityJSON texture coordinates use a lower-left origin, while browser image
+    // uploads expose their first row at v=0. Flip once in the shared mesh so
+    // deck.gl and Three.js sample the same source texels.
+    target.texCoords.push(uv[0], 1 - uv[1]);
   }
   for (const triangle of earcut(flat2d, holes, 2)) target.indices.push(vertexOffset + triangle);
 }
