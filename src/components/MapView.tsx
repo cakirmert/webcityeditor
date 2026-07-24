@@ -101,6 +101,7 @@ import {
   roadDepthTestEnabled,
   type RoadRenderPosition,
 } from '../lib/road-rendering';
+import { buildLaneConnectorSurface } from '../lib/road-connection-surfaces';
 import {
   BUILDING_BLOCK_FULL_ZOOM,
   BUILDING_BLOCK_MIN_ZOOM,
@@ -1963,6 +1964,15 @@ export default function MapView({
       renderedOsmRoads,
       selectedDraftBand
     );
+    const confirmedLaneConnectionSurfaces = laneConnectionPaths.flatMap((connection) => {
+      if (connection.status !== 'confirmed') return [];
+      const polygon = buildLaneConnectorSurface({
+        path: connection.path,
+        sourceWidthM: connection.sourceWidthM,
+        targetWidthM: connection.targetWidthM,
+      });
+      return polygon.length >= 4 ? [{ ...connection, polygon }] : [];
+    });
     const connectionDragPath = roadConnectionDragPreview
       ? curvedConnectionPath(
           roadConnectionDragPreview.from,
@@ -2538,6 +2548,26 @@ export default function MapView({
             ],
             getLineColor: [basemap, roadOverlayOpacity],
           },
+        })
+      );
+    }
+
+    if (confirmedLaneConnectionSurfaces.length > 0) {
+      layers.push(
+        new PolygonLayer({
+          id: 'road-lane-connection-surfaces',
+          data: confirmedLaneConnectionSurfaces,
+          getPolygon: (d: any) => d.polygon,
+          getFillColor: (d: any) => [
+            d.color[0],
+            d.color[1],
+            d.color[2],
+            Math.min(150, d.color[3]),
+          ],
+          filled: true,
+          stroked: false,
+          pickable: false,
+          parameters: { depthTest: false } as unknown as never,
         })
       );
     }
@@ -3817,6 +3847,8 @@ interface LaneConnectionPath {
   selected: boolean;
   sourceBandIndex: number;
   targetBandIndex: number;
+  sourceWidthM: number;
+  targetWidthM: number;
   status: 'proposed' | 'confirmed';
   provenance: string;
   movementId?: string;
@@ -3898,6 +3930,10 @@ function buildLaneConnectionPaths(
           selected,
           sourceBandIndex,
           targetBandIndex,
+          sourceWidthM: section.bands[sourceBandIndex].widthM,
+          targetWidthM:
+            target?.section.bands[targetBandIndex]?.widthM ??
+            section.bands[sourceBandIndex].widthM,
           status: 'confirmed',
           provenance: 'manual',
         });
@@ -3961,6 +3997,8 @@ function buildLaneConnectionPaths(
       selected,
       sourceBandIndex,
       targetBandIndex,
+      sourceWidthM: sourceSection.bands[sourceBandIndex].widthM,
+      targetWidthM: targetSection.bands[targetBandIndex].widthM,
       status: movement.status,
       provenance: movement.provenance,
       movementId: movement.id,

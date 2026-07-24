@@ -88,7 +88,7 @@ Endpoint editing is deliberate:
   from the connected road in the same guarded edit when the user accepts the disconnection;
 - deleting a CityJSON road clears reciprocal endpoint metadata from every surviving editable road.
 
-Connection metadata and imported movement decisions confirm graph topology. They do not yet synthesize new intersection surfaces or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
+Connection metadata and imported movement decisions confirm graph topology. While editing, the selected confirmed movement is previewed as a width-aware tapered connector surface between its source and target lanes; proposed movements remain subdued centre-lines. These preview surfaces are not yet persisted as CityJSON junction geometry, and the editor does not yet synthesize complete intersection surfaces or regenerated road markings.
 
 ## UX and performance decisions
 
@@ -310,7 +310,7 @@ This task is complete only when all of the following hold in the Hamburg demo:
 
 The following work is intentionally not claimed as complete:
 
-1. Generate true intersection surfaces from confirmed connected roads, including lane-to-lane connectors, turns, crossings, and regenerated markings. Exact lane polygons already match osm2streets styling; dynamic junction synthesis is not claimed as complete.
+1. Persist true intersection surfaces from confirmed connected roads, including turns, crossings, and regenerated markings. The editor now previews the selected confirmed lane-to-lane movement as a tapered surface at the source and target band widths, but does not yet write that connector into CityJSON junction geometry. Exact lane polygons already match osm2streets styling; complete dynamic junction synthesis is not claimed as complete.
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
 3. Complete topology-aware coordinate propagation for every road source. The editor now detects a
    moved-away confirmed endpoint and can, after explicit confirmation, move a generated peer road's
