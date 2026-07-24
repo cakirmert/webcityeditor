@@ -36,7 +36,11 @@ import { activeMetricCrsForCityJson } from '../lib/projection';
 import { limitRoadQueryBbox, type Wgs84Bbox } from '../lib/road-query';
 import { extractFootprints } from '../lib/footprints';
 import { runStructurallyGuardedMutation } from '../lib/editor-actions';
-import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
+import {
+  validateRoadFit,
+  type RoadFitConflict,
+  type RoadFitTree,
+} from '../lib/road-fit';
 import type { ParcelZone } from '../lib/zoning';
 import type { BasemapMode } from '../lib/basemap';
 import { compactVertices } from '../lib/compact';
@@ -68,7 +72,9 @@ const ROAD_QUERY_MAX_HEIGHT_METERS = 1_600;
 const ROAD_QUERY_TIMEOUT_MS = 25_000;
 const ROAD_BUILDING_CLEARANCE_BLOCK_METERS = 0.5;
 const ROAD_BUILDING_CLEARANCE_WARNING_METERS = 1;
+const ROAD_TREE_CLEARANCE_METERS = 0.5;
 const EMPTY_PARCEL_ZONES: ParcelZone[] = [];
+const EMPTY_ROAD_FIT_TREES: RoadFitTree[] = [];
 
 interface RoadEditBaseline {
   roadId: string;
@@ -164,9 +170,10 @@ function downloadJson(value: unknown, fileName: string): void {
 export function useRoadEditor(
   coreState: CoreState,
   undoRedo: UndoRedoState,
-  options: { zones?: ParcelZone[] } = {}
+  options: { zones?: ParcelZone[]; trees?: RoadFitTree[] } = {}
 ) {
   const affectedZones = options.zones?.length ? options.zones : EMPTY_PARCEL_ZONES;
+  const roadFitTrees = options.trees?.length ? options.trees : EMPTY_ROAD_FIT_TREES;
   const {
     cityjson,
     setSelection,
@@ -665,14 +672,16 @@ export function useRoadEditor(
   // path cloned the entire CityJSON document and reran fit validation for every
   // pointer event, which made handles feel detached on city-scale datasets.
   useEffect(() => {
-    const shouldHide =
-      !cityjson ||
-      !roadDraft ||
-      (!roadDraftDirty && !!(osm2streetsResult || selectedRoadArea || lastInsertedRoadId));
-    if (shouldHide) {
+    if (!cityjson || !roadDraft) {
       setRoadPreviewAreas([]);
       setRoadFitConflicts([]);
       setRoadFitPending(false);
+      return;
+    }
+    const shouldHidePreview =
+      !roadDraftDirty && !!(osm2streetsResult || selectedRoadArea || lastInsertedRoadId);
+    if (shouldHidePreview) {
+      setRoadPreviewAreas([]);
       return;
     }
     const elapsed = performance.now() - lastPreviewAtRef.current;
@@ -703,28 +712,34 @@ export function useRoadEditor(
     reloadToken,
   ]);
 
+  const roadFitAreas = useMemo(() => {
+    if (roadPreviewAreas.length > 0) return roadPreviewAreas;
+    if (!roadDraft || !editingRoadId) return [];
+    return roadAreas.filter((area) => area.roadId === editingRoadId);
+  }, [editingRoadId, roadAreas, roadDraft, roadPreviewAreas]);
+
   // Clearance/overlap checks intentionally trail the visual curve slightly;
   // they settle after the user's latest movement instead of blocking it.
   useEffect(() => {
-    if (
-      !cityjson ||
-      roadPreviewAreas.length === 0 ||
-      exactGeometryStatus === 'preserved'
-    ) {
+    if (!cityjson || roadFitAreas.length === 0) {
       setRoadFitConflicts([]);
       setRoadFitPending(false);
       return;
     }
+    const validateChangedGeometry =
+      roadPreviewAreas.length > 0 && exactGeometryStatus !== 'preserved';
     setRoadFitPending(true);
     const timer = window.setTimeout(() => {
       setRoadFitConflicts(
         validateRoadFit({
-          roadAreas: roadPreviewAreas,
-          buildingFootprints,
-          affectedLand: affectedZones,
+          roadAreas: roadFitAreas,
+          buildingFootprints: validateChangedGeometry ? buildingFootprints : [],
+          trees: roadFitTrees,
+          affectedLand: validateChangedGeometry ? affectedZones : [],
           metricCrs: activeMetricCrsForCityJson(cityjson),
           buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
           buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
+          treeClearanceM: ROAD_TREE_CLEARANCE_METERS,
         })
       );
       setRoadFitPending(false);
@@ -732,10 +747,12 @@ export function useRoadEditor(
     return () => window.clearTimeout(timer);
   }, [
     cityjson,
-    roadPreviewAreas,
+    roadFitAreas,
+    roadFitTrees,
     buildingFootprints,
     affectedZones,
     exactGeometryStatus,
+    roadPreviewAreas.length,
   ]);
 
   const handleInsertRoad = useCallback(() => {
@@ -757,10 +774,12 @@ export function useRoadEditor(
       : validateRoadFit({
           roadAreas: commitPreview,
           buildingFootprints,
+          trees: roadFitTrees,
           affectedLand: affectedZones,
           metricCrs: activeMetricCrsForCityJson(cityjson),
           buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
           buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
+          treeClearanceM: ROAD_TREE_CLEARANCE_METERS,
         });
     const blockingConflicts = commitConflicts.filter(
       (conflict) => conflict.severity === 'error'
@@ -887,6 +906,7 @@ export function useRoadEditor(
     exactGeometryStatus,
     roadAreas,
     buildingFootprints,
+    roadFitTrees,
     affectedZones,
     clearRoadDraftHistory,
     pushUndo,

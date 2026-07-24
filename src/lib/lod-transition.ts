@@ -9,6 +9,26 @@ export const BUILDING_DETAIL_FULL_ZOOM = 18;
 /** Textured Hamburg LoD3 is deliberately reserved for a very close street view. */
 export const BUILDING_LOD3_MIN_ZOOM = 18.25;
 
+export type BuildingMapDetailMode =
+  | 'lod0'
+  | 'lod2'
+  | 'lod3-untextured'
+  | 'lod3-textured';
+
+/**
+ * Close zoom always upgrades to the highest available LoD3 geometry. Photo
+ * tiles are a separate, explicit opt-in so reaching LoD3 never starts their
+ * network requests by itself.
+ */
+export function buildingMapDetailMode(
+  zoom: number,
+  texturesEnabled: boolean
+): BuildingMapDetailMode {
+  if (zoom < BUILDING_DETAIL_MIN_ZOOM) return 'lod0';
+  if (zoom < BUILDING_LOD3_MIN_ZOOM) return 'lod2';
+  return texturesEnabled ? 'lod3-textured' : 'lod3-untextured';
+}
+
 /**
  * A pitched map has a much larger visible footprint than a top-down map. Start
  * with a useful neighbourhood instead of a tiny 24-building island, then widen

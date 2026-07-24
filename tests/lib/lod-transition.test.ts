@@ -5,6 +5,7 @@ import {
   BUILDING_DETAIL_MIN_ZOOM,
   BUILDING_DETAIL_MIN_OBJECTS,
   BUILDING_LOD3_MIN_ZOOM,
+  buildingMapDetailMode,
   buildingDetailObjectLimit,
   smoothZoomStep,
 } from '../../src/lib/lod-transition';
@@ -26,5 +27,16 @@ describe('building LoD zoom transition', () => {
     expect(buildingDetailObjectLimit(1)).toBe(BUILDING_DETAIL_MAX_OBJECTS);
     expect(buildingDetailObjectLimit(-1)).toBe(BUILDING_DETAIL_MIN_OBJECTS);
     expect(buildingDetailObjectLimit(2)).toBe(BUILDING_DETAIL_MAX_OBJECTS);
+  });
+
+  it('uses untextured LoD3 first and requests textured LoD3 only after opt-in', () => {
+    expect(buildingMapDetailMode(BUILDING_DETAIL_MIN_ZOOM - 0.01, false)).toBe('lod0');
+    expect(buildingMapDetailMode(BUILDING_LOD3_MIN_ZOOM - 0.01, false)).toBe('lod2');
+    expect(buildingMapDetailMode(BUILDING_LOD3_MIN_ZOOM, false)).toBe(
+      'lod3-untextured'
+    );
+    expect(buildingMapDetailMode(BUILDING_LOD3_MIN_ZOOM, true)).toBe(
+      'lod3-textured'
+    );
   });
 });

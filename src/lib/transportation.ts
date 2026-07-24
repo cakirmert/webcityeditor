@@ -1674,6 +1674,9 @@ export function roadSectionPointAt(
   normalizedCurve = normaliseRoadCurve(section.curve)
 ): [number, number] {
   const points = normalizedPoints;
+  if (points.length < 2) {
+    return points[0] ?? section.centerlineWgs84[segmentIndex] ?? [0, 0];
+  }
   const index = Math.max(0, Math.min(points.length - 2, segmentIndex));
   const p1 = points[index];
   const p2 = points[index + 1];

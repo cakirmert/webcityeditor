@@ -74,8 +74,8 @@ import {
   BUILDING_BLOCK_MIN_ZOOM,
   BUILDING_DETAIL_FULL_ZOOM,
   BUILDING_DETAIL_MIN_ZOOM,
-  BUILDING_LOD3_MIN_ZOOM,
   HAMBURG_TREE_MIN_ZOOM,
+  buildingMapDetailMode,
   buildingDetailObjectLimit,
   smoothZoomStep,
 } from '../lib/lod-transition';
@@ -95,11 +95,11 @@ import {
 import type { BasemapMode } from '../lib/basemap';
 import {
   groundHamburgLod3Tile,
-  HAMBURG_LOD3_TILESET_URL,
+  hamburgLod3TilesetUrl,
 } from '../lib/hamburg-lod3-tiles';
 import { Layers3, Map as MapIcon, Satellite } from 'lucide-react';
 
-/** Zoom stages keep LoD0, source LoD2, and close textured LoD3 distinct. */
+/** Zoom stages keep LoD0, source LoD2, and close untextured-first LoD3 distinct. */
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
@@ -108,6 +108,55 @@ const DEFAULT_INITIAL_ZOOM = 12;
 const EDIT_FOCUS_PADDING_DEGREES = 0.0038;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
 const HAMBURG_CITY_CENTER_TREES_URL = 'data/hamburg/hamburg-city-center-trees.json';
+
+function createHamburgTreeLayers(
+  trees: HamburgCityTree[],
+  opacity: number,
+  conflictingTreeIds: ReadonlySet<string>
+): any[] {
+  const layers: any[] = [
+    new SimpleMeshLayer<HamburgCityTree>({
+      id: 'hamburg-official-tree-trunks',
+      data: trees,
+      mesh: TREE_TRUNK_MESH as unknown as never,
+      getPosition: treePositionOnFlatGround,
+      getScale: treeTrunkScale,
+      getColor: (tree) =>
+        conflictingTreeIds.has(tree.id)
+          ? [255, 126, 42, 255]
+          : [104, 74, 50, 255],
+      coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+      pickable: false,
+      opacity,
+      material: { ambient: 0.48, diffuse: 0.72, shininess: 5 },
+      updateTriggers: { getColor: [conflictingTreeIds] },
+    }),
+  ];
+  for (const form of TREE_CROWN_FORMS) {
+    const matchingTrees = trees.filter((tree) => treeCrownForm(tree) === form);
+    if (matchingTrees.length === 0) continue;
+    layers.push(
+      new SimpleMeshLayer<HamburgCityTree>({
+        id: `hamburg-official-tree-crowns-${form}`,
+        data: matchingTrees,
+        mesh: TREE_CROWN_MESHES[form] as unknown as never,
+        getPosition: treePositionOnFlatGround,
+        getTranslation: treeCrownTranslation,
+        getScale: treeCrownScale,
+        getColor: (tree) =>
+          conflictingTreeIds.has(tree.id)
+            ? [255, 166, 64, 255]
+            : treeCrownColor(tree),
+        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        pickable: false,
+        opacity,
+        material: { ambient: 0.52, diffuse: 0.82, shininess: 7 },
+        updateTriggers: { getColor: [conflictingTreeIds] },
+      })
+    );
+  }
+  return layers;
+}
 
 function addCityObjectWithDescendants(
   doc: CityJsonDocument,
@@ -354,6 +403,7 @@ interface Props {
   osm2streetsSelection?: Osm2StreetsSelection;
   highlightedOsm2StreetsRoadIds?: Set<number | string>;
   onOsm2StreetsSelect?: (selection: Osm2StreetsSelection) => void;
+  onHamburgTreesLoaded?: (trees: HamburgCityTree[]) => void;
   initialView?: {
     center: [number, number];
     zoom: number;
@@ -425,6 +475,7 @@ export default function MapView({
   osm2streetsSelection = null,
   highlightedOsm2StreetsRoadIds = new Set(),
   onOsm2StreetsSelect,
+  onHamburgTreesLoaded,
   initialView,
   precomputedFootprints,
 }: Props) {
@@ -454,8 +505,8 @@ export default function MapView({
   const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[] | null>(null);
   const [treeDataError, setTreeDataError] = useState<string | null>(null);
   const [officialLod3Status, setOfficialLod3Status] = useState<
-    'loading' | 'ready' | 'error'
-  >('loading');
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
   const [officialLod3LoadedTiles, setOfficialLod3LoadedTiles] = useState(0);
   const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
   const [texturesEnabled, setTexturesEnabled] = useState(false);
@@ -480,7 +531,9 @@ export default function MapView({
   }, [onRoadDraftChange]);
 
   useEffect(() => {
-    if (zoom < HAMBURG_TREE_MIN_ZOOM || treeLoadStartedRef.current) return;
+    if ((zoom < HAMBURG_TREE_MIN_ZOOM && !roadWorkspaceOpen) || treeLoadStartedRef.current) {
+      return;
+    }
     treeLoadStartedRef.current = true;
     void fetch(HAMBURG_CITY_CENTER_TREES_URL)
       .then((response) => {
@@ -494,23 +547,11 @@ export default function MapView({
       .catch((error) => {
         setTreeDataError(error instanceof Error ? error.message : String(error));
       });
-  }, [zoom]);
+  }, [roadWorkspaceOpen, zoom]);
 
-  const handleOfficialLod3TileLoad = useCallback((tile: any) => {
-    groundHamburgLod3Tile(tile);
-    setOfficialLod3Status('ready');
-    setOfficialLod3LoadedTiles((count) => count + 1);
-  }, []);
-
-  const handleOfficialLod3TileError = useCallback(
-    (_tile: unknown, firstMessage: string, secondMessage: string) => {
-      setOfficialLod3Status('error');
-      setWarning(
-        `Official Hamburg LoD3 tile failed to load: ${secondMessage || firstMessage || 'unknown error'}`
-      );
-    },
-    []
-  );
+  useEffect(() => {
+    if (hamburgTrees) onHamburgTreesLoaded?.(hamburgTrees);
+  }, [hamburgTrees, onHamburgTreesLoaded]);
 
   const finishCurrentRoadDraw = useCallback(() => {
     const draw = drawRef.current;
@@ -699,10 +740,11 @@ export default function MapView({
   );
 
   const renderedHamburgTrees = useMemo(() => {
-    if (!hamburgTrees || editFocusBbox || zoom < HAMBURG_TREE_MIN_ZOOM) return [];
-    return viewportBbox
+    if (!hamburgTrees || (zoom < HAMBURG_TREE_MIN_ZOOM && !editFocusBbox)) return [];
+    const scope = editFocusBbox ?? viewportBbox;
+    return scope
       ? hamburgTrees.filter((tree) =>
-          pointInsideBbox([tree.position[0], tree.position[1]], viewportBbox)
+          pointInsideBbox([tree.position[0], tree.position[1]], scope)
         )
       : hamburgTrees;
   }, [editFocusBbox, hamburgTrees, viewportBbox, zoom]);
@@ -727,17 +769,67 @@ export default function MapView({
     zoom
   );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
-  const detailLod: 'lod2' | 'lod3' = zoom >= BUILDING_LOD3_MIN_ZOOM ? 'lod3' : 'lod2';
+  const buildingDetailMode = buildingMapDetailMode(zoom, texturesEnabled);
+  const detailLod: 'lod2' | 'lod3' =
+    buildingDetailMode === 'lod3-untextured' ||
+    buildingDetailMode === 'lod3-textured'
+      ? 'lod3'
+      : 'lod2';
+  const officialLod3Requested =
+    buildingDetailMode === 'lod3-untextured' ||
+    buildingDetailMode === 'lod3-textured';
+  const officialLod3Variant = officialLod3Requested
+    ? buildingDetailMode
+    : 'idle';
+  const officialLod3VariantRef = useRef(officialLod3Variant);
+  officialLod3VariantRef.current = officialLod3Variant;
+  const officialLod3TilesetUrl = hamburgLod3TilesetUrl(
+    buildingDetailMode === 'lod3-textured'
+  );
   const officialLod3Active =
-    texturesEnabled && detailLod === 'lod3' && officialLod3Status !== 'error';
-  const treeDetailLabel = editFocusBbox
-    ? 'street trees hidden while editing'
-    : zoom < HAMBURG_TREE_MIN_ZOOM
+    officialLod3Requested && officialLod3Status !== 'error';
+  const officialLod3Ready =
+    officialLod3Active && officialLod3Status === 'ready';
+
+  useEffect(() => {
+    if (!officialLod3Requested) {
+      setOfficialLod3Status('idle');
+      setOfficialLod3LoadedTiles(0);
+      return;
+    }
+    setOfficialLod3Status('loading');
+    setOfficialLod3LoadedTiles(0);
+  }, [officialLod3Requested, officialLod3Variant]);
+
+  const handleOfficialLod3TileLoad = useCallback(
+    (tile: any) => {
+      groundHamburgLod3Tile(tile);
+      if (officialLod3VariantRef.current !== officialLod3Variant) return;
+      setOfficialLod3Status('ready');
+      setOfficialLod3LoadedTiles((count) => count + 1);
+    },
+    [officialLod3Variant]
+  );
+
+  const handleOfficialLod3TileError = useCallback(
+    (_tile: unknown, firstMessage: string, secondMessage: string) => {
+      if (officialLod3VariantRef.current !== officialLod3Variant) return;
+      setOfficialLod3Status('error');
+      setWarning(
+        `Official Hamburg LoD3 tile failed to load: ${secondMessage || firstMessage || 'unknown error'}`
+      );
+    },
+    [officialLod3Variant]
+  );
+  const treeDetailLabel =
+    zoom < HAMBURG_TREE_MIN_ZOOM && !editFocusBbox
       ? 'official street trees at zoom 16.5'
       : treeDataError
         ? 'street-tree data unavailable'
         : hamburgTrees
-          ? `${renderedHamburgTrees.length} official street trees in view`
+          ? `${renderedHamburgTrees.length} official street trees ${
+              editFocusBbox ? 'around this edit' : 'in view'
+            }`
           : 'official street trees loading';
   const detailScopeBbox = editFocusBbox ?? viewportBbox;
   const detailFocus = editFocusBbox
@@ -797,7 +889,7 @@ export default function MapView({
 
   const detailMesh = useMemo(
     () =>
-      detailObjectIds && !officialLod3Active
+      detailObjectIds && !officialLod3Ready
         ? buildCityJsonMapMesh(cityjson, {
             objectIds: detailObjectIds,
             maxOutputVertices: 280_000,
@@ -812,13 +904,13 @@ export default function MapView({
       detailLod,
       detailObjectColors,
       detailObjectIds,
-      officialLod3Active,
+      officialLod3Ready,
       reloadToken,
     ]
   );
   const blockFootprints = useMemo(
     () =>
-      officialLod3Active
+      officialLod3Ready
         ? []
         : detailObjectIds
         ? groundedRenderedFootprints.filter(
@@ -827,7 +919,7 @@ export default function MapView({
               (!footprint.parentId || !detailObjectIds.has(footprint.parentId))
           )
         : groundedRenderedFootprints,
-    [groundedRenderedFootprints, detailObjectIds, officialLod3Active]
+    [groundedRenderedFootprints, detailObjectIds, officialLod3Ready]
   );
   const blockOpacity = smoothZoomStep(
     BUILDING_BLOCK_MIN_ZOOM,
@@ -874,6 +966,15 @@ export default function MapView({
   const visibleRoadFitConflicts = useMemo(
     () => [...roadFitConflicts, ...inspectedBuildingRoadConflicts],
     [roadFitConflicts, inspectedBuildingRoadConflicts]
+  );
+  const conflictingTreeIds = useMemo(
+    () =>
+      new Set(
+        visibleRoadFitConflicts
+          .filter((conflict) => conflict.kind === 'tree_overlap')
+          .flatMap((conflict) => (conflict.affectedId ? [conflict.affectedId] : []))
+      ),
+    [visibleRoadFitConflicts]
   );
   const conflictingSavedRoadAreas = useMemo(() => {
     if (inspectedBuildingRoadConflicts.length === 0) return [];
@@ -980,9 +1081,9 @@ export default function MapView({
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
-    // The editor uses a raster-only basemap, so keep deck.gl on its own
-    // canvas above MapLibre. Interleaving can place the building context
-    // behind the raster layer, which makes the editable city look empty.
+    // Keep deck.gl on its own foreground canvas above MapLibre's raster
+    // basemap. Interleaving puts the raster and z=0 road polygons in one
+    // depth buffer, where they can z-fight and the raster can obscure roads.
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     map.addControl(overlay as unknown as maplibregl.IControl);
 
@@ -1352,63 +1453,20 @@ export default function MapView({
     }
     const visibleSnapCandidates = [...visibleSnapCandidateMap.values()];
 
-    // The official source positions, laser-derived heights, measured crown
-    // diameters, and botanical names drive one detailed trunk plus four
-    // species-informed crown meshes. Absolute source elevations are clamped to
-    // the same flat z=0 plane as the editor map. Instancing keeps thousands of
-    // trees inexpensive, and edit focus removes them entirely.
-    if (renderedHamburgTrees.length > 0) {
-      const treeOpacity = smoothZoomStep(
-        HAMBURG_TREE_MIN_ZOOM,
-        HAMBURG_TREE_MIN_ZOOM + 0.75,
-        zoom
-      );
-      layers.push(
-        new SimpleMeshLayer<HamburgCityTree>({
-          id: 'hamburg-official-tree-trunks',
-          data: renderedHamburgTrees,
-          mesh: TREE_TRUNK_MESH as unknown as never,
-          getPosition: treePositionOnFlatGround,
-          getScale: treeTrunkScale,
-          getColor: [104, 74, 50, 255],
-          coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-          pickable: false,
-          opacity: treeOpacity,
-          material: { ambient: 0.48, diffuse: 0.72, shininess: 5 },
-        })
-      );
-      for (const form of TREE_CROWN_FORMS) {
-        const trees = renderedHamburgTrees.filter((tree) => treeCrownForm(tree) === form);
-        if (trees.length === 0) continue;
-        layers.push(
-          new SimpleMeshLayer<HamburgCityTree>({
-            id: `hamburg-official-tree-crowns-${form}`,
-            data: trees,
-            mesh: TREE_CROWN_MESHES[form] as unknown as never,
-            getPosition: treePositionOnFlatGround,
-            getTranslation: treeCrownTranslation,
-            getScale: treeCrownScale,
-            getColor: treeCrownColor,
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            pickable: false,
-            opacity: treeOpacity,
-            material: { ambient: 0.52, diffuse: 0.82, shininess: 7 },
-          })
-        );
-      }
-    }
-
-    // LoD0 — outlines on the ground. Always on; at low zoom this is the only
-    // thing drawn, at high zoom it still fires picking when clicking a roof edge.
-    // Stream the exact PBR/texture hierarchy used by Hamburg's official
-    // geoportal. Per-feature grounding happens before the b3dm scenegraph is
-    // uploaded, using each batch feature's surveyed base elevation.
+    // At the close-view threshold, stream Hamburg's official untextured LoD3
+    // tiles. The texture switch replaces this source with the geometrically
+    // identical 20 cm textured tileset, so it controls textures rather than
+    // whether LoD3 geometry exists. Per-feature grounding happens before each
+    // b3dm scenegraph is uploaded, using its surveyed base elevation.
     if (officialLod3Active) {
       layers.push(
         new Tile3DLayer({
-          id: 'hamburg-official-textured-lod3',
-          data: HAMBURG_LOD3_TILESET_URL,
+          id: `hamburg-official-${buildingDetailMode}-tiles`,
+          data: officialLod3TilesetUrl,
           loadOptions: {
+            gltf: {
+              loadImages: buildingDetailMode === 'lod3-textured',
+            },
             tileset: {
               maximumScreenSpaceError: 4,
               maximumMemoryUsage: 192,
@@ -1865,6 +1923,26 @@ export default function MapView({
       );
     }
 
+    // Render nearby street trees after road surfaces so Roads mode cannot
+    // paint depth-disabled road polygons over them. Conflict rings and edit
+    // handles are appended after the trees and remain clearly visible.
+    if (renderedHamburgTrees.length > 0) {
+      const treeOpacity = editFocusBbox
+        ? 1
+        : smoothZoomStep(
+            HAMBURG_TREE_MIN_ZOOM,
+            HAMBURG_TREE_MIN_ZOOM + 0.75,
+            zoom
+          );
+      layers.push(
+        ...createHamburgTreeLayers(
+          renderedHamburgTrees,
+          treeOpacity,
+          conflictingTreeIds
+        )
+      );
+    }
+
     if (roadDraftPaths.length > 0) {
       layers.push(
         new PathLayer<RoadDraftPath>({
@@ -2226,6 +2304,7 @@ export default function MapView({
     onRoadDraftChange,
     drawMode,
     conflictingSavedRoadAreas,
+    conflictingTreeIds,
     visibleRoadFitConflicts,
     selectedRoadAreaId,
     onRoadAreaSelect,
@@ -2248,7 +2327,9 @@ export default function MapView({
     roadSelectionEnabled,
     roadWorkspaceOpen,
     planningSelectionEnabled,
+    buildingDetailMode,
     officialLod3Active,
+    officialLod3TilesetUrl,
     handleOfficialLod3TileLoad,
     handleOfficialLod3TileError,
   ]);
@@ -2685,12 +2766,22 @@ export default function MapView({
         onTexturesEnabledChange={setTexturesEnabled}
         lod3Visible={detailLod === 'lod3'}
         detailLabel={
-          texturesEnabled && detailLod === 'lod3' && officialLod3Status === 'error'
-            ? `Official textured LoD3 unavailable · untextured semantic fallback · ${treeDetailLabel}`
+          officialLod3Requested && officialLod3Status === 'error'
+            ? `Official ${
+                buildingDetailMode === 'lod3-textured' ? 'textured' : 'untextured'
+              } LoD3 unavailable · source-geometry fallback · ${treeDetailLabel}`
             : officialLod3Active
               ? officialLod3Status === 'ready'
-                ? `Official Hamburg 20 cm LoD3 3D Tiles · ${officialLod3LoadedTiles} streamed tiles · grounded per building · ${treeDetailLabel}`
-                : `Loading official Hamburg 20 cm LoD3 3D Tiles · ${treeDetailLabel}`
+                ? `Official Hamburg ${
+                    buildingDetailMode === 'lod3-textured'
+                      ? '20 cm textured'
+                      : 'untextured'
+                  } LoD3 · ${officialLod3LoadedTiles} streamed tiles · grounded per building · ${treeDetailLabel}`
+                : `Streaming official Hamburg ${
+                    buildingDetailMode === 'lod3-textured'
+                      ? '20 cm textured LoD3'
+                      : 'untextured LoD3 geometry'
+                  } · source geometry remains visible while loading · ${treeDetailLabel}`
               : detailMesh
             ? `${(detailMesh.maxLod ?? 0) >= 3 ? 'Untextured source LoD3' : 'Source LoD2'} · ${
                 detailMesh.objectCount
@@ -3025,7 +3116,11 @@ function MapLayerControl({
             <span>
               <b>Photo textures</b>
               <small>
-                {lod3Visible ? 'LoD3 close view only' : 'Zoom in to LoD3'}
+                {lod3Visible
+                  ? texturesEnabled
+                    ? '20 cm textures on; uncheck for untextured LoD3'
+                    : 'LoD3 geometry is on; enable to download 20 cm textures'
+                  : 'Zoom in; untextured LoD3 loads first'}
               </small>
             </span>
             <input

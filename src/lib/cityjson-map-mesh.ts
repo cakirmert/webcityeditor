@@ -1,6 +1,10 @@
 import earcut from 'earcut';
 import type { CityJsonDocument } from '../types';
-import { applyVertexTransform, detectCrs, projectToWgs84 } from './projection';
+import {
+  applyVertexTransform,
+  createDeckMeterOffsetProjector,
+  detectCrs,
+} from './projection';
 
 export interface CityJsonMapMesh {
   positions: Float32Array;
@@ -161,7 +165,8 @@ export function buildCityJsonMapMesh(
     y: (minY + maxY) / 2,
     z: options.groundObjectGroups ? 0 : minZ,
   };
-  const anchorLngLat = projectToWgs84(crs.code, origin);
+  const localProjector = createDeckMeterOffsetProjector(crs.code, origin);
+  const anchorLngLat = localProjector.anchorLngLat;
 
   const positions: number[] = [];
   const colors: number[] = [];
@@ -175,7 +180,8 @@ export function buildCityJsonMapMesh(
     const v = doc.vertices[idx];
     if (!v) return null;
     const c = applyVertexTransform(v, doc);
-    return [c.x - origin.x, c.y - origin.y, c.z - (groundZ ?? origin.z)];
+    const [x, y] = localProjector.toMeterOffset(c.x, c.y);
+    return [x, y, c.z - (groundZ ?? origin.z)];
   };
 
   for (const surface of queued) {

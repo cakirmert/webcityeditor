@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
@@ -17,6 +17,43 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('reports mapped street-tree overlaps as non-blocking road-fit warnings', async () => {
+    const doc = buildSampleCube();
+    const midpoint: [number, number] = [
+      (roadLine[0][0] + roadLine[1][0]) / 2,
+      (roadLine[0][1] + roadLine[1][1]) / 2,
+    ];
+    const trees = [
+      {
+        id: 'tree-on-draft',
+        position: [midpoint[0], midpoint[1], 0] as [number, number, number],
+        trunkRadius: 0.2,
+        species: 'Acer campestre',
+        street: 'Teststraße',
+      },
+    ];
+    const { result } = renderHook(() =>
+      useRoadEditor(
+        coreStateFor(doc) as never,
+        { pushUndo: vi.fn() } as never,
+        { trees }
+      )
+    );
+
+    act(() => result.current.handleRoadLineDrawn(roadLine));
+
+    await waitFor(() => {
+      expect(
+        result.current.roadFitConflicts.find(
+          (conflict) => conflict.kind === 'tree_overlap'
+        )
+      ).toMatchObject({
+        severity: 'warning',
+        affectedId: 'tree-on-draft',
+      });
+    });
+  });
+
   it('clears stale road status when a different dataset is loaded', () => {
     const doc = buildSampleCube();
     const { result } = renderHook(() =>

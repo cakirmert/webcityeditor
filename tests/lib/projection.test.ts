@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { activeMetricCrsForCityJson, detectCrs, projectToWgs84 } from '../../src/lib/projection';
+import {
+  activeMetricCrsForCityJson,
+  createDeckMeterOffsetProjector,
+  detectCrs,
+  projectToWgs84,
+} from '../../src/lib/projection';
 import { buildSampleCube } from '../../src/lib/cityjson';
 
 describe('detectCrs', () => {
@@ -104,5 +109,20 @@ describe('projectToWgs84', () => {
     expect(lng).toBeLessThan(12);
     expect(lat).toBeGreaterThan(48);
     expect(lat).toBeLessThan(49);
+  });
+});
+
+describe('createDeckMeterOffsetProjector', () => {
+  it('rotates UTM grid deltas into deck.gl true-east/true-north offsets', () => {
+    const origin = { x: 565500, y: 5933500, z: 0 };
+    const projector = createDeckMeterOffsetProjector('EPSG:25832', origin);
+
+    const east = projector.toMeterOffset(origin.x + 500, origin.y);
+    const north = projector.toMeterOffset(origin.x, origin.y + 500);
+
+    expect(east[0]).toBeCloseTo(499.04, 1);
+    expect(east[1]).toBeCloseTo(-6.97, 1);
+    expect(north[0]).toBeCloseTo(6.93, 1);
+    expect(north[1]).toBeCloseTo(500.26, 1);
   });
 });

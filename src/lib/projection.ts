@@ -203,6 +203,102 @@ export function projectToWgs84(code: string, coord: CityCoord): [number, number]
   return [lng, lat];
 }
 
+export interface DeckMeterOffsetProjector {
+  /** Geographic point represented by local [0, 0]. */
+  anchorLngLat: [number, number];
+  /**
+   * Convert a planar source coordinate to deck.gl METER_OFFSETS at the anchor.
+   *
+   * These are local true-east/true-north offsets, not raw projected-grid
+   * deltas. The distinction matters in UTM because grid north is rotated from
+   * true north; raw deltas can visibly shift a large close-range mesh.
+   */
+  toMeterOffset(x: number, y: number): [number, number];
+}
+
+const WEB_MERCATOR_WORLD_SIZE = 512;
+const WEB_MERCATOR_MAX_LATITUDE = 85.051129;
+const WGS84_EQUATORIAL_CIRCUMFERENCE = 2 * Math.PI * 6_378_137;
+
+/**
+ * Build a cheap local source-CRS -> deck.gl METER_OFFSETS transform.
+ *
+ * Only three proj4 conversions are needed: the anchor and one metre along
+ * each projected axis. Every mesh vertex then uses the resulting local basis,
+ * keeping large viewport meshes aligned without a per-vertex reprojection.
+ */
+export function createDeckMeterOffsetProjector(
+  code: string,
+  origin: CityCoord
+): DeckMeterOffsetProjector {
+  const anchorLngLat = projectToWgs84(code, origin);
+
+  if (code === 'EPSG:4326') {
+    return {
+      anchorLngLat,
+      toMeterOffset: (lng, lat) => lngLatToDeckMeterOffset([lng, lat], anchorLngLat),
+    };
+  }
+
+  // ECEF needs a full 3D ENU transform, while this helper deliberately handles
+  // planar editing CRSs. Preserve the previous local behaviour for that rare
+  // input instead of pretending two ECEF axes form an east/north plane.
+  if (code === 'EPSG:4978') {
+    return {
+      anchorLngLat,
+      toMeterOffset: (x, y) => [x - origin.x, y - origin.y],
+    };
+  }
+
+  const sourceXStep = lngLatToDeckMeterOffset(
+    projectToWgs84(code, { ...origin, x: origin.x + 1 }),
+    anchorLngLat
+  );
+  const sourceYStep = lngLatToDeckMeterOffset(
+    projectToWgs84(code, { ...origin, y: origin.y + 1 }),
+    anchorLngLat
+  );
+
+  return {
+    anchorLngLat,
+    toMeterOffset: (x, y) => {
+      const dx = x - origin.x;
+      const dy = y - origin.y;
+      return [
+        sourceXStep[0] * dx + sourceYStep[0] * dy,
+        sourceXStep[1] * dx + sourceYStep[1] * dy,
+      ];
+    },
+  };
+}
+
+function lngLatToDeckMeterOffset(
+  point: [number, number],
+  anchor: [number, number]
+): [number, number] {
+  const [anchorX, anchorY] = lngLatToMercatorWorld(anchor);
+  const [pointX, pointY] = lngLatToMercatorWorld(point);
+  const unitsPerMeter =
+    WEB_MERCATOR_WORLD_SIZE /
+    WGS84_EQUATORIAL_CIRCUMFERENCE /
+    Math.cos((anchor[1] * Math.PI) / 180);
+  return [(pointX - anchorX) / unitsPerMeter, (pointY - anchorY) / unitsPerMeter];
+}
+
+function lngLatToMercatorWorld([lng, latitude]: [number, number]): [number, number] {
+  const lat = Math.max(
+    -WEB_MERCATOR_MAX_LATITUDE,
+    Math.min(WEB_MERCATOR_MAX_LATITUDE, latitude)
+  );
+  const latRadians = (lat * Math.PI) / 180;
+  return [
+    (WEB_MERCATOR_WORLD_SIZE * (lng + 180)) / 360,
+    (WEB_MERCATOR_WORLD_SIZE *
+      (Math.PI + Math.log(Math.tan(Math.PI / 4 + latRadians / 2)))) /
+      (2 * Math.PI),
+  ];
+}
+
 export function projectWgs84BboxToCrs(bbox: Bbox2D, crs: string): Bbox2D {
   return projectBboxCorners(bbox, 'EPSG:4326', crs, `Could not project WGS84 bbox into ${crs}`);
 }

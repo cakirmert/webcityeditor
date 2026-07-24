@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { groundHamburgLod3Tile } from '../../src/lib/hamburg-lod3-tiles';
+import {
+  groundHamburgLod3Tile,
+  hamburgLod3TilesetUrl,
+  HAMBURG_LOD3_TEXTURED_TILESET_URL,
+  HAMBURG_LOD3_UNTEXTURED_TILESET_URL,
+} from '../../src/lib/hamburg-lod3-tiles';
+
+describe('official Hamburg LoD3 tile sources', () => {
+  it('uses full untextured LoD3 geometry before the texture opt-in', () => {
+    expect(hamburgLod3TilesetUrl(false)).toBe(
+      HAMBURG_LOD3_UNTEXTURED_TILESET_URL
+    );
+    expect(hamburgLod3TilesetUrl(true)).toBe(
+      HAMBURG_LOD3_TEXTURED_TILESET_URL
+    );
+    expect(HAMBURG_LOD3_UNTEXTURED_TILESET_URL).not.toBe(
+      HAMBURG_LOD3_TEXTURED_TILESET_URL
+    );
+  });
+});
 
 describe('official Hamburg LoD3 tile grounding', () => {
   it('uses each batch feature surveyed ground height without changing roof height', () => {

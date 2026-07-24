@@ -32,6 +32,7 @@ import {
   type CityJsonSeqViewportLoad,
 } from './lib/cityjsonseq-catalog';
 import { publicAssetUrl } from './lib/public-assets';
+import type { HamburgCityTree } from './lib/hamburg-trees';
 import {
   fetchPlanningZones,
   getPlanningProviderForBbox,
@@ -174,8 +175,10 @@ export default function App() {
     setSelectedZone(zone);
   }, []);
 
+  const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[]>([]);
   const roadEditor = useRoadEditor(coreState, undoRedo, {
     zones: zoningEnabled ? zones : [],
+    trees: hamburgTrees,
   });
   const buildingEditor = useBuildingEditor(coreState, undoRedo, { zones, zoningEnabled });
 
@@ -821,6 +824,7 @@ export default function App() {
               osm2streetsSelection={roadEditor.osm2streetsSelection}
               highlightedOsm2StreetsRoadIds={roadEditor.highlightedOsm2StreetsRoadIds}
               onOsm2StreetsSelect={roadEditor.handleOsm2StreetsSelect}
+              onHamburgTreesLoaded={setHamburgTrees}
               footprintEdit={
                 buildingEditor.footprintEdit
                   ? {

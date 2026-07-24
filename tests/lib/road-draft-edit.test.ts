@@ -64,6 +64,29 @@ describe('road draft edit helpers', () => {
     expect(handles).toHaveLength(3);
   });
 
+  it('keeps duplicate draft anchors from crashing midpoint rendering', () => {
+    const duplicateAnchors: RoadDraft = {
+      ...draft,
+      sections: [
+        {
+          ...draft.sections[0],
+          centerlineWgs84: [
+            [10, 53],
+            [10, 53],
+          ],
+        },
+      ],
+    };
+
+    const handles = buildRoadDraftHandles(duplicateAnchors);
+
+    expect(handles).toHaveLength(3);
+    expect(handles[1]).toMatchObject({
+      kind: 'midpoint',
+      position: [10, 53],
+    });
+  });
+
   it('keeps handle indices aligned with the original centerline array', () => {
     const dirtyDraft: RoadDraft = {
       ...draft,

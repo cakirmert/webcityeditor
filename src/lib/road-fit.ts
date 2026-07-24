@@ -15,6 +15,7 @@ export type RoadFitConflictKind =
   | 'outside_corridor'
   | 'building_overlap'
   | 'building_clearance'
+  | 'tree_overlap'
   | 'vertical_uncertainty'
   | 'affected_land';
 
@@ -32,13 +33,23 @@ export interface RoadFitConflict {
 export interface RoadFitValidationContext {
   roadAreas: RoadArea[];
   buildingFootprints?: Footprint[];
+  trees?: RoadFitTree[];
   affectedLand?: Array<Pick<ParcelZone, 'id' | 'label' | 'polygon'>>;
   allowedCorridors?: RoadAllowedCorridor[];
   corridorSeverity?: 'warning' | 'error';
   metricCrs?: string;
   buildingClearanceBlockM?: number;
   buildingClearanceWarningM?: number;
+  treeClearanceM?: number;
   verticalClearanceM?: number;
+}
+
+export interface RoadFitTree {
+  id: string;
+  position: readonly [number, number, number];
+  trunkRadius?: number;
+  species?: string;
+  street?: string;
 }
 
 interface MetricPoint {
@@ -57,8 +68,13 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
   const conflicts: RoadFitConflict[] = [];
   const seen = new Set<string>();
   const buildings = context.buildingFootprints ?? [];
+  const trees = context.trees ?? [];
   const affectedLand = context.affectedLand ?? [];
   const corridors = context.allowedCorridors ?? [];
+  const treeClearanceM =
+    Number.isFinite(context.treeClearanceM) && (context.treeClearanceM ?? 0) >= 0
+      ? context.treeClearanceM ?? 0
+      : 0.5;
   const buildingClearanceWarningM =
     Number.isFinite(context.buildingClearanceWarningM) &&
     (context.buildingClearanceWarningM ?? 0) > 0
@@ -197,6 +213,45 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
       }
     }
 
+    for (const tree of trees) {
+      const position: [number, number] = [tree.position[0], tree.position[1]];
+      if (!position.every(Number.isFinite)) continue;
+      const trunkRadiusM = Number.isFinite(tree.trunkRadius)
+        ? Math.max(0, Number(tree.trunkRadius))
+        : 0;
+      const protectionRadiusM = Math.max(0.25, trunkRadiusM) + treeClearanceM;
+      const treeBbox = expandBboxByMeters(
+        [position[0], position[1], position[0], position[1]],
+        protectionRadiusM
+      );
+      if (roadBbox && !bboxesOverlap(roadBbox, treeBbox)) continue;
+      const protectionPolygon = circleAroundLngLat(position, protectionRadiusM);
+      if (
+        !pointInOrOnPolygon(position, roadPolygon) &&
+        !polygonsIntersect(roadPolygon, protectionPolygon)
+      ) {
+        continue;
+      }
+      const overlapPolygon = polygonIntersection(
+        roadPolygon,
+        protectionPolygon,
+        context.metricCrs
+      );
+      const species = tree.species?.trim();
+      const street = tree.street?.trim();
+      addConflict(conflicts, seen, {
+        id: `road-fit-tree-${roadArea.id}-${tree.id}`,
+        kind: 'tree_overlap',
+        severity: 'warning',
+        roadAreaId: roadArea.id,
+        affectedId: tree.id,
+        label: `Road area ${roadArea.id} overlaps street tree ${tree.id}${
+          species ? ` (${species})` : ''
+        }${street ? ` on ${street}` : ''}; keep its trunk/root zone clear.`,
+        polygon: overlapPolygon ?? protectionPolygon,
+      });
+    }
+
     for (const land of affectedLand) {
       const landPolygon = cleanRing(land.polygon);
       if (landPolygon.length < 3) continue;
@@ -251,6 +306,24 @@ function expandBboxByMeters(bbox: RingBbox, meters: number): RingBbox {
     bbox[2] + lngPadding,
     bbox[3] + latPadding,
   ];
+}
+
+function circleAroundLngLat(
+  center: [number, number],
+  radiusM: number,
+  segments = 16
+): [number, number][] {
+  const [lng, lat] = center;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLng =
+    metersPerDegreeLat * Math.max(0.01, Math.cos((lat * Math.PI) / 180));
+  return Array.from({ length: segments }, (_, index) => {
+    const angle = (index / segments) * Math.PI * 2;
+    return [
+      lng + (Math.cos(angle) * radiusM) / metersPerDegreeLng,
+      lat + (Math.sin(angle) * radiusM) / metersPerDegreeLat,
+    ];
+  });
 }
 
 function classifyVerticalRelation(

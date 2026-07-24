@@ -1,5 +1,6 @@
 import proj4 from 'proj4';
 import type { RoofType } from './generator';
+import { createDeckMeterOffsetProjector } from './projection';
 
 export interface PreviewMeshParams {
   /** Footprint ring in WGS84 [lng, lat], optionally closed. */
@@ -172,9 +173,13 @@ export function buildPreviewMesh(params: PreviewMeshParams): PreviewMesh | null 
   }
   cx /= projected.length;
   cy /= projected.length;
-  const local = projected.map(([x, y]) => [x - cx, y - cy] as [number, number]);
-
-  const anchorLngLat = proj4(params.targetCrs, 'EPSG:4326', [cx, cy]) as [number, number];
+  const localProjector = createDeckMeterOffsetProjector(params.targetCrs, {
+    x: cx,
+    y: cy,
+    z: 0,
+  });
+  const local = projected.map(([x, y]) => localProjector.toMeterOffset(x, y));
+  const anchorLngLat = localProjector.anchorLngLat;
 
   const roofZ = params.ridgeHeight;
   const eaveZ = params.eaveHeight;

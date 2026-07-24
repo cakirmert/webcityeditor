@@ -1,5 +1,14 @@
-export const HAMBURG_LOD3_TILESET_URL =
+export const HAMBURG_LOD3_UNTEXTURED_TILESET_URL =
+  'https://daten-hamburg.de/gdi3d/datasource-data/LoD3_untexturiert/tileset.json';
+
+export const HAMBURG_LOD3_TEXTURED_TILESET_URL =
   'https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json';
+
+export function hamburgLod3TilesetUrl(texturesEnabled: boolean): string {
+  return texturesEnabled
+    ? HAMBURG_LOD3_TEXTURED_TILESET_URL
+    : HAMBURG_LOD3_UNTEXTURED_TILESET_URL;
+}
 
 export const HAMBURG_LOD3_ATTRIBUTION =
   'Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung';

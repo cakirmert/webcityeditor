@@ -73,6 +73,20 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.colors.length).toBe(18);
   });
 
+  it('aligns projected-grid mesh vertices with deck.gl true east and north', () => {
+    const mesh = buildCityJsonMapMesh(detailDocument(), {
+      objectIds: new Set(['detailed']),
+    });
+    const positions = [...mesh!.positions];
+    const eastEdge = [positions[3] - positions[0], positions[4] - positions[1]];
+    const northEdge = [positions[6] - positions[3], positions[7] - positions[4]];
+
+    expect(eastEdge[0]).toBeCloseTo(9.98, 1);
+    expect(eastEdge[1]).toBeCloseTo(-0.14, 1);
+    expect(northEdge[0]).toBeCloseTo(0.14, 1);
+    expect(northEdge[1]).toBeCloseTo(10.01, 1);
+  });
+
   it('selects source LoD2 without overlapping the available LoD3 geometry', () => {
     const doc = detailDocument();
     const detailed = doc.CityObjects.detailed.geometry as Array<Record<string, unknown>>;

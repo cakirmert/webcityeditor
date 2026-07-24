@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateRoadFit } from '../../src/lib/road-fit';
+import { validateRoadFit, type RoadFitTree } from '../../src/lib/road-fit';
 import type { Footprint } from '../../src/lib/footprints';
 import type { RoadArea } from '../../src/lib/transportation';
 import { projectToWgs84 } from '../../src/lib/projection';
@@ -50,6 +50,25 @@ function metricFootprint(id: string, polygon: [number, number][]): Footprint {
       projectToWgs84('EPSG:25832', { x: point[0], y: point[1], z: 0 })
     )
   );
+}
+
+function metricTree(
+  id: string,
+  point: [number, number],
+  trunkRadius = 0.2
+): RoadFitTree {
+  const [lng, lat] = projectToWgs84('EPSG:25832', {
+    x: point[0],
+    y: point[1],
+    z: 0,
+  });
+  return {
+    id,
+    position: [lng, lat, 0],
+    trunkRadius,
+    species: 'Acer campestre',
+    street: 'Teststraße',
+  };
 }
 
 function expectPolygonBounds(
@@ -113,6 +132,51 @@ describe('road-fit validation', () => {
       affectedId: 'lot-1',
     });
     expectPolygonBounds(conflicts[0].polygon, [3, 0.25, 4, 1]);
+  });
+
+  it('warns when a road overlaps a mapped street-tree trunk/root zone', () => {
+    const conflicts = validateRoadFit({
+      metricCrs: 'EPSG:25832',
+      treeClearanceM: 0.5,
+      roadAreas: [
+        metricRoadArea('road-over-tree', [
+          [565000, 5935000],
+          [565004, 5935000],
+          [565004, 5935001],
+          [565000, 5935001],
+          [565000, 5935000],
+        ]),
+      ],
+      trees: [metricTree('tree-42', [565002, 5935000.5])],
+    });
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({
+      kind: 'tree_overlap',
+      severity: 'warning',
+      affectedId: 'tree-42',
+    });
+    expect(conflicts[0].label).toContain('Acer campestre');
+    expect(conflicts[0].label).toContain('Teststraße');
+  });
+
+  it('keeps trees outside the configured trunk/root clearance clear', () => {
+    const conflicts = validateRoadFit({
+      metricCrs: 'EPSG:25832',
+      treeClearanceM: 0.5,
+      roadAreas: [
+        metricRoadArea('road-clear-of-tree', [
+          [565000, 5935000],
+          [565004, 5935000],
+          [565004, 5935001],
+          [565000, 5935001],
+          [565000, 5935000],
+        ]),
+      ],
+      trees: [metricTree('tree-clear', [565005, 5935000.5])],
+    });
+
+    expect(conflicts).toEqual([]);
   });
 
   it('flags road polygons outside an allowed corridor', () => {
