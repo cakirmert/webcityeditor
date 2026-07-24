@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildSampleCube } from '../../src/lib/cityjson';
-import { BUILDING_ASSETS, insertBuildingAsset } from '../../src/lib/building-assets';
+import {
+  BUILDING_ASSETS,
+  buildBuildingAssetPlacementPreview,
+  editorPlacedAssetObjectIds,
+  insertBuildingAsset,
+} from '../../src/lib/building-assets';
 import { buildCityJsonMapMesh } from '../../src/lib/cityjson-map-mesh';
 import { checkIntegrity } from '../../src/lib/integrity';
 import type { CityJsonDocument } from '../../src/types';
@@ -61,9 +66,35 @@ describe('official Hamburg LoD3 building assets', () => {
     ).textures?.[0].image;
     expect(appearance.textures[0].image).toContain(sourceTexture);
     expect(inserted.children?.length ?? 0).toBeGreaterThan(0);
+    expect(editorPlacedAssetObjectIds(host)).toEqual(insertedIds);
     expect(mesh?.textures).toHaveLength(1);
     expect(mesh?.triangleCount).toBeGreaterThan(10);
     expect(checkIntegrity(host).ok).toBe(true);
     }
   );
+
+  it('previews the exact asset location without mutating the host', () => {
+    const host = buildSampleCube();
+    const { definition, document } = files[0];
+    const originalVertexCount = host.vertices.length;
+    const originalObjectCount = Object.keys(host.CityObjects).length;
+
+    const preview = buildBuildingAssetPlacementPreview(
+      host,
+      document,
+      definition,
+      [4.35722, 52.01165]
+    );
+
+    expect(preview).not.toBeNull();
+    expect(preview?.positions.length).toBeGreaterThan(30);
+    expect(preview?.indices.length).toBeGreaterThan(30);
+    expect(preview?.colors.length).toBe(preview?.positions.length);
+    expect(preview?.anchorLngLat[0]).toBeCloseTo(4.35722, 3);
+    expect(preview?.anchorLngLat[1]).toBeCloseTo(52.01165, 3);
+    expect([...preview!.positions].every(Number.isFinite)).toBe(true);
+    expect(Math.max(...[...preview!.positions].map(Math.abs))).toBeLessThan(100);
+    expect(host.vertices).toHaveLength(originalVertexCount);
+    expect(Object.keys(host.CityObjects)).toHaveLength(originalObjectCount);
+  });
 });

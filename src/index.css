@@ -168,12 +168,19 @@
   color: white;
   box-shadow: 0 12px 34px rgba(0,0,0,.38);
 }
-.building-placement-banner div { flex: 1; }
+.building-placement-banner__copy { min-width: 0; flex: 1; }
 .building-placement-banner strong,
 .building-placement-banner span { display: block; }
 .building-placement-banner strong { font-size: 14px; }
 .building-placement-banner span { margin-top: 3px; color: rgba(255,255,255,.72); font-size: 12px; }
 .building-placement-banner button { min-height: 44px; padding: 0 16px; border: 1px solid rgba(255,255,255,.2); border-radius: 10px; background: rgba(255,255,255,.1); color: white; }
+.building-placement-banner button.is-primary { border-color: var(--accent); background: var(--accent); font-weight: 700; }
+.building-placement-banner button:disabled { cursor: not-allowed; opacity: .48; }
+.building-placement-banner__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
 
 @media (max-width: 760px) {
   .building-start-backdrop { align-items: end; padding: 0; }
@@ -183,10 +190,58 @@
   .building-start-custom,
   .building-asset-card { min-height: 104px; }
   .building-start-action { min-width: 78px; }
+  .building-placement-banner {
+    top: 8px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .building-placement-banner__actions { width: 100%; }
+  .building-placement-banner__actions button { flex: 1; }
 }
 
 * {
   box-sizing: border-box;
+}
+
+button,
+summary,
+input,
+select,
+textarea,
+[role='button'],
+[role='menuitem'] {
+  touch-action: manipulation;
+}
+
+@media (max-width: 900px), (any-pointer: coarse) {
+  button,
+  summary,
+  input,
+  select,
+  textarea,
+  [role='button'],
+  [role='menuitem'] {
+    min-height: 44px;
+  }
+
+  button,
+  summary,
+  [role='button'],
+  [role='menuitem'] {
+    min-width: 44px;
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 24px;
+    min-width: 24px;
+    min-height: 24px;
+  }
+
+  input[type='range'] {
+    min-height: 44px;
+  }
 }
 
 html,
@@ -306,7 +361,7 @@ kbd {
   display: none;
 }
 
-@media (max-width: 900px), (pointer: coarse) {
+@media (max-width: 900px), (any-pointer: coarse) {
   .app-toolbar {
     min-height: 64px;
     gap: 8px;
@@ -370,6 +425,16 @@ kbd {
   flex: 1;
   position: relative;
   background: #0d0d0d;
+}
+
+@media (max-width: 760px) {
+  .building-list-panel {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 32;
+    width: min(92vw, 340px);
+    box-shadow: 12px 0 36px rgba(0, 0, 0, .45);
+  }
 }
 .viewer-host canvas {
   display: block;
@@ -596,7 +661,7 @@ kbd {
   min-height: 40px;
 }
 
-@media (max-width: 900px), (pointer: coarse) {
+@media (max-width: 900px), (any-pointer: coarse) {
   .building-inspector-content button,
   .building-inspector-content input,
   .building-inspector-content select {
@@ -1177,7 +1242,7 @@ select:focus {
   background: rgba(20, 184, 166, 0.18);
 }
 
-@media (max-width: 900px), (pointer: coarse) {
+@media (max-width: 900px), (any-pointer: coarse) {
   .map-layer-control.is-obscured-by-inspector {
     display: none;
   }
@@ -2017,7 +2082,7 @@ select:focus {
   }
 }
 
-@media (max-width: 900px), (pointer: coarse) {
+@media (max-width: 900px), (any-pointer: coarse) {
   .road-editor-panel,
   .road-editor-panel.is-expanded {
     top: auto;
@@ -2115,4 +2180,40 @@ select:focus {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-faint);
+}
+
+/* Last in the cascade so compact desktop component rules cannot shrink coarse
+   pointer targets back below a comfortable finger-sized control. */
+@media (max-width: 900px), (any-pointer: coarse) {
+  #root button,
+  #root summary,
+  #root input,
+  #root select,
+  #root textarea,
+  #root [role='button'],
+  #root [role='menuitem'],
+  body [role='option'] {
+    min-height: 44px;
+  }
+
+  #root button,
+  #root summary,
+  #root [role='button'],
+  #root [role='menuitem'],
+  body [role='option'] {
+    min-width: 44px;
+  }
+
+  #root input[type='checkbox'],
+  #root input[type='radio'] {
+    width: 24px;
+    min-width: 24px;
+    min-height: 24px;
+  }
+
+  #root label:has(input[type='checkbox']),
+  #root label:has(input[type='radio']) {
+    min-height: 44px;
+    align-items: center;
+  }
 }

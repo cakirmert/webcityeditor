@@ -36,7 +36,7 @@ export default function BuildingStartPanel({ onDrawCustom, onPlaceAsset, onCance
 
         <div className="building-start-section-title">
           <span>Ready-made LoD3 buildings</span>
-          <small>Tap an asset, then tap the map to place it.</small>
+          <small>Choose one, preview it on the map, reposition it, then confirm.</small>
         </div>
         <div className="building-asset-grid">
           {BUILDING_ASSETS.map((asset) => (
@@ -53,7 +53,7 @@ export default function BuildingStartPanel({ onDrawCustom, onPlaceAsset, onCance
               <span className="building-asset-copy">
                 <strong>{asset.name}</strong>
                 <small>{asset.description}</small>
-                <em>{asset.size} · official texture</em>
+                <em>{asset.size} · corrected official texture</em>
               </span>
               <span className="building-start-action">Place</span>
             </button>

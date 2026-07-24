@@ -70,6 +70,7 @@ export default function App() {
 
   const [sidePanelWide, setSidePanelWide] = useState(false);
   const [showBuildingStart, setShowBuildingStart] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const autoHamburgLoadStartedRef = useRef(false);
   const [autoHamburgStatus, setAutoHamburgStatus] = useState<{
     kind: 'loading' | 'error';
@@ -333,6 +334,7 @@ export default function App() {
         buildingEditor.setMultiSelection(new Set());
         buildingEditor.setPendingAsset(null);
         setShowBuildingStart(false);
+        setFiltersOpen(false);
         setSelectedZone(null);
         roadEditor.setRoadStatus(
           (current) => current ?? 'Road editor ready. Fetch OSM roads or draw a road manually.'
@@ -557,12 +559,25 @@ export default function App() {
         onCompactVertices={importExport.handleCompactVertices}
         undoState={undoRedo.undoState}
         showList={coreState.showList}
-        onToggleList={() => coreState.setShowList((v) => !v)}
+        onToggleList={() => {
+          setFiltersOpen(false);
+          coreState.setShowList((v) => !v);
+        }}
+        filtersAvailable={!!coreState.cityjson && footprintsForFilter.length > 0}
+        filtersOpen={filtersOpen}
+        filtersActive={!filterIsEmpty}
+        onToggleFilters={() => {
+          if (!filtersOpen) coreState.setShowList(false);
+          setFiltersOpen((open) => !open);
+        }}
         onMergeFile={importExport.handleMergeFile}
         onImportIfc={buildingEditor.handleImportIfc}
         ifcParsing={buildingEditor.ifcParsing}
         onReloadView={() => coreState.setReloadToken((t) => t + 1)}
-        onOpenLoader={() => importExport.setLoadModalOpen(true)}
+        onOpenLoader={() => {
+          setFiltersOpen(false);
+          importExport.setLoadModalOpen(true);
+        }}
         onSaveLocal={importExport.handleSaveLocal}
         saveStatus={coreState.saveStatus}
         drawMode={coreState.drawMode}
@@ -584,6 +599,7 @@ export default function App() {
           buildingEditor.setCreationError(null);
           buildingEditor.setPendingAsset(null);
           coreState.setDrawMode('none');
+          setFiltersOpen(false);
           setShowBuildingStart(true);
         }}
         onCancelDraw={() => {
@@ -635,15 +651,16 @@ export default function App() {
         }
         onPersistCatalog={catalog.catalogConnection ? catalog.handlePersistCatalog : undefined}
       />
-      {coreState.cityjson && footprintsForFilter.length > 0 && (
-        <FilterBar
-          footprints={footprintsForFilter}
-          filter={coreState.filter}
-          onChange={coreState.setFilter}
-          matchCount={filteredIds.size}
-        />
-      )}
       <div className="main">
+        {filtersOpen && coreState.cityjson && footprintsForFilter.length > 0 && (
+          <FilterBar
+            footprints={footprintsForFilter}
+            filter={coreState.filter}
+            onChange={coreState.setFilter}
+            matchCount={filteredIds.size}
+            onClose={() => setFiltersOpen(false)}
+          />
+        )}
         {coreState.showList && coreState.cityjson && footprintsForFilter.length > 0 && (
           <BuildingListPanel
             filteredFootprints={filteredFootprints}
@@ -665,6 +682,11 @@ export default function App() {
             <AssetPlacementBanner
               name={buildingEditor.pendingAsset.name}
               size={buildingEditor.pendingAsset.size}
+              loading={!buildingEditor.pendingAssetDocument}
+              hasLocation={!!buildingEditor.pendingAssetLocation}
+              ready={!!buildingEditor.pendingAssetPreview}
+              error={buildingEditor.pendingAssetError}
+              onConfirm={buildingEditor.handleConfirmAssetPlacement}
               onCancel={buildingEditor.handleCancelAssetPlacement}
             />
           )}
@@ -835,7 +857,9 @@ export default function App() {
               }
               onFootprintChange={buildingEditor.handleFootprintChange}
               preview={
-                buildingEditor.pendingFootprint && buildingEditor.pendingForm
+                buildingEditor.pendingAssetPreview
+                  ? { mesh: buildingEditor.pendingAssetPreview }
+                  : buildingEditor.pendingFootprint && buildingEditor.pendingForm
                   ? {
                       mesh:
                         buildPreviewMesh({
@@ -1478,20 +1502,57 @@ function IfcPlacementBanner({
 function AssetPlacementBanner({
   name,
   size,
+  loading,
+  hasLocation,
+  ready,
+  error,
+  onConfirm,
   onCancel,
 }: {
   name: string;
   size: string;
+  loading: boolean;
+  hasLocation: boolean;
+  ready: boolean;
+  error: string | null;
+  onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const title = error
+    ? `Could not preview ${name}`
+    : !hasLocation
+      ? `Tap the map to preview ${name}`
+      : ready
+        ? `${name} is ready to place`
+        : `Preparing ${name} preview`;
+  const detail = error
+    ? error
+    : !hasLocation
+      ? `${size} · detailed geometry loads now; nothing is added yet`
+      : ready
+        ? 'Tap elsewhere to reposition, or confirm this location'
+        : loading
+          ? 'Loading detailed geometry…'
+          : 'Building the untextured LoD3 preview…';
+
   return (
-    <div className="building-placement-banner" role="status">
-      <div>
-        <strong>Tap the map to place {name}</strong>
-        <span>{size} · genuine textured Hamburg LoD3 geometry</span>
+    <section className="building-placement-banner" aria-label="Place building">
+      <div className="building-placement-banner__copy" role="status" aria-live="polite">
+        <strong>{title}</strong>
+        <span>{detail}</span>
       </div>
-      <button type="button" onClick={onCancel}>Cancel</button>
-    </div>
+      <div className="building-placement-banner__actions">
+        <button type="button" onClick={onCancel}>Cancel</button>
+        <button
+          type="button"
+          className="is-primary"
+          disabled={!ready || !!error}
+          onClick={onConfirm}
+        >
+          Place here
+        </button>
+      </div>
+    </section>
   );
 }
 

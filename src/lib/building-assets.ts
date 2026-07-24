@@ -3,6 +3,7 @@ import type { CityJsonDocument, CityObject } from '../types';
 import { detectCrs } from './projection';
 import { estimateTerrainElevationAtPoint } from './terrain';
 import { publicAssetUrl } from './public-assets';
+import { buildCityJsonMapMesh } from './cityjson-map-mesh';
 
 export interface BuildingAssetDefinition {
   id: string;
@@ -12,6 +13,13 @@ export interface BuildingAssetDefinition {
   cityJsonPath: string;
   previewImagePath: string;
   sourceObjectId: string;
+}
+
+export interface BuildingAssetPlacementPreview {
+  positions: Float32Array;
+  indices: Uint32Array;
+  colors: Uint8Array;
+  anchorLngLat: [number, number];
 }
 
 export const BUILDING_ASSETS: BuildingAssetDefinition[] = [
@@ -59,6 +67,73 @@ export async function loadBuildingAsset(
   const response = await fetch(publicAssetUrl(definition.cityJsonPath));
   if (!response.ok) throw new Error(`Could not load ${definition.name}: HTTP ${response.status}`);
   return response.json() as Promise<CityJsonDocument>;
+}
+
+/**
+ * Build the exact untextured mesh that would be inserted at a map point,
+ * without mutating the loaded document. The preview deliberately shares the
+ * host CRS and transform so confirming it cannot introduce a position jump.
+ */
+export function buildBuildingAssetPlacementPreview(
+  hostDoc: CityJsonDocument,
+  assetDoc: CityJsonDocument,
+  definition: BuildingAssetDefinition,
+  placementWgs84: [number, number]
+): BuildingAssetPlacementPreview | null {
+  const scratch: CityJsonDocument = {
+    type: 'CityJSON',
+    version: hostDoc.version,
+    metadata: hostDoc.metadata?.referenceSystem
+      ? { referenceSystem: hostDoc.metadata.referenceSystem }
+      : undefined,
+    transform: hostDoc.transform ? structuredClone(hostDoc.transform) : undefined,
+    CityObjects: {},
+    vertices: [],
+  };
+  const rootId = insertBuildingAsset(
+    scratch,
+    assetDoc,
+    definition,
+    placementWgs84
+  );
+  const objectIds = new Set(collectObjectTree(scratch, rootId));
+  const mesh = buildCityJsonMapMesh(scratch, {
+    objectIds,
+    maxOutputVertices: 280_000,
+    maxLod: 3.9,
+    groundObjectGroups: true,
+    texturesEnabled: false,
+  });
+  if (!mesh) return null;
+  return {
+    positions: mesh.positions,
+    indices: mesh.indices,
+    colors: Uint8Array.from(mesh.colors, (value) =>
+      Math.max(0, Math.min(255, Math.round(value * 255)))
+    ),
+    anchorLngLat: mesh.anchorLngLat,
+  };
+}
+
+/** IDs that must stay in the local map overlay because remote LoD3 tiles can
+ * never contain objects created in this editor session. */
+export function editorPlacedAssetObjectIds(
+  doc: CityJsonDocument
+): Set<string> {
+  const ids = new Set<string>();
+  for (const [objectId, object] of Object.entries(doc.CityObjects)) {
+    const attributes = object.attributes ?? {};
+    if (
+      typeof attributes._assetId !== 'string' &&
+      attributes._createdBy !== 'city-editor'
+    ) {
+      continue;
+    }
+    for (const descendantId of collectObjectTree(doc, objectId)) {
+      ids.add(descendantId);
+    }
+  }
+  return ids;
 }
 
 export function insertBuildingAsset(

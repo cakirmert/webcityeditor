@@ -140,6 +140,32 @@ describe('<Toolbar />', () => {
     expect(onToggleZoning).toHaveBeenCalledTimes(1);
   });
 
+  it('opens search and filters from one touch-sized header action', async () => {
+    const onToggleFilters = vi.fn();
+    render(
+      <Toolbar
+        fileName="x"
+        stats={defaultStats}
+        dirtyCount={0}
+        hasData={true}
+        onExport={() => {}}
+        onReloadView={() => {}}
+        onOpenLoader={() => {}}
+        filtersAvailable
+        filtersOpen={false}
+        onToggleFilters={onToggleFilters}
+      />
+    );
+
+    const search = screen.getByRole('button', { name: 'Search' });
+    expect(search).toHaveClass('min-h-12');
+    expect(search).toHaveAttribute('aria-expanded', 'false');
+    expect(search).toHaveAttribute('aria-controls', 'building-filter-panel');
+
+    await userEvent.click(search);
+    expect(onToggleFilters).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the connected CityJSONSeq tile count and reloads the viewport on request', async () => {
     const onLoadCatalogViewport = vi.fn();
     render(

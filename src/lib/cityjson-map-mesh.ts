@@ -506,7 +506,10 @@ function addTexturedSurface(
   const vertexOffset = target.positions.length / 3;
   for (const point of vertices3d) target.positions.push(point[0], point[1], point[2]);
   for (const uv of uvCoordinates) {
-    target.texCoords.push(uv[0], uv[1]);
+    // CityJSON/CityGML UVs use the conventional bottom-left image origin.
+    // Both deck.gl's browser-image upload and this app's custom Three.js path
+    // upload HTML images without flipping them, so invert V once here.
+    target.texCoords.push(uv[0], 1 - uv[1]);
   }
   for (const triangle of earcut(flat2d, holes, 2)) target.indices.push(vertexOffset + triangle);
 }

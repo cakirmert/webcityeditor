@@ -144,8 +144,8 @@ describe('CityJSON close-range map mesh', () => {
     expect(mesh?.textures).toHaveLength(1);
     expect(mesh?.textures[0].image).toBe('/assets/sample.jpg');
     expect([...mesh!.textures[0].texCoords]).toEqual([
-      0, 0, 1, 0, 0, 1,
-      0, 0, 1, 0, 0, 1,
+      0, 1, 1, 1, 0, 0,
+      0, 1, 1, 1, 0, 0,
     ]);
   });
 

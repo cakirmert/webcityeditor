@@ -7,6 +7,7 @@ import {
   BUILDING_LOD3_MIN_ZOOM,
   buildingMapDetailMode,
   buildingDetailObjectLimit,
+  editorAssetMapDetailMode,
   smoothZoomStep,
 } from '../../src/lib/lod-transition';
 
@@ -36,6 +37,21 @@ describe('building LoD zoom transition', () => {
       'lod3-untextured'
     );
     expect(buildingMapDetailMode(BUILDING_LOD3_MIN_ZOOM, true)).toBe(
+      'lod3-textured'
+    );
+  });
+
+  it('keeps LoD3-only editor assets visible throughout the source-LoD2 range', () => {
+    expect(editorAssetMapDetailMode(BUILDING_DETAIL_MIN_ZOOM - 0.01, false)).toBe(
+      'block'
+    );
+    expect(editorAssetMapDetailMode(BUILDING_DETAIL_MIN_ZOOM, false)).toBe(
+      'lod3-untextured'
+    );
+    expect(
+      editorAssetMapDetailMode(BUILDING_LOD3_MIN_ZOOM - 0.01, true)
+    ).toBe('lod3-untextured');
+    expect(editorAssetMapDetailMode(BUILDING_LOD3_MIN_ZOOM, true)).toBe(
       'lod3-textured'
     );
   });

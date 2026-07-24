@@ -41,7 +41,7 @@ export default function BuildingListPanel({
   const visible = truncated ? sorted.slice(0, VISIBLE_CAP) : sorted;
 
   return (
-    <aside className="flex w-[300px] flex-shrink-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface)]">
+    <aside className="building-list-panel flex w-[300px] flex-shrink-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface)]">
       <header className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
         <div>
           <div className="text-[12px] font-semibold">
@@ -54,19 +54,21 @@ export default function BuildingListPanel({
           </div>
         </div>
         <button
+          type="button"
           onClick={onClose}
           aria-label="Close list"
-          className="text-[16px] leading-none text-[var(--text-dim)] hover:text-[var(--text)]"
+          className="grid h-10 w-10 touch-manipulation place-items-center rounded-md text-[18px] leading-none text-[var(--text-dim)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
         >
           ×
         </button>
       </header>
 
-      <div className="flex flex-wrap gap-1 border-b border-[var(--border)] px-3 py-1.5 text-[10px]">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] px-3 py-2 text-[11px]">
         <span className="text-[var(--text-faint)] self-center">Sort:</span>
         {(['id', 'year', 'height', 'function'] as const).map((k) => (
           <button
             key={k}
+            type="button"
             onClick={() => {
               if (k === sortKey) setSortDesc((d) => !d);
               else {
@@ -76,8 +78,8 @@ export default function BuildingListPanel({
             }}
             className={
               sortKey === k
-                ? 'rounded border border-[var(--accent)] bg-[var(--accent-soft)] px-1.5 py-0.5 text-[var(--accent)] cursor-pointer'
-                : 'rounded border border-[var(--border)] px-1.5 py-0.5 text-[var(--text-dim)] hover:bg-[var(--bg)] cursor-pointer'
+                ? 'min-h-10 touch-manipulation rounded border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-[var(--accent)] cursor-pointer'
+                : 'min-h-10 touch-manipulation rounded border border-[var(--border)] px-3 py-2 text-[var(--text-dim)] hover:bg-[var(--bg)] cursor-pointer'
             }
           >
             {k}
@@ -102,11 +104,12 @@ export default function BuildingListPanel({
             return (
               <button
                 key={fp.id}
+                type="button"
                 onClick={() => onSelect(fp.id)}
                 className={
                   sel
-                    ? 'block w-full border-b border-[var(--border)] bg-[rgba(255,150,40,0.12)] px-3 py-1.5 text-left text-[11px]'
-                    : 'block w-full border-b border-[var(--border)] px-3 py-1.5 text-left text-[11px] hover:bg-[var(--bg)]'
+                    ? 'block min-h-12 w-full touch-manipulation border-b border-[var(--border)] bg-[rgba(255,150,40,0.12)] px-3 py-2.5 text-left text-[12px]'
+                    : 'block min-h-12 w-full touch-manipulation border-b border-[var(--border)] px-3 py-2.5 text-left text-[12px] hover:bg-[var(--bg)]'
                 }
               >
                 <div

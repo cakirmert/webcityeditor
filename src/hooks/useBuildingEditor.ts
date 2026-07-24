@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
-import type { NewBuildingForm } from '../types';
+import type { CityJsonDocument, NewBuildingForm } from '../types';
 import type { FloorPlanDivision, SplitAxis } from '../lib/subdivision';
 import {
   splitBuildingByFloor,
@@ -29,8 +29,10 @@ import { moveOpening } from '../lib/opening-edit';
 import { parametriseBuilding } from '../lib/parametrise';
 import { findZoneForPoint, validateBuildingType, type ParcelZone } from '../lib/zoning';
 import {
+  buildBuildingAssetPlacementPreview,
   insertBuildingAsset,
   loadBuildingAsset,
+  type BuildingAssetPlacementPreview,
   type BuildingAssetDefinition,
 } from '../lib/building-assets';
 
@@ -68,7 +70,25 @@ export function useBuildingEditor(
     fileName: string;
   } | null>(null);
   const [ifcParsing, setIfcParsing] = useState(false);
-  const [pendingAsset, setPendingAsset] = useState<BuildingAssetDefinition | null>(null);
+  const [pendingAsset, setPendingAssetState] = useState<BuildingAssetDefinition | null>(null);
+  const [pendingAssetDocument, setPendingAssetDocument] =
+    useState<CityJsonDocument | null>(null);
+  const [pendingAssetLocation, setPendingAssetLocation] =
+    useState<[number, number] | null>(null);
+  const [pendingAssetPreview, setPendingAssetPreview] =
+    useState<BuildingAssetPlacementPreview | null>(null);
+  const [pendingAssetError, setPendingAssetError] = useState<string | null>(null);
+
+  const setPendingAsset = useCallback(
+    (asset: BuildingAssetDefinition | null) => {
+      setPendingAssetState(asset);
+      setPendingAssetDocument(null);
+      setPendingAssetLocation(null);
+      setPendingAssetPreview(null);
+      setPendingAssetError(null);
+    },
+    []
+  );
 
   const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
   const [clipboardIds, setClipboardIds] = useState<Set<string> | null>(null);
@@ -582,31 +602,119 @@ export function useBuildingEditor(
     setIfcPending(null);
   }, []);
 
+  useEffect(() => {
+    if (!pendingAsset) return;
+    let canceled = false;
+    loadBuildingAsset(pendingAsset)
+      .then((assetDocument) => {
+        if (!canceled) setPendingAssetDocument(assetDocument);
+      })
+      .catch((error) => {
+        if (!canceled) {
+          setPendingAssetError(
+            `Could not load ${pendingAsset.name}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [pendingAsset]);
+
+  useEffect(() => {
+    if (!cityjson || !pendingAsset || !pendingAssetDocument || !pendingAssetLocation) {
+      setPendingAssetPreview(null);
+      return;
+    }
+    try {
+      const preview = buildBuildingAssetPlacementPreview(
+        cityjson,
+        pendingAssetDocument,
+        pendingAsset,
+        pendingAssetLocation
+      );
+      setPendingAssetPreview(preview);
+      setPendingAssetError(
+        preview ? null : `Could not build a preview for ${pendingAsset.name}.`
+      );
+    } catch (error) {
+      setPendingAssetPreview(null);
+      setPendingAssetError(
+        `Could not preview ${pendingAsset.name}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }, [
+    cityjson,
+    pendingAsset,
+    pendingAssetDocument,
+    pendingAssetLocation,
+  ]);
+
   const handleAssetPlacement = useCallback(
-    async (lngLat: [number, number]) => {
-      if (!cityjson || !pendingAsset) return;
-      const asset = pendingAsset;
-      setPendingAsset(null);
-      try {
-        const assetDoc = await loadBuildingAsset(asset);
-        pushUndo(`Place ${asset.name}`);
-        const { value: id } = runStructurallyGuardedMutation(
-          cityjson,
-          `Placing ${asset.name}`,
-          () => insertBuildingAsset(cityjson, assetDoc, asset, lngLat)
-        );
-        setDirtyIds((prev) => new Set(prev).add(id));
-        setSelection({ objectId: id });
-        setReloadToken((token) => token + 1);
-        markGeometryChanged();
-      } catch (error) {
-        alert(`Could not place building asset: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    (lngLat: [number, number]) => {
+      if (!pendingAsset) return;
+      setPendingAssetLocation(lngLat);
     },
-    [cityjson, pendingAsset, pushUndo, setDirtyIds, setSelection, setReloadToken, markGeometryChanged]
+    [pendingAsset]
   );
 
-  const handleCancelAssetPlacement = useCallback(() => setPendingAsset(null), []);
+  const handleConfirmAssetPlacement = useCallback(() => {
+    if (
+      !cityjson ||
+      !pendingAsset ||
+      !pendingAssetDocument ||
+      !pendingAssetLocation ||
+      !pendingAssetPreview
+    ) {
+      return;
+    }
+    try {
+      pushUndo(`Place ${pendingAsset.name}`);
+      const { value: id } = runStructurallyGuardedMutation(
+        cityjson,
+        `Placing ${pendingAsset.name}`,
+        () =>
+          insertBuildingAsset(
+            cityjson,
+            pendingAssetDocument,
+            pendingAsset,
+            pendingAssetLocation
+          )
+      );
+      setDirtyIds((prev) => new Set(prev).add(id));
+      setSelection({ objectId: id });
+      setReloadToken((token) => token + 1);
+      markGeometryChanged();
+      setPendingAsset(null);
+    } catch (error) {
+      setPendingAssetError(
+        `Could not place ${pendingAsset.name}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }, [
+    cityjson,
+    pendingAsset,
+    pendingAssetDocument,
+    pendingAssetLocation,
+    pendingAssetPreview,
+    pushUndo,
+    setDirtyIds,
+    setSelection,
+    setReloadToken,
+    markGeometryChanged,
+    setPendingAsset,
+  ]);
+
+  const handleCancelAssetPlacement = useCallback(
+    () => setPendingAsset(null),
+    [setPendingAsset]
+  );
 
   useEffect(() => {
     if (!pendingAsset) return;
@@ -618,7 +726,7 @@ export function useBuildingEditor(
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [pendingAsset]);
+  }, [pendingAsset, setPendingAsset]);
 
   useEffect(() => {
     if (!ifcPending) return;
@@ -672,6 +780,10 @@ export function useBuildingEditor(
     setIfcParsing,
     pendingAsset,
     setPendingAsset,
+    pendingAssetDocument,
+    pendingAssetLocation,
+    pendingAssetPreview,
+    pendingAssetError,
     multiSelection,
     setMultiSelection,
     clipboardIds,
@@ -700,6 +812,7 @@ export function useBuildingEditor(
     handleIfcPlacement,
     handleCancelIfcPlacement,
     handleAssetPlacement,
+    handleConfirmAssetPlacement,
     handleCancelAssetPlacement,
     handleDragMove,
   };

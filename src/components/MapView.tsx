@@ -68,6 +68,7 @@ import {
 } from '../lib/road-draft-edit';
 import { osmTrafficSignIcon } from '../lib/osm-street-point-style';
 import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
+import { editorPlacedAssetObjectIds } from '../lib/building-assets';
 import { buildRoadVisuals } from '../lib/road-visuals';
 import {
   BUILDING_BLOCK_FULL_ZOOM,
@@ -77,6 +78,7 @@ import {
   HAMBURG_TREE_MIN_ZOOM,
   buildingMapDetailMode,
   buildingDetailObjectLimit,
+  editorAssetMapDetailMode,
   smoothZoomStep,
 } from '../lib/lod-transition';
 import {
@@ -770,6 +772,7 @@ export default function MapView({
   );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
   const buildingDetailMode = buildingMapDetailMode(zoom, texturesEnabled);
+  const localAssetDetailMode = editorAssetMapDetailMode(zoom, texturesEnabled);
   const detailLod: 'lod2' | 'lod3' =
     buildingDetailMode === 'lod3-untextured' ||
     buildingDetailMode === 'lod3-textured'
@@ -831,6 +834,10 @@ export default function MapView({
               editFocusBbox ? 'around this edit' : 'in view'
             }`
           : 'official street trees loading';
+  const localAssetObjectIds = useMemo(
+    () => editorPlacedAssetObjectIds(cityjson),
+    [cityjson, reloadToken]
+  );
   const detailScopeBbox = editFocusBbox ?? viewportBbox;
   const detailFocus = editFocusBbox
     ? [
@@ -864,6 +871,10 @@ export default function MapView({
       if (footprint.parentId) addCityObjectWithDescendants(cityjson, footprint.parentId, ids);
     }
     if (selectedId) addCityObjectWithDescendants(cityjson, selectedId, ids);
+    // Editor-created assets have no LoD2 geometry. They use their dedicated
+    // local overlay throughout the detail zoom range instead of entering the
+    // source LoD selector and disappearing before official LoD3 activates.
+    for (const localAssetId of localAssetObjectIds) ids.delete(localAssetId);
     return ids.size > 0 ? ids : null;
   }, [
     cityjson,
@@ -871,6 +882,7 @@ export default function MapView({
     detailFocus,
     detailOpacity,
     detailScopeBbox,
+    localAssetObjectIds,
     renderedFootprints,
     selectedId,
   ]);
@@ -908,18 +920,45 @@ export default function MapView({
       reloadToken,
     ]
   );
+  const localAssetOverlayMesh = useMemo(
+    () =>
+      localAssetDetailMode !== 'block' && localAssetObjectIds.size > 0
+        ? buildCityJsonMapMesh(cityjson, {
+            objectIds: localAssetObjectIds,
+            maxOutputVertices: 280_000,
+            maxLod: 3.9,
+            groundObjectGroups: true,
+            texturesEnabled: localAssetDetailMode === 'lod3-textured',
+          })
+        : null,
+    [
+      cityjson,
+      localAssetDetailMode,
+      localAssetObjectIds,
+      reloadToken,
+    ]
+  );
   const blockFootprints = useMemo(
     () =>
       officialLod3Ready
         ? []
-        : detailObjectIds
-        ? groundedRenderedFootprints.filter(
-            (footprint) =>
-              !detailObjectIds.has(footprint.id) &&
-              (!footprint.parentId || !detailObjectIds.has(footprint.parentId))
-          )
-        : groundedRenderedFootprints,
-    [groundedRenderedFootprints, detailObjectIds, officialLod3Ready]
+        : groundedRenderedFootprints.filter((footprint) => {
+            const inDetailMesh =
+              detailObjectIds?.has(footprint.id) ||
+              (!!footprint.parentId && detailObjectIds?.has(footprint.parentId));
+            const inLocalAssetMesh =
+              !!localAssetOverlayMesh &&
+              (localAssetObjectIds.has(footprint.id) ||
+                (!!footprint.parentId && localAssetObjectIds.has(footprint.parentId)));
+            return !inDetailMesh && !inLocalAssetMesh;
+          }),
+    [
+      groundedRenderedFootprints,
+      detailObjectIds,
+      localAssetObjectIds,
+      localAssetOverlayMesh,
+      officialLod3Ready,
+    ]
   );
   const blockOpacity = smoothZoomStep(
     BUILDING_BLOCK_MIN_ZOOM,
@@ -1589,6 +1628,77 @@ export default function MapView({
       });
     }
 
+    // Remote Hamburg tiles cannot contain buildings created in this editor,
+    // and these assets have no lower LoD fallback. Keep them in one small
+    // local overlay across both source-detail and official-LoD3 zoom ranges.
+    if (localAssetOverlayMesh && localAssetOverlayMesh.indices.length > 0) {
+      layers.push(
+        new SimpleMeshLayer<{ position: [number, number, number] }>({
+          id: 'building-local-assets-overlay',
+          data: [{ position: [0, 0, 0] }],
+          getPosition: (d: { position: [number, number, number] }) => d.position,
+          getColor: [255, 255, 255, 255],
+          mesh: {
+            attributes: {
+              positions: { value: localAssetOverlayMesh.positions, size: 3 },
+              colors: { value: localAssetOverlayMesh.colors, size: 3 },
+            },
+            indices: { value: localAssetOverlayMesh.indices, size: 1 },
+          } as unknown as never,
+          _instanced: false,
+          opacity: 1,
+          sizeScale: 1,
+          coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+          coordinateOrigin: [
+            localAssetOverlayMesh.anchorLngLat[0],
+            localAssetOverlayMesh.anchorLngLat[1],
+            0,
+          ],
+          pickable: false,
+          material: {
+            ambient: 0.58,
+            diffuse: 0.7,
+            shininess: 16,
+            specularColor: [65, 68, 76],
+          },
+        } as any)
+      );
+    }
+    localAssetOverlayMesh?.textures.forEach((textureMesh, index) => {
+      layers.push(
+        new SimpleMeshLayer<{ position: [number, number, number] }>({
+          id: `building-local-assets-texture-${index}`,
+          data: [{ position: [0, 0, 0] }],
+          getPosition: (d: { position: [number, number, number] }) => d.position,
+          getColor: [255, 255, 255, 255],
+          mesh: {
+            attributes: {
+              positions: { value: textureMesh.positions, size: 3 },
+              texCoords: { value: textureMesh.texCoords, size: 2 },
+            },
+            indices: { value: textureMesh.indices, size: 1 },
+          } as unknown as never,
+          texture: textureMesh.image,
+          _instanced: false,
+          opacity: 1,
+          sizeScale: 1,
+          coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+          coordinateOrigin: [
+            localAssetOverlayMesh.anchorLngLat[0],
+            localAssetOverlayMesh.anchorLngLat[1],
+            0,
+          ],
+          pickable: false,
+          material: {
+            ambient: 0.78,
+            diffuse: 0.34,
+            shininess: 6,
+            specularColor: [30, 30, 30],
+          },
+        } as any)
+      );
+    });
+
     // Cheap block context fills the middle zoom range; close zoom swaps it for
     // the indexed highest-available CityJSON surface mesh above.
     if (blockOpacity > 0.001 && blockFootprints.length > 0) {
@@ -2232,6 +2342,9 @@ export default function MapView({
           coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
           coordinateOrigin: [preview.mesh.anchorLngLat[0], preview.mesh.anchorLngLat[1], 0],
           pickable: false,
+          // Placement is a temporary x-ray preview. Keeping it visible over
+          // official tiles lets the user notice collisions before confirming.
+          parameters: { depthTest: false } as unknown as never,
         })
       );
     } else if (preview?.polygon && preview.polygon.length >= 3) {
@@ -2291,6 +2404,7 @@ export default function MapView({
     blockFootprints,
     renderedZones,
     detailMesh,
+    localAssetOverlayMesh,
     selectedId,
     onSelect,
     zoom,
@@ -2472,10 +2586,11 @@ export default function MapView({
     if (drawMode === 'road-line') setDrawWarning(null);
   }, [drawMode]);
 
-  // ── One-click placement mode (used by IFC import) ────────────────────────
-  // When `onPlacementClick` is set, we attach a one-shot map click listener
-  // that fires the callback with the clicked lng/lat. The change in cursor
-  // gives the user a visual cue. Selection clicks are blocked because
+  // ── Interactive placement mode (used by assets and IFC import) ───────────
+  // While `onPlacementClick` is set, every map tap reports its lng/lat. Asset
+  // previews can therefore be repositioned repeatedly; IFC clears its pending
+  // callback after the first tap. The cursor gives a visual cue. Selection
+  // clicks are blocked because
   // deck.gl's `onClick` on the building layers fires after MapLibre's, but
   // we set the picking layer to non-pickable while placement is awaiting,
   // so map clicks can land cleanly on the basemap.

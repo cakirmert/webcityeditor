@@ -29,6 +29,27 @@ export function buildingMapDetailMode(
   return texturesEnabled ? 'lod3-textured' : 'lod3-untextured';
 }
 
+export type EditorAssetMapDetailMode =
+  | 'block'
+  | 'lod3-untextured'
+  | 'lod3-textured';
+
+/**
+ * Ready-made editor assets currently ship with LoD3 geometry only. Promote
+ * that local geometry as soon as the ordinary map enters its LoD2 range, but
+ * keep it untextured until the close-zoom texture control is explicitly on.
+ */
+export function editorAssetMapDetailMode(
+  zoom: number,
+  texturesEnabled: boolean
+): EditorAssetMapDetailMode {
+  const mapMode = buildingMapDetailMode(zoom, texturesEnabled);
+  if (mapMode === 'lod0') return 'block';
+  return mapMode === 'lod3-textured'
+    ? 'lod3-textured'
+    : 'lod3-untextured';
+}
+
 /**
  * A pitched map has a much larger visible footprint than a top-down map. Start
  * with a useful neighbourhood instead of a tiny 24-building island, then widen

@@ -8,6 +8,7 @@ import {
   MapPinned,
   MoreHorizontal,
   Route,
+  Search,
 } from 'lucide-react';
 
 interface Stats {
@@ -55,6 +56,10 @@ interface Props {
   };
   showList?: boolean;
   onToggleList?: () => void;
+  filtersAvailable?: boolean;
+  filtersOpen?: boolean;
+  filtersActive?: boolean;
+  onToggleFilters?: () => void;
   onMergeFile?: () => void;
   onImportIfc?: () => void;
   ifcParsing?: boolean;
@@ -105,6 +110,10 @@ export default function Toolbar({
   undoState,
   showList = false,
   onToggleList,
+  filtersAvailable = false,
+  filtersOpen = false,
+  filtersActive = false,
+  onToggleFilters,
   onMergeFile,
   onImportIfc,
   ifcParsing = false,
@@ -267,6 +276,29 @@ export default function Toolbar({
                 <Building2 aria-hidden="true" /> New Building
               </Button>
             )
+          )}
+
+          {filtersAvailable && onToggleFilters && (
+            <Button
+              className="app-toolbar__action min-h-12"
+              variant={filtersOpen || filtersActive ? 'primary' : 'ghost'}
+              onClick={onToggleFilters}
+              aria-expanded={filtersOpen}
+              aria-controls="building-filter-panel"
+              title={
+                filtersActive
+                  ? 'Search and filter buildings (filters active)'
+                  : 'Search and filter buildings'
+              }
+            >
+              <Search aria-hidden="true" /> Search
+              {filtersActive && (
+                <span
+                  className="h-2 w-2 rounded-full bg-white"
+                  aria-hidden="true"
+                />
+              )}
+            </Button>
           )}
 
           {onToggleList && (
