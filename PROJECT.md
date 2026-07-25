@@ -256,9 +256,11 @@ The following work is intentionally not claimed as complete:
 
 1. Generate true intersection surfaces from confirmed connected roads, including lane-to-lane connectors, turns, crossings, and regenerated markings. Exact lane polygons already match osm2streets styling; dynamic junction synthesis is not claimed as complete.
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
-3. Add topology-aware coordinate propagation when a connected road is later moved. The editor now
-   detects a moved-away confirmed endpoint, asks before saving, and clears stale reciprocal metadata
-   from the peer road; automatic movement of the peer geometry is still pending.
+3. Complete topology-aware coordinate propagation for every road source. The editor now detects a
+   moved-away confirmed endpoint and can, after explicit confirmation, move a generated peer road's
+   endpoint while preserving reciprocal metadata and fit-checking both geometries. Exact imported
+   polygons and ambiguous multi-peer joins retain the guarded disconnect path until a deliberate
+   regeneration/conflict-resolution workflow is added.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
 5. Add a dedicated renderer for Hamburg's CORS-enabled Cesium quantized-mesh DGM terrain and drape the active MapLibre basemap onto it. Per-building grounding fixes floating models now; full terrain is required to preserve surveyed elevation differences and terrain breaklines visually.
 6. Add screenshot-based GPU regression coverage for official 3D Tiles and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural grounding and tile-data regressions already have unit coverage.
