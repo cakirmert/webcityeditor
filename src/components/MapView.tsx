@@ -221,6 +221,9 @@ function roadAreaSourceType(area: RoadArea): string | undefined {
   return typeof sourceType === 'string' ? sourceType : undefined;
 }
 
+const ROAD_CONNECTION_CORAL: Rgba = [255, 88, 72, 255];
+const ROAD_CONNECTION_AMBER: Rgba = [255, 214, 82, 255];
+
 function roadAreaFillColor(
   area: RoadArea,
   basemap: BasemapMode,
@@ -290,7 +293,7 @@ function osm2streetsSelectionLineColor(
   highlighted = false
 ): Rgba {
   if (isSelectedOsm2StreetsFeature(feature, selection, kind)) return [188, 235, 255, 255];
-  if (highlighted) return [94, 234, 212, 245];
+  if (highlighted) return ROAD_CONNECTION_CORAL;
   return [0, 0, 0, 0];
 }
 
@@ -1981,7 +1984,7 @@ export default function MapView({
             filled: false,
             stroked: true,
             pickable: false,
-            getLineColor: [94, 234, 212, 245],
+            getLineColor: ROAD_CONNECTION_CORAL,
             getLineWidth: 3,
             lineWidthUnits: 'pixels',
             lineWidthMinPixels: 3,
@@ -2098,14 +2101,14 @@ export default function MapView({
             roadOverlayColor(
               area.roadId === selectedRoadConnections.focusRoadId
                 ? [60, 176, 255, 62]
-                : [45, 212, 191, 28],
+                : withAlpha(ROAD_CONNECTION_CORAL, 42),
               { basemap, opacity: roadOverlayOpacity }
             ),
           getLineColor: (area) =>
             roadOverlayColor(
               area.roadId === selectedRoadConnections.focusRoadId
                 ? [188, 235, 255, 255]
-                : [94, 234, 212, 225],
+                : ROAD_CONNECTION_CORAL,
               { basemap, opacity: roadOverlayOpacity }
             ),
           getLineWidth: (area) =>
@@ -2140,11 +2143,11 @@ export default function MapView({
           id: 'road-connection-junctions',
           data: connectionJunctionAreas,
           getPolygon: (area) => area.polygon,
-          getFillColor: roadOverlayColor([20, 184, 166, 92], {
+          getFillColor: roadOverlayColor(withAlpha(ROAD_CONNECTION_CORAL, 118), {
             basemap,
             opacity: roadOverlayOpacity,
           }),
-          getLineColor: roadOverlayColor([153, 246, 228, 255], {
+          getLineColor: roadOverlayColor(ROAD_CONNECTION_AMBER, {
             basemap,
             opacity: roadOverlayOpacity,
           }),
@@ -2283,11 +2286,11 @@ export default function MapView({
               roadDraft,
               selectedDraftBand
             )
-              ? roadOverlayColor([188, 235, 255, 255], {
+              ? roadOverlayColor(ROAD_CONNECTION_AMBER, {
                   basemap,
                   opacity: roadOverlayOpacity,
                 })
-              : roadOverlayColor([94, 234, 212, 235], {
+              : roadOverlayColor(ROAD_CONNECTION_CORAL, {
                   basemap,
                   opacity: roadOverlayOpacity,
                 }),
@@ -2328,12 +2331,12 @@ export default function MapView({
           getPosition: (node) => node.position,
           getFillColor: (node) =>
             node.kind === 'junction'
-              ? [20, 184, 166, 150]
-              : [60, 176, 255, 145],
+              ? withAlpha(ROAD_CONNECTION_CORAL, 190)
+              : withAlpha(ROAD_CONNECTION_AMBER, 180),
           getLineColor: (node) =>
             node.kind === 'junction'
-              ? [153, 246, 228, 255]
-              : [188, 235, 255, 255],
+              ? ROAD_CONNECTION_AMBER
+              : ROAD_CONNECTION_CORAL,
           getLineWidth: 2.5,
           getRadius: (node) => (node.kind === 'junction' ? 9 : 7),
           radiusUnits: 'pixels',
