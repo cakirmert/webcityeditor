@@ -195,6 +195,10 @@ export function useRoadEditor(
   const [osmPointFeatures, setOsmPointFeatures] = useState<OsmPointFeature[]>([]);
   const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
+  const [selectedRoadBand, setSelectedRoadBand] = useState<{
+    sectionId: string;
+    bandIndex: number;
+  } | null>(null);
   const [roadEditBaseline, setRoadEditBaseline] = useState<RoadEditBaseline | null>(null);
   const [roadDraftDirty, setRoadDraftDirty] = useState(false);
   const [editingRoadId, setEditingRoadId] = useState<string | null>(null);
@@ -209,6 +213,35 @@ export function useRoadEditor(
   const [highlightedOsm2StreetsRoadIds, setHighlightedOsm2StreetsRoadIds] = useState<Set<number | string>>(new Set());
   const roadDraftHistoryRef = useRef(new RoadDraftHistory());
   const [roadDraftHistoryVersion, setRoadDraftHistoryVersion] = useState(0);
+
+  useEffect(() => {
+    setSelectedRoadBand((current) => {
+      if (!roadDraft) return null;
+      if (
+        current &&
+        roadDraft.sections.some(
+          (section) =>
+            section.id === current.sectionId && !!section.bands[current.bandIndex]
+        )
+      ) {
+        return current;
+      }
+      const currentSection = current
+        ? roadDraft.sections.find((section) => section.id === current.sectionId)
+        : undefined;
+      const fallbackSection =
+        currentSection?.bands.length ? currentSection : roadDraft.sections[0];
+      return fallbackSection?.bands.length
+        ? {
+            sectionId: fallbackSection.id,
+            bandIndex: Math.min(
+              current?.bandIndex ?? 0,
+              fallbackSection.bands.length - 1
+            ),
+          }
+        : null;
+    });
+  }, [roadDraft]);
 
   const clearRoadDraftHistory = useCallback(() => {
     roadDraftHistoryRef.current.clear();
@@ -1146,6 +1179,8 @@ export function useRoadEditor(
     setSelectedOsmRoadId,
     roadDraft,
     setRoadDraft,
+    selectedRoadBand,
+    setSelectedRoadBand,
     roadDraftDirty,
     roadDraftHistoryState,
     handleUndoRoadDraft,

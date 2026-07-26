@@ -17,6 +17,47 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('keeps the selected map lane valid as the road layout changes', async () => {
+    const doc = buildSampleCube();
+    const { result } = renderHook(() =>
+      useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never)
+    );
+    const draft = createManualRoadDraft(roadLine);
+
+    act(() => result.current.setRoadDraft(draft));
+    await waitFor(() => {
+      expect(result.current.selectedRoadBand).toEqual({
+        sectionId: draft.sections[0].id,
+        bandIndex: 0,
+      });
+    });
+
+    act(() =>
+      result.current.setSelectedRoadBand({
+        sectionId: draft.sections[0].id,
+        bandIndex: draft.sections[0].bands.length - 1,
+      })
+    );
+    act(() =>
+      result.current.setRoadDraft({
+        ...draft,
+        sections: [
+          {
+            ...draft.sections[0],
+            bands: draft.sections[0].bands.slice(0, 1),
+          },
+        ],
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.selectedRoadBand).toEqual({
+        sectionId: draft.sections[0].id,
+        bandIndex: 0,
+      });
+    });
+  });
+
   it('reports mapped street-tree overlaps as non-blocking road-fit warnings', async () => {
     const doc = buildSampleCube();
     const midpoint: [number, number] = [

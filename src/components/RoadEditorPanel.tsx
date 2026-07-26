@@ -59,6 +59,7 @@ interface Props {
   roadFitConflicts?: RoadFitConflict[];
   roadFitPending?: boolean;
   selectedRoadArea?: RoadArea | null;
+  selectedRoadBand?: { sectionId: string; bandIndex: number } | null;
   osm2streetsSelection?: Osm2StreetsSelection;
   canUndoDraft: boolean;
   canRedoDraft: boolean;
@@ -83,6 +84,9 @@ interface Props {
   onBackendUrlChange: (url: string) => void;
   onEditSelectedRoadArea: (area: RoadArea) => void;
   onDeleteSelectedRoadArea: (area: RoadArea) => void;
+  onRoadBandSelect?: (
+    selection: { sectionId: string; bandIndex: number } | null
+  ) => void;
   onEditOsm2StreetsSelection: () => void;
   onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
@@ -126,6 +130,7 @@ export default function RoadEditorPanel({
   roadFitConflicts = [],
   roadFitPending = false,
   selectedRoadArea = null,
+  selectedRoadBand = null,
   osm2streetsSelection = null,
   canUndoDraft,
   canRedoDraft,
@@ -150,6 +155,7 @@ export default function RoadEditorPanel({
   onBackendUrlChange,
   onEditSelectedRoadArea,
   onDeleteSelectedRoadArea,
+  onRoadBandSelect,
   onEditOsm2StreetsSelection,
   onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
@@ -187,6 +193,16 @@ export default function RoadEditorPanel({
     }
     setActiveBandIndex((index) => Math.min(index, activeSection.bands.length - 1));
   }, [activeSection]);
+
+  useEffect(() => {
+    if (!selectedRoadBand) return;
+    const section = draft?.sections.find(
+      (candidate) => candidate.id === selectedRoadBand.sectionId
+    );
+    if (!section?.bands[selectedRoadBand.bandIndex]) return;
+    setActiveSectionId(section.id);
+    setActiveBandIndex(selectedRoadBand.bandIndex);
+  }, [draft, selectedRoadBand]);
 
   const selectedOsm = osmRoads.find((road) => road.id === selectedOsmRoadId);
   const payloadPreview = draft
@@ -260,7 +276,18 @@ export default function RoadEditorPanel({
       ...section,
       bands: section.bands.filter((_, index) => index !== bandIndex),
     }));
-    setActiveBandIndex((index) => Math.max(0, Math.min(index, activeSection.bands.length - 2)));
+    const nextBandIndex =
+      bandIndex < activeBandIndex
+        ? activeBandIndex - 1
+        : Math.max(
+            0,
+            Math.min(activeBandIndex, activeSection.bands.length - 2)
+          );
+    setActiveBandIndex(nextBandIndex);
+    onRoadBandSelect?.({
+      sectionId: activeSection.id,
+      bandIndex: nextBandIndex,
+    });
   };
 
   const reorderBand = (fromIndex: number, toIndex: number) => {
@@ -279,7 +306,21 @@ export default function RoadEditorPanel({
       bands.splice(toIndex, 0, moved);
       return { ...section, bands };
     });
-    if (activeBandIndex === fromIndex) setActiveBandIndex(toIndex);
+    const nextActiveBandIndex =
+      activeBandIndex === fromIndex
+        ? toIndex
+        : fromIndex < activeBandIndex && toIndex >= activeBandIndex
+          ? activeBandIndex - 1
+          : fromIndex > activeBandIndex && toIndex <= activeBandIndex
+            ? activeBandIndex + 1
+            : activeBandIndex;
+    if (nextActiveBandIndex !== activeBandIndex) {
+      setActiveBandIndex(nextActiveBandIndex);
+      onRoadBandSelect?.({
+        sectionId: activeSection.id,
+        bandIndex: nextActiveBandIndex,
+      });
+    }
   };
 
   const handleBandDragStart = (
@@ -324,6 +365,10 @@ export default function RoadEditorPanel({
       ],
     }));
     setActiveBandIndex(activeSection.bands.length);
+    onRoadBandSelect?.({
+      sectionId: activeSection.id,
+      bandIndex: activeSection.bands.length,
+    });
   };
 
   return (
@@ -633,7 +678,14 @@ export default function RoadEditorPanel({
                   <span className="mb-1 block text-[var(--text-dim)]">Active section</span>
                   <select
                     value={activeSection.id}
-                    onChange={(event) => setActiveSectionId(event.target.value)}
+                    onChange={(event) => {
+                      setActiveSectionId(event.target.value);
+                      setActiveBandIndex(0);
+                      onRoadBandSelect?.({
+                        sectionId: event.target.value,
+                        bandIndex: 0,
+                      });
+                    }}
                     className="h-12 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 text-sm"
                   >
                     {draft.sections.map((section, index) => (
@@ -784,7 +836,13 @@ export default function RoadEditorPanel({
                       setDraggingBandIndex(null);
                       setDropBandIndex(null);
                     }}
-                    onClick={() => setActiveBandIndex(index)}
+                    onClick={() => {
+                      setActiveBandIndex(index);
+                      onRoadBandSelect?.({
+                        sectionId: activeSection.id,
+                        bandIndex: index,
+                      });
+                    }}
                     aria-pressed={activeBandIndex === index}
                     className={`road-cross-section__band ${
                       draggingBandIndex === index

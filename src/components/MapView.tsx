@@ -75,6 +75,10 @@ import {
   type RoadLaneContinuation,
 } from '../lib/road-lane-continuations';
 import {
+  roadAreaMatchesDraftBand,
+  roadLaneContinuationMatchesDraftBand,
+} from '../lib/road-selection';
+import {
   BUILDING_BLOCK_FULL_ZOOM,
   BUILDING_BLOCK_MIN_ZOOM,
   BUILDING_DETAIL_FULL_ZOOM,
@@ -399,6 +403,10 @@ interface Props {
   selectedRoadAreaId?: string | null;
   onRoadAreaSelect?: (area: RoadArea) => void;
   roadDraft?: RoadDraft | null;
+  selectedRoadBand?: { sectionId: string; bandIndex: number } | null;
+  onSelectedRoadBandChange?: (
+    selection: { sectionId: string; bandIndex: number } | null
+  ) => void;
   onRoadDraftChange?: (draft: RoadDraft) => void;
   osmRoads?: OsmRoadFeature[];
   osmPointFeatures?: OsmPointFeature[];
@@ -471,6 +479,8 @@ export default function MapView({
   selectedRoadAreaId = null,
   onRoadAreaSelect,
   roadDraft = null,
+  selectedRoadBand,
+  onSelectedRoadBandChange,
   onRoadDraftChange,
   osmRoads = [],
   osmPointFeatures = [],
@@ -519,6 +529,54 @@ export default function MapView({
   const [viewportBbox, setViewportBbox] = useState<[number, number, number, number] | null>(null);
   const [detailFocusPoint, setDetailFocusPoint] = useState<[number, number] | null>(null);
   const [layerControlOpen, setLayerControlOpen] = useState(false);
+  const [internalSelectedRoadBand, setInternalSelectedRoadBand] = useState<{
+    sectionId: string;
+    bandIndex: number;
+  } | null>(null);
+  const selectedDraftBand =
+    selectedRoadBand === undefined ? internalSelectedRoadBand : selectedRoadBand;
+  const setSelectedDraftBand = useCallback(
+    (selection: { sectionId: string; bandIndex: number } | null) => {
+      if (selectedRoadBand === undefined) setInternalSelectedRoadBand(selection);
+      onSelectedRoadBandChange?.(selection);
+    },
+    [onSelectedRoadBandChange, selectedRoadBand]
+  );
+
+  useEffect(() => {
+    if (!roadDraft) {
+      setSelectedDraftBand(null);
+      return;
+    }
+    if (
+      selectedDraftBand &&
+      roadDraft.sections.some(
+        (section) =>
+          section.id === selectedDraftBand.sectionId &&
+          !!section.bands[selectedDraftBand.bandIndex]
+      )
+    ) {
+      return;
+    }
+    const currentSection = selectedDraftBand
+      ? roadDraft.sections.find(
+          (section) => section.id === selectedDraftBand.sectionId
+        )
+      : undefined;
+    const fallbackSection =
+      currentSection?.bands.length ? currentSection : roadDraft.sections[0];
+    setSelectedDraftBand(
+      fallbackSection?.bands.length
+        ? {
+            sectionId: fallbackSection.id,
+            bandIndex: Math.min(
+              selectedDraftBand?.bandIndex ?? 0,
+              fallbackSection.bands.length - 1
+            ),
+          }
+        : null
+    );
+  }, [roadDraft, selectedDraftBand, setSelectedDraftBand]);
 
   useEffect(() => {
     // Keep this compact control behind its button whenever another map tool
@@ -726,9 +784,29 @@ export default function MapView({
     () => roadLaneContinuations.filter((continuation) => continuation.turn === 'through'),
     [roadLaneContinuations]
   );
-  const turningRoadLaneContinuations = useMemo(
-    () => roadLaneContinuations.filter((continuation) => continuation.turn !== 'through'),
-    [roadLaneContinuations]
+  const selectedHighlightBand = roadDraft?.sections
+    .find((section) => section.id === selectedDraftBand?.sectionId)
+    ?.bands[selectedDraftBand?.bandIndex ?? -1];
+  const roadSelectionHighlightKey = [
+    roadDraft?.id ?? 'none',
+    selectedDraftBand?.sectionId ?? 'none',
+    selectedDraftBand?.bandIndex ?? -1,
+    selectedHighlightBand?.id ??
+      `${selectedHighlightBand?.kind ?? 'none'}:${selectedHighlightBand?.sourceType ?? ''}`,
+    roadPreviewAreas.length > 0 ? 'preview' : 'saved',
+  ].join(':');
+  const selectedRoadBandAreas = useMemo(
+    () =>
+      (roadPreviewAreas.length > 0 ? roadPreviewAreas : renderedRoadAreas).filter(
+        (area) => roadAreaMatchesDraftBand(area, roadDraft, selectedDraftBand)
+      ),
+    [
+      renderedRoadAreas,
+      roadDraft,
+      roadPreviewAreas,
+      roadSelectionHighlightKey,
+      selectedDraftBand,
+    ]
   );
 
   const renderedZones = useMemo(
@@ -1999,21 +2077,45 @@ export default function MapView({
           data: throughRoadLaneContinuations,
           getPolygon: (continuation) => continuation.polygon,
           getFillColor: (continuation) =>
-            roadOverlayColor(
-              withAlpha(
-                roadBandFillColor(continuation.sourceKind, continuation.sourceType),
-                225
-              ),
-              { basemap, opacity: roadOverlayOpacity }
-            ),
+            roadLaneContinuationMatchesDraftBand(
+              continuation,
+              roadDraft,
+              selectedDraftBand
+            )
+              ? roadOverlayColor([77, 163, 255, 232], {
+                  basemap,
+                  opacity: roadOverlayOpacity,
+                })
+              : roadOverlayColor(
+                  withAlpha(
+                    roadBandFillColor(
+                      continuation.sourceKind,
+                      continuation.sourceType
+                    ),
+                    225
+                  ),
+                  { basemap, opacity: roadOverlayOpacity }
+                ),
           getLineColor: (continuation) =>
-            roadOverlayColor(
-              withAlpha(
-                roadBandFillColor(continuation.sourceKind, continuation.sourceType),
-                250
-              ),
-              { basemap, opacity: roadOverlayOpacity }
-            ),
+            roadLaneContinuationMatchesDraftBand(
+              continuation,
+              roadDraft,
+              selectedDraftBand
+            )
+              ? roadOverlayColor([168, 225, 255, 255], {
+                  basemap,
+                  opacity: roadOverlayOpacity,
+                })
+              : roadOverlayColor(
+                  withAlpha(
+                    roadBandFillColor(
+                      continuation.sourceKind,
+                      continuation.sourceType
+                    ),
+                    250
+                  ),
+                  { basemap, opacity: roadOverlayOpacity }
+                ),
           getLineWidth: 1,
           lineWidthMinPixels: 1,
           stroked: true,
@@ -2022,35 +2124,65 @@ export default function MapView({
           extruded: false,
           parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
           updateTriggers: {
-            getFillColor: [basemap, roadOverlayOpacity],
-            getLineColor: [basemap, roadOverlayOpacity],
+            getFillColor: [
+              basemap,
+              roadOverlayOpacity,
+              roadSelectionHighlightKey,
+            ],
+            getLineColor: [
+              basemap,
+              roadOverlayOpacity,
+              roadSelectionHighlightKey,
+            ],
           },
         })
       );
     }
 
-    if (turningRoadLaneContinuations.length > 0) {
+    if (roadLaneContinuations.length > 0) {
       layers.push(
         new PathLayer<RoadLaneContinuation>({
-          id: 'cityjson-road-turn-guides',
-          data: turningRoadLaneContinuations,
+          id: 'cityjson-road-lane-connection-guides',
+          data: roadLaneContinuations,
           getPath: (continuation: RoadLaneContinuation) => continuation.path,
-          getColor: roadOverlayColor([108, 92, 153, 165], {
-            basemap,
-            opacity: roadOverlayOpacity,
-          }),
-          getWidth: 0.16,
-          widthUnits: 'meters',
-          widthMinPixels: 1,
-          getDashArray: [2.4, 2],
+          getColor: (continuation: RoadLaneContinuation) =>
+            roadLaneContinuationMatchesDraftBand(
+              continuation,
+              roadDraft,
+              selectedDraftBand
+            )
+              ? roadOverlayColor([168, 225, 255, 255], {
+                  basemap,
+                  opacity: roadOverlayOpacity,
+                })
+              : roadOverlayColor([108, 92, 153, 185], {
+                  basemap,
+                  opacity: roadOverlayOpacity,
+                }),
+          getWidth: (continuation: RoadLaneContinuation) =>
+            roadLaneContinuationMatchesDraftBand(
+              continuation,
+              roadDraft,
+              selectedDraftBand
+            )
+              ? 3.2
+              : 2,
+          widthUnits: 'pixels',
+          widthMinPixels: 2,
+          getDashArray: [1, 1.5],
           dashJustified: true,
           extensions: [new PathStyleExtension({ dash: true })],
           jointRounded: true,
           capRounded: true,
           pickable: false,
-          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
-            getColor: [basemap, roadOverlayOpacity],
+            getColor: [
+              basemap,
+              roadOverlayOpacity,
+              roadSelectionHighlightKey,
+            ],
+            getWidth: [roadSelectionHighlightKey],
           },
         } as any)
       );
@@ -2110,6 +2242,36 @@ export default function MapView({
             getLineColor: [basemap, roadOverlayOpacity],
           },
         } as any)
+      );
+    }
+
+    if (selectedRoadBandAreas.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadArea>({
+          id: 'road-selected-band-highlight',
+          data: selectedRoadBandAreas,
+          getPolygon: (area) => area.polygon,
+          getFillColor: roadOverlayColor([60, 176, 255, 122], {
+            basemap,
+            opacity: roadOverlayOpacity,
+          }),
+          getLineColor: roadOverlayColor([188, 235, 255, 255], {
+            basemap,
+            opacity: roadOverlayOpacity,
+          }),
+          getLineWidth: 3,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 3,
+          stroked: true,
+          filled: true,
+          pickable: false,
+          extruded: false,
+          parameters: { depthTest: false } as unknown as never,
+          updateTriggers: {
+            getFillColor: [basemap, roadOverlayOpacity],
+            getLineColor: [basemap, roadOverlayOpacity],
+          },
+        })
       );
     }
 
@@ -2494,8 +2656,10 @@ export default function MapView({
     onZoneSelect,
     roadPreviewAreas,
     roadVisuals,
+    selectedRoadBandAreas,
     throughRoadLaneContinuations,
-    turningRoadLaneContinuations,
+    roadLaneContinuations,
+    roadSelectionHighlightKey,
     roadDraft,
     onRoadDraftChange,
     drawMode,
@@ -2922,7 +3086,12 @@ export default function MapView({
         <>
           <RoadHandleGuide draft={roadDraft} />
           {onRoadDraftChange && (
-            <MapRoadCrossSection draft={roadDraft} onChange={onRoadDraftChange} />
+            <MapRoadCrossSection
+              draft={roadDraft}
+              onChange={onRoadDraftChange}
+              selection={selectedDraftBand}
+              onSelectionChange={setSelectedDraftBand}
+            />
           )}
         </>
       )}
@@ -3025,15 +3194,22 @@ function RoadHandleGuide({ draft }: { draft: RoadDraft }) {
 function MapRoadCrossSection({
   draft,
   onChange,
+  selection,
+  onSelectionChange,
 }: {
   draft: RoadDraft;
   onChange: (draft: RoadDraft) => void;
+  selection: { sectionId: string; bandIndex: number } | null;
+  onSelectionChange: (
+    selection: { sectionId: string; bandIndex: number }
+  ) => void;
 }) {
-  const [activeBandIndex, setActiveBandIndex] = useState(0);
   const [newBandKind, setNewBandKind] = useState<RoadBandKind>('car_lane');
-  const section = draft.sections[0];
+  const section =
+    draft.sections.find((candidate) => candidate.id === selection?.sectionId) ??
+    draft.sections[0];
   const effectiveBandIndex = Math.min(
-    activeBandIndex,
+    selection?.sectionId === section?.id ? selection.bandIndex : 0,
     Math.max(0, (section?.bands.length ?? 1) - 1)
   );
   const activeBand = section?.bands[effectiveBandIndex];
@@ -3042,8 +3218,8 @@ function MapRoadCrossSection({
   const patchActiveBand = (patch: Partial<typeof activeBand>) => {
     onChange({
       ...draft,
-      sections: draft.sections.map((candidate, sectionIndex) =>
-        sectionIndex === 0
+      sections: draft.sections.map((candidate) =>
+        candidate.id === section.id
           ? {
               ...candidate,
               bands: candidate.bands.map((band, bandIndex) =>
@@ -3058,8 +3234,8 @@ function MapRoadCrossSection({
   const replaceBands = (bands: typeof section.bands) => {
     onChange({
       ...draft,
-      sections: draft.sections.map((candidate, sectionIndex) =>
-        sectionIndex === 0 ? { ...candidate, bands } : candidate
+      sections: draft.sections.map((candidate) =>
+        candidate.id === section.id ? { ...candidate, bands } : candidate
       ),
     });
   };
@@ -3070,6 +3246,27 @@ function MapRoadCrossSection({
     <section className="map-road-cross-section" aria-label="Road cross-section quick editor">
       <header>
         <div><b>Road on the map</b><span>Tap a band, then adjust it with large controls.</span></div>
+        {draft.sections.length > 1 && (
+          <label className="map-road-cross-section__section">
+            <span>Section</span>
+            <select
+              value={section.id}
+              aria-label="Active road section"
+              onChange={(event) =>
+                onSelectionChange({
+                  sectionId: event.target.value,
+                  bandIndex: 0,
+                })
+              }
+            >
+              {draft.sections.map((candidate, index) => (
+                <option key={candidate.id} value={candidate.id}>
+                  Part {index + 1}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <span>{section.bands.reduce((sum, band) => sum + band.widthM, 0).toFixed(1)} m total</span>
       </header>
       <div className="map-road-cross-section__bands">
@@ -3087,7 +3284,9 @@ function MapRoadCrossSection({
                 color: lightBand ? '#17202a' : '#ffffff',
                 textShadow: lightBand ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.75)',
               }}
-              onClick={() => setActiveBandIndex(index)}
+              onClick={() =>
+                onSelectionChange({ sectionId: section.id, bandIndex: index })
+              }
               aria-pressed={index === effectiveBandIndex}
               aria-label={`Band ${index + 1}: ${mapRoadBandLabel(band.kind, band.sourceType)}, ${band.widthM.toFixed(2)} metres`}
             >
@@ -3147,18 +3346,27 @@ function MapRoadCrossSection({
         <button type="button" disabled={effectiveBandIndex === 0} onClick={() => {
           const bands = section.bands.slice();
           [bands[effectiveBandIndex - 1], bands[effectiveBandIndex]] = [bands[effectiveBandIndex], bands[effectiveBandIndex - 1]];
-          setActiveBandIndex(effectiveBandIndex - 1);
+          onSelectionChange({
+            sectionId: section.id,
+            bandIndex: effectiveBandIndex - 1,
+          });
           replaceBands(bands);
         }}>Move left</button>
         <button type="button" disabled={effectiveBandIndex === section.bands.length - 1} onClick={() => {
           const bands = section.bands.slice();
           [bands[effectiveBandIndex], bands[effectiveBandIndex + 1]] = [bands[effectiveBandIndex + 1], bands[effectiveBandIndex]];
-          setActiveBandIndex(effectiveBandIndex + 1);
+          onSelectionChange({
+            sectionId: section.id,
+            bandIndex: effectiveBandIndex + 1,
+          });
           replaceBands(bands);
         }}>Move right</button>
         <button type="button" className="is-destructive" disabled={section.bands.length <= 1} onClick={() => {
           replaceBands(section.bands.filter((_, index) => index !== effectiveBandIndex));
-          setActiveBandIndex(Math.max(0, effectiveBandIndex - 1));
+          onSelectionChange({
+            sectionId: section.id,
+            bandIndex: Math.max(0, effectiveBandIndex - 1),
+          });
         }}>Remove</button>
         </div>
       </div>
@@ -3166,7 +3374,10 @@ function MapRoadCrossSection({
         <label><span>Add a band</span><select value={newBandKind} onChange={(event) => setNewBandKind(event.target.value as RoadBandKind)}>{MAP_ROAD_BAND_KINDS.map((kind) => <option key={kind} value={kind}>{mapRoadBandLabel(kind)}</option>)}</select></label>
         <button type="button" onClick={() => {
           replaceBands([...section.bands, { kind: newBandKind, widthM: MAP_ROAD_DEFAULT_WIDTH[newBandKind], direction: newBandKind === 'car_lane' || newBandKind === 'bike_lane' ? 'forward' : 'none', surface: newBandKind === 'green' ? 'grass' : 'asphalt' }]);
-          setActiveBandIndex(section.bands.length);
+          onSelectionChange({
+            sectionId: section.id,
+            bandIndex: section.bands.length,
+          });
         }}>Add band</button>
       </div>
     </section>
