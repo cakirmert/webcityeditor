@@ -71,6 +71,10 @@ import { buildCityJsonMapMesh } from '../lib/cityjson-map-mesh';
 import { editorPlacedAssetObjectIds } from '../lib/building-assets';
 import { buildRoadVisuals } from '../lib/road-visuals';
 import {
+  buildConfirmedRoadLaneContinuations,
+  type RoadLaneContinuation,
+} from '../lib/road-lane-continuations';
+import {
   BUILDING_BLOCK_FULL_ZOOM,
   BUILDING_BLOCK_MIN_ZOOM,
   BUILDING_DETAIL_FULL_ZOOM,
@@ -713,6 +717,18 @@ export default function MapView({
       directions: [...savedRoadVisuals.directions, ...previewRoadVisuals.directions],
     }),
     [savedRoadVisuals, previewRoadVisuals]
+  );
+  const roadLaneContinuations = useMemo(
+    () => buildConfirmedRoadLaneContinuations(roadDecorationAreas),
+    [roadDecorationAreas]
+  );
+  const throughRoadLaneContinuations = useMemo(
+    () => roadLaneContinuations.filter((continuation) => continuation.turn === 'through'),
+    [roadLaneContinuations]
+  );
+  const turningRoadLaneContinuations = useMemo(
+    () => roadLaneContinuations.filter((continuation) => continuation.turn !== 'through'),
+    [roadLaneContinuations]
   );
 
   const renderedZones = useMemo(
@@ -1976,6 +1992,70 @@ export default function MapView({
       );
     }
 
+    if (throughRoadLaneContinuations.length > 0) {
+      layers.push(
+        new PolygonLayer<RoadLaneContinuation>({
+          id: 'cityjson-road-through-continuations',
+          data: throughRoadLaneContinuations,
+          getPolygon: (continuation) => continuation.polygon,
+          getFillColor: (continuation) =>
+            roadOverlayColor(
+              withAlpha(
+                roadBandFillColor(continuation.sourceKind, continuation.sourceType),
+                225
+              ),
+              { basemap, opacity: roadOverlayOpacity }
+            ),
+          getLineColor: (continuation) =>
+            roadOverlayColor(
+              withAlpha(
+                roadBandFillColor(continuation.sourceKind, continuation.sourceType),
+                250
+              ),
+              { basemap, opacity: roadOverlayOpacity }
+            ),
+          getLineWidth: 1,
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          pickable: false,
+          extruded: false,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          updateTriggers: {
+            getFillColor: [basemap, roadOverlayOpacity],
+            getLineColor: [basemap, roadOverlayOpacity],
+          },
+        })
+      );
+    }
+
+    if (turningRoadLaneContinuations.length > 0) {
+      layers.push(
+        new PathLayer<RoadLaneContinuation>({
+          id: 'cityjson-road-turn-guides',
+          data: turningRoadLaneContinuations,
+          getPath: (continuation: RoadLaneContinuation) => continuation.path,
+          getColor: roadOverlayColor([108, 92, 153, 165], {
+            basemap,
+            opacity: roadOverlayOpacity,
+          }),
+          getWidth: 0.16,
+          widthUnits: 'meters',
+          widthMinPixels: 1,
+          getDashArray: [2.4, 2],
+          dashJustified: true,
+          extensions: [new PathStyleExtension({ dash: true })],
+          jointRounded: true,
+          capRounded: true,
+          pickable: false,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          updateTriggers: {
+            getColor: [basemap, roadOverlayOpacity],
+          },
+        } as any)
+      );
+    }
+
     if ((zoom >= 15 || roadWorkspaceOpen) && roadVisuals.dividers.length > 0) {
       layers.push(
         new PathLayer({
@@ -2414,6 +2494,8 @@ export default function MapView({
     onZoneSelect,
     roadPreviewAreas,
     roadVisuals,
+    throughRoadLaneContinuations,
+    turningRoadLaneContinuations,
     roadDraft,
     onRoadDraftChange,
     drawMode,

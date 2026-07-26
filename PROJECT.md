@@ -80,6 +80,11 @@ Endpoint editing is deliberate:
 - teal endpoint targets come from other draft sections, editable CityJSON roads, and OSM road endpoints;
 - dropping an endpoint on a teal target stores a confirmed connection;
 - connections between two editable CityJSON roads are written reciprocally.
+- confirmed editable-road joins derive direction- and mode-compatible lane continuations from
+  their CityJSON layouts. Opposite endpoint kinds preserve target band order, while equal endpoint
+  kinds reverse it, so straight three-lane continuations do not cross. Physically aligned pairs
+  render as temporary road-coloured surfaces; real turns remain subdued guides. These display
+  surfaces do not modify exact osm2streets polygons or export junction geometry.
 - moving a confirmed endpoint away prompts before Save, then clears the stale reciprocal metadata
   from the connected road in the same guarded edit when the user accepts the disconnection;
 - deleting a CityJSON road clears reciprocal endpoint metadata from every surviving editable road.
@@ -249,6 +254,13 @@ Required behavior:
    fixture. In the browser, verify that straight lanes no longer cross, the grey gap is visually
    filled, real turns remain understandable, TopPlus stays sharp, and interaction performance does
    not drop after the map settles.
+
+Implemented first slice (2026-07-26): confirmed reciprocal editable-road joins now satisfy the
+endpoint-order normalization and mode/direction filtering in item 2. Their geometrically aligned
+`through` pairs use temporary width-aware continuation surfaces, while non-through pairs remain
+subdued guides. Imported-junction proposal derivation, proposed/confirmed/rejected lane-movement
+decisions, reciprocal decision persistence, lane-removal remapping, and the Hamburg fixture/browser
+acceptance pass remain part of this guided patch.
 
 ## Remaining roadmap
 
