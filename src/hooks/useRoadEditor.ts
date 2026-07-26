@@ -32,7 +32,7 @@ import { processOsmXml } from '../lib/osm2streets';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import { insertOsm2StreetsRoadIntoCityJson } from '../lib/osm2streets-cityjson';
 import { buildRoadDraftFromOsm2StreetsSelection } from '../lib/osm2streets-draft';
-import { connectedRoadIdsForIntersection } from '../lib/osm2streets-selection';
+import { connectedRoadIdsForSelection } from '../lib/osm2streets-selection';
 import { activeMetricCrsForCityJson } from '../lib/projection';
 import { limitRoadQueryBbox, type Wgs84Bbox } from '../lib/road-query';
 import { extractFootprints } from '../lib/footprints';
@@ -483,35 +483,27 @@ export function useRoadEditor(
     setRoadStatus('OSM kept as a seed. Use Draw / redraw road and edit lanes before inserting.');
   }, [clearRoadDraftHistory]);
 
-  const handleOsm2StreetsSelect = useCallback((selection: Osm2StreetsSelection) => {
-    setShowRoadEditor(true);
-    setOsm2streetsSelection(selection);
-    setHighlightedOsm2StreetsRoadIds(new Set());
-    if (!selection) return;
-    if (selection.kind === 'lane') {
-      const props = selection.feature.properties ?? {};
-      setRoadStatus(
-        `Selected osm2streets lane ${props.index ?? '?'} on road ${props.road ?? '?'}. Tap Edit road to store its exact surfaces in CityJSON and change it.`
-      );
-    } else {
-      const props = selection.feature.properties ?? {};
-      setRoadStatus(
-        `Selected osm2streets intersection ${props.id ?? '?'} (${props.intersection_kind ?? props.kind ?? 'unknown'}).`
-      );
-    }
-  }, []);
-
-  const handleHighlightConnectedOsm2StreetsRoads = useCallback(() => {
-    const connected = connectedRoadIdsForIntersection(osm2streetsSelection, osm2streetsResult);
-    setHighlightedOsm2StreetsRoadIds(connected);
-    if (connected.size === 0) {
-      setRoadStatus('No connected osm2streets road polygons were found for this intersection.');
-      return;
-    }
-    setRoadStatus(
-      `Highlighted ${connected.size} osm2streets road polygon${connected.size === 1 ? '' : 's'} connected to the selected intersection.`
-    );
-  }, [osm2streetsResult, osm2streetsSelection]);
+  const handleOsm2StreetsSelect = useCallback(
+    (selection: Osm2StreetsSelection) => {
+      setShowRoadEditor(true);
+      setOsm2streetsSelection(selection);
+      const connected = connectedRoadIdsForSelection(selection, osm2streetsResult);
+      setHighlightedOsm2StreetsRoadIds(connected);
+      if (!selection) return;
+      if (selection.kind === 'lane') {
+        const props = selection.feature.properties ?? {};
+        setRoadStatus(
+          `Selected osm2streets lane ${props.index ?? '?'} on road ${props.road ?? '?'}. Showing ${connected.size} road${connected.size === 1 ? '' : 's'} sharing its endpoint nodes.`
+        );
+      } else {
+        const props = selection.feature.properties ?? {};
+        setRoadStatus(
+          `Selected osm2streets intersection ${props.id ?? '?'} (${props.intersection_kind ?? props.kind ?? 'unknown'}). Showing ${connected.size} connected road${connected.size === 1 ? '' : 's'}.`
+        );
+      }
+    },
+    [osm2streetsResult]
+  );
 
   const handleClearOsm2StreetsSelection = useCallback(() => {
     setOsm2streetsSelection(null);
@@ -1210,7 +1202,6 @@ export function useRoadEditor(
     loadOsmRoadXml,
     handleOsmRoadSelect,
     handleOsm2StreetsSelect,
-    handleHighlightConnectedOsm2StreetsRoads,
     handleClearOsm2StreetsSelection,
     handleCreateDraftFromOsm2StreetsSelection,
     handleStartRoadDraw,

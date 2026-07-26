@@ -28,12 +28,13 @@ export function roadLaneContinuationMatchesDraftBand(
   draft: RoadDraft | null,
   selection: RoadBandSelection | null
 ): boolean {
-  if (!draft?.id || !selection) return false;
+  if (!draft || !selection) return false;
+  const draftRoadId = draft.id ?? '__road_preview__';
   return (
-    (continuation.sourceRoadId === draft.id &&
+    (continuation.sourceRoadId === draftRoadId &&
       continuation.sourceSectionId === selection.sectionId &&
       continuation.sourceBandIndex === selection.bandIndex) ||
-    (continuation.targetRoadId === draft.id &&
+    (continuation.targetRoadId === draftRoadId &&
       continuation.targetSectionId === selection.sectionId &&
       continuation.targetBandIndex === selection.bandIndex)
   );

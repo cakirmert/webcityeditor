@@ -4,14 +4,12 @@ import { Button } from './ui/button';
 interface Props {
   selection: Osm2StreetsSelection;
   onEditRoad: () => void;
-  onHighlightConnectedRoads: () => void;
   onClear: () => void;
 }
 
 export default function Osm2StreetsInspector({
   selection,
   onEditRoad,
-  onHighlightConnectedRoads,
   onClear,
 }: Props) {
   if (!selection) return null;
@@ -46,10 +44,7 @@ export default function Osm2StreetsInspector({
           onEditRoad={onEditRoad}
         />
       ) : (
-        <IntersectionDetails
-          properties={props}
-          onHighlightConnectedRoads={onHighlightConnectedRoads}
-        />
+        <IntersectionDetails properties={props} />
       )}
     </section>
   );
@@ -95,10 +90,8 @@ function LaneDetails({
 
 function IntersectionDetails({
   properties,
-  onHighlightConnectedRoads,
 }: {
   properties: Record<string, any>;
-  onHighlightConnectedRoads: () => void;
 }) {
   return (
     <>
@@ -110,9 +103,6 @@ function IntersectionDetails({
         <InspectorRow label="Movements" value={properties.movements} />
         <InspectorRow label="OSM nodes" value={properties.osm_node_ids ?? properties.osm_nodes} />
       </dl>
-      <Button size="sm" className="w-full" onClick={onHighlightConnectedRoads}>
-        Highlight connected roads
-      </Button>
     </>
   );
 }

@@ -5,7 +5,11 @@ import type {
   RoadDraft,
   RoadSectionDraft,
 } from '../../src/lib/transportation';
-import { buildConfirmedRoadLaneContinuations } from '../../src/lib/road-lane-continuations';
+import {
+  buildConfirmedRoadLaneContinuations,
+  buildRoadConnectionIndex,
+  buildSelectedRoadConnections,
+} from '../../src/lib/road-lane-continuations';
 
 function carBands(direction: 'forward' | 'backward', count = 3): RoadBand[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -24,7 +28,11 @@ function section(
   return { id, centerlineWgs84, bands, curve: { mode: 'straight', strength: 0 } };
 }
 
-function roadArea(roadId: string, draft: RoadDraft): RoadArea {
+function roadArea(
+  roadId: string,
+  draft: RoadDraft,
+  osm2streetsRoadId?: string
+): RoadArea {
   return {
     id: `${roadId}-surface`,
     roadId,
@@ -41,7 +49,42 @@ function roadArea(roadId: string, draft: RoadDraft): RoadArea {
       [9.99, 53.55],
     ],
     editableDraft: draft,
-    attributes: {},
+    attributes: {
+      ...(osm2streetsRoadId ? { osm2streetsRoadId } : {}),
+    },
+  };
+}
+
+function exactRoadArea(
+  roadId: string,
+  osm2streetsRoadId: string,
+  centerlineWgs84: [number, number][]
+): RoadArea {
+  return {
+    id: `${roadId}-surface`,
+    roadId,
+    sectionId: `${roadId}-section`,
+    bandId: `${roadId}-band`,
+    surfaceIndex: 0,
+    surfaceType: 'TrafficArea',
+    function: 'driving_lane',
+    polygon: [
+      centerlineWgs84[0],
+      centerlineWgs84.at(-1)!,
+      [
+        centerlineWgs84.at(-1)![0] + 0.00001,
+        centerlineWgs84.at(-1)![1] + 0.00001,
+      ],
+      centerlineWgs84[0],
+    ],
+    attributes: {
+      osm2streetsRoadId,
+      sourceCenterlineWgs84: centerlineWgs84,
+      transportationUsage: 'car_lane',
+      sourceType: 'Driving',
+      trafficDirection: 'both',
+      allowedModes: ['car'],
+    },
   };
 }
 
@@ -169,5 +212,189 @@ describe('confirmed road lane continuations', () => {
         ['car', 0, 1],
         ['pedestrian', 2, 2],
       ]);
+  });
+
+  it('shows every lane movement and connected node for a clicked junction road', () => {
+    const sharedBand: RoadBand = {
+      id: 'car',
+      kind: 'car_lane',
+      widthM: 3.2,
+      direction: 'both',
+    };
+    const west: RoadDraft = {
+      id: 'west',
+      source: 'manual',
+      sections: [
+        section(
+          'west-section',
+          [[9.999, 53.55], [10, 53.55]],
+          [{ ...sharedBand }]
+        ),
+      ],
+    };
+    const east: RoadDraft = {
+      id: 'east',
+      source: 'manual',
+      sections: [
+        section(
+          'east-section',
+          [[10, 53.55], [10.001, 53.55]],
+          [{ ...sharedBand }]
+        ),
+      ],
+    };
+    const north: RoadDraft = {
+      id: 'north',
+      source: 'manual',
+      sections: [
+        section(
+          'north-section',
+          [[10, 53.55], [10, 53.551]],
+          [{ ...sharedBand }]
+        ),
+      ],
+    };
+    const junction: RoadArea = {
+      id: 'junction-surface',
+      roadId: 'junction',
+      sectionId: '',
+      bandId: '',
+      surfaceIndex: 0,
+      surfaceType: 'TrafficArea',
+      function: 'intersection',
+      polygon: [
+        [9.99995, 53.54995],
+        [10.00005, 53.54995],
+        [10.00005, 53.55005],
+        [9.99995, 53.55005],
+        [9.99995, 53.54995],
+      ],
+      attributes: {
+        transportationUsage: 'intersection',
+        connectedRoadIds: ['1', '2', '3'],
+      },
+    };
+    const areas = [
+      roadArea('west', west, '1'),
+      roadArea('east', east, '2'),
+      roadArea('north', north, '3'),
+      junction,
+    ];
+    const index = buildRoadConnectionIndex(areas);
+
+    const roadSelection = buildSelectedRoadConnections(
+      index,
+      'west-surface'
+    );
+    const junctionSelection = buildSelectedRoadConnections(
+      index,
+      junction.id
+    );
+
+    expect([...roadSelection.roadIds].sort()).toEqual(['east', 'north', 'west']);
+    expect([...roadSelection.junctionAreaIds]).toEqual([junction.id]);
+    expect(roadSelection.nodes).toHaveLength(1);
+    expect(roadSelection.continuations).toHaveLength(3);
+    expect(
+      roadSelection.continuations.every(
+        (continuation) => continuation.path.length > 2
+      )
+    ).toBe(true);
+    expect([...junctionSelection.roadIds].sort()).toEqual([
+      'east',
+      'north',
+      'west',
+    ]);
+    expect(junctionSelection.continuations).toHaveLength(3);
+  });
+
+  it('derives visible connections for exact imported roads without saved editor layouts', () => {
+    const west = exactRoadArea(
+      'west',
+      '1',
+      [[9.999, 53.55], [10, 53.55]]
+    );
+    const east = exactRoadArea(
+      'east',
+      '2',
+      [[10, 53.55], [10.001, 53.55]]
+    );
+    const junction: RoadArea = {
+      id: 'junction-surface',
+      roadId: 'junction',
+      sectionId: '',
+      bandId: '',
+      surfaceIndex: 0,
+      surfaceType: 'TrafficArea',
+      function: 'intersection',
+      polygon: [
+        [9.99995, 53.54995],
+        [10.00005, 53.54995],
+        [10.00005, 53.55005],
+        [9.99995, 53.55005],
+        [9.99995, 53.54995],
+      ],
+      attributes: {
+        transportationUsage: 'intersection',
+        connectedRoadIds: ['1', '2'],
+      },
+    };
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([west, east, junction]),
+      west.id
+    );
+
+    expect([...selection.roadIds].sort()).toEqual(['east', 'west']);
+    expect(selection.nodes).toHaveLength(1);
+    expect(selection.continuations).toHaveLength(1);
+    expect(selection.continuations[0].path.length).toBeGreaterThan(2);
+  });
+
+  it('shows a snapped connection before a new road has been saved', () => {
+    const target = exactRoadArea(
+      'target',
+      '2',
+      [[10, 53.55], [10.001, 53.55]]
+    );
+    const activeDraft: RoadDraft = {
+      source: 'manual',
+      sections: [
+        section(
+          'new-section',
+          [[9.999, 53.55], [10, 53.55]],
+          [{
+            id: 'new-lane',
+            kind: 'car_lane',
+            widthM: 3.2,
+            direction: 'both',
+          }]
+        ),
+      ],
+    };
+    activeDraft.sections[0].connections = {
+      end: {
+        target: 'cityjson',
+        targetId: target.roadId,
+        targetSectionId: target.sectionId,
+        targetEndpoint: 'start',
+        positionWgs84: [10, 53.55],
+        confirmed: true,
+      },
+    };
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([target]),
+      null,
+      activeDraft
+    );
+
+    expect(selection.focusRoadId).toBe('__road_preview__');
+    expect([...selection.roadIds].sort()).toEqual([
+      '__road_preview__',
+      'target',
+    ]);
+    expect(selection.nodes).toHaveLength(1);
+    expect(selection.continuations).toHaveLength(1);
   });
 });

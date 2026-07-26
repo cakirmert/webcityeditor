@@ -37,7 +37,6 @@ function renderPanel(
     onEditSelectedRoadArea?: (area: RoadArea) => void;
     onDeleteSelectedRoadArea?: (area: RoadArea) => void;
     onEditOsm2StreetsSelection?: () => void;
-    onHighlightConnectedOsm2StreetsRoads?: () => void;
     canUndoDraft?: boolean;
     canRedoDraft?: boolean;
     undoDraftLabel?: string;
@@ -51,8 +50,6 @@ function renderPanel(
   } = {}
 ) {
   const onEditOsm2StreetsSelection = options.onEditOsm2StreetsSelection ?? vi.fn();
-  const onHighlightConnectedOsm2StreetsRoads =
-    options.onHighlightConnectedOsm2StreetsRoads ?? vi.fn();
   const rendered = render(
     <RoadEditorPanel
       osmRoads={[]}
@@ -95,14 +92,12 @@ function renderPanel(
       onRoadBandSelect={options.onRoadBandSelect}
       osm2streetsSelection={options.osm2streetsSelection}
       onEditOsm2StreetsSelection={onEditOsm2StreetsSelection}
-      onHighlightConnectedOsm2StreetsRoads={onHighlightConnectedOsm2StreetsRoads}
       onClearOsm2StreetsSelection={() => {}}
     />
   );
   return {
     onDraftChange,
     onEditOsm2StreetsSelection,
-    onHighlightConnectedOsm2StreetsRoads,
     unmount: rendered.unmount,
   };
 }
@@ -382,10 +377,36 @@ describe('<RoadEditorPanel />', () => {
     expect(onEditSelectedRoadArea).toHaveBeenCalledWith(selectedRoadArea);
   });
 
-  it('shows osm2streets intersection inspection and triggers connected-road highlight', () => {
-    const onHighlightConnectedOsm2StreetsRoads = vi.fn();
+  it('shows junction metadata without connection instructions or an edit action', () => {
     renderPanel(vi.fn(), {
-      onHighlightConnectedOsm2StreetsRoads,
+      draft: null,
+      selectedRoadArea: {
+        id: 'junction-surface',
+        roadId: 'junction-1',
+        sectionId: '',
+        bandId: '',
+        surfaceIndex: 0,
+        surfaceType: 'TrafficArea',
+        function: 'intersection',
+        polygon: [],
+        attributes: {
+          transportationUsage: 'intersection',
+          connectedRoadIds: ['7', '8'],
+        },
+      },
+    });
+
+    expect(screen.getByText('Selected CityJSON junction')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'How to connect roads here' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/drag its yellow endpoint/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows osm2streets intersection details without a separate highlight action', () => {
+    renderPanel(vi.fn(), {
       osm2streetsSelection: {
         kind: 'intersection',
         feature: {
@@ -404,7 +425,8 @@ describe('<RoadEditorPanel />', () => {
 
     expect(screen.getByText('osm2streets intersection')).toBeInTheDocument();
     expect(screen.getByText('Connection')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Highlight connected roads' }));
-    expect(onHighlightConnectedOsm2StreetsRoads).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole('button', { name: 'Highlight connected roads' })
+    ).not.toBeInTheDocument();
   });
 });

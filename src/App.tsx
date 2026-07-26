@@ -773,9 +773,6 @@ export default function App() {
               onDeleteSelectedRoadArea={roadEditor.handleDeleteSelectedRoadArea}
               osm2streetsSelection={roadEditor.osm2streetsSelection}
               onEditOsm2StreetsSelection={roadEditor.handleInsertOsm2StreetsSelection}
-              onHighlightConnectedOsm2StreetsRoads={
-                roadEditor.handleHighlightConnectedOsm2StreetsRoads
-              }
               onClearOsm2StreetsSelection={roadEditor.handleClearOsm2StreetsSelection}
             />
           )}

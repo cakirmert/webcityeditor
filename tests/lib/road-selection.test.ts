@@ -61,4 +61,24 @@ describe('road band map selection', () => {
       })
     ).toBe(false);
   });
+
+  it('matches lane continuations for an unsaved preview draft', () => {
+    expect(
+      roadLaneContinuationMatchesDraftBand(
+        {
+          sourceRoadId: '__road_preview__',
+          sourceSectionId: 'new-section',
+          sourceBandIndex: 0,
+        } as RoadLaneContinuation,
+        {
+          source: 'manual',
+          sections: [],
+        },
+        {
+          sectionId: 'new-section',
+          bandIndex: 0,
+        }
+      )
+    ).toBe(true);
+  });
 });

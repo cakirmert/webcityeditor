@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { connectedRoadIdsForIntersection } from '../../src/lib/osm2streets-selection';
+import {
+  connectedRoadIdsForIntersection,
+  connectedRoadIdsForSelection,
+} from '../../src/lib/osm2streets-selection';
 import type { Osm2StreetsResult, Osm2StreetsSelection } from '../../src/lib/osm2streets';
 
 const result: Osm2StreetsResult = {
@@ -43,8 +46,26 @@ describe('connectedRoadIdsForIntersection', () => {
       connectedRoadIdsForIntersection(
         { kind: 'lane', feature: { type: 'Feature', properties: { road: 7 }, geometry: null } },
         result
-      ).size
+    ).size
     ).toBe(0);
+  });
+
+  it('finds every road sharing either endpoint of a selected lane road', () => {
+    expect(
+      [
+        ...connectedRoadIdsForSelection(
+          {
+            kind: 'lane',
+            feature: {
+              type: 'Feature',
+              properties: { road: 8 },
+              geometry: null,
+            },
+          },
+          result
+        ),
+      ].sort()
+    ).toEqual([7, 8]);
   });
 });
 

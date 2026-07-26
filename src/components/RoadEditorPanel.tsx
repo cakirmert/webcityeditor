@@ -88,7 +88,6 @@ interface Props {
     selection: { sectionId: string; bandIndex: number } | null
   ) => void;
   onEditOsm2StreetsSelection: () => void;
-  onHighlightConnectedOsm2StreetsRoads: () => void;
   onClearOsm2StreetsSelection: () => void;
 }
 
@@ -157,7 +156,6 @@ export default function RoadEditorPanel({
   onDeleteSelectedRoadArea,
   onRoadBandSelect,
   onEditOsm2StreetsSelection,
-  onHighlightConnectedOsm2StreetsRoads,
   onClearOsm2StreetsSelection,
 }: Props) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
@@ -576,7 +574,6 @@ export default function RoadEditorPanel({
         <Osm2StreetsInspector
           selection={osm2streetsSelection}
           onEditRoad={onEditOsm2StreetsSelection}
-          onHighlightConnectedRoads={onHighlightConnectedOsm2StreetsRoads}
           onClear={onClearOsm2StreetsSelection}
         />
         {selectedRoadArea && !draft && (
@@ -600,7 +597,7 @@ export default function RoadEditorPanel({
                 <span>{activeSection.centerlineWgs84.length} curve anchors · {activeTotalWidth.toFixed(2)} m wide</span>
               </div>
               <span className={connectionCount > 0 ? 'is-connected' : ''}>
-                {connectionCount > 0 ? `${connectionCount} joins confirmed` : 'No joins yet'}
+                {connectionCount > 0 ? `${connectionCount} joins confirmed` : 'No manual joins'}
               </span>
             </div>
 
@@ -1227,9 +1224,11 @@ function SelectedRoadAreaCard({
         </div>
         <span>{modes}</span>
       </div>
-      <Button className="h-14 w-full text-sm" variant="primary" onClick={() => onEdit(area)}>
-        <PencilLine className="h-5 w-5" aria-hidden="true" /> {isIntersection ? 'How to connect roads here' : 'Edit road'}
-      </Button>
+      {!isIntersection && (
+        <Button className="h-14 w-full text-sm" variant="primary" onClick={() => onEdit(area)}>
+          <PencilLine className="h-5 w-5" aria-hidden="true" /> Edit road
+        </Button>
+      )}
       <Button
         className="h-12 w-full text-sm"
         variant="warn"
@@ -1238,12 +1237,6 @@ function SelectedRoadAreaCard({
       >
         <Trash2 className="h-4 w-4" aria-hidden="true" /> {isIntersection ? 'Delete junction' : 'Delete road'}
       </Button>
-      {isIntersection && (
-        <p>
-          Keep this generated junction. Edit an entering road, then drag its yellow endpoint onto
-          a teal target. Saving records the confirmed connection in CityJSON.
-        </p>
-      )}
       {!isIntersection && area.geometryMode === 'exact' && (
         <p>
           Speed, direction, access, material, and type keep the exact source polygons. Shape or
