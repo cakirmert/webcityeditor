@@ -175,6 +175,60 @@ describe('confirmed road lane continuations', () => {
     expect(continuations.every((item) => item.turn === 'through')).toBe(true);
   });
 
+  it('keeps a rejected reciprocal movement hidden after layout reload', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'manual',
+      sections: [
+        section('source-section', [[9.999, 53.55], [10, 53.55]], carBands('forward')),
+      ],
+    };
+    const target: RoadDraft = {
+      id: 'target',
+      source: 'manual',
+      sections: [
+        section('target-section', [[10, 53.55], [10.001, 53.55]], carBands('forward')),
+      ],
+      laneMovementDecisions: [
+        {
+          id: 'reject-middle-lane',
+          status: 'rejected',
+          source: {
+            roadId: 'target',
+            sectionId: 'target-section',
+            endpoint: 'start',
+            bandId: 'lane-2',
+          },
+          target: {
+            roadId: 'source',
+            sectionId: 'source-section',
+            endpoint: 'end',
+            bandId: 'lane-2',
+          },
+          mode: 'car',
+          provenance: {
+            source: 'osm2streets',
+            sourceId: 'hamburg-short-intersection',
+          },
+        },
+      ],
+    };
+
+    const continuations = buildConfirmedRoadLaneContinuations(
+      connect(source, 'end', target, 'start')
+    );
+
+    expect(
+      continuations.map((item) => [
+        item.sourceBandId,
+        item.targetBandId,
+      ])
+    ).toEqual([
+      ['lane-1', 'lane-1'],
+      ['lane-3', 'lane-3'],
+    ]);
+  });
+
   it('filters non-connectable, incompatible-mode, and wrong-direction bands', () => {
     const sourceBands: RoadBand[] = [
       { id: 'car', kind: 'car_lane', widthM: 3.2, direction: 'forward' },

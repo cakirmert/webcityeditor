@@ -262,6 +262,13 @@ subdued guides. Imported-junction proposal derivation, proposed/confirmed/reject
 decisions, reciprocal decision persistence, lane-removal remapping, and the Hamburg fixture/browser
 acceptance pass remain part of this guided patch.
 
+Implemented metadata slice (2026-07-27): `_roadLayout` now round-trips stable, reciprocal
+lane-movement references with `proposed`, `confirmed`, or `rejected` status and provenance. Rejected
+movements are filtered from derived junction guides after reload/export, surviving decisions remain
+stable when bands are reordered, and removing a band prunes decisions that reference its stable id.
+The movement-decision UI, automatic reciprocal decision writes across two Road objects, and the
+Hamburg fixture/browser acceptance pass remain pending.
+
 ## Remaining roadmap
 
 The following work is intentionally not claimed as complete:

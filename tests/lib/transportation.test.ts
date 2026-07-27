@@ -19,6 +19,7 @@ import {
   parseOsmRoadsFromOverpass,
   planStaleReciprocalRoadPropagation,
   readEditableRoadDraftFromCityObject,
+  removeRoadBandFromDraft,
   roadDraftPreservesExactGeometry,
   splitRoadSectionAtFraction,
   synchronizeRoadConnectionMetadata,
@@ -258,6 +259,75 @@ describe('transportation roads', () => {
       },
     });
     expect(areas.some((area) => area.attributes.sourceType === 'Bus')).toBe(true);
+  });
+
+  it('round-trips lane-movement decisions and prunes a removed-band reference', () => {
+    const doc = buildSampleCube();
+    const draft = createManualRoadDraft(delftRoad, {
+      name: 'Decision road',
+      maxspeedKmh: 30,
+    });
+    draft.id = 'road-test';
+    const section = draft.sections[0];
+    const statuses = ['proposed', 'confirmed', 'rejected'] as const;
+    draft.laneMovementDecisions = statuses.map((status, index) => ({
+      id: `movement-${status}`,
+      status,
+      source: {
+        roadId: draft.id!,
+        sectionId: section.id,
+        endpoint: 'end' as const,
+        bandId: section.bands[index].id!,
+      },
+      target: {
+        roadId: 'road-peer',
+        sectionId: 'peer-section',
+        endpoint: 'start' as const,
+        bandId: `peer-band-${index + 1}`,
+      },
+      mode: index === 1 ? 'bicycle' : 'car',
+      provenance: {
+        source: index === 2 ? ('user' as const) : ('osm2streets' as const),
+        sourceId: 'hamburg-short-intersection',
+      },
+    }));
+    insertRoadIntoCityJson(doc, draft, { id: draft.id });
+
+    const prepared = prepareValidatedCityJsonExport(doc);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const parsed = parseCityJson(prepared.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const reopened = readEditableRoadDraftFromCityObject(
+      parsed.doc.CityObjects[draft.id]
+    );
+    expect(reopened?.laneMovementDecisions).toEqual(
+      draft.laneMovementDecisions
+    );
+
+    const reordered = {
+      ...reopened!,
+      sections: reopened!.sections.map((candidate) => ({
+        ...candidate,
+        bands: [...candidate.bands].reverse(),
+      })),
+    };
+    expect(reordered.laneMovementDecisions).toEqual(
+      draft.laneMovementDecisions
+    );
+
+    const removed = removeRoadBandFromDraft(
+      reopened!,
+      section.id,
+      1
+    );
+    expect(removed.sections[0].bands).toHaveLength(section.bands.length - 1);
+    expect(removed.laneMovementDecisions?.map((decision) => decision.status)).toEqual([
+      'proposed',
+      'rejected',
+    ]);
   });
 
   it('derives an editable draft from precomputed CityJSON road surfaces alone', () => {

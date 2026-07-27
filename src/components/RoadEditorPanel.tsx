@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import {
   buildRoadEditPayload,
+  removeRoadBandFromDraft,
   roadVerticalProfileForDraft,
   summarizeRoadDraft,
   type OsmRoadFeature,
@@ -269,11 +270,11 @@ export default function RoadEditorPanel({
   };
 
   const removeBand = (bandIndex: number) => {
-    if (!activeSection || activeSection.bands.length <= 1) return;
-    updateSection(activeSection.id, (section) => ({
-      ...section,
-      bands: section.bands.filter((_, index) => index !== bandIndex),
-    }));
+    if (!activeSection || !draft || activeSection.bands.length <= 1) return;
+    onDraftChange(
+      removeRoadBandFromDraft(draft, activeSection.id, bandIndex),
+      'Remove road band'
+    );
     const nextBandIndex =
       bandIndex < activeBandIndex
         ? activeBandIndex - 1

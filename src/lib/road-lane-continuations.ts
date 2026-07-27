@@ -7,6 +7,8 @@ import {
   type RoadBandKind,
   type RoadDirection,
   type RoadDraft,
+  type RoadLaneMovementDecision,
+  type RoadLaneMovementReference,
   type RoadSectionDraft,
 } from './transportation';
 
@@ -22,6 +24,8 @@ export interface RoadLaneContinuation {
   targetEndpoint: 'start' | 'end';
   sourceBandIndex: number;
   targetBandIndex: number;
+  sourceBandId?: string;
+  targetBandId?: string;
   sourceKind: RoadBandKind;
   sourceType?: string;
   mode: string;
@@ -91,7 +95,10 @@ export function buildConfirmedRoadLaneContinuations(
   const draftCache = new Map(index.editableDraftsByRoadId);
   const activeRoadId = activeDraftIdentity(activeDraft);
   if (activeDraft && activeRoadId) draftCache.set(activeRoadId, activeDraft);
-  return buildConfirmedRoadLaneContinuationsFromIndex(index, activeDraft, draftCache);
+  return applyRoadLaneMovementDecisions(
+    buildConfirmedRoadLaneContinuationsFromIndex(index, activeDraft, draftCache),
+    draftCache.values()
+  );
 }
 
 /**
@@ -167,8 +174,27 @@ export function buildSelectedRoadConnections(
     roadIds,
     junctionAreaIds,
     nodes: dedupeConnectionNodes([...junctionNodes, ...confirmedNodes]),
-    continuations: dedupeContinuations([...inferred, ...confirmed]),
+    continuations: applyRoadLaneMovementDecisions(
+      dedupeContinuations([...inferred, ...confirmed]),
+      draftCache.values()
+    ),
   };
+}
+
+export function applyRoadLaneMovementDecisions(
+  continuations: RoadLaneContinuation[],
+  drafts: Iterable<RoadDraft>
+): RoadLaneContinuation[] {
+  const rejected = [...drafts]
+    .flatMap((draft) => draft.laneMovementDecisions ?? [])
+    .filter((decision) => decision.status === 'rejected');
+  if (rejected.length === 0) return continuations;
+  return continuations.filter(
+    (continuation) =>
+      !rejected.some((decision) =>
+        roadLaneMovementDecisionMatchesContinuation(decision, continuation)
+      )
+  );
 }
 
 export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex {
@@ -413,6 +439,8 @@ function appendLanePairContinuations({
       targetEndpoint,
       sourceBandIndex: pair.source.index,
       targetBandIndex: pair.target.index,
+      ...(pair.source.band.id ? { sourceBandId: pair.source.band.id } : {}),
+      ...(pair.target.band.id ? { targetBandId: pair.target.band.id } : {}),
       sourceKind: pair.source.band.kind,
       ...(pair.source.band.sourceType
         ? { sourceType: pair.source.band.sourceType }
@@ -430,6 +458,61 @@ function appendLanePairContinuations({
       targetWidthM: pair.target.band.widthM,
     });
   }
+}
+
+function roadLaneMovementDecisionMatchesContinuation(
+  decision: RoadLaneMovementDecision,
+  continuation: RoadLaneContinuation
+): boolean {
+  if (decision.mode !== continuation.mode) return false;
+  const direct =
+    roadLaneMovementReferenceMatchesContinuation(
+      decision.source,
+      continuation,
+      'source'
+    ) &&
+    roadLaneMovementReferenceMatchesContinuation(
+      decision.target,
+      continuation,
+      'target'
+    );
+  const reciprocal =
+    roadLaneMovementReferenceMatchesContinuation(
+      decision.source,
+      continuation,
+      'target'
+    ) &&
+    roadLaneMovementReferenceMatchesContinuation(
+      decision.target,
+      continuation,
+      'source'
+    );
+  return direct || reciprocal;
+}
+
+function roadLaneMovementReferenceMatchesContinuation(
+  reference: RoadLaneMovementReference,
+  continuation: RoadLaneContinuation,
+  side: 'source' | 'target'
+): boolean {
+  const roadId =
+    side === 'source' ? continuation.sourceRoadId : continuation.targetRoadId;
+  const sectionId =
+    side === 'source'
+      ? continuation.sourceSectionId
+      : continuation.targetSectionId;
+  const endpoint =
+    side === 'source'
+      ? continuation.sourceEndpoint
+      : continuation.targetEndpoint;
+  const bandId =
+    side === 'source' ? continuation.sourceBandId : continuation.targetBandId;
+  return (
+    reference.roadId === roadId &&
+    reference.sectionId === sectionId &&
+    reference.endpoint === endpoint &&
+    reference.bandId === bandId
+  );
 }
 
 function resolveRoadDraft(
