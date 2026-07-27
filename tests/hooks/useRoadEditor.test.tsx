@@ -24,7 +24,10 @@ describe('useRoadEditor road-edit lifecycle', () => {
     );
     const draft = createManualRoadDraft(roadLine);
 
-    act(() => result.current.setRoadDraft(draft));
+    act(() => {
+      result.current.setShowRoadEditor(true);
+      result.current.setRoadDraft(draft);
+    });
     await waitFor(() => {
       expect(result.current.selectedRoadBand).toEqual({
         sectionId: draft.sections[0].id,
@@ -56,6 +59,51 @@ describe('useRoadEditor road-edit lifecycle', () => {
         bandIndex: 0,
       });
     });
+  });
+
+  it('clears every road highlight when the Roads workspace closes', async () => {
+    const doc = buildSampleCube();
+    const draft = createManualRoadDraft(roadLine);
+    insertRoadIntoCityJson(doc, draft, { id: 'road-highlighted' });
+    const area = extractTransportationAreas(doc).find(
+      (candidate) => candidate.roadId === 'road-highlighted'
+    );
+    expect(area).toBeDefined();
+    if (!area) return;
+
+    const { result } = renderHook(() =>
+      useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never)
+    );
+
+    act(() => {
+      result.current.setShowRoadEditor(true);
+      result.current.setRoadDraft(draft);
+      result.current.setSelectedRoadArea(area);
+      result.current.setSelectedOsmRoadId('osm-road-1');
+      result.current.setOsm2streetsSelection({
+        kind: 'lane',
+        feature: {
+          type: 'Feature',
+          properties: { road: 'osm-road-1', index: 0 },
+          geometry: { type: 'Polygon', coordinates: [] },
+        },
+      } as never);
+      result.current.setHighlightedOsm2StreetsRoadIds(new Set(['osm-road-1']));
+    });
+    await waitFor(() => {
+      expect(result.current.selectedRoadBand).not.toBeNull();
+      expect(result.current.selectedRoadArea?.roadId).toBe('road-highlighted');
+    });
+
+    act(() => result.current.handleCloseRoadWorkspace());
+
+    expect(result.current.showRoadEditor).toBe(false);
+    expect(result.current.selectedRoadArea).toBeNull();
+    expect(result.current.selectedRoadBand).toBeNull();
+    expect(result.current.selectedOsmRoadId).toBeNull();
+    expect(result.current.osm2streetsSelection).toBeNull();
+    expect(result.current.highlightedOsm2StreetsRoadIds.size).toBe(0);
+    expect(result.current.roadDraft).toEqual(draft);
   });
 
   it('reports mapped street-tree overlaps as non-blocking road-fit warnings', async () => {

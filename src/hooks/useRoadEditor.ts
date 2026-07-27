@@ -214,9 +214,26 @@ export function useRoadEditor(
   const roadDraftHistoryRef = useRef(new RoadDraftHistory());
   const [roadDraftHistoryVersion, setRoadDraftHistoryVersion] = useState(0);
 
+  const clearRoadSelectionHighlights = useCallback(() => {
+    setSelectedRoadArea(null);
+    setSelectedOsmRoadId(null);
+    setSelectedRoadBand(null);
+    setOsm2streetsSelection(null);
+    setHighlightedOsm2StreetsRoadIds(new Set());
+  }, []);
+
+  const handleCloseRoadWorkspace = useCallback(() => {
+    setShowRoadEditor(false);
+    clearRoadSelectionHighlights();
+  }, [clearRoadSelectionHighlights]);
+
+  useEffect(() => {
+    if (!showRoadEditor) clearRoadSelectionHighlights();
+  }, [clearRoadSelectionHighlights, showRoadEditor]);
+
   useEffect(() => {
     setSelectedRoadBand((current) => {
-      if (!roadDraft) return null;
+      if (!showRoadEditor || !roadDraft) return null;
       if (
         current &&
         roadDraft.sections.some(
@@ -241,7 +258,7 @@ export function useRoadEditor(
           }
         : null;
     });
-  }, [roadDraft]);
+  }, [roadDraft, showRoadEditor]);
 
   const clearRoadDraftHistory = useCallback(() => {
     roadDraftHistoryRef.current.clear();
@@ -1197,6 +1214,8 @@ export function useRoadEditor(
     setOsm2streetsSelection,
     highlightedOsm2StreetsRoadIds,
     setHighlightedOsm2StreetsRoadIds,
+    clearRoadSelectionHighlights,
+    handleCloseRoadWorkspace,
     clearOsmRoadData,
     handleFetchOsmRoads,
     loadOsmRoadXml,

@@ -322,28 +322,26 @@ export default function App() {
   );
 
   const handleToggleRoadEditor = useCallback(() => {
-    roadEditor.setShowRoadEditor((isOpen) => {
-      const nextOpen = !isOpen;
-      if (nextOpen) {
-        // The data loader is a full-screen modal. Close it before opening the
-        // road editor so the toolbar action always produces a visible panel.
-        importExport.setLoadModalOpen(false);
-        // Road editing is a focused map workspace. Do not leave an unrelated
-        // building/planning inspector stacked underneath its right-hand dock.
-        coreState.setSelection(null);
-        buildingEditor.setMultiSelection(new Set());
-        buildingEditor.setPendingAsset(null);
-        setShowBuildingStart(false);
-        setFiltersOpen(false);
-        setSelectedZone(null);
-        roadEditor.setRoadStatus(
-          (current) => current ?? 'Road editor ready. Fetch OSM roads or draw a road manually.'
-        );
-      } else if (coreState.drawMode === 'road-line') {
-        coreState.setDrawMode('none');
-      }
-      return nextOpen;
-    });
+    if (roadEditor.showRoadEditor) {
+      if (coreState.drawMode === 'road-line') coreState.setDrawMode('none');
+      roadEditor.handleCloseRoadWorkspace();
+      return;
+    }
+    // The data loader is a full-screen modal. Close it before opening the
+    // road editor so the toolbar action always produces a visible panel.
+    importExport.setLoadModalOpen(false);
+    // Road editing is a focused map workspace. Do not leave an unrelated
+    // building/planning inspector stacked underneath its right-hand dock.
+    coreState.setSelection(null);
+    buildingEditor.setMultiSelection(new Set());
+    buildingEditor.setPendingAsset(null);
+    setShowBuildingStart(false);
+    setFiltersOpen(false);
+    setSelectedZone(null);
+    roadEditor.setRoadStatus(
+      (current) => current ?? 'Road editor ready. Fetch OSM roads or draw a road manually.'
+    );
+    roadEditor.setShowRoadEditor(true);
   }, [buildingEditor, coreState, importExport, roadEditor]);
 
   // Keyboard shortcuts: Ctrl+Z / Cmd+Z, Ctrl+C / Ctrl+V, Delete, Backspace.
@@ -473,10 +471,14 @@ export default function App() {
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
-      if (info && roadEditor.showRoadEditor && !roadEditor.roadDraft) {
-        roadEditor.setShowRoadEditor(false);
-        roadEditor.setSelectedRoadArea(null);
-        roadEditor.setOsm2streetsSelection(null);
+      if (
+        roadEditor.showRoadEditor ||
+        roadEditor.selectedRoadArea ||
+        roadEditor.selectedOsmRoadId ||
+        roadEditor.osm2streetsSelection ||
+        roadEditor.highlightedOsm2StreetsRoadIds.size > 0
+      ) {
+        roadEditor.handleCloseRoadWorkspace();
       }
       if (info?.ctrlKey) {
         buildingEditor.setMultiSelection((prev) => {
@@ -560,6 +562,7 @@ export default function App() {
         undoState={undoRedo.undoState}
         showList={coreState.showList}
         onToggleList={() => {
+          if (!coreState.showList) roadEditor.handleCloseRoadWorkspace();
           setFiltersOpen(false);
           coreState.setShowList((v) => !v);
         }}
@@ -567,7 +570,10 @@ export default function App() {
         filtersOpen={filtersOpen}
         filtersActive={!filterIsEmpty}
         onToggleFilters={() => {
-          if (!filtersOpen) coreState.setShowList(false);
+          if (!filtersOpen) {
+            roadEditor.handleCloseRoadWorkspace();
+            coreState.setShowList(false);
+          }
           setFiltersOpen((open) => !open);
         }}
         onMergeFile={importExport.handleMergeFile}
@@ -575,6 +581,7 @@ export default function App() {
         ifcParsing={buildingEditor.ifcParsing}
         onReloadView={() => coreState.setReloadToken((t) => t + 1)}
         onOpenLoader={() => {
+          roadEditor.handleCloseRoadWorkspace();
           setFiltersOpen(false);
           importExport.setLoadModalOpen(true);
         }}
@@ -590,8 +597,7 @@ export default function App() {
             return;
           }
           if (roadEditor.roadDraft) roadEditor.handleCancelRoadEdit(true);
-          roadEditor.setShowRoadEditor(false);
-          roadEditor.setSelectedRoadArea(null);
+          roadEditor.handleCloseRoadWorkspace();
           if (zoningEnabled) handleHideZoning();
           coreState.setShowList(false);
           coreState.setSelection(null);
@@ -622,7 +628,10 @@ export default function App() {
         canDelete={!!coreState.selection || buildingEditor.multiSelection.size > 0}
         zoningEnabled={zoningEnabled}
         zoningLoading={zoningLoading}
-        onToggleZoning={handleToggleZoning}
+        onToggleZoning={() => {
+          if (!zoningEnabled) roadEditor.handleCloseRoadWorkspace();
+          void handleToggleZoning();
+        }}
         onFilterViewport={importExport.handleReloadViewport}
         canFilterViewport={!!importExport.seqRawText}
         catalogState={
@@ -741,7 +750,7 @@ export default function App() {
               canRedoDraft={roadEditor.roadDraftHistoryState.canRedo}
               undoDraftLabel={roadEditor.roadDraftHistoryState.undoLabel}
               redoDraftLabel={roadEditor.roadDraftHistoryState.redoLabel}
-              onClose={() => roadEditor.setShowRoadEditor(false)}
+              onClose={roadEditor.handleCloseRoadWorkspace}
               onFetchOsmRoads={() => void roadEditor.handleFetchOsmRoads()}
               onBasemapChange={roadEditor.setBasemap}
               onSatelliteOpacityChange={roadEditor.setSatelliteOpacity}
