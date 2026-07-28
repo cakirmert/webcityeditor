@@ -267,8 +267,13 @@ Implemented metadata slice (2026-07-27): `_roadLayout` now round-trips stable, r
 lane-movement references with `proposed`, `confirmed`, or `rejected` status and provenance. Rejected
 movements are filtered from derived junction guides after reload/export, surviving decisions remain
 stable when bands are reordered, and removing a band prunes decisions that reference its stable id.
-The movement-decision UI, automatic reciprocal decision writes across two Road objects, and the
-Hamburg fixture/browser acceptance pass remain pending.
+
+Implemented decision-UI slice (2026-07-28): an edited road with persisted lane-movement decisions
+now lists each source/target lane and provenance in the Roads workspace. Touch-sized proposed,
+confirmed, and rejected controls update the draft through normal road undo/redo history; rejected
+guides disappear immediately and remain hidden after the edited CityJSON Road is saved and reloaded.
+Imported-junction proposal derivation, automatic reciprocal decision writes across two Road objects,
+and the Hamburg fixture/browser acceptance pass remain pending.
 
 ## Remaining roadmap
 
