@@ -22,9 +22,11 @@ import {
   parseOsmPointFeaturesFromXml,
   parseOsmRoadsFromXml,
   planStaleReciprocalRoadPropagation,
+  readEditableRoadDraftFromCityObject,
   splitRoadSectionAtFraction,
   summarizeRoadDraft,
   synchronizeRoadConnectionMetadata,
+  synchronizeRoadLaneMovementMetadata,
   roadDraftPreservesExactGeometry,
   updateExactRoadAttributesInCityJson,
 } from '../lib/transportation';
@@ -801,6 +803,9 @@ export function useRoadEditor(
   const handleInsertRoad = useCallback(() => {
     if (!cityjson || !roadDraft) return;
     const targetRoadId = editingRoadId;
+    const previousRoadDraft = targetRoadId
+      ? readEditableRoadDraftFromCityObject(cityjson.CityObjects[targetRoadId])
+      : null;
     const preserveExactGeometry =
       exactGeometryStatus === 'preserved' && targetRoadId !== null;
     // Recheck synchronously at commit so the edit-time debounce can never
@@ -935,11 +940,22 @@ export function useRoadEditor(
             inserted.id,
             savedRoadDraft
           );
+          const movementDecisionSync = synchronizeRoadLaneMovementMetadata(
+            cityjson,
+            inserted.id,
+            savedRoadDraft,
+            previousRoadDraft
+          );
           if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
           return {
             ...inserted,
             ...disconnected,
             connectedRoadIds,
+            movementDecisionRoadIds: movementDecisionSync.updatedRoadIds,
+            mirroredMovementDecisionCount:
+              movementDecisionSync.mirroredDecisionCount,
+            removedMovementDecisionCount:
+              movementDecisionSync.removedDecisionCount,
             propagatedRoadIds,
             propagatedConnectionCount,
           };
@@ -949,6 +965,9 @@ export function useRoadEditor(
         const next = new Set(prev);
         next.add(result.id);
         for (const connectedRoadId of result.connectedRoadIds) next.add(connectedRoadId);
+        for (const movementRoadId of result.movementDecisionRoadIds) {
+          next.add(movementRoadId);
+        }
         for (const propagatedRoadId of result.propagatedRoadIds) next.add(propagatedRoadId);
         for (const disconnectedRoadId of result.disconnectedRoadIds) next.add(disconnectedRoadId);
         return next;
@@ -979,6 +998,10 @@ export function useRoadEditor(
               result.connectedRoadIds.length > 0
                 ? `; confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
                 : ''
+            }${
+              result.movementDecisionRoadIds.length > 0
+                ? `; synchronized lane movements with ${result.movementDecisionRoadIds.length} connected road${result.movementDecisionRoadIds.length === 1 ? '' : 's'}`
+                : ''
             }.`
           : targetRoadId
           ? `Saved changes to ${result.id} with ${result.areas.length} transportation surfaces${
@@ -995,10 +1018,18 @@ export function useRoadEditor(
               result.disconnectedConnectionCount > 0
                 ? ` and cleared ${result.disconnectedConnectionCount} stale reciprocal road connection${result.disconnectedConnectionCount === 1 ? '' : 's'}`
                 : ''
+            }${
+              result.movementDecisionRoadIds.length > 0
+                ? ` and synchronized lane movements with ${result.movementDecisionRoadIds.length} connected road${result.movementDecisionRoadIds.length === 1 ? '' : 's'}`
+                : ''
             }.`
           : `Inserted ${result.id} with ${result.areas.length} transportation surfaces${
               result.connectedRoadIds.length > 0
                 ? ` and confirmed ${result.connectedRoadIds.length} reciprocal road connection${result.connectedRoadIds.length === 1 ? '' : 's'}`
+                : ''
+            }${
+              result.movementDecisionRoadIds.length > 0
+                ? ` and synchronized lane movements with ${result.movementDecisionRoadIds.length} connected road${result.movementDecisionRoadIds.length === 1 ? '' : 's'}`
                 : ''
             }.`
       );

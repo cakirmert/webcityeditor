@@ -23,6 +23,7 @@ import {
   roadDraftPreservesExactGeometry,
   splitRoadSectionAtFraction,
   synchronizeRoadConnectionMetadata,
+  synchronizeRoadLaneMovementMetadata,
   updateExactRoadAttributesInCityJson,
   type RoadArea,
 } from '../../src/lib/transportation';
@@ -328,6 +329,105 @@ describe('transportation roads', () => {
       'proposed',
       'rejected',
     ]);
+  });
+
+  it('mirrors lane-movement decisions to the peer and removes stale copies', () => {
+    const doc = buildSampleCube();
+    const source = createManualRoadDraft(delftRoad, { name: 'Source road' });
+    source.id = 'road-source';
+    const peer = createManualRoadDraft(
+      [...delftRoad].reverse() as [number, number][],
+      { name: 'Peer road' }
+    );
+    peer.id = 'road-peer';
+    insertRoadIntoCityJson(doc, source, { id: source.id });
+    insertRoadIntoCityJson(doc, peer, { id: peer.id });
+
+    const previousSource = readEditableRoadDraftFromCityObject(
+      doc.CityObjects[source.id]
+    )!;
+    const decision = {
+      id: 'movement-source-to-peer',
+      status: 'confirmed' as const,
+      source: {
+        roadId: source.id,
+        sectionId: source.sections[0].id,
+        endpoint: 'end' as const,
+        bandId: source.sections[0].bands[0].id!,
+      },
+      target: {
+        roadId: peer.id,
+        sectionId: peer.sections[0].id,
+        endpoint: 'start' as const,
+        bandId: peer.sections[0].bands[0].id!,
+      },
+      mode: 'car',
+      provenance: { source: 'user' as const },
+    };
+    source.laneMovementDecisions = [decision];
+    insertRoadIntoCityJson(doc, source, { id: source.id });
+
+    expect(
+      synchronizeRoadLaneMovementMetadata(
+        doc,
+        source.id,
+        source,
+        previousSource
+      )
+    ).toMatchObject({
+      updatedRoadIds: [peer.id],
+      mirroredDecisionCount: 1,
+      removedDecisionCount: 0,
+    });
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
+        ?.laneMovementDecisions
+    ).toEqual([
+      {
+        ...decision,
+        source: decision.target,
+        target: decision.source,
+      },
+    ]);
+
+    const beforeStatusChange = readEditableRoadDraftFromCityObject(
+      doc.CityObjects[source.id]
+    )!;
+    source.laneMovementDecisions![0].status = 'rejected';
+    insertRoadIntoCityJson(doc, source, { id: source.id });
+    synchronizeRoadLaneMovementMetadata(
+      doc,
+      source.id,
+      source,
+      beforeStatusChange
+    );
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
+        ?.laneMovementDecisions?.[0].status
+    ).toBe('rejected');
+
+    const beforeRemoval = readEditableRoadDraftFromCityObject(
+      doc.CityObjects[source.id]
+    )!;
+    source.laneMovementDecisions = undefined;
+    insertRoadIntoCityJson(doc, source, { id: source.id });
+    expect(
+      synchronizeRoadLaneMovementMetadata(
+        doc,
+        source.id,
+        source,
+        beforeRemoval
+      )
+    ).toMatchObject({
+      updatedRoadIds: [peer.id],
+      mirroredDecisionCount: 0,
+      removedDecisionCount: 1,
+    });
+    expect(
+      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
+        ?.laneMovementDecisions
+    ).toBeUndefined();
+    expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
   });
 
   it('derives an editable draft from precomputed CityJSON road surfaces alone', () => {

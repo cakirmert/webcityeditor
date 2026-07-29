@@ -272,8 +272,12 @@ Implemented decision-UI slice (2026-07-28): an edited road with persisted lane-m
 now lists each source/target lane and provenance in the Roads workspace. Touch-sized proposed,
 confirmed, and rejected controls update the draft through normal road undo/redo history; rejected
 guides disappear immediately and remain hidden after the edited CityJSON Road is saved and reloaded.
-Imported-junction proposal derivation, automatic reciprocal decision writes across two Road objects,
-and the Hamburg fixture/browser acceptance pass remain pending.
+Implemented reciprocal-write slice (2026-07-29): saving a lane-movement decision now mirrors the
+same stable decision onto the referenced editable Road with peer-local source/target orientation.
+Status changes stay synchronized, lane removal clears the mirrored peer record, road deletion prunes
+references to the deleted Road, and the guarded save marks both Road objects dirty without rebuilding
+peer geometry. Imported-junction proposal derivation and the Hamburg fixture/browser acceptance pass
+remain pending.
 
 ## Remaining roadmap
 

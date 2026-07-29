@@ -2239,6 +2239,171 @@ export function synchronizeRoadConnectionMetadata(
   return [...changedTargets];
 }
 
+export interface RoadLaneMovementSynchronizationResult {
+  updatedRoadIds: string[];
+  mirroredDecisionCount: number;
+  removedDecisionCount: number;
+}
+
+/**
+ * Mirror lane-movement decisions into the other editable Road participating
+ * in each movement. The peer stores the same stable decision id with its local
+ * lane as the source, so either Road can reopen and review the decision.
+ *
+ * The previous source layout is used to remove mirrored peer records when a
+ * source lane (and therefore its decision) is removed. Geometry is untouched.
+ */
+export function synchronizeRoadLaneMovementMetadata(
+  doc: CityJsonDocument,
+  sourceRoadId: string,
+  sourceDraft: RoadDraft,
+  previousSourceDraft: RoadDraft | null = null
+): RoadLaneMovementSynchronizationResult {
+  const currentByPeer = laneMovementDecisionsByPeer(
+    sourceRoadId,
+    sourceDraft.laneMovementDecisions
+  );
+  const previousByPeer = laneMovementDecisionsByPeer(
+    sourceRoadId,
+    previousSourceDraft?.laneMovementDecisions
+  );
+  const peerRoadIds = new Set([
+    ...currentByPeer.keys(),
+    ...previousByPeer.keys(),
+  ]);
+  const updatedRoadIds = new Set<string>();
+  let mirroredDecisionCount = 0;
+  let removedDecisionCount = 0;
+
+  for (const peerRoadId of peerRoadIds) {
+    const peerObject = doc.CityObjects[peerRoadId];
+    if (!peerObject || peerObject.type !== 'Road') continue;
+    const peerDraft = readEditableRoadDraftFromCityObject(peerObject);
+    if (!peerDraft) continue;
+
+    const previousIds = new Set(
+      (previousByPeer.get(peerRoadId) ?? []).map((decision) => decision.id)
+    );
+    const currentDecisions = (currentByPeer.get(peerRoadId) ?? [])
+      .filter((decision) =>
+        roadLaneMovementDecisionReferencesExistingBands(
+          decision,
+          sourceRoadId,
+          sourceDraft,
+          peerRoadId,
+          peerDraft
+        )
+      )
+      .map((decision) => orientLaneMovementDecisionForRoad(decision, peerRoadId));
+    const currentIds = new Set(currentDecisions.map((decision) => decision.id));
+    const replacedIds = new Set([...previousIds, ...currentIds]);
+    const existingDecisions = peerDraft.laneMovementDecisions ?? [];
+    const retained = existingDecisions.filter(
+      (decision) =>
+        !(
+          replacedIds.has(decision.id) &&
+          laneMovementDecisionConnectsRoads(
+            decision,
+            sourceRoadId,
+            peerRoadId
+          )
+        )
+    );
+    removedDecisionCount += existingDecisions.length - retained.length;
+    const nextDecisions = [...retained, ...currentDecisions];
+    const changed =
+      JSON.stringify(existingDecisions) !== JSON.stringify(nextDecisions);
+    if (!changed) continue;
+
+    peerDraft.laneMovementDecisions =
+      nextDecisions.length > 0 ? nextDecisions : undefined;
+    peerObject.attributes = {
+      ...(peerObject.attributes ?? {}),
+      _roadLayout: roadDraftToJson(peerDraft),
+      _updatedAt: new Date().toISOString(),
+    };
+    updatedRoadIds.add(peerRoadId);
+    mirroredDecisionCount += currentDecisions.length;
+  }
+
+  return {
+    updatedRoadIds: [...updatedRoadIds],
+    mirroredDecisionCount,
+    removedDecisionCount,
+  };
+}
+
+function laneMovementDecisionsByPeer(
+  sourceRoadId: string,
+  decisions: RoadLaneMovementDecision[] | undefined
+): Map<string, RoadLaneMovementDecision[]> {
+  const byPeer = new Map<string, RoadLaneMovementDecision[]>();
+  for (const decision of decisions ?? []) {
+    const peerRoadId =
+      decision.source.roadId === sourceRoadId
+        ? decision.target.roadId
+        : decision.target.roadId === sourceRoadId
+          ? decision.source.roadId
+          : null;
+    if (!peerRoadId || peerRoadId === sourceRoadId) continue;
+    const peerDecisions = byPeer.get(peerRoadId) ?? [];
+    peerDecisions.push(decision);
+    byPeer.set(peerRoadId, peerDecisions);
+  }
+  return byPeer;
+}
+
+function orientLaneMovementDecisionForRoad(
+  decision: RoadLaneMovementDecision,
+  roadId: string
+): RoadLaneMovementDecision {
+  const oriented =
+    decision.source.roadId === roadId
+      ? decision
+      : { ...decision, source: decision.target, target: decision.source };
+  return JSON.parse(JSON.stringify(oriented)) as RoadLaneMovementDecision;
+}
+
+function roadLaneMovementDecisionReferencesExistingBands(
+  decision: RoadLaneMovementDecision,
+  sourceRoadId: string,
+  sourceDraft: RoadDraft,
+  peerRoadId: string,
+  peerDraft: RoadDraft
+): boolean {
+  const sourceReference =
+    decision.source.roadId === sourceRoadId ? decision.source : decision.target;
+  const peerReference =
+    decision.source.roadId === peerRoadId ? decision.source : decision.target;
+  return (
+    roadLaneMovementReferenceExists(sourceReference, sourceDraft) &&
+    roadLaneMovementReferenceExists(peerReference, peerDraft)
+  );
+}
+
+function roadLaneMovementReferenceExists(
+  reference: RoadLaneMovementReference,
+  draft: RoadDraft
+): boolean {
+  const section = draft.sections.find(
+    (candidate) => candidate.id === reference.sectionId
+  );
+  return !!section?.bands.some((band) => band.id === reference.bandId);
+}
+
+function laneMovementDecisionConnectsRoads(
+  decision: RoadLaneMovementDecision,
+  firstRoadId: string,
+  secondRoadId: string
+): boolean {
+  return (
+    (decision.source.roadId === firstRoadId &&
+      decision.target.roadId === secondRoadId) ||
+    (decision.source.roadId === secondRoadId &&
+      decision.target.roadId === firstRoadId)
+  );
+}
+
 export interface StaleReciprocalRoadConnection {
   roadId: string;
   sectionId: string;
@@ -2483,6 +2648,20 @@ export function deleteRoadFromCityJson(
       if (!section.connections.start && !section.connections.end) {
         delete section.connections;
       }
+    }
+    const survivingDecisions = draft.laneMovementDecisions?.filter(
+      (decision) =>
+        decision.source.roadId !== roadId &&
+        decision.target.roadId !== roadId
+    );
+    if (
+      (draft.laneMovementDecisions?.length ?? 0) !==
+      (survivingDecisions?.length ?? 0)
+    ) {
+      draft.laneMovementDecisions = survivingDecisions?.length
+        ? survivingDecisions
+        : undefined;
+      changed = true;
     }
 
     if (!changed) continue;
