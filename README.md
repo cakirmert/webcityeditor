@@ -66,7 +66,7 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
    The remote city uses lightweight semantic LoD1 while this workspace is open, which keeps road interaction responsive; closing Roads restores the saved LoD3/photo setting.
 2. Tap a coloured road surface on the map, then choose **Edit road**.
 3. Tap a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
-4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction arrows update from the road bands.
+4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction markings update from the road bands. Imported junction movements first restrict which directed road pairs can connect; each lane's `allowed_turns` then selects the compatible destination and produces straight, hooked left/right, merge, U-turn, and combined lane arrows.
 5. Drag a yellow anchor to move a bend. Tap or drag a white `+` to add a bend. Drag a road end onto a teal target to confirm a road connection.
 6. Choose **Smooth** or **Straight**. Split the road only where its lane layout changes along its length.
 7. Use **Undo** or `Ctrl+Z` to step back. Use **Redo**, `Ctrl+Shift+Z`, or `Ctrl+Y` to repeat an undone change. Changes are recorded automatically, and rapid anchor dragging is kept as one useful history step.

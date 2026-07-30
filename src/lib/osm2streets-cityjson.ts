@@ -102,6 +102,7 @@ export function insertOsm2StreetsRoadIntoCityJson(
         usageLabel: lane.usageLabel,
         trafficDirection: lane.band.direction ?? null,
         allowedModes: lane.band.allowedModes ?? [],
+        allowedTurns: lane.band.allowedTurns ?? [],
         source: lane.source,
         sourceType: lane.laneType,
         osm2streetsRoadId: lane.osm2streetsRoadId ?? null,
@@ -187,6 +188,9 @@ function surfaceFromLane(
   };
   if (lane.band.allowedModes && lane.band.allowedModes.length > 0) {
     surface.allowedModes = lane.band.allowedModes;
+  }
+  if (lane.band.allowedTurns && lane.band.allowedTurns.length > 0) {
+    surface.allowedTurns = lane.band.allowedTurns;
   }
   return surface;
 }

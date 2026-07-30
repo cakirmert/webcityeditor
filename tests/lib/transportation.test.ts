@@ -20,6 +20,8 @@ import {
   planStaleReciprocalRoadPropagation,
   readEditableRoadDraftFromCityObject,
   removeRoadBandFromDraft,
+  normalizeRoadAllowedTurns,
+  roadAllowedTurnsPermitMovement,
   roadDraftPreservesExactGeometry,
   splitRoadSectionAtFraction,
   synchronizeRoadConnectionMetadata,
@@ -35,6 +37,33 @@ const delftRoad: [number, number][] = [
 ];
 
 describe('transportation roads', () => {
+  it('normalizes osm2streets turn variants and applies explicit restrictions', () => {
+    const turns = normalizeRoadAllowedTurns([
+      'slight_left',
+      'through',
+      'sharp_right',
+      'merge_to_right',
+      'none',
+    ]);
+
+    expect(turns).toEqual([
+      'slight_left',
+      'through',
+      'sharp_right',
+      'merge_right',
+    ]);
+    expect(roadAllowedTurnsPermitMovement(turns, 'slight_left')).toBe(true);
+    expect(roadAllowedTurnsPermitMovement(turns, 'left')).toBe(false);
+    expect(roadAllowedTurnsPermitMovement(turns, 'uturn')).toBe(false);
+    expect(roadAllowedTurnsPermitMovement(['merge_left'], 'through')).toBe(true);
+    expect(roadAllowedTurnsPermitMovement(['left'], 'slight_left')).toBe(true);
+    expect(roadAllowedTurnsPermitMovement(['left'], 'sharp_left')).toBe(true);
+    expect(roadAllowedTurnsPermitMovement(['right'], 'slight_right')).toBe(true);
+    expect(roadAllowedTurnsPermitMovement(['right'], 'sharp_right')).toBe(true);
+    expect(roadAllowedTurnsPermitMovement(['slight_right'], 'right')).toBe(false);
+    expect(roadAllowedTurnsPermitMovement(undefined, 'uturn')).toBe(true);
+  });
+
   it('queries road ways and the supported tagged street-point nodes', () => {
     const query = buildOverpassRoadQuery([9.98, 53.54, 10.01, 53.56], 'xml', 30);
 
@@ -483,7 +512,8 @@ describe('transportation roads', () => {
           maxspeed: 30,
           osm2streetsLaneIndex: 1,
           osmWayIds: ['3100'],
-          osm2streetsPropertiesJson: '{"type":"Driving","width":3}',
+          osm2streetsPropertiesJson:
+            '{"type":"Driving","width":3,"allowed_turns":["through","right"]}',
         },
       },
     ];
@@ -505,7 +535,12 @@ describe('transportation roads', () => {
     expect(draft.sections[0].maxspeedKmh).toBe(30);
     expect(draft.sections[0].bands).toEqual([
       expect.objectContaining({ kind: 'sidewalk', widthM: 1.5, direction: 'backward' }),
-      expect.objectContaining({ kind: 'car_lane', widthM: 3, direction: 'forward' }),
+      expect.objectContaining({
+        kind: 'car_lane',
+        widthM: 3,
+        direction: 'forward',
+        allowedTurns: ['through', 'right'],
+      }),
     ]);
 
     const reordered = JSON.parse(JSON.stringify(draft)) as typeof draft;

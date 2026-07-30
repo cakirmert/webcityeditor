@@ -8,7 +8,11 @@ import type {
   RoadDirection,
   RoadDraft,
 } from './transportation';
-import { DEFAULT_ROAD_CURVE, inferRoadVerticalProfileFromOsmTags } from './transportation';
+import {
+  DEFAULT_ROAD_CURVE,
+  inferRoadVerticalProfileFromOsmTags,
+  normalizeRoadAllowedTurns,
+} from './transportation';
 import type { Osm2StreetsFeature, Osm2StreetsResult, Osm2StreetsSelection } from './osm2streets';
 
 export interface Osm2StreetsDraftBuildResult {
@@ -259,6 +263,7 @@ export function roadBandFromLaneFeature(feature: Osm2StreetsFeature, index: numb
   if (!kind) return null;
   const widthM = typeof props.width === 'number' && Number.isFinite(props.width) ? props.width : 1;
   const maxspeedKmh = parseSpeedKmh(props.speed_limit);
+  const allowedTurns = normalizeRoadAllowedTurns(props.allowed_turns);
 
   return {
     id: `osm2streets-${kind}-${index}`,
@@ -267,6 +272,7 @@ export function roadBandFromLaneFeature(feature: Osm2StreetsFeature, index: numb
     widthM: Math.max(0.4, widthM),
     direction: roadDirectionFromLaneDirection(String(props.direction ?? '')),
     allowedModes: allowedModesForLaneType(String(props.type ?? '')),
+    ...(allowedTurns.length > 0 ? { allowedTurns } : {}),
     maxspeedKmh: kind === 'car_lane' ? maxspeedKmh : undefined,
   };
 }

@@ -154,6 +154,7 @@ function projectIntersectionGroups(network, idPrefix) {
   if (!network || !Array.isArray(network.intersections)) return [];
   const toWgs84 = networkPointToWgs84(network);
   if (!toWgs84) return [];
+  const roadMetadataById = readRoadMetadata(network);
   const result = [];
   for (const entry of network.intersections) {
     if (!Array.isArray(entry) || !isObject(entry[1])) continue;
@@ -174,12 +175,19 @@ function projectIntersectionGroups(network, idPrefix) {
       });
     if (!rings[0]) continue;
     const id = String(entry[0]);
+    const allowedRoadMovements = normalizeRoadMovementPairs(value.movements);
     result.push({
       kind: 'intersection',
       roadId: `intersection-${id}`,
       cityObjectId: `${idPrefix}osm2streets-intersection-${id}`,
       sourceIntersectionId: id,
       connectedRoadIds: uniqueValues(value.roads).map(String),
+      allowedRoadMovements,
+      roadEndpoints: roadEndpointsAtIntersection(
+        id,
+        value.roads,
+        roadMetadataById
+      ),
       osmNodeIds: uniqueValues(Array.isArray(value.osm_ids) ? value.osm_ids : []).map(String),
       control: String(value.control ?? 'Uncontrolled'),
       intersectionKind: String(value.kind ?? 'Intersection'),
@@ -207,6 +215,8 @@ function intersectionObjectFromProjectedGroup(group, transform, vertices, genera
     sourceType: group.intersectionKind,
     osm2streetsIntersectionId: group.sourceIntersectionId,
     connectedRoadIds: group.connectedRoadIds,
+    allowedRoadMovements: group.allowedRoadMovements,
+    roadEndpoints: group.roadEndpoints,
     osmNodeIds: group.osmNodeIds,
   };
   return {
@@ -222,6 +232,8 @@ function intersectionObjectFromProjectedGroup(group, transform, vertices, genera
         _transportationKind: 'intersection',
         _osm2streetsIntersectionId: group.sourceIntersectionId,
         _connectedOsm2streetsRoadIds: group.connectedRoadIds,
+        _allowedOsm2streetsRoadMovements: group.allowedRoadMovements,
+        _osm2streetsRoadEndpoints: group.roadEndpoints,
         _osmNodeIds: group.osmNodeIds,
         _intersectionControl: group.control,
         _verticalProfile: { placement: 'surface', source: 'osm_tags', elevationM: 0, osmLayer: 0 },
@@ -236,6 +248,44 @@ function intersectionObjectFromProjectedGroup(group, transform, vertices, genera
     localVertexCount: vertices.length,
     surfaces: boundaries.length,
   };
+}
+
+function normalizeRoadMovementPairs(value) {
+  if (!Array.isArray(value)) return null;
+  const result = [];
+  const seen = new Set();
+  for (const entry of value) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length < 2 ||
+      !['string', 'number'].includes(typeof entry[0]) ||
+      !['string', 'number'].includes(typeof entry[1])
+    ) {
+      continue;
+    }
+    const pair = [String(entry[0]), String(entry[1])];
+    const key = `${pair[0]}\u0000${pair[1]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(pair);
+  }
+  return result;
+}
+
+function roadEndpointsAtIntersection(
+  intersectionId,
+  roadIds,
+  roadMetadataById
+) {
+  const result = {};
+  for (const rawRoadId of roadIds) {
+    const roadId = String(rawRoadId);
+    const road = roadMetadataById.get(roadId);
+    if (!road) continue;
+    if (String(road.src_i) === intersectionId) result[roadId] = 'start';
+    else if (String(road.dst_i) === intersectionId) result[roadId] = 'end';
+  }
+  return result;
 }
 
 function groupLaneFeatures(features) {

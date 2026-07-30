@@ -262,6 +262,138 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
     }
   });
 
+  it('preserves authoritative directional intersection movements and road endpoints', () => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'webcityeditor-osm2streets-movements-'));
+    try {
+      const input = resolve(dir, 'lane-polygons.geojson');
+      const network = resolve(dir, 'network.json');
+      const output = resolve(dir, 'roads.city.json');
+      writeFileSync(input, `${JSON.stringify(lanePolygonsFixture())}\n`);
+      writeFileSync(
+        network,
+        JSON.stringify({
+          gps_bounds: {
+            min_lon: 9.99,
+            min_lat: 53.54,
+            max_lon: 10.01,
+            max_lat: 53.56,
+          },
+          boundary_polygon: {
+            rings: [
+              {
+                pts: [
+                  { x: 0, y: 0 },
+                  { x: 1000, y: 0 },
+                  { x: 1000, y: 1000 },
+                ],
+              },
+            ],
+          },
+          roads: [
+            [
+              7,
+              {
+                id: 7,
+                src_i: 100,
+                dst_i: 101,
+                reference_line: {
+                  pts: [
+                    { x: 0, y: 500 },
+                    { x: 500, y: 500 },
+                  ],
+                },
+              },
+            ],
+            [
+              9,
+              {
+                id: 9,
+                src_i: 101,
+                dst_i: 102,
+                reference_line: {
+                  pts: [
+                    { x: 500, y: 500 },
+                    { x: 1000, y: 500 },
+                  ],
+                },
+              },
+            ],
+          ],
+          intersections: [
+            [100, { kind: 'MapEdge', roads: [7], movements: [] }],
+            [
+              101,
+              {
+                kind: 'Intersection',
+                roads: [7, 9],
+                movements: [[7, 9]],
+                polygon: {
+                  rings: [
+                    {
+                      pts: [
+                        { x: 480, y: 480 },
+                        { x: 520, y: 480 },
+                        { x: 520, y: 520 },
+                        { x: 480, y: 520 },
+                        { x: 480, y: 480 },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+            [102, { kind: 'MapEdge', roads: [9], movements: [] }],
+          ],
+        })
+      );
+
+      execFileSync(
+        process.execPath,
+        [
+          scriptPath,
+          '--lanes',
+          input,
+          '--output',
+          output,
+          '--network',
+          network,
+          '--generated-at',
+          '2026-01-01T00:00:00.000Z',
+        ],
+        { cwd: projectRoot, stdio: 'pipe' }
+      );
+
+      const doc = JSON.parse(readFileSync(output, 'utf8'));
+      const junction = doc.CityObjects['osm2streets-intersection-101'];
+      expect(junction.attributes).toMatchObject({
+        _connectedOsm2streetsRoadIds: ['7', '9'],
+        _allowedOsm2streetsRoadMovements: [['7', '9']],
+        _osm2streetsRoadEndpoints: { '7': 'end', '9': 'start' },
+      });
+      expect(junction.geometry[0].semantics.surfaces[0]).toMatchObject({
+        connectedRoadIds: ['7', '9'],
+        allowedRoadMovements: [['7', '9']],
+        roadEndpoints: { '7': 'end', '9': 'start' },
+      });
+
+      const parsed = parseCityJson(JSON.stringify(doc));
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const junctionArea = extractTransportationAreas(parsed.doc).find(
+        (area) => area.roadId === 'osm2streets-intersection-101'
+      );
+      expect(junctionArea?.attributes.allowedRoadMovements).toEqual([
+        ['7', '9'],
+      ]);
+      expect(junctionArea?.attributes.roadEndpoints).toEqual({
+        '7': 'end',
+        '9': 'start',
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('can emit only CityJSONSeq for a disk-efficient local catalog build', () => {
     const dir = mkdtempSync(resolve(tmpdir(), 'webcityeditor-osm2streets-seq-only-'));
     try {

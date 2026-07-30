@@ -1,4 +1,9 @@
-import type { RoadArea, RoadDirection } from './transportation';
+import {
+  normalizeRoadAllowedTurns,
+  type RoadAllowedTurn,
+  type RoadArea,
+  type RoadDirection,
+} from './transportation';
 
 export interface RoadLaneDivider {
   id: string;
@@ -11,9 +16,12 @@ export interface RoadDirectionMarker {
   id: string;
   roadId: string;
   position: [number, number];
+  path: [number, number][];
   polygon: [number, number][];
   angle: number;
   direction: RoadDirection;
+  turn: RoadAllowedTurn | 'direction';
+  shaftWidthM: number;
 }
 
 export interface RoadVisuals {
@@ -44,8 +52,7 @@ export function buildRoadVisuals(areas: RoadArea[]): RoadVisuals {
     for (let index = 0; index < group.length; index++) {
       const area = group[index];
       if (isTravelLane(area)) {
-        const marker = directionMarker(area, sourceCenterline);
-        if (marker) directions.push(marker);
+        directions.push(...directionMarkers(area, sourceCenterline));
       }
       const next = group[index + 1];
       if (!next) continue;
@@ -81,35 +88,91 @@ function laneIndex(area: RoadArea): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : area.surfaceIndex;
 }
 
-function directionMarker(
+function directionMarkers(
   area: RoadArea,
   roadCenterline: [number, number][] | null
-): RoadDirectionMarker | null {
+): RoadDirectionMarker[] {
   const raw = String(area.attributes.trafficDirection ?? 'none').toLowerCase();
   const direction: RoadDirection = raw === 'forward' || raw === 'backward' || raw === 'both'
     ? raw
     : 'none';
-  if (direction === 'none') return null;
+  if (direction === 'none') return [];
 
   const laneCenterline = ribbonCenterline(area.polygon);
-  if (laneCenterline.length < 2) return null;
+  if (laneCenterline.length < 2) return [];
+  const laneLengthM = lineLengthMeters(laneCenterline);
+  if (laneLengthM < 2.4) return [];
   const position = pointAtHalfLength(laneCenterline);
   const tangent = closestTangent(position, roadCenterline ?? laneCenterline);
-  if (!tangent) return null;
-  const travelTangent: [number, number] = direction === 'backward'
-    ? [-tangent[0], -tangent[1]]
-    : tangent;
-  const angle = (Math.atan2(travelTangent[1], travelTangent[0]) * 180) / Math.PI;
-  return {
-    id: `${area.id}-direction`,
-    roadId: area.roadId,
-    position,
-    polygon: direction === 'both'
-      ? doubleArrowPolygon(position, travelTangent)
-      : forwardArrowPolygon(position, travelTangent),
-    angle,
-    direction,
-  };
+  if (!tangent) return [];
+  const nominalLengthM = isBikeLane(area) ? 3 : 5;
+  const lengthM = Math.min(nominalLengthM, Math.max(2.4, laneLengthM * 0.64));
+  const turns = allowedTurnsForArea(area);
+  const travelTangents: Array<{ suffix: string; tangent: [number, number] }> =
+    direction === 'both'
+      ? [
+          { suffix: 'forward', tangent },
+          { suffix: 'backward', tangent: [-tangent[0], -tangent[1]] },
+        ]
+      : [
+          {
+            suffix: direction,
+            tangent:
+              direction === 'backward'
+                ? [-tangent[0], -tangent[1]]
+                : tangent,
+          },
+        ];
+  const markers: RoadDirectionMarker[] = [];
+  for (const travel of travelTangents) {
+    const angle =
+      (Math.atan2(travel.tangent[1], travel.tangent[0]) * 180) / Math.PI;
+    for (const turn of turns) {
+      const geometry = germanDirectionArrow(
+        position,
+        travel.tangent,
+        turn,
+        lengthM
+      );
+      markers.push({
+        id: `${area.id}-direction-${travel.suffix}-${turn}`,
+        roadId: area.roadId,
+        position,
+        path: geometry.path,
+        polygon: geometry.head,
+        angle,
+        direction,
+        turn,
+        shaftWidthM: isBikeLane(area) ? 0.14 : 0.2,
+      });
+    }
+  }
+  return markers;
+}
+
+function allowedTurnsForArea(
+  area: RoadArea
+): Array<RoadAllowedTurn | 'direction'> {
+  const semanticTurns = normalizeRoadAllowedTurns(area.attributes.allowedTurns);
+  if (semanticTurns.length > 0) return semanticTurns;
+  const sourceJson = area.attributes.osm2streetsPropertiesJson;
+  if (typeof sourceJson === 'string') {
+    try {
+      const source = JSON.parse(sourceJson) as { allowed_turns?: unknown };
+      const sourceTurns = normalizeRoadAllowedTurns(source.allowed_turns);
+      if (sourceTurns.length > 0) return sourceTurns;
+    } catch {
+      // Invalid optional source provenance must not suppress the direction cue.
+    }
+  }
+  return ['direction'];
+}
+
+function isBikeLane(area: RoadArea): boolean {
+  const key = normalize(
+    `${String(area.attributes.transportationUsage ?? '')} ${area.function} ${String(area.attributes.sourceType ?? '')}`
+  );
+  return key.includes('bike') || key.includes('biking') || key.includes('cycle');
 }
 
 function roadSourceCenterline(areas: RoadArea[]): [number, number][] | null {
@@ -188,45 +251,209 @@ function closestTangent(
   return best?.tangent ?? null;
 }
 
-function forwardArrowPolygon(
+interface DirectionArrowGeometry {
+  path: [number, number][];
+  head: [number, number][];
+}
+
+interface LocalPoint {
+  along: number;
+  across: number;
+}
+
+/**
+ * A lightweight approximation of German StVO Zeichen 297 / RMS lane arrows:
+ * a long narrow stem, a compact triangular head, and a hooked 90-degree
+ * branch for turns. Combined permissions are rendered as overlapping
+ * components, matching the shared-stem markings used on German streets.
+ */
+function germanDirectionArrow(
   center: [number, number],
-  tangent: [number, number]
+  tangent: [number, number],
+  turn: RoadAllowedTurn | 'direction',
+  lengthM: number
+): DirectionArrowGeometry {
+  const headLengthM = Math.min(0.76, lengthM * 0.18);
+  const headHalfWidthM = Math.min(0.46, lengthM * 0.105);
+  const start: LocalPoint = { along: -lengthM / 2, across: 0 };
+  let tip: LocalPoint;
+  let headDirection: LocalPoint;
+  let localPath: LocalPoint[];
+
+  if (
+    turn === 'left' ||
+    turn === 'right' ||
+    turn === 'sharp_left' ||
+    turn === 'sharp_right'
+  ) {
+    const side = turn === 'left' || turn === 'sharp_left' ? 1 : -1;
+    const reachM = Math.min(1.18, Math.max(0.78, lengthM * 0.24));
+    const isSharp = turn === 'sharp_left' || turn === 'sharp_right';
+    tip = {
+      along: isSharp ? lengthM * 0.04 : lengthM * 0.2,
+      across: side * reachM,
+    };
+    headDirection = normalizeLocal({
+      along: isSharp ? -0.28 : 0,
+      across: side,
+    });
+    const base = subtractLocal(tip, scaleLocal(headDirection, headLengthM));
+    localPath = cubicBezierLocal(
+      start,
+      { along: -lengthM * 0.02, across: 0 },
+      { along: base.along, across: 0 },
+      base,
+      10
+    );
+  } else if (turn === 'slight_left' || turn === 'slight_right') {
+    const side = turn === 'slight_left' ? 1 : -1;
+    tip = {
+      along: lengthM / 2,
+      across: side * Math.min(0.92, lengthM * 0.19),
+    };
+    headDirection = normalizeLocal({ along: 0.84, across: side * 0.54 });
+    const base = subtractLocal(tip, scaleLocal(headDirection, headLengthM));
+    localPath = cubicBezierLocal(
+      start,
+      { along: -lengthM * 0.04, across: 0 },
+      {
+        along: base.along - lengthM * 0.16,
+        across: base.across * 0.42,
+      },
+      base,
+      8
+    );
+  } else if (turn === 'merge_left' || turn === 'merge_right') {
+    const side = turn === 'merge_left' ? 1 : -1;
+    tip = {
+      along: lengthM / 2,
+      across: side * Math.min(0.9, lengthM * 0.18),
+    };
+    headDirection = normalizeLocal({ along: 0.82, across: side * 0.58 });
+    const base = subtractLocal(tip, scaleLocal(headDirection, headLengthM));
+    localPath = cubicBezierLocal(
+      start,
+      { along: -lengthM * 0.06, across: 0 },
+      {
+        along: base.along - lengthM * 0.16,
+        across: base.across * 0.45,
+      },
+      base,
+      8
+    );
+  } else if (turn === 'uturn') {
+    const reachM = Math.min(1.05, Math.max(0.72, lengthM * 0.22));
+    tip = { along: -lengthM * 0.08, across: reachM };
+    headDirection = { along: -1, across: 0 };
+    const base = subtractLocal(tip, scaleLocal(headDirection, headLengthM));
+    localPath = cubicBezierLocal(
+      start,
+      { along: lengthM * 0.24, across: 0 },
+      { along: lengthM * 0.28, across: reachM },
+      base,
+      12
+    );
+  } else {
+    tip = { along: lengthM / 2, across: 0 };
+    headDirection = { along: 1, across: 0 };
+    localPath = [
+      start,
+      subtractLocal(tip, scaleLocal(headDirection, headLengthM)),
+    ];
+  }
+
+  return {
+    path: localPath.map((point) =>
+      offsetMeters(center, tangent, point.along, point.across)
+    ),
+    head: arrowHeadPolygon(
+      center,
+      tangent,
+      tip,
+      headDirection,
+      headLengthM,
+      headHalfWidthM
+    ),
+  };
+}
+
+function arrowHeadPolygon(
+  center: [number, number],
+  tangent: [number, number],
+  tip: LocalPoint,
+  direction: LocalPoint,
+  headLengthM: number,
+  headHalfWidthM: number
 ): [number, number][] {
-  const length = 2.4;
-  const headLength = 0.82;
-  const headHalfWidth = 0.58;
-  const shaftHalfWidth = 0.14;
+  const normalizedDirection = normalizeLocal(direction);
+  const base = subtractLocal(
+    tip,
+    scaleLocal(normalizedDirection, headLengthM)
+  );
+  const normal = {
+    along: -normalizedDirection.across,
+    across: normalizedDirection.along,
+  };
   return closeArrow([
-    offsetMeters(center, tangent, -length / 2, shaftHalfWidth),
-    offsetMeters(center, tangent, length / 2 - headLength, shaftHalfWidth),
-    offsetMeters(center, tangent, length / 2 - headLength, headHalfWidth),
-    offsetMeters(center, tangent, length / 2, 0),
-    offsetMeters(center, tangent, length / 2 - headLength, -headHalfWidth),
-    offsetMeters(center, tangent, length / 2 - headLength, -shaftHalfWidth),
-    offsetMeters(center, tangent, -length / 2, -shaftHalfWidth),
+    offsetMeters(center, tangent, tip.along, tip.across),
+    offsetMeters(
+      center,
+      tangent,
+      base.along + normal.along * headHalfWidthM,
+      base.across + normal.across * headHalfWidthM
+    ),
+    offsetMeters(
+      center,
+      tangent,
+      base.along - normal.along * headHalfWidthM,
+      base.across - normal.across * headHalfWidthM
+    ),
   ]);
 }
 
-function doubleArrowPolygon(
-  center: [number, number],
-  tangent: [number, number]
-): [number, number][] {
-  const length = 2.8;
-  const headLength = 0.78;
-  const headHalfWidth = 0.52;
-  const shaftHalfWidth = 0.13;
-  return closeArrow([
-    offsetMeters(center, tangent, length / 2, 0),
-    offsetMeters(center, tangent, length / 2 - headLength, headHalfWidth),
-    offsetMeters(center, tangent, length / 2 - headLength, shaftHalfWidth),
-    offsetMeters(center, tangent, -length / 2 + headLength, shaftHalfWidth),
-    offsetMeters(center, tangent, -length / 2 + headLength, headHalfWidth),
-    offsetMeters(center, tangent, -length / 2, 0),
-    offsetMeters(center, tangent, -length / 2 + headLength, -headHalfWidth),
-    offsetMeters(center, tangent, -length / 2 + headLength, -shaftHalfWidth),
-    offsetMeters(center, tangent, length / 2 - headLength, -shaftHalfWidth),
-    offsetMeters(center, tangent, length / 2 - headLength, -headHalfWidth),
-  ]);
+function cubicBezierLocal(
+  start: LocalPoint,
+  controlA: LocalPoint,
+  controlB: LocalPoint,
+  end: LocalPoint,
+  steps: number
+): LocalPoint[] {
+  const points: LocalPoint[] = [];
+  for (let index = 0; index <= steps; index++) {
+    const t = index / steps;
+    const inverse = 1 - t;
+    points.push({
+      along:
+        inverse ** 3 * start.along +
+        3 * inverse ** 2 * t * controlA.along +
+        3 * inverse * t ** 2 * controlB.along +
+        t ** 3 * end.along,
+      across:
+        inverse ** 3 * start.across +
+        3 * inverse ** 2 * t * controlA.across +
+        3 * inverse * t ** 2 * controlB.across +
+        t ** 3 * end.across,
+    });
+  }
+  return points;
+}
+
+function normalizeLocal(point: LocalPoint): LocalPoint {
+  const length = Math.hypot(point.along, point.across);
+  return length > 1e-9
+    ? { along: point.along / length, across: point.across / length }
+    : { along: 1, across: 0 };
+}
+
+function scaleLocal(point: LocalPoint, factor: number): LocalPoint {
+  return { along: point.along * factor, across: point.across * factor };
+}
+
+function subtractLocal(left: LocalPoint, right: LocalPoint): LocalPoint {
+  return {
+    along: left.along - right.along,
+    across: left.across - right.across,
+  };
 }
 
 function offsetMeters(
@@ -250,6 +477,14 @@ function localMeters(a: [number, number], b: [number, number]): number {
   const x = (b[0] - a[0]) * 111_320 * Math.cos(latitudeRadians);
   const y = (b[1] - a[1]) * 111_320;
   return Math.hypot(x, y);
+}
+
+function lineLengthMeters(line: [number, number][]): number {
+  let total = 0;
+  for (let index = 0; index < line.length - 1; index++) {
+    total += localMeters(line[index], line[index + 1]);
+  }
+  return total;
 }
 
 function ribbonCenterline(polygon: [number, number][]): [number, number][] {

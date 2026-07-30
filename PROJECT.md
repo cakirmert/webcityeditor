@@ -70,7 +70,7 @@ There are two geometry modes:
 | `exact` | Imported osm2streets lane and junction polygons | Type, direction, material, access, and speed update attributes while boundaries and the global vertex array remain unchanged |
 | `generated` | User-drawn or intentionally reshaped roads | The curved centreline and ordered bands regenerate matching preview and CityJSON ribbons |
 
-The `_roadLayout` attribute stores editable sections, bands, curve settings, elevation, and confirmed endpoint connections. `_sourceCenterlineWgs84` preserves osm2streets' directed centerline, so reordering or resizing one band rebuilds around the same road axis instead of deriving a diagonal from polygon corners. Direction arrows are map polygons tangent to that line, independent of CityJSON ring winding. `_roadGeometryMode` records whether the current boundaries are `exact` or `generated`. Existing exact data without the marker is still treated as exact for compatibility.
+The `_roadLayout` attribute stores editable sections, bands, curve settings, elevation, and confirmed endpoint connections. `_sourceCenterlineWgs84` preserves osm2streets' directed centerline, so reordering or resizing one band rebuilds around the same road axis instead of deriving a diagonal from polygon corners. Direction markings are map paths tangent to that line, independent of CityJSON ring winding. Imported osm2streets `allowed_turns` values are normalised onto their driving bands and draw straight, hooked left/right, merge, or U-turn markings; combined permissions share the same lane stem. `_roadGeometryMode` records whether the current boundaries are `exact` or `generated`. Existing exact data without the marker is still treated as exact for compatibility.
 
 Changing only semantic attributes shows **Exact source polygons protected**. Moving handles, changing any width, reordering or adding bands, splitting a section, or changing curve settings switches the pending save to a clearly labelled geometry rebuild.
 
@@ -94,7 +94,13 @@ Endpoint editing is deliberate:
   from the connected road in the same guarded edit when the user accepts the disconnection;
 - deleting a CityJSON road clears reciprocal endpoint metadata from every surviving editable road.
 
-Connection metadata confirms graph topology. It does not yet synthesize a complete lane-level intersection, turn restrictions, or regenerated road markings; that is listed in the remaining roadmap rather than presented as finished.
+Connection metadata confirms graph topology. Imported osm2streets intersections preserve their
+directed source-road-to-target-road movement list and each road's endpoint at that intersection.
+Only those authoritative road pairs are considered. Within an allowed pair, explicit
+`allowed_turns` select the compatible source lanes before left-to-right rank pairing chooses target
+lanes, so a right-turn lane cannot fan out into a left branch. Missing metadata remains unknown and
+does not invent a restriction. The editor does not permanently regenerate exact imported junction
+geometry.
 
 ## UX and performance decisions
 

@@ -6,7 +6,8 @@ function area(
   id: string,
   laneIndex: number,
   polygon: [number, number][],
-  direction: 'forward' | 'backward' | 'both' = 'forward'
+  direction: 'forward' | 'backward' | 'both' = 'forward',
+  allowedTurns?: string[]
 ): RoadArea {
   return {
     id,
@@ -22,6 +23,13 @@ function area(
       trafficDirection: direction,
       osm2streetsLaneIndex: laneIndex,
       sourceCenterlineWgs84: [[0, 0.5], [10, 0.5]],
+      ...(allowedTurns
+        ? {
+            osm2streetsPropertiesJson: JSON.stringify({
+              allowed_turns: allowedTurns,
+            }),
+          }
+        : {}),
     },
   };
 }
@@ -42,7 +50,35 @@ describe('CityJSON road visuals', () => {
     expect(visuals.directions.map((marker) => marker.direction)).toEqual(['forward', 'backward']);
     expect(visuals.directions[0].angle).toBeCloseTo(0, 6);
     expect(Math.abs(visuals.directions[1].angle)).toBeCloseTo(180, 6);
-    expect(visuals.directions.every((marker) => marker.polygon.length >= 8)).toBe(true);
+    expect(visuals.directions.every((marker) => marker.path.length >= 2)).toBe(true);
+    expect(visuals.directions.every((marker) => marker.polygon.length === 4)).toBe(true);
+  });
+
+  it('draws German-style curved and combined arrows from allowed_turns', () => {
+    const visuals = buildRoadVisuals([
+      area(
+        'combined-lane',
+        0,
+        [[0, 0], [10, 0], [10, 1], [0, 1], [0, 0]],
+        'forward',
+        ['left', 'through', 'right']
+      ),
+    ]);
+
+    expect(visuals.directions.map((marker) => marker.turn)).toEqual([
+      'left',
+      'through',
+      'right',
+    ]);
+    const left = visuals.directions[0];
+    const through = visuals.directions[1];
+    const right = visuals.directions[2];
+    expect(left.path.length).toBeGreaterThan(4);
+    expect(through.path).toHaveLength(2);
+    expect(right.path.length).toBeGreaterThan(4);
+    expect(left.path.at(-1)![1]).toBeGreaterThan(left.path[0][1]);
+    expect(right.path.at(-1)![1]).toBeLessThan(right.path[0][1]);
+    expect(through.path.at(-1)![1]).toBeCloseTo(through.path[0][1], 8);
   });
 
   it('does not draw lane arrows or dividers inside an intersection surface', () => {

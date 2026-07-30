@@ -1,18 +1,21 @@
 import { buildLaneConnectorSurface } from './road-connection-surfaces';
 import {
   deriveEditableRoadDraftFromAreas,
+  roadAllowedTurnsPermitMovement,
   sampleRoadSectionCenterlineWgs84,
   type RoadArea,
+  type RoadAllowedTurn,
   type RoadBand,
   type RoadBandKind,
   type RoadDirection,
   type RoadDraft,
+  type RoadIntersectionTurn,
   type RoadLaneMovementDecision,
   type RoadLaneMovementReference,
   type RoadSectionDraft,
 } from './transportation';
 
-export type RoadLaneContinuationTurn = 'through' | 'left' | 'right' | 'uturn';
+export type RoadLaneContinuationTurn = RoadIntersectionTurn;
 
 export interface RoadLaneContinuation {
   id: string;
@@ -61,7 +64,21 @@ interface RoadConnectionJunction {
   position: [number, number];
   externalRoadIds: string[];
   roadIds: string[];
+  /** Authoritative directed CityJSON road pairs; undefined is legacy/unknown. */
+  allowedRoadMovements?: Set<string>;
   roadEndpoints?: Record<string, 'start' | 'end'>;
+}
+
+interface JunctionApproach {
+  roadId: string;
+  section: RoadSectionDraft;
+  endpoint: 'start' | 'end';
+  distanceM: number;
+}
+
+interface JunctionSourceBandAllocation {
+  sourceBandIndices: Set<number>;
+  targetBandAnchor?: number;
 }
 
 interface SourceSeamEndpoint {
@@ -266,15 +283,39 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
     ];
     const connectedCityRoadIds = new Set<string>();
     const sourceNamespace = generatedOsm2StreetsNamespace(roadId, 'intersection');
+    const resolveExternalRoadIds = (externalRoadId: string): Set<string> =>
+      sourceNamespace === null
+        ? legacyCityRoadIdsByExternalId.get(externalRoadId) ?? new Set()
+        : generatedCityRoadIdsByScopedExternalId.get(
+            scopedExternalRoadId(sourceNamespace, externalRoadId)
+          ) ?? new Set();
     for (const externalRoadId of externalRoadIds) {
-      const candidates =
-        sourceNamespace === null
-          ? legacyCityRoadIdsByExternalId.get(externalRoadId)
-          : generatedCityRoadIdsByScopedExternalId.get(
-              scopedExternalRoadId(sourceNamespace, externalRoadId)
-            );
-      for (const cityRoadId of candidates ?? []) {
+      for (const cityRoadId of resolveExternalRoadIds(externalRoadId)) {
         connectedCityRoadIds.add(cityRoadId);
+      }
+    }
+    const externalMovements = firstExplicitRoadMovements(junctionAreas);
+    const allowedRoadMovements =
+      externalMovements === null
+        ? undefined
+        : new Set(
+            externalMovements.flatMap(([sourceExternalId, targetExternalId]) =>
+              [...resolveExternalRoadIds(sourceExternalId)].flatMap(
+                (sourceCityId) =>
+                  [...resolveExternalRoadIds(targetExternalId)].map(
+                    (targetCityId) =>
+                      directedRoadMovementKey(sourceCityId, targetCityId)
+                  )
+              )
+            )
+          );
+    const externalEndpoints = firstExplicitRoadEndpoints(junctionAreas);
+    const roadEndpoints: Record<string, 'start' | 'end'> = {};
+    for (const [externalRoadId, endpoint] of Object.entries(
+      externalEndpoints ?? {}
+    )) {
+      for (const cityRoadId of resolveExternalRoadIds(externalRoadId)) {
+        roadEndpoints[cityRoadId] = endpoint;
       }
     }
     junctions.push({
@@ -284,6 +325,8 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       position: polygonGroupCenter(junctionAreas),
       externalRoadIds,
       roadIds: [...connectedCityRoadIds].sort(),
+      ...(allowedRoadMovements ? { allowedRoadMovements } : {}),
+      ...(Object.keys(roadEndpoints).length > 0 ? { roadEndpoints } : {}),
     });
   }
   junctions.push(...inferGeneratedOsm2StreetsSourceSeams(areasByRoadId));
@@ -343,6 +386,7 @@ function buildConfirmedRoadLaneContinuationsFromIndex(
           targetRoadId,
           targetSection,
           targetEndpoint,
+          respectAllowedTurns: false,
           continuations,
           seen,
         });
@@ -378,19 +422,37 @@ function buildJunctionRoadLaneContinuations(
           : null;
       })
       .filter(
-        (
-          approach
-        ): approach is {
-          roadId: string;
-          section: RoadSectionDraft;
-          endpoint: 'start' | 'end';
-          distanceM: number;
-        } => !!approach
+        (approach): approach is JunctionApproach => !!approach
       );
 
     for (const source of approaches) {
-      for (const target of approaches) {
-        if (source.roadId === target.roadId) continue;
+      const legalTargets = approaches.filter((target) => {
+        const movementKey = directedRoadMovementKey(
+          source.roadId,
+          target.roadId
+        );
+        if (source.roadId === target.roadId) {
+          return junction.allowedRoadMovements?.has(movementKey) === true;
+        }
+        return (
+          junction.allowedRoadMovements === undefined ||
+          junction.allowedRoadMovements.has(movementKey)
+        );
+      });
+      const usableTargets = legalTargets.filter((target) =>
+        indexedBands(target.section).some(({ band }) =>
+          bandCanDepartFromEndpoint(band, target.endpoint)
+        )
+      );
+      const targetTurns = classifyJunctionTargetTurns(source, usableTargets);
+      const respectAllowedTurns = usableTargets.length > 1;
+      const sourceBandAllocations = respectAllowedTurns
+        ? allocateJunctionSourceBands(source, usableTargets, targetTurns)
+        : usableTargets.map(() => undefined);
+      for (let targetIndex = 0; targetIndex < usableTargets.length; targetIndex++) {
+        const target = usableTargets[targetIndex];
+        const targetTurn = targetTurns[targetIndex];
+        const sourceBandAllocation = sourceBandAllocations[targetIndex];
         appendLanePairContinuations({
           idPrefix: `junction-continuation:${junction.id}`,
           sourceRoadId: source.roadId,
@@ -399,6 +461,12 @@ function buildJunctionRoadLaneContinuations(
           targetRoadId: target.roadId,
           targetSection: target.section,
           targetEndpoint: target.endpoint,
+          turnOverride: targetTurn,
+          sourceBandIndices: sourceBandAllocation?.sourceBandIndices,
+          targetBandAnchor: sourceBandAllocation?.targetBandAnchor,
+          // If there is only one authoritative exit, carried arrows can refer
+          // to the next logical junction. Preserve the rank-aligned segment.
+          respectAllowedTurns,
           continuations,
           seen,
         });
@@ -409,6 +477,402 @@ function buildJunctionRoadLaneContinuations(
   return continuations.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+function classifyJunctionTargetTurns(
+  source: JunctionApproach,
+  targets: JunctionApproach[]
+): RoadLaneContinuationTurn[] {
+  const angles = targets.map((target) =>
+    signedTurnAngle(
+      source.section,
+      source.endpoint,
+      target.section,
+      target.endpoint
+    )
+  );
+  const geometricTurns = angles.map(classifyTurnAngle);
+  if (targets.length <= 1) return geometricTurns;
+
+  const availableSlots: Array<{
+    turn: RoadLaneContinuationTurn;
+    explicit: boolean;
+  }> = [];
+  for (const { band } of indexedBands(source.section)) {
+    if (!bandCanArriveAtEndpoint(band, source.endpoint)) continue;
+    if (!bandModes(band).some(isMotorVehicleMode)) continue;
+    const explicitTurns = [
+      ...new Set(
+        (band.allowedTurns ?? [])
+          .map(allowedTurnMovement)
+          .filter(
+            (turn): turn is RoadLaneContinuationTurn => turn !== null
+          )
+      ),
+    ];
+    if (explicitTurns.length > 0) {
+      for (const turn of explicitTurns) {
+        availableSlots.push({ turn, explicit: true });
+      }
+    } else {
+      availableSlots.push({ turn: 'through', explicit: false });
+    }
+  }
+  if (availableSlots.length === 0) return geometricTurns;
+
+  const assignments: Array<RoadLaneContinuationTurn | null> = targets.map(
+    () => null
+  );
+  const candidates: Array<{
+    targetIndex: number;
+    slotIndex: number;
+    turn: RoadLaneContinuationTurn;
+    cost: number;
+    explicit: boolean;
+  }> = [];
+  for (let slotIndex = 0; slotIndex < availableSlots.length; slotIndex++) {
+    const slot = availableSlots[slotIndex];
+    for (let targetIndex = 0; targetIndex < angles.length; targetIndex++) {
+      const angle = angles[targetIndex];
+      if (!turnCanMatchAngle(slot.turn, angle)) continue;
+      candidates.push({
+        targetIndex,
+        slotIndex,
+        turn: slot.turn,
+        // Explicit arrows should win over an unspecified lane's broad
+        // straight-ahead fallback when both fit a shallow branch.
+        cost: turnAngleCost(slot.turn, angle) + (slot.explicit ? 0 : 80),
+        explicit: slot.explicit,
+      });
+    }
+  }
+  candidates.sort(
+    (left, right) =>
+      left.cost - right.cost ||
+      Number(right.explicit) - Number(left.explicit) ||
+      left.targetIndex - right.targetIndex ||
+      left.turn.localeCompare(right.turn) ||
+      left.slotIndex - right.slotIndex
+  );
+  const usedSlots = new Set<number>();
+  const assignedTurns = new Set<RoadLaneContinuationTurn>();
+
+  // Prefer distinct movement categories first. A near-straight fork with
+  // `through` and `slight_right` arrows should use both categories.
+  for (const candidate of candidates) {
+    if (
+      assignments[candidate.targetIndex] ||
+      usedSlots.has(candidate.slotIndex) ||
+      assignedTurns.has(candidate.turn)
+    ) {
+      continue;
+    }
+    assignments[candidate.targetIndex] = candidate.turn;
+    usedSlots.add(candidate.slotIndex);
+    assignedTurns.add(candidate.turn);
+  }
+
+  // Duplicate turn slots are meaningful: two left lanes can feed two
+  // authoritative left branches. Use the remaining physical lane slots
+  // before falling back to geometry.
+  for (const candidate of candidates) {
+    if (
+      assignments[candidate.targetIndex] ||
+      usedSlots.has(candidate.slotIndex)
+    ) {
+      continue;
+    }
+    assignments[candidate.targetIndex] = candidate.turn;
+    usedSlots.add(candidate.slotIndex);
+  }
+
+  return assignments.map(
+    (assignment, targetIndex) => assignment ?? geometricTurns[targetIndex]
+  );
+}
+
+type RoadLaneTurnFamily = 'left' | 'through' | 'right' | 'uturn';
+
+function allocateJunctionSourceBands(
+  source: JunctionApproach,
+  targets: JunctionApproach[],
+  turns: RoadLaneContinuationTurn[]
+): JunctionSourceBandAllocation[] {
+  const allocations = targets.map(() => new Set<number>());
+  const targetBandAnchors: Array<number | undefined> = targets.map(
+    () => undefined
+  );
+  if (targets.length === 0) return [];
+
+  const orderedSourceBands = orderBandsByTravelSide(
+    source.section,
+    source.endpoint,
+    indexedBands(source.section).filter(({ band }) =>
+      bandCanArriveAtEndpoint(band, source.endpoint)
+    ),
+    true
+  );
+  const targetAngles = targets.map((target) =>
+    signedTurnAngle(
+      source.section,
+      source.endpoint,
+      target.section,
+      target.endpoint
+    )
+  );
+
+  for (const [mode, modeBands] of groupBandsByMode(orderedSourceBands)) {
+    const targetIndices = targets
+      .map((target, targetIndex) =>
+        junctionTargetSupportsMode(target, mode) ? targetIndex : -1
+      )
+      .filter((targetIndex) => targetIndex >= 0);
+    if (targetIndices.length === 0) continue;
+
+    const hasExplicitTurns = modeBands.some(
+      ({ band }) => (band.allowedTurns?.length ?? 0) > 0
+    );
+    if (!hasExplicitTurns) {
+      const eligibleByTarget = new Map(
+        targetIndices.map((targetIndex) => [targetIndex, modeBands])
+      );
+      distributeCompatibleSourceBands({
+        sourceBands: modeBands,
+        targetIndices,
+        targetAngles,
+        eligibleByTarget,
+        allocations,
+        targetBandAnchors,
+      });
+      continue;
+    }
+
+    const targetsByFamily = new Map<RoadLaneTurnFamily, number[]>();
+    for (const targetIndex of targetIndices) {
+      const family = roadLaneTurnFamily(turns[targetIndex]);
+      const familyTargets = targetsByFamily.get(family) ?? [];
+      familyTargets.push(targetIndex);
+      targetsByFamily.set(family, familyTargets);
+    }
+    for (const familyTargets of targetsByFamily.values()) {
+      const eligibleByTarget = new Map<number, IndexedBand[]>();
+      for (const targetIndex of familyTargets) {
+        let eligible = sourceBandsForMovement(
+          modeBands,
+          turns[targetIndex],
+          true
+        );
+        if (eligible.length === 0) {
+          // Missing arrows are unknown rather than forbidden. Prefer those
+          // lanes when explicit tags do not explain an authoritative branch.
+          eligible = modeBands.filter(
+            ({ band }) => (band.allowedTurns?.length ?? 0) === 0
+          );
+        }
+        eligibleByTarget.set(targetIndex, eligible);
+      }
+      distributeCompatibleSourceBands({
+        sourceBands: modeBands,
+        targetIndices: familyTargets,
+        targetAngles,
+        eligibleByTarget,
+        allocations,
+        targetBandAnchors,
+      });
+    }
+  }
+
+  return allocations.map((sourceBandIndices, targetIndex) => ({
+    sourceBandIndices,
+    ...(targetBandAnchors[targetIndex] === undefined
+      ? {}
+      : { targetBandAnchor: targetBandAnchors[targetIndex] }),
+  }));
+}
+
+function junctionTargetSupportsMode(
+  target: JunctionApproach,
+  mode: string
+): boolean {
+  return indexedBands(target.section).some(
+    ({ band }) =>
+      bandCanDepartFromEndpoint(band, target.endpoint) &&
+      targetBandAcceptsMode(band, mode)
+  );
+}
+
+function distributeCompatibleSourceBands({
+  sourceBands,
+  targetIndices,
+  targetAngles,
+  eligibleByTarget,
+  allocations,
+  targetBandAnchors,
+}: {
+  sourceBands: IndexedBand[];
+  targetIndices: number[];
+  targetAngles: number[];
+  eligibleByTarget: Map<number, IndexedBand[]>;
+  allocations: Set<number>[];
+  targetBandAnchors: Array<number | undefined>;
+}): void {
+  const sortedTargetIndices = [...targetIndices].sort(
+    (left, right) =>
+      targetAngles[right] - targetAngles[left] || left - right
+  );
+  const eligibleIndicesByTarget = new Map(
+    sortedTargetIndices.map((targetIndex) => [
+      targetIndex,
+      new Set(
+        (eligibleByTarget.get(targetIndex) ?? []).map(({ index }) => index)
+      ),
+    ])
+  );
+  const candidates = sourceBands.filter(({ index }) =>
+    sortedTargetIndices.some((targetIndex) =>
+      eligibleIndicesByTarget.get(targetIndex)?.has(index)
+    )
+  );
+  if (candidates.length === 0) return;
+  if (sortedTargetIndices.length > 1) {
+    sortedTargetIndices.forEach((targetIndex, targetOrdinal) => {
+      targetBandAnchors[targetIndex] ??= normalizedOrdinal(
+        targetOrdinal,
+        sortedTargetIndices.length
+      );
+    });
+  }
+
+  const candidateOrdinalByIndex = new Map(
+    candidates.map(({ index }, ordinal) => [index, ordinal])
+  );
+  const usageByIndex = new Map<number, number>();
+
+  // Cover every compatible authoritative target, reusing a lane only when
+  // there are fewer compatible lane slots than target branches.
+  sortedTargetIndices.forEach((targetIndex, targetOrdinal) => {
+    const eligibleIndices =
+      eligibleIndicesByTarget.get(targetIndex) ?? new Set<number>();
+    const candidate = candidates
+      .filter(({ index }) => eligibleIndices.has(index))
+      .sort((left, right) => {
+        const leftUsage = usageByIndex.get(left.index) ?? 0;
+        const rightUsage = usageByIndex.get(right.index) ?? 0;
+        const targetRank = normalizedOrdinal(
+          targetOrdinal,
+          sortedTargetIndices.length
+        );
+        const leftRank = normalizedOrdinal(
+          candidateOrdinalByIndex.get(left.index) ?? 0,
+          candidates.length
+        );
+        const rightRank = normalizedOrdinal(
+          candidateOrdinalByIndex.get(right.index) ?? 0,
+          candidates.length
+        );
+        return (
+          leftUsage - rightUsage ||
+          Math.abs(leftRank - targetRank) -
+            Math.abs(rightRank - targetRank) ||
+          left.index - right.index
+        );
+      })[0];
+    if (!candidate) return;
+    allocations[targetIndex].add(candidate.index);
+    usageByIndex.set(
+      candidate.index,
+      (usageByIndex.get(candidate.index) ?? 0) + 1
+    );
+  });
+
+  // Extra compatible lanes join their nearest branch without crossing the
+  // already ordered lane-to-target assignment.
+  for (const candidate of candidates) {
+    if ((usageByIndex.get(candidate.index) ?? 0) > 0) continue;
+    const candidateRank = normalizedOrdinal(
+      candidateOrdinalByIndex.get(candidate.index) ?? 0,
+      candidates.length
+    );
+    const targetIndex = sortedTargetIndices
+      .filter((candidateTargetIndex) =>
+        eligibleIndicesByTarget
+          .get(candidateTargetIndex)
+          ?.has(candidate.index)
+      )
+      .sort((left, right) => {
+        const leftRank = normalizedOrdinal(
+          sortedTargetIndices.indexOf(left),
+          sortedTargetIndices.length
+        );
+        const rightRank = normalizedOrdinal(
+          sortedTargetIndices.indexOf(right),
+          sortedTargetIndices.length
+        );
+        return (
+          Math.abs(candidateRank - leftRank) -
+            Math.abs(candidateRank - rightRank) ||
+          left - right
+        );
+      })[0];
+    if (targetIndex === undefined) continue;
+    allocations[targetIndex].add(candidate.index);
+  }
+}
+
+function normalizedOrdinal(ordinal: number, count: number): number {
+  return count <= 1 ? 0.5 : ordinal / (count - 1);
+}
+
+function roadLaneTurnFamily(
+  turn: RoadLaneContinuationTurn
+): RoadLaneTurnFamily {
+  if (isLeftTurn(turn)) return 'left';
+  if (isRightTurn(turn)) return 'right';
+  return turn === 'uturn' ? 'uturn' : 'through';
+}
+
+function allowedTurnMovement(
+  turn: RoadAllowedTurn
+): RoadLaneContinuationTurn | null {
+  if (turn === 'merge_left') return 'slight_left';
+  if (turn === 'merge_right') return 'slight_right';
+  return turn;
+}
+
+function turnCanMatchAngle(
+  turn: RoadLaneContinuationTurn,
+  angle: number
+): boolean {
+  if (turn === 'uturn') return Math.abs(angle) >= 120;
+  if (turn === 'through') return Math.abs(angle) <= 60;
+  if (isLeftTurn(turn)) return angle > 1;
+  if (isRightTurn(turn)) return angle < -1;
+  return false;
+}
+
+function turnAngleCost(
+  turn: RoadLaneContinuationTurn,
+  angle: number
+): number {
+  const ideal =
+    turn === 'through'
+      ? 0
+      : turn === 'slight_left'
+        ? 30
+        : turn === 'left'
+          ? 90
+          : turn === 'sharp_left'
+            ? 145
+            : turn === 'slight_right'
+              ? -30
+              : turn === 'right'
+                ? -90
+                : turn === 'sharp_right'
+                  ? -145
+                  : angle < 0
+                    ? -180
+                    : 180;
+  return Math.abs(angle - ideal);
+}
+
 function appendLanePairContinuations({
   idPrefix,
   sourceRoadId,
@@ -417,6 +881,10 @@ function appendLanePairContinuations({
   targetRoadId,
   targetSection,
   targetEndpoint,
+  turnOverride,
+  sourceBandIndices,
+  targetBandAnchor,
+  respectAllowedTurns = true,
   continuations,
   seen,
 }: {
@@ -427,21 +895,47 @@ function appendLanePairContinuations({
   targetRoadId: string;
   targetSection: RoadSectionDraft;
   targetEndpoint: 'start' | 'end';
+  turnOverride?: RoadLaneContinuationTurn;
+  sourceBandIndices?: Set<number>;
+  targetBandAnchor?: number;
+  respectAllowedTurns?: boolean;
   continuations: RoadLaneContinuation[];
   seen: Set<string>;
 }): void {
-  const sourceBands = indexedBands(sourceSection).filter(({ band }) =>
-    bandCanArriveAtEndpoint(band, sourceEndpoint)
+  const sourceBands = orderBandsByTravelSide(
+    sourceSection,
+    sourceEndpoint,
+    indexedBands(sourceSection).filter(
+      ({ band, index }) =>
+        bandCanArriveAtEndpoint(band, sourceEndpoint) &&
+        (!sourceBandIndices || sourceBandIndices.has(index))
+    ),
+    true
   );
-  const rawTargetBands = indexedBands(targetSection).filter(({ band }) =>
-    bandCanDepartFromEndpoint(band, targetEndpoint)
+  const targetBands = orderBandsByTravelSide(
+    targetSection,
+    targetEndpoint,
+    indexedBands(targetSection).filter(({ band }) =>
+      bandCanDepartFromEndpoint(band, targetEndpoint)
+    ),
+    false
   );
-  const targetBands =
-    sourceEndpoint === targetEndpoint
-      ? [...rawTargetBands].reverse()
-      : rawTargetBands;
+  const turn =
+    turnOverride ??
+    classifyTurn(
+      sourceSection,
+      sourceEndpoint,
+      targetSection,
+      targetEndpoint
+    );
 
-  for (const pair of compatibleBandPairs(sourceBands, targetBands)) {
+  for (const pair of compatibleBandPairs(
+    sourceBands,
+    targetBands,
+    turn,
+    respectAllowedTurns,
+    targetBandAnchor
+  )) {
     const sourceRef = laneRef(
       sourceRoadId,
       sourceSection.id,
@@ -454,10 +948,7 @@ function appendLanePairContinuations({
       targetEndpoint,
       pair.target.index
     );
-    const dedupeKey =
-      sourceRef < targetRef
-        ? `${sourceRef}|${targetRef}|${pair.mode}`
-        : `${targetRef}|${sourceRef}|${pair.mode}`;
+    const dedupeKey = `${sourceRef}>${targetRef}|${pair.mode}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
@@ -493,12 +984,7 @@ function appendLanePairContinuations({
         ? { sourceType: pair.source.band.sourceType }
         : {}),
       mode: pair.mode,
-      turn: classifyTurn(
-        sourceSection,
-        sourceEndpoint,
-        targetSection,
-        targetEndpoint
-      ),
+      turn,
       path,
       polygon,
       sourceWidthM: pair.source.band.widthM,
@@ -687,10 +1173,7 @@ function dedupeContinuations(
       continuation.targetEndpoint,
       continuation.targetBandIndex
     );
-    const key =
-      sourceRef < targetRef
-        ? `${sourceRef}|${targetRef}|${continuation.mode}`
-        : `${targetRef}|${sourceRef}|${continuation.mode}`;
+    const key = `${sourceRef}>${targetRef}|${continuation.mode}`;
     byLanePair.set(key, continuation);
   }
   return [...byLanePair.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -753,6 +1236,54 @@ function normalizeExternalId(value: unknown): string | null {
   return typeof value === 'string' || typeof value === 'number'
     ? String(value)
     : null;
+}
+
+function firstExplicitRoadMovements(
+  areas: RoadArea[]
+): Array<[string, string]> | null {
+  let found = false;
+  const result: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const area of areas) {
+    const value = area.attributes.allowedRoadMovements;
+    if (!Array.isArray(value)) continue;
+    found = true;
+    for (const entry of value) {
+      if (!Array.isArray(entry) || entry.length < 2) continue;
+      const source = normalizeExternalId(entry[0]);
+      const target = normalizeExternalId(entry[1]);
+      if (!source || !target) continue;
+      const key = directedRoadMovementKey(source, target);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push([source, target]);
+    }
+  }
+  return found ? result : null;
+}
+
+function firstExplicitRoadEndpoints(
+  areas: RoadArea[]
+): Record<string, 'start' | 'end'> | null {
+  for (const area of areas) {
+    const value = area.attributes.roadEndpoints;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const result: Record<string, 'start' | 'end'> = {};
+    for (const [roadId, endpoint] of Object.entries(value)) {
+      if (endpoint === 'start' || endpoint === 'end') {
+        result[roadId] = endpoint;
+      }
+    }
+    return result;
+  }
+  return null;
+}
+
+function directedRoadMovementKey(
+  sourceRoadId: string,
+  targetRoadId: string
+): string {
+  return `${sourceRoadId}\u0000${targetRoadId}`;
 }
 
 function generatedOsm2StreetsNamespace(
@@ -993,23 +1524,61 @@ function indexedBands(section: RoadSectionDraft): IndexedBand[] {
   return section.bands.map((band, index) => ({ band, index }));
 }
 
+function orderBandsByTravelSide(
+  section: RoadSectionDraft,
+  endpoint: 'start' | 'end',
+  bands: IndexedBand[],
+  incoming: boolean
+): IndexedBand[] {
+  const centerline = sampleRoadSectionCenterlineWgs84(section);
+  if (centerline.length < 2) return bands;
+  const center =
+    endpoint === 'start' ? centerline[0] : centerline[centerline.length - 1];
+  const travel = endpointTravelVector(section, endpoint, incoming);
+  const travelLeft: [number, number] = [-travel[1], travel[0]];
+  return [...bands].sort((left, right) => {
+    const leftPoint = lanePoint(section, left.index, endpoint, 0);
+    const rightPoint = lanePoint(section, right.index, endpoint, 0);
+    if (!leftPoint || !rightPoint) return left.index - right.index;
+    const leftOffset = localVectorMeters(center, leftPoint.position);
+    const rightOffset = localVectorMeters(center, rightPoint.position);
+    const leftScore =
+      leftOffset[0] * travelLeft[0] + leftOffset[1] * travelLeft[1];
+    const rightScore =
+      rightOffset[0] * travelLeft[0] + rightOffset[1] * travelLeft[1];
+    return rightScore - leftScore || left.index - right.index;
+  });
+}
+
 function compatibleBandPairs(
   source: IndexedBand[],
-  target: IndexedBand[]
+  target: IndexedBand[],
+  turn: RoadLaneContinuationTurn,
+  respectAllowedTurns: boolean,
+  targetBandAnchor?: number
 ): Array<{ source: IndexedBand; target: IndexedBand; mode: string }> {
   const result: Array<{ source: IndexedBand; target: IndexedBand; mode: string }> = [];
   const sourceByMode = groupBandsByMode(source);
-  const targetByMode = groupBandsByMode(target);
   const paired = new Set<string>();
 
   for (const [mode, sourceBands] of sourceByMode) {
-    const targetBands = targetByMode.get(mode) ?? [];
+    const targetBands = target.filter(({ band }) =>
+      targetBandAcceptsMode(band, mode)
+    );
     if (targetBands.length === 0) continue;
-    sourceBands.forEach((sourceBand, ordinal) => {
-      const targetOrdinal =
-        sourceBands.length <= 1
-          ? Math.floor((targetBands.length - 1) / 2)
-          : Math.round((ordinal / (sourceBands.length - 1)) * (targetBands.length - 1));
+    const eligibleSourceBands = sourceBandsForMovement(
+      sourceBands,
+      turn,
+      respectAllowedTurns
+    );
+    eligibleSourceBands.forEach((sourceBand, ordinal) => {
+      const targetOrdinal = targetOrdinalForMovement(
+        ordinal,
+        eligibleSourceBands.length,
+        targetBands.length,
+        turn,
+        targetBandAnchor
+      );
       const targetBand = targetBands[targetOrdinal];
       const key = `${sourceBand.index}:${targetBand?.index}:${mode}`;
       if (!targetBand || paired.has(key)) return;
@@ -1018,6 +1587,100 @@ function compatibleBandPairs(
     });
   }
   return result;
+}
+
+function sourceBandsForMovement(
+  sourceBands: IndexedBand[],
+  turn: RoadLaneContinuationTurn,
+  respectAllowedTurns: boolean
+): IndexedBand[] {
+  if (!respectAllowedTurns) return sourceBands;
+  const explicit = sourceBands.filter(
+    ({ band }) => (band.allowedTurns?.length ?? 0) > 0
+  );
+  if (explicit.length > 0) {
+    const permitted = explicit.filter(({ band }) =>
+      roadAllowedTurnsPermitMovement(band.allowedTurns, turn)
+    );
+    if (turn === 'through') {
+      permitted.push(
+        ...sourceBands.filter(
+          ({ band }) => (band.allowedTurns?.length ?? 0) === 0
+        )
+      );
+    }
+    return dedupeIndexedBands(permitted);
+  }
+
+  if (turn === 'through') return sourceBands;
+  if (turn === 'uturn') return [];
+  if (isLeftTurn(turn)) return sourceBands.slice(0, 1);
+  if (isRightTurn(turn)) return sourceBands.slice(-1);
+  return [];
+}
+
+function targetOrdinalForMovement(
+  sourceOrdinal: number,
+  sourceCount: number,
+  targetCount: number,
+  turn: RoadLaneContinuationTurn,
+  targetBandAnchor?: number
+): number {
+  if (targetCount <= 1) return 0;
+  if (
+    targetBandAnchor !== undefined &&
+    sourceCount <= targetCount
+  ) {
+    const start = Math.round(
+      Math.max(0, Math.min(1, targetBandAnchor)) *
+        (targetCount - sourceCount)
+    );
+    return Math.min(targetCount - 1, start + sourceOrdinal);
+  }
+  if (sourceCount <= 1) {
+    if (isLeftTurn(turn) || turn === 'uturn') return 0;
+    if (isRightTurn(turn)) return targetCount - 1;
+    return Math.floor((targetCount - 1) / 2);
+  }
+  if (sourceCount <= targetCount) {
+    if (isLeftTurn(turn) || turn === 'uturn') return sourceOrdinal;
+    if (isRightTurn(turn)) {
+      return targetCount - sourceCount + sourceOrdinal;
+    }
+  }
+  return Math.round(
+    (sourceOrdinal / Math.max(1, sourceCount - 1)) * (targetCount - 1)
+  );
+}
+
+function dedupeIndexedBands(bands: IndexedBand[]): IndexedBand[] {
+  const seen = new Set<number>();
+  return bands.filter(({ index }) => {
+    if (seen.has(index)) return false;
+    seen.add(index);
+    return true;
+  });
+}
+
+function targetBandAcceptsMode(band: RoadBand, sourceMode: string): boolean {
+  const targetModes = bandModes(band);
+  if (targetModes.includes(sourceMode)) return true;
+  return (
+    sourceMode !== 'car' &&
+    isMotorVehicleMode(sourceMode) &&
+    targetModes.includes('car')
+  );
+}
+
+function isMotorVehicleMode(mode: string): boolean {
+  return [
+    'car',
+    'bus',
+    'taxi',
+    'hgv',
+    'motorcycle',
+    'motorvehicle',
+  ].includes(mode);
 }
 
 function groupBandsByMode(bands: IndexedBand[]): Map<string, IndexedBand[]> {
@@ -1090,13 +1753,49 @@ function classifyTurn(
   target: RoadSectionDraft,
   targetEndpoint: 'start' | 'end'
 ): RoadLaneContinuationTurn {
+  return classifyTurnAngle(
+    signedTurnAngle(source, sourceEndpoint, target, targetEndpoint)
+  );
+}
+
+function signedTurnAngle(
+  source: RoadSectionDraft,
+  sourceEndpoint: 'start' | 'end',
+  target: RoadSectionDraft,
+  targetEndpoint: 'start' | 'end'
+): number {
   const incoming = endpointTravelVector(source, sourceEndpoint, true);
   const outgoing = endpointTravelVector(target, targetEndpoint, false);
   const dot = incoming[0] * outgoing[0] + incoming[1] * outgoing[1];
   const cross = incoming[0] * outgoing[1] - incoming[1] * outgoing[0];
-  if (dot < -0.72) return 'uturn';
-  if (dot > 0.72) return 'through';
-  return cross > 0 ? 'left' : 'right';
+  return (Math.atan2(cross, dot) * 180) / Math.PI;
+}
+
+function classifyTurnAngle(angle: number): RoadLaneContinuationTurn {
+  const absoluteAngle = Math.abs(angle);
+  if (absoluteAngle >= 165) return 'uturn';
+  if (absoluteAngle <= 12) return 'through';
+  if (absoluteAngle < 45) {
+    return angle > 0 ? 'slight_left' : 'slight_right';
+  }
+  if (absoluteAngle < 135) return angle > 0 ? 'left' : 'right';
+  return angle > 0 ? 'sharp_left' : 'sharp_right';
+}
+
+function isLeftTurn(turn: RoadLaneContinuationTurn): boolean {
+  return (
+    turn === 'slight_left' ||
+    turn === 'left' ||
+    turn === 'sharp_left'
+  );
+}
+
+function isRightTurn(turn: RoadLaneContinuationTurn): boolean {
+  return (
+    turn === 'slight_right' ||
+    turn === 'right' ||
+    turn === 'sharp_right'
+  );
 }
 
 function endpointTravelVector(

@@ -65,6 +65,7 @@ function exactRoadArea(
       Record<'start' | 'end', [number, number]>
     >;
     trafficDirection?: 'forward' | 'backward' | 'both';
+    allowedTurns?: string[];
   } = {}
 ): RoadArea {
   return {
@@ -98,6 +99,15 @@ function exactRoadArea(
       sourceType: 'Driving',
       trafficDirection: options.trafficDirection ?? 'both',
       allowedModes: ['car'],
+      ...(options.allowedTurns
+        ? {
+            osm2streetsPropertiesJson: JSON.stringify({
+              type: 'Driving',
+              width: 3,
+              allowed_turns: options.allowedTurns,
+            }),
+          }
+        : {}),
     },
   };
 }
@@ -105,7 +115,9 @@ function exactRoadArea(
 function junctionArea(
   roadId: string,
   connectedRoadIds: string[],
-  center: [number, number] = [10, 53.55]
+  center: [number, number] = [10, 53.55],
+  allowedRoadMovements?: Array<[string, string]>,
+  roadEndpoints?: Record<string, 'start' | 'end'>
 ): RoadArea {
   const [lng, lat] = center;
   return {
@@ -126,6 +138,8 @@ function junctionArea(
     attributes: {
       transportationUsage: 'intersection',
       connectedRoadIds,
+      ...(allowedRoadMovements ? { allowedRoadMovements } : {}),
+      ...(roadEndpoints ? { roadEndpoints } : {}),
     },
   };
 }
@@ -307,6 +321,7 @@ describe('confirmed road lane continuations', () => {
       .toEqual([
         ['car', 0, 1],
         ['pedestrian', 2, 2],
+        ['pedestrian', 2, 2],
       ]);
   });
 
@@ -390,7 +405,7 @@ describe('confirmed road lane continuations', () => {
     expect([...roadSelection.roadIds].sort()).toEqual(['east', 'north', 'west']);
     expect([...roadSelection.junctionAreaIds]).toEqual([junction.id]);
     expect(roadSelection.nodes).toHaveLength(1);
-    expect(roadSelection.continuations).toHaveLength(3);
+    expect(roadSelection.continuations).toHaveLength(6);
     expect(
       roadSelection.continuations.every(
         (continuation) => continuation.path.length > 2
@@ -401,7 +416,7 @@ describe('confirmed road lane continuations', () => {
       'north',
       'west',
     ]);
-    expect(junctionSelection.continuations).toHaveLength(3);
+    expect(junctionSelection.continuations).toHaveLength(6);
   });
 
   it('derives visible connections for exact imported roads without saved editor layouts', () => {
@@ -443,8 +458,619 @@ describe('confirmed road lane continuations', () => {
 
     expect([...selection.roadIds].sort()).toEqual(['east', 'west']);
     expect(selection.nodes).toHaveLength(1);
-    expect(selection.continuations).toHaveLength(1);
+    expect(selection.continuations).toHaveLength(2);
     expect(selection.continuations[0].path.length).toBeGreaterThan(2);
+  });
+
+  it('uses imported allowed_turns to exclude forbidden lane movements', () => {
+    const west = exactRoadArea(
+      'west',
+      '1',
+      [[9.999, 53.55], [10, 53.55]],
+      { trafficDirection: 'forward', allowedTurns: ['through'] }
+    );
+    const east = exactRoadArea(
+      'east',
+      '2',
+      [[10, 53.55], [10.001, 53.55]],
+      { trafficDirection: 'forward' }
+    );
+    const north = exactRoadArea(
+      'north',
+      '3',
+      [[10, 53.55], [10, 53.551]],
+      { trafficDirection: 'forward' }
+    );
+    const junction = junctionArea('junction', ['1', '2', '3']);
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([west, east, north, junction]),
+      west.id
+    );
+
+    expect(
+      selection.continuations.map((continuation) => ({
+        source: continuation.sourceRoadId,
+        target: continuation.targetRoadId,
+        turn: continuation.turn,
+      }))
+    ).toEqual([{ source: 'west', target: 'east', turn: 'through' }]);
+  });
+
+  it('uses authoritative road movements and pairs turn lanes without crossing or fan-out', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'osm',
+      sections: [
+        section(
+          'source-section',
+          [[10, 53.549], [10, 53.55]],
+          [
+            {
+              id: 'left-1',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+            {
+              id: 'left-2',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+            {
+              id: 'right-1',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['right'],
+            },
+            {
+              id: 'right-2',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['right'],
+            },
+          ]
+        ),
+      ],
+    };
+    const left: RoadDraft = {
+      id: 'left',
+      source: 'osm',
+      sections: [
+        section(
+          'left-section',
+          [[10, 53.55], [9.999, 53.55]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const shallowRight: RoadDraft = {
+      id: 'shallow-right',
+      source: 'osm',
+      sections: [
+        section(
+          'shallow-right-section',
+          [[10, 53.55], [10.0005, 53.551]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const unauthorizedRight: RoadDraft = {
+      id: 'unauthorized-right',
+      source: 'osm',
+      sections: [
+        section(
+          'unauthorized-right-section',
+          [[10, 53.55], [10.001, 53.55]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const junction = junctionArea(
+      'junction',
+      ['878', '1380', '877', '624'],
+      [10, 53.55],
+      [
+        ['878', '1380'],
+        ['878', '877'],
+      ],
+      {
+        '878': 'end',
+        '1380': 'start',
+        '877': 'start',
+        '624': 'start',
+      }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        roadArea('source', source, '878'),
+        roadArea('left', left, '1380'),
+        roadArea('shallow-right', shallowRight, '877'),
+        roadArea('unauthorized-right', unauthorizedRight, '624'),
+        junction,
+      ]),
+      'source-surface'
+    );
+
+    expect(
+      selection.continuations.map((continuation) => ({
+        target: continuation.targetRoadId,
+        sourceBand: continuation.sourceBandIndex,
+        targetBand: continuation.targetBandIndex,
+        turn: continuation.turn,
+      }))
+    ).toEqual([
+      { target: 'left', sourceBand: 0, targetBand: 0, turn: 'left' },
+      { target: 'left', sourceBand: 1, targetBand: 1, turn: 'left' },
+      {
+        target: 'shallow-right',
+        sourceBand: 2,
+        targetBand: 0,
+        turn: 'right',
+      },
+      {
+        target: 'shallow-right',
+        sourceBand: 3,
+        targetBand: 1,
+        turn: 'right',
+      },
+    ]);
+    expect(
+      selection.continuations.some(
+        (continuation) => continuation.targetRoadId === 'unauthorized-right'
+      )
+    ).toBe(false);
+  });
+
+  it('keeps combined turn lanes only on each permitted branch', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'osm',
+      sections: [
+        section(
+          'source-section',
+          [[10, 53.549], [10, 53.55]],
+          [
+            {
+              id: 'left',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+            {
+              id: 'left-through',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left', 'through'],
+            },
+            {
+              id: 'through-right',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['through', 'right'],
+            },
+            {
+              id: 'right',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['right'],
+            },
+          ]
+        ),
+      ],
+    };
+    const targets = [
+      {
+        id: 'left-target',
+        externalId: 'left',
+        centerline: [[10, 53.55], [9.999, 53.55]] as [number, number][],
+      },
+      {
+        id: 'through-target',
+        externalId: 'through',
+        centerline: [[10, 53.55], [10, 53.551]] as [number, number][],
+      },
+      {
+        id: 'right-target',
+        externalId: 'right',
+        centerline: [[10, 53.55], [10.001, 53.55]] as [number, number][],
+      },
+    ].map(({ id, externalId, centerline }) => {
+      const draft: RoadDraft = {
+        id,
+        source: 'osm',
+        sections: [
+          section(`${id}-section`, centerline, carBands('forward', 2)),
+        ],
+      };
+      return { id, externalId, area: roadArea(id, draft, externalId) };
+    });
+    const junction = junctionArea(
+      'junction',
+      ['source', ...targets.map(({ externalId }) => externalId)],
+      [10, 53.55],
+      targets.map(
+        ({ externalId }) => ['source', externalId] as [string, string]
+      ),
+      Object.fromEntries([
+        ['source', 'end'],
+        ...targets.map(
+          ({ externalId }) => [externalId, 'start'] as const
+        ),
+      ])
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        roadArea('source', source, 'source'),
+        ...targets.map(({ area }) => area),
+        junction,
+      ]),
+      'source-surface'
+    );
+
+    expect(
+      selection.continuations.map((continuation) => [
+        continuation.targetRoadId,
+        continuation.sourceBandIndex,
+        continuation.targetBandIndex,
+      ])
+    ).toEqual([
+      ['left-target', 0, 0],
+      ['left-target', 1, 1],
+      ['through-target', 1, 0],
+      ['right-target', 2, 0],
+      ['through-target', 2, 1],
+      ['right-target', 3, 1],
+    ]);
+  });
+
+  it('treats an explicit empty movement list as authoritative', () => {
+    const west = exactRoadArea(
+      'west',
+      '1',
+      [[9.999, 53.55], [10, 53.55]],
+      { trafficDirection: 'forward' }
+    );
+    const east = exactRoadArea(
+      'east',
+      '2',
+      [[10, 53.55], [10.001, 53.55]],
+      { trafficDirection: 'forward' }
+    );
+    const junction = junctionArea(
+      'junction',
+      ['1', '2'],
+      [10, 53.55],
+      [],
+      { '1': 'end', '2': 'start' }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([west, east, junction]),
+      junction.id
+    );
+
+    expect(selection.continuations).toEqual([]);
+  });
+
+  it('rank-maps every lane when a multi-road junction has one authoritative exit', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'osm',
+      sections: [
+        section(
+          'source-section',
+          [[10, 53.549], [10, 53.55]],
+          [
+            {
+              id: 'left-only',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+            {
+              id: 'right-only',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['right'],
+            },
+          ]
+        ),
+      ],
+    };
+    const target: RoadDraft = {
+      id: 'target',
+      source: 'osm',
+      sections: [
+        section(
+          'target-section',
+          [[10, 53.55], [10.0005, 53.551]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const otherApproach: RoadDraft = {
+      id: 'other',
+      source: 'osm',
+      sections: [
+        section(
+          'other-section',
+          [[9.999, 53.55], [10, 53.55]],
+          carBands('forward', 1)
+        ),
+      ],
+    };
+    const junction = junctionArea(
+      'junction',
+      ['source', 'target', 'other'],
+      [10, 53.55],
+      [['source', 'target']],
+      { source: 'end', target: 'start', other: 'end' }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        roadArea('source', source, 'source'),
+        roadArea('target', target, 'target'),
+        roadArea('other', otherApproach, 'other'),
+        junction,
+      ]),
+      'source-surface'
+    );
+
+    expect(
+      selection.continuations.map((continuation) => ({
+        sourceBand: continuation.sourceBandIndex,
+        targetBand: continuation.targetBandIndex,
+        target: continuation.targetRoadId,
+        turn: continuation.turn,
+      }))
+    ).toEqual([
+      {
+        sourceBand: 0,
+        targetBand: 0,
+        target: 'target',
+        turn: 'slight_right',
+      },
+      {
+        sourceBand: 1,
+        targetBand: 1,
+        target: 'target',
+        turn: 'slight_right',
+      },
+    ]);
+  });
+
+  it('distributes unspecified lanes monotonically across authoritative branches', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'osm',
+      sections: [
+        section(
+          'source-section',
+          [[10, 53.549], [10, 53.55]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const through: RoadDraft = {
+      id: 'through',
+      source: 'osm',
+      sections: [
+        section(
+          'through-section',
+          [[10, 53.55], [10, 53.551]],
+          carBands('forward', 1)
+        ),
+      ],
+    };
+    const right: RoadDraft = {
+      id: 'right',
+      source: 'osm',
+      sections: [
+        section(
+          'right-section',
+          [[10, 53.55], [10.001, 53.55]],
+          carBands('forward', 1)
+        ),
+      ],
+    };
+    const junction = junctionArea(
+      'junction',
+      ['source', 'through', 'right'],
+      [10, 53.55],
+      [
+        ['source', 'through'],
+        ['source', 'right'],
+      ],
+      { source: 'end', through: 'start', right: 'start' }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        roadArea('source', source, 'source'),
+        roadArea('through', through, 'through'),
+        roadArea('right', right, 'right'),
+        junction,
+      ]),
+      'source-surface'
+    );
+
+    expect(
+      selection.continuations.map((continuation) => [
+        continuation.sourceBandIndex,
+        continuation.targetRoadId,
+        continuation.turn,
+      ])
+    ).toEqual([
+      [0, 'through', 'through'],
+      [1, 'right', 'right'],
+    ]);
+  });
+
+  it('assigns two left lanes to two left branches without fan-out', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'osm',
+      sections: [
+        section(
+          'source-section',
+          [[10, 53.549], [10, 53.55]],
+          [
+            {
+              id: 'left-outer',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+            {
+              id: 'left-inner',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+          ]
+        ),
+      ],
+    };
+    const sharpLeft: RoadDraft = {
+      id: 'sharp-left',
+      source: 'osm',
+      sections: [
+        section(
+          'sharp-left-section',
+          [[10, 53.55], [9.999, 53.55]],
+          carBands('forward', 1)
+        ),
+      ],
+    };
+    const shallowLeft: RoadDraft = {
+      id: 'shallow-left',
+      source: 'osm',
+      sections: [
+        section(
+          'shallow-left-section',
+          [[10, 53.55], [9.9995, 53.551]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const junction = junctionArea(
+      'junction',
+      ['source', 'sharp-left', 'shallow-left'],
+      [10, 53.55],
+      [
+        ['source', 'sharp-left'],
+        ['source', 'shallow-left'],
+      ],
+      {
+        source: 'end',
+        'sharp-left': 'start',
+        'shallow-left': 'start',
+      }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        roadArea('source', source, 'source'),
+        roadArea('sharp-left', sharpLeft, 'sharp-left'),
+        roadArea('shallow-left', shallowLeft, 'shallow-left'),
+        junction,
+      ]),
+      'source-surface'
+    );
+
+    expect(
+      selection.continuations.map((continuation) => [
+        continuation.sourceBandIndex,
+        continuation.targetRoadId,
+        continuation.targetBandIndex,
+      ])
+    ).toEqual([
+      [0, 'sharp-left', 0],
+      [1, 'shallow-left', 1],
+    ]);
+  });
+
+  it('keeps the only authoritative continuation despite downstream lane arrows', () => {
+    const source: RoadDraft = {
+      id: 'source',
+      source: 'osm',
+      sections: [
+        section(
+          'source-section',
+          [[9.999, 53.55], [10, 53.55]],
+          [
+            {
+              id: 'carried-right',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['right'],
+            },
+            {
+              id: 'carried-left',
+              kind: 'car_lane',
+              widthM: 3,
+              direction: 'forward',
+              allowedTurns: ['left'],
+            },
+          ]
+        ),
+      ],
+    };
+    const target: RoadDraft = {
+      id: 'target',
+      source: 'osm',
+      sections: [
+        section(
+          'target-section',
+          [[10, 53.55], [10.001, 53.5501]],
+          carBands('forward', 2)
+        ),
+      ],
+    };
+    const junction = junctionArea(
+      'junction',
+      ['10292', '22018'],
+      [10, 53.55],
+      [['10292', '22018']],
+      { '10292': 'end', '22018': 'start' }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        roadArea('source', source, '10292'),
+        roadArea('target', target, '22018'),
+        junction,
+      ]),
+      'source-surface'
+    );
+
+    expect(
+      selection.continuations.map((continuation) => [
+        continuation.sourceBandIndex,
+        continuation.targetBandIndex,
+      ])
+    ).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
   });
 
   it('keeps generated osm2streets road ids scoped to their source network', () => {

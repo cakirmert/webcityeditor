@@ -3484,6 +3484,27 @@ export default function MapView({
 
     if (roadDirectionsVisible && roadVisuals.directions.length > 0) {
       layers.push(
+        new PathLayer({
+          id: 'cityjson-road-direction-arrow-shafts',
+          data: roadVisuals.directions,
+          getPath: (d: any) => d.path,
+          getColor: roadOverlayColor([248, 250, 252, 238], {
+            basemap,
+            opacity: roadOverlayOpacity,
+          }),
+          getWidth: (d: any) => d.shaftWidthM,
+          widthUnits: 'meters',
+          widthMinPixels: 1,
+          jointRounded: true,
+          capRounded: false,
+          pickable: false,
+          parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
+          updateTriggers: {
+            getColor: [basemap, roadOverlayOpacity],
+          },
+        } as any)
+      );
+      layers.push(
         new PolygonLayer({
           id: 'cityjson-road-direction-arrows',
           data: roadVisuals.directions,
@@ -3492,21 +3513,13 @@ export default function MapView({
             basemap,
             opacity: roadOverlayOpacity,
           }),
-          getLineColor: roadOverlayColor([36, 40, 47, 220], {
-            basemap,
-            opacity: roadOverlayOpacity,
-          }),
-          getLineWidth: 0.55,
-          lineWidthUnits: 'pixels',
-          lineWidthMinPixels: 0.55,
-          stroked: true,
+          stroked: false,
           filled: true,
           extruded: false,
           pickable: false,
           parameters: { depthTest: !roadWorkspaceOpen } as unknown as never,
           updateTriggers: {
             getFillColor: [basemap, roadOverlayOpacity],
-            getLineColor: [basemap, roadOverlayOpacity],
           },
         } as any)
       );

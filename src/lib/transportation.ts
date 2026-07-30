@@ -17,6 +17,102 @@ export type RoadBandKind =
 
 export type RoadDirection = 'forward' | 'backward' | 'both' | 'none';
 
+export type RoadAllowedTurn =
+  | 'through'
+  | 'slight_left'
+  | 'left'
+  | 'sharp_left'
+  | 'slight_right'
+  | 'right'
+  | 'sharp_right'
+  | 'uturn'
+  | 'merge_left'
+  | 'merge_right';
+
+export type RoadIntersectionTurn =
+  | 'through'
+  | 'slight_left'
+  | 'left'
+  | 'sharp_left'
+  | 'slight_right'
+  | 'right'
+  | 'sharp_right'
+  | 'uturn';
+
+/**
+ * Normalize osm2streets/OSM turn values into the movement vocabulary used by
+ * the editor. The full slight/ordinary/sharp vocabulary is retained because
+ * a multi-leg junction can have more than one legal branch on the same side.
+ */
+export function normalizeRoadAllowedTurns(value: unknown): RoadAllowedTurn[] {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[;|,]/)
+      : [];
+  const turns: RoadAllowedTurn[] = [];
+  for (const rawValue of rawValues) {
+    if (typeof rawValue !== 'string') continue;
+    const key = rawValue
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_');
+    let turn: RoadAllowedTurn | null = null;
+    if (key === 'through' || key === 'straight') turn = 'through';
+    else if (key === 'slight_left') turn = 'slight_left';
+    else if (key === 'left') turn = 'left';
+    else if (key === 'sharp_left') turn = 'sharp_left';
+    else if (key === 'slight_right') turn = 'slight_right';
+    else if (key === 'right') turn = 'right';
+    else if (key === 'sharp_right') turn = 'sharp_right';
+    else if (key === 'reverse' || key === 'uturn' || key === 'u_turn') {
+      turn = 'uturn';
+    } else if (key === 'merge_left' || key === 'merge_to_left') {
+      turn = 'merge_left';
+    } else if (key === 'merge_right' || key === 'merge_to_right') {
+      turn = 'merge_right';
+    }
+    if (turn && !turns.includes(turn)) turns.push(turn);
+  }
+  return turns;
+}
+
+export function roadAllowedTurnsPermitMovement(
+  allowedTurns: RoadAllowedTurn[] | undefined,
+  movement: RoadIntersectionTurn
+): boolean {
+  if (!allowedTurns?.length) return true;
+  if (movement === 'through') {
+    return allowedTurns.some(
+      (turn) =>
+        turn === 'through' || turn === 'merge_left' || turn === 'merge_right'
+    );
+  }
+  if (movement === 'slight_left') {
+    return allowedTurns.some(
+      (turn) =>
+        turn === 'slight_left' || turn === 'left' || turn === 'merge_left'
+    );
+  }
+  if (movement === 'slight_right') {
+    return allowedTurns.some(
+      (turn) =>
+        turn === 'slight_right' || turn === 'right' || turn === 'merge_right'
+    );
+  }
+  if (movement === 'sharp_left') {
+    return allowedTurns.some(
+      (turn) => turn === 'sharp_left' || turn === 'left'
+    );
+  }
+  if (movement === 'sharp_right') {
+    return allowedTurns.some(
+      (turn) => turn === 'sharp_right' || turn === 'right'
+    );
+  }
+  return allowedTurns.includes(movement);
+}
+
 export type RoadVerticalPlacement = 'surface' | 'underground' | 'elevated' | 'unknown';
 
 export type RoadCurveMode = 'smooth' | 'straight';
@@ -59,6 +155,8 @@ export interface RoadBand {
   direction?: RoadDirection;
   surface?: string;
   allowedModes?: string[];
+  /** Explicit OSM/osm2streets lane movements. Missing/empty means unknown. */
+  allowedTurns?: RoadAllowedTurn[];
   maxspeedKmh?: number | null;
 }
 
@@ -1100,6 +1198,9 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             transportationUsage: (surface.transportationUsage ?? null) as JsonValue,
             trafficDirection: (surface.trafficDirection ?? null) as JsonValue,
             allowedModes: (surface.allowedModes ?? null) as JsonValue,
+            allowedTurns: (
+              surface.allowedTurns ?? osm2streetsProperties?.allowed_turns ?? null
+            ) as JsonValue,
             surfaceMaterial: (surface.surfaceMaterial ?? null) as JsonValue,
             maxspeed: (surface.maxspeed ?? null) as JsonValue,
             source: (surface.source ?? object.attributes?._source ?? null) as JsonValue,
@@ -1119,6 +1220,16 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
             osm2streetsIntersectionId: (surface.osm2streetsIntersectionId ?? null) as JsonValue,
             connectedRoadIds: (surface.connectedRoadIds ?? null) as JsonValue,
+            allowedRoadMovements: (
+              surface.allowedRoadMovements ??
+              object.attributes?._allowedOsm2streetsRoadMovements ??
+              null
+            ) as JsonValue,
+            roadEndpoints: (
+              surface.roadEndpoints ??
+              object.attributes?._osm2streetsRoadEndpoints ??
+              null
+            ) as JsonValue,
             osmNodeIds: (surface.osmNodeIds ?? null) as JsonValue,
             osmWayIds: (
               surface.osmWayIds ??
@@ -1247,6 +1358,7 @@ function roadBandAttributeValues(
     trafficDirection: band.direction ?? defaultDirectionForBand(band.kind),
     surfaceMaterial: band.surface ?? defaultSurfaceForBand(band.kind),
     allowedModes: [...(band.allowedModes ?? defaultModesForBand(band.kind))],
+    allowedTurns: [...(band.allowedTurns ?? [])],
     maxspeed: band.maxspeedKmh ?? section.maxspeedKmh ?? null,
   };
 }
@@ -1264,6 +1376,7 @@ function applyBandAttributesToSemanticSurface(
   surface.trafficDirection = attributes.trafficDirection;
   surface.surfaceMaterial = attributes.surfaceMaterial;
   surface.allowedModes = attributes.allowedModes;
+  surface.allowedTurns = attributes.allowedTurns;
   surface.maxspeed = attributes.maxspeed;
   surface.sectionId = section.id;
   surface.bandId = band.id ?? null;
@@ -1318,6 +1431,9 @@ function importedRoadBand(area: RoadArea, index: number): RoadBand {
   const maxspeedKmh =
     finiteNumber(area.attributes.maxspeed) ?? finiteNumber(sourceProperties?.speed_limit);
   const allowedModes = stringArray(area.attributes.allowedModes);
+  const allowedTurns = normalizeRoadAllowedTurns(
+    area.attributes.allowedTurns ?? sourceProperties?.allowed_turns
+  );
 
   return {
     id: area.bandId || `imported-${kind}-${index}`,
@@ -1326,6 +1442,7 @@ function importedRoadBand(area: RoadArea, index: number): RoadBand {
     widthM: Math.max(0.4, Math.min(12, widthM)),
     direction: importedRoadDirection(area.attributes.trafficDirection),
     ...(allowedModes.length > 0 ? { allowedModes } : {}),
+    ...(allowedTurns.length > 0 ? { allowedTurns } : {}),
     ...(maxspeedKmh === null ? {} : { maxspeedKmh }),
   };
 }
@@ -2062,6 +2179,7 @@ function cloneBands(bands: RoadBand[]): RoadBand[] {
   return bands.map((band) => ({
     ...band,
     allowedModes: band.allowedModes ? [...band.allowedModes] : undefined,
+    allowedTurns: band.allowedTurns ? [...band.allowedTurns] : undefined,
   }));
 }
 
@@ -2926,6 +3044,8 @@ function readRoadBand(value: unknown): RoadBand | null {
     );
     if (allowedModes.length > 0) band.allowedModes = allowedModes;
   }
+  const allowedTurns = normalizeRoadAllowedTurns(record.allowedTurns);
+  if (allowedTurns.length > 0) band.allowedTurns = allowedTurns;
   if (typeof record.maxspeedKmh === 'number' && Number.isFinite(record.maxspeedKmh)) {
     band.maxspeedKmh = record.maxspeedKmh;
   } else if (record.maxspeedKmh === null) {
