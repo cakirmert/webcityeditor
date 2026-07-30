@@ -34,6 +34,10 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
   const catalogConnectionRef = useRef<CatalogConnection | null>(null);
   const catalogLoadingRef = useRef(false);
   const catalogViewportTimerRef = useRef<number | null>(null);
+  const catalogPendingViewportRef = useRef<Bbox | null>(null);
+  const loadCatalogViewportRef = useRef<
+    ((bbox: Bbox) => Promise<void>) | null
+  >(null);
   const [catalogStatus, setCatalogStatus] = useState<{
     kind: 'idle' | 'loading' | 'ok' | 'error';
     message?: string;
@@ -47,10 +51,30 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
     setCatalogConnection(next);
   }, []);
 
+  const flushPendingCatalogViewport = useCallback(() => {
+    const pending = catalogPendingViewportRef.current;
+    catalogPendingViewportRef.current = null;
+    if (!pending) return;
+    if (catalogViewportTimerRef.current !== null) {
+      window.clearTimeout(catalogViewportTimerRef.current);
+    }
+    catalogViewportTimerRef.current = window.setTimeout(() => {
+      catalogViewportTimerRef.current = null;
+      void loadCatalogViewportRef.current?.(pending);
+    }, 0);
+  }, []);
+
   const loadCatalogViewport = useCallback(async (bboxWgs84: Bbox) => {
     const source = catalogConnectionRef.current;
     const doc = cityjsonRef.current;
-    if (!source || !doc || catalogLoadingRef.current) return;
+    if (!source || !doc) return;
+    if (catalogLoadingRef.current) {
+      // A slow tile fetch must not make the final viewport update disappear.
+      // Keep only the newest request and replay it as soon as the active load
+      // releases the catalog. This also evicts large intermediate zoom sets.
+      catalogPendingViewportRef.current = bboxWgs84;
+      return;
+    }
     if (source.loadMode === 'all') {
       setCatalogStatus({
         kind: 'ok',
@@ -103,23 +127,26 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
         bbox,
         new Set(source.loadedTiles.keys())
       );
-      const loadedTiles = new Map(source.loadedTiles);
+      // Drop clean off-screen source geometry before merging the next
+      // viewport. Merging first briefly retained the old working set, the new
+      // parsed tiles, and a cloned merged copy at the same time.
+      const eviction = evictCleanCityJsonSeqTiles(
+        doc,
+        source.loadedTiles,
+        new Set(loaded.intersectingTileIds),
+        dirtyIdsRef.current,
+        { sourceOnly: source.readOnly === true }
+      );
+      const loadedTiles = new Map(eviction.tiles);
       if (loaded.doc) {
         const merged = mergeCityJson(doc, loaded.doc);
         if (!merged.ok) throw new Error(merged.reason);
         for (const tile of loaded.tiles) loadedTiles.set(tile.catalog.id, tile);
       }
-      const eviction = evictCleanCityJsonSeqTiles(
-        doc,
-        loadedTiles,
-        new Set(loaded.intersectingTileIds),
-        dirtyIdsRef.current,
-        { sourceOnly: source.readOnly === true }
-      );
-      const next = { ...source, loadedTiles: eviction.tiles };
+      const next = { ...source, loadedTiles };
       catalogConnectionRef.current = next;
       setCatalogConnection(next);
-      setFileName(`Hamburg CityJSONSeq catalog (${eviction.tiles.size} tiles)`);
+      setFileName(`Hamburg CityJSONSeq catalog (${loadedTiles.size} tiles)`);
       if (loaded.doc || eviction.evictedTileIds.length > 0) {
         setSelection((current) =>
           current && !doc.CityObjects[current.objectId] ? null : current
@@ -133,7 +160,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
       setCatalogStatus({
         kind: 'ok',
         message:
-          `${eviction.tiles.size} strict sequence tiles loaded` +
+          `${loadedTiles.size} strict sequence tiles loaded` +
           (loaded.features > 0 ? `; added ${loaded.features.toLocaleString()} features` : '') +
           (eviction.evictedTileIds.length > 0
             ? `; unloaded ${eviction.evictedTileIds.length} clean off-screen tiles`
@@ -151,8 +178,19 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
       });
     } finally {
       catalogLoadingRef.current = false;
+      flushPendingCatalogViewport();
     }
-  }, [cityjsonRef, dirtyIdsRef, setFileName, setSelection, setReloadToken, undoRef, setUndoVersion]);
+  }, [
+    cityjsonRef,
+    dirtyIdsRef,
+    flushPendingCatalogViewport,
+    setFileName,
+    setSelection,
+    setReloadToken,
+    undoRef,
+    setUndoVersion,
+  ]);
+  loadCatalogViewportRef.current = loadCatalogViewport;
 
   const handlePersistCatalog = useCallback(async () => {
     const source = catalogConnectionRef.current;
@@ -209,8 +247,18 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
       catalogLoadingRef.current = false;
     }
     const bbox = mapBboxRef.current;
-    if (saved && bbox) void loadCatalogViewport(bbox);
-  }, [cityjsonRef, dirtyIdsRef, setDirtyIds, undoRef, setUndoVersion, setPrimitiveValidation, loadCatalogViewport]);
+    if (saved && bbox) catalogPendingViewportRef.current = bbox;
+    flushPendingCatalogViewport();
+  }, [
+    cityjsonRef,
+    dirtyIdsRef,
+    flushPendingCatalogViewport,
+    loadCatalogViewport,
+    setDirtyIds,
+    setPrimitiveValidation,
+    undoRef,
+    setUndoVersion,
+  ]);
 
   const handleViewportChange = useCallback(
     (bbox: Bbox) => {
@@ -233,6 +281,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
       if (catalogViewportTimerRef.current !== null) {
         window.clearTimeout(catalogViewportTimerRef.current);
       }
+      catalogPendingViewportRef.current = null;
     },
     []
   );

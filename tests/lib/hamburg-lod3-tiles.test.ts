@@ -7,6 +7,8 @@ import {
   HAMBURG_LOD3_TEXTURED_TILESET_URL,
   HAMBURG_LOD3_UNTEXTURED_TILESET_URL,
   HAMBURG_SEMANTIC_ROOF_COLOR,
+  releaseHamburgTileDecodedImages,
+  sRgbByteToLinear,
   styleHamburgBuildingTile,
 } from '../../src/lib/hamburg-lod3-tiles';
 
@@ -37,6 +39,29 @@ describe('official Hamburg LoD3 tile sources', () => {
 });
 
 describe('official Hamburg LoD3 tile grounding', () => {
+  it('releases decoded texture atlases exactly once when a tile unloads', () => {
+    let closeCalls = 0;
+    const tile = {
+      content: {
+        gltf: {
+          images: [
+            { image: { close: () => closeCalls++ } },
+            { image: {} },
+          ],
+        },
+      },
+    };
+
+    expect(releaseHamburgTileDecodedImages(tile)).toBe(2);
+    expect(closeCalls).toBe(1);
+    expect(tile.content.gltf.images).toEqual([
+      { image: null },
+      { image: null },
+    ]);
+    expect(releaseHamburgTileDecodedImages(tile)).toBe(0);
+    expect(closeCalls).toBe(1);
+  });
+
   it('uses each batch feature surveyed ground height without changing roof height', () => {
     const positions = new Float32Array([
       0, 5.25, 0,
@@ -159,14 +184,30 @@ describe('official Hamburg LoD3 tile grounding', () => {
       semanticPrimitives.every((value) => value.material?.id !== material.id)
     ).toBe(true);
     expect(
+      semanticPrimitives.every(
+        (value) =>
+          (value.material as { unlit?: boolean } | undefined)?.unlit === true
+      )
+    ).toBe(true);
+    expect(
       semanticPrimitives.map(
         (value) => value.material?.pbrMetallicRoughness?.baseColorFactor
       )
     ).toEqual(
       expect.arrayContaining([
         [...HAMBURG_SEMANTIC_ROOF_COLOR, 1],
-        [0.78, 0.74, 0.67, 1],
-        [0.36, 0.33, 0.3, 1],
+        [
+          sRgbByteToLinear(235),
+          sRgbByteToLinear(220),
+          sRgbByteToLinear(194),
+          1,
+        ],
+        [
+          sRgbByteToLinear(110),
+          sRgbByteToLinear(104),
+          sRgbByteToLinear(95),
+          1,
+        ],
       ])
     );
     expect(
@@ -193,9 +234,9 @@ describe('official Hamburg LoD3 tile grounding', () => {
       usageTile.gltf.meshes[0].primitives[0].material
         ?.pbrMetallicRoughness?.baseColorFactor
     ).toEqual([
-      expect.closeTo(240 / 255),
-      expect.closeTo(220 / 255),
-      expect.closeTo(60 / 255),
+      expect.closeTo(sRgbByteToLinear(240)),
+      expect.closeTo(sRgbByteToLinear(220)),
+      expect.closeTo(sRgbByteToLinear(60)),
       1,
     ]);
   });

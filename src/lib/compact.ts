@@ -38,48 +38,48 @@ export function compactVertices(doc: CityJsonDocument): CompactResult {
     return { before, after: 0, reclaimed: 0, changed: false };
   }
 
-  // Pass 1: collect every referenced vertex index.
-  const referenced = new Set<number>();
+  // A Set<number> plus Map<number, number> costs tens of bytes per entry in
+  // V8. Hamburg road working sets routinely contain hundreds of thousands of
+  // vertices, so use one bounded 4-byte-per-vertex table as both the reference
+  // marker and the final remap.
+  const remap = new Int32Array(before);
+  remap.fill(-1);
+  let referencedCount = 0;
   for (const obj of Object.values(doc.CityObjects)) {
     if (!obj.geometry) continue;
     for (const g of obj.geometry as Array<{ boundaries?: unknown }>) {
-      if (g.boundaries) collectIndices(g.boundaries, referenced);
+      if (g.boundaries) {
+        referencedCount += markReferencedIndices(g.boundaries, remap);
+      }
     }
   }
 
   // Early-exit: no orphans (every vertex in [0, before) is referenced).
-  if (referenced.size === before) {
+  if (referencedCount === before) {
     return { before, after: before, reclaimed: 0, changed: false };
   }
 
-  // Pass 2: build a remap (oldIndex → newIndex). Walk old indices in order so
-  // the surviving vertex order is preserved.
-  const remap = new Map<number, number>();
-  const newVertices: typeof doc.vertices = [];
-  for (let i = 0; i < before; i++) {
-    if (referenced.has(i)) {
-      remap.set(i, newVertices.length);
-      newVertices.push(doc.vertices[i]);
+  // Compact the original array in place. This preserves its identity and
+  // avoids retaining the old and new Hamburg vertex arrays simultaneously.
+  let writeIndex = 0;
+  for (let sourceIndex = 0; sourceIndex < before; sourceIndex++) {
+    if (remap[sourceIndex] === -2) {
+      remap[sourceIndex] = writeIndex;
+      if (writeIndex !== sourceIndex) {
+        doc.vertices[writeIndex] = doc.vertices[sourceIndex];
+      }
+      writeIndex++;
     }
   }
+  doc.vertices.length = writeIndex;
 
-  // Pass 3: rewrite every geometry's vertex indices using the remap.
+  // Rewrite existing boundary arrays in place rather than allocating a second
+  // complete nested boundary tree during viewport-tile eviction.
   for (const obj of Object.values(doc.CityObjects)) {
     if (!obj.geometry) continue;
     for (const g of obj.geometry as Array<{ boundaries?: unknown }>) {
-      if (g.boundaries) g.boundaries = remapIndices(g.boundaries, remap);
+      if (g.boundaries) remapIndicesInPlace(g.boundaries, remap);
     }
-  }
-
-  // Pass 4: install the compacted array. In-place mutation so external
-  // references to doc.vertices keep pointing at the new contents.
-  doc.vertices.length = 0;
-  // Avoid one giant spread call: multi-tile CityJSONSeq working sets can
-  // contain hundreds of thousands of vertices, which exceeds JavaScript's
-  // function-argument limit and throws "Maximum call stack size exceeded".
-  const chunkSize = 10_000;
-  for (let start = 0; start < newVertices.length; start += chunkSize) {
-    doc.vertices.push(...newVertices.slice(start, start + chunkSize));
   }
 
   return {
@@ -90,24 +90,42 @@ export function compactVertices(doc: CityJsonDocument): CompactResult {
   };
 }
 
-/** Recursive walk that collects every leaf integer into the given set. */
-function collectIndices(node: unknown, out: Set<number>): void {
+/** Mark each valid source index once and report how many were newly marked. */
+function markReferencedIndices(node: unknown, remap: Int32Array): number {
   if (typeof node === 'number') {
-    if (Number.isFinite(node) && node >= 0) out.add(node);
-  } else if (Array.isArray(node)) {
-    for (const child of node) collectIndices(child, out);
+    if (
+      Number.isInteger(node) &&
+      node >= 0 &&
+      node < remap.length &&
+      remap[node] === -1
+    ) {
+      remap[node] = -2;
+      return 1;
+    }
+    return 0;
   }
+  if (!Array.isArray(node)) return 0;
+  let count = 0;
+  for (const child of node) count += markReferencedIndices(child, remap);
+  return count;
 }
 
-/** Recursive walk that rebuilds the structure with remapped leaf integers.
- *  Returns a new tree (immutable on input) — geometry boundaries get freshly
- *  allocated arrays at every level. */
-function remapIndices(node: unknown, remap: Map<number, number>): unknown {
-  if (typeof node === 'number') {
-    return remap.get(node) ?? node;
+/** Rewrite numeric leaves without cloning their containing arrays. */
+function remapIndicesInPlace(node: unknown, remap: Int32Array): void {
+  if (!Array.isArray(node)) return;
+  for (let index = 0; index < node.length; index++) {
+    const child = node[index];
+    if (typeof child === 'number') {
+      if (
+        Number.isInteger(child) &&
+        child >= 0 &&
+        child < remap.length &&
+        remap[child] >= 0
+      ) {
+        node[index] = remap[child];
+      }
+    } else {
+      remapIndicesInPlace(child, remap);
+    }
   }
-  if (Array.isArray(node)) {
-    return node.map((child) => remapIndices(child, remap));
-  }
-  return node;
 }

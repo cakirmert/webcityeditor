@@ -177,6 +177,7 @@ describe('fetchCityJsonSeqViewport', () => {
     expect(loaded.readOnly).toBe(true);
     expect(loaded.tileIds).toEqual(['tile-a']);
     expect(Object.keys(loaded.doc!.CityObjects)).toEqual(['Building_A']);
+    expect(loaded.tiles[0].features[0].value).toBeUndefined();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -316,6 +317,65 @@ describe('fetchCityJsonSeqViewport', () => {
       'Building_Visible',
     ]);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('asks for a closer view instead of dropping required seam dependencies', async () => {
+    const staticCatalog = {
+      type: 'HamburgOsm2StreetsRoadCityJSONSeqCatalog',
+      crs: 'EPSG:25832',
+      packaging: { cellSizeMeters: 1000 },
+      tiles: [
+        {
+          id: 'tile-visible',
+          file: 'tile-visible.city.jsonl',
+          url: 'tiles/tile-visible.city.jsonl',
+          extent: [565100, 5936100, 0, 565200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+          dependencies: ['tile-seam-a', 'tile-seam-b'],
+        },
+        {
+          id: 'tile-seam-a',
+          file: 'tile-seam-a.city.jsonl',
+          url: 'tiles/tile-seam-a.city.jsonl',
+          extent: [568100, 5936100, 0, 568200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+        {
+          id: 'tile-seam-b',
+          file: 'tile-seam-b.city.jsonl',
+          url: 'tiles/tile-seam-b.city.jsonl',
+          extent: [569100, 5936100, 0, 569200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+      ],
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://example.test/hamburg/roads/catalog.json') {
+        return response(staticCatalog);
+      }
+      throw new Error(`A partial seam set must not be fetched: ${url}`);
+    }) as unknown as typeof fetch;
+
+    await expect(
+      fetchCityJsonSeqViewport(
+        'https://example.test/hamburg/roads/catalog.json',
+        [565100, 5936100, 565200, 5936200],
+        new Set(),
+        fetchImpl,
+        2
+      )
+    ).rejects.toThrow(/Zoom in/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -39,6 +39,7 @@ type NumericAttribute = {
 type TileMaterial = {
   id?: string;
   name?: string;
+  unlit?: boolean;
   pbrMetallicRoughness?: {
     baseColorFactor?: number[];
     metallicFactor?: number;
@@ -58,6 +59,11 @@ type TileContent = {
   [COLOR_MODE_MARKER]?: 'roof' | 'usage';
   batchTableJson?: { attributes?: unknown[] };
   gltf?: {
+    images?: Array<{
+      image?: {
+        close?: () => void;
+      } | null;
+    }>;
     meshes?: Array<{ primitives?: TilePrimitive[] }>;
   };
 };
@@ -73,6 +79,35 @@ export interface HamburgBuildingTileStylingResult {
   roofTriangleCount: number;
   wallTriangleCount: number;
   groundTriangleCount: number;
+}
+
+/**
+ * loaders.gl keeps each decoded texture atlas on the glTF image entry after
+ * uploading it to the GPU. Chromium does not reliably reclaim those backing
+ * ImageBitmaps when a 3D tile is removed, so repeated LoD3 zoom cycles can
+ * retain hundreds of megabytes. Tile3DLayer calls this only while unloading a
+ * tile, after its texture has already been uploaded and is no longer needed as
+ * a CPU-side source.
+ */
+export function releaseHamburgTileDecodedImages(
+  tile: { content?: TileContent } | TileContent
+): number {
+  const content =
+    'content' in tile && tile.content ? tile.content : tile as TileContent;
+  let released = 0;
+  for (const entry of content.gltf?.images ?? []) {
+    const decoded = entry.image;
+    if (!decoded) continue;
+    try {
+      decoded.close?.();
+    } catch {
+      // A browser may report an already-detached ImageBitmap. Clearing the
+      // reference is still safe because this tile is leaving the renderer.
+    }
+    entry.image = null;
+    released++;
+  }
+  return released;
 }
 
 /**
@@ -203,7 +238,11 @@ export function styleHamburgBuildingTile(
           const usage = attributes.function ?? attributes.citygml_function;
           const [red, green, blue] = usageRgb(usage);
           groupKey = `usage-${red}-${green}-${blue}`;
-          color = [red / 255, green / 255, blue / 255];
+          color = [
+            sRgbByteToLinear(red),
+            sRgbByteToLinear(green),
+            sRgbByteToLinear(blue),
+          ];
         } else {
           const surface = classifyTriangleSurface(
             positions,
@@ -297,18 +336,36 @@ function classifyTriangleSurface(
   return Math.max(...heights) <= 0.15 ? 'ground' : 'roof';
 }
 
-export const HAMBURG_SEMANTIC_ROOF_COLOR =
-  [0.95, 0.22, 0.12] as const;
+export function sRgbByteToLinear(value: number): number {
+  const srgb = Math.max(0, Math.min(255, value)) / 255;
+  return srgb <= 0.04045
+    ? srgb / 12.92
+    : Math.pow((srgb + 0.055) / 1.055, 2.4);
+}
+
+/** Linear PBR factor that displays as the editor's deep terracotta #b84a2c. */
+export const HAMBURG_SEMANTIC_ROOF_COLOR = [
+  sRgbByteToLinear(184),
+  sRgbByteToLinear(74),
+  sRgbByteToLinear(44),
+] as const;
 
 function semanticColor(
   surface: 'roof' | 'wall' | 'ground'
 ): readonly [number, number, number] {
-  // The official stream is PBR-lit, while local CityJSON uses Phong-lit
-  // vertex colours. This brighter factor keeps both paths visually terracotta
-  // instead of making streamed roofs read as dark brown.
   if (surface === 'roof') return HAMBURG_SEMANTIC_ROOF_COLOR;
-  if (surface === 'ground') return [0.36, 0.33, 0.3];
-  return [0.78, 0.74, 0.67];
+  if (surface === 'ground') {
+    return [
+      sRgbByteToLinear(110),
+      sRgbByteToLinear(104),
+      sRgbByteToLinear(95),
+    ];
+  }
+  return [
+    sRgbByteToLinear(235),
+    sRgbByteToLinear(220),
+    sRgbByteToLinear(194),
+  ];
 }
 
 function triangleIndexAccessor(
@@ -345,6 +402,9 @@ function semanticMaterial(
     ...(source ?? {}),
     id,
     name: id,
+    // Use linear-space editor colours without the source tile's strong PBR
+    // lighting, which otherwise shifts the intended terracotta roof to brown.
+    unlit: true,
     pbrMetallicRoughness: {
       ...pbr,
       baseColorTexture: undefined,

@@ -15,7 +15,8 @@ export const DEFAULT_HAMBURG_VIEWPORT_BBOX: Bbox = [565000, 5936000, 566000, 593
 export const HAMBURG_ROAD_CATALOG_TYPE =
   'HamburgOsm2StreetsRoadCityJSONSeqCatalog';
 export const MAX_CATALOG_TILES_PER_VIEWPORT = 25;
-const CATALOG_TILE_FETCH_CONCURRENCY = 4;
+const CATALOG_TILE_FETCH_CONCURRENCY = 2;
+const OPTIONAL_ROAD_HALO_TILE_LIMIT = 2;
 
 export interface CityJsonSeqCatalogTile {
   id: string;
@@ -33,7 +34,8 @@ export interface CityJsonSeqCatalogTile {
 export interface CityJsonSeqFeatureTemplate {
   id: string;
   objectIds: string[];
-  value: Record<string, unknown>;
+  /** Retained only for writable catalogs that may need exact write-back. */
+  value?: Record<string, unknown>;
 }
 
 export interface CityJsonSeqLoadedTile {
@@ -115,37 +117,39 @@ async function fetchCityJsonSeqTiles(
     throw new Error(tooManyMessage(tiles.length));
   }
 
-  const fetched: Array<{ doc: CityJsonDocument; tile: CityJsonSeqLoadedTile }> = [];
+  const fetchedTiles: CityJsonSeqLoadedTile[] = [];
+  let doc: CityJsonDocument | null = null;
   for (let index = 0; index < tiles.length; index += CATALOG_TILE_FETCH_CONCURRENCY) {
     const batch = tiles.slice(index, index + CATALOG_TILE_FETCH_CONCURRENCY);
-    fetched.push(
-      ...(await Promise.all(
-        batch.map(async (tile) => {
-          const tileResponse = await fetchImpl(new URL(tile.url, baseUrl));
-          if (!tileResponse.ok) {
-            throw new Error(`Tile ${tile.id} failed: HTTP ${tileResponse.status} ${tileResponse.statusText}`);
-          }
-          const text = await readTileResponseText(tileResponse, tile);
-          return parseCityJsonSeqTileStrict(text, tile);
-        })
-      ))
+    const parsedBatch = await Promise.all(
+      batch.map(async (tile) => {
+        const tileResponse = await fetchImpl(new URL(tile.url, baseUrl));
+        if (!tileResponse.ok) {
+          throw new Error(`Tile ${tile.id} failed: HTTP ${tileResponse.status} ${tileResponse.statusText}`);
+        }
+        const text = await readTileResponseText(tileResponse, tile);
+        return parseCityJsonSeqTileStrict(text, tile);
+      })
     );
+    for (const parsed of parsedBatch) {
+      if (doc) {
+        const merged = mergeCityJson(doc, parsed.doc);
+        if (!merged.ok) {
+          throw new Error(`Could not merge catalog tile: ${merged.reason}`);
+        }
+      } else {
+        doc = parsed.doc;
+      }
+      if (query.readOnly) {
+        // Static Pages tiles are never written back. Keeping their complete
+        // CityJSONFeature templates would retain a second copy of every
+        // source geometry after it has been merged into the working document.
+        for (const feature of parsed.tile.features) delete feature.value;
+      }
+      fetchedTiles.push(parsed.tile);
+    }
     if (index + CATALOG_TILE_FETCH_CONCURRENCY < tiles.length) {
       await yieldToBrowser();
-    }
-  }
-
-  const docs = fetched.map(({ doc }) => doc);
-  const doc = docs.shift() ?? null;
-  if (doc) {
-    for (const [index, incoming] of docs.entries()) {
-      const merged = mergeCityJson(doc, incoming);
-      if (!merged.ok) {
-        throw new Error(`Could not merge catalog tile: ${merged.reason}`);
-      }
-      if (index % 8 === 7) {
-        await yieldToBrowser();
-      }
     }
   }
   return {
@@ -154,7 +158,7 @@ async function fetchCityJsonSeqTiles(
     queriedTileCount: query.count,
     intersectingTileIds: query.tiles.map((tile) => tile.id),
     tileIds: tiles.map((tile) => tile.id),
-    tiles: fetched.map(({ tile }) => tile),
+    tiles: fetchedTiles,
     features: tiles.reduce((sum, tile) => sum + tile.features, 0),
     catalogType: query.catalogType,
     readOnly: query.readOnly,
@@ -416,8 +420,6 @@ function selectStaticCatalogViewportTiles(
   const tileCap = Number.isFinite(maxTiles)
     ? Math.max(0, Math.floor(maxTiles))
     : Infinity;
-  if (visible.length >= tileCap) return visible;
-
   const selectedIds = new Set(visible.map((tile) => tile.id));
   const tileById = new Map(catalog.tiles.map((tile) => [tile.id, tile]));
   const dependencies = visible
@@ -431,11 +433,12 @@ function selectStaticCatalogViewportTiles(
         tileDistanceToBboxSquared(right.extent, bbox);
       return distance || left.id.localeCompare(right.id);
     });
-  const dependencyCapacity = Number.isFinite(tileCap)
-    ? Math.max(0, tileCap - visible.length)
-    : dependencies.length;
-  const selectedDependencies = dependencies.slice(0, dependencyCapacity);
-  for (const dependency of selectedDependencies) selectedIds.add(dependency.id);
+  // Dependencies are correctness data, not prefetch. Never silently omit one
+  // to satisfy the request cap; returning the complete required set lets the
+  // caller ask the user to zoom in instead of displaying broken junctions.
+  for (const dependency of dependencies) selectedIds.add(dependency.id);
+  const required = [...visible, ...dependencies];
+  if (Number.isFinite(tileCap) && required.length > tileCap) return required;
 
   const haloBbox: Bbox = [
     bbox[0] - catalog.tileSizeMeters,
@@ -455,10 +458,13 @@ function selectStaticCatalogViewportTiles(
         tileDistanceToBboxSquared(right.extent, bbox);
       return distance || left.id.localeCompare(right.id);
     });
-  const remaining = Number.isFinite(tileCap)
-    ? Math.max(0, tileCap - visible.length - selectedDependencies.length)
-    : halo.length;
-  return [...visible, ...selectedDependencies, ...halo.slice(0, remaining)];
+  const remaining = Math.min(
+    OPTIONAL_ROAD_HALO_TILE_LIMIT,
+    Number.isFinite(tileCap)
+      ? Math.max(0, tileCap - required.length)
+      : OPTIONAL_ROAD_HALO_TILE_LIMIT
+  );
+  return [...required, ...halo.slice(0, remaining)];
 }
 
 function tileDistanceToBboxSquared(

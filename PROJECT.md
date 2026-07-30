@@ -5,18 +5,18 @@ This file is the single technical handoff for City Editor. It consolidates the f
 ## What the project guarantees
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
-- The default demo starts with lightweight citywide ALKIS raster footprints, streams native LoD1 blocks from zoom 14, switches to semantic-coloured native LoD2 at zoom 15.25, and switches to photo-textured native LoD3 at zoom 18. Tapping a streamed batch feature creates a passive local CityJSON edit proxy; the streamed object is hidden only after a local mutation is saved.
+- The default demo starts with usage-coloured citywide ALKIS LoD0 footprints, fades in native LoD1 from zoom 13.25, and switches directly to photo-textured native LoD3 at zoom 18. There is no ordinary LoD2 display tier. A persistent building-usage legend explains the flat-footprint palette; official 3D tiers retain semantic deep-red roofs and cream walls. Tapping a streamed batch feature creates a passive local CityJSON edit proxy; the streamed object is hidden only after a local mutation is saved.
 - The complete 550,691-feature osm2streets catalog—344,265 roads plus 206,426 linked intersections—is packaged as 930 static 1 km gzip CityJSONSeq tiles and streamed from GitHub Pages by viewport. Its 122.6 MB gzip payload replaces 1.67 GB of raw CityJSONSeq and includes exact cross-tile seam dependencies. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for roads, locally loaded buildings, and buildings handed off from the remote stream.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close building views replace the official LoD2 stream with Hamburg's official LoD3 stream. Editable local CityJSON remains the source of truth for selected/changed objects.
+- Close building views replace the official LoD1 stream with Hamburg's official LoD3 stream. Editable local CityJSON remains the source of truth for selected/changed objects.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
 ```mermaid
 flowchart LR
-  F["Hamburg ALKIS raster footprints"] --> B["Browser editor"]
-  H["Hamburg LoD1/LoD2/LoD3 3D Tiles"] --> B
+  F["Hamburg ALKIS LoD0 raster/vector footprint tiles"] --> B["Browser editor"]
+  H["Hamburg LoD1/LoD3 3D Tiles"] --> B
   H --> C["Picked feature to local CityJSON"]
   R["Pages gzip CityJSONSeq roads"] --> B
   A["Local CityJSON / CityJSONSeq / IFC"] --> B
@@ -51,9 +51,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The citywide overview is the official ALKIS building-footprint WMS rendered as lightweight raster tiles. At zoom 14 the map streams Hamburg's native LoD1 blocks and fades them in through the old low-detail block range without whole-tile CityJSON conversion. At zoom 15.25 it requests official LoD2 and styles its native streamed glTF triangles with bright terracotta roofs, cream walls, and semantic ground or usage-coloured PBR materials. At zoom 18 it requests official photo-textured LoD3 by default. A coarse native LoD2 fallback remains behind LoD3 without writing depth, so new viewport areas do not go blank and cannot cover the later LoD3/photo surfaces. Opening Roads temporarily promotes that same fallback to the active remote city layer; local LoD3-only edits remain visible without photos, and closing Roads restores the saved texture preference. The photo-texture switch can select the smaller untextured LoD3 variant instead. Zoom updates are quantized to twentieths of a level during the gesture and settle to the exact final value.
+The citywide LoD0 overview is generated from the official ALKIS 2D GML snapshot. Zooms 8–11 use small pre-rendered usage-coloured PNG tiles so a city overview never asks the browser to parse hundreds of thousands of sub-pixel polygons. From zoom 12, static MVT tiles preserve flat vector footprints and the same usage categories. They remain mounted under the incoming 3D tier through its 15.4–16.2 handoff, and remain fully visible at any zoom while that tier is still loading. The official ALKIS WMS remains a neutral low-zoom/loading fallback. At zoom 13.25 the map streams Hamburg's native LoD1 blocks and reaches full opacity at zoom 14.25 without whole-tile CityJSON conversion. LoD1 remains the ordinary middle-distance 3D tier until zoom 18; no LoD2 visual stream is requested. At zoom 18 the editor requests official photo-textured LoD3 by default, keeping LoD1 visible until the first LoD3 tile is ready. Opening Roads caps the remote city at LoD1; local LoD3-only edits remain visible without photos, and closing Roads restores the saved texture preference. The photo-texture switch can select the smaller untextured LoD3 variant instead. Semantic 3D materials are unlit linear-space colours so roofs display as deep terracotta rather than orange or lighting-dependent brown. Zoom updates are quantized to twentieths of a level during the gesture and settle to the exact final value.
 
-Official building payloads are `.b3dm`/glTF, not CityJSON. On a building click, the editor resolves the picked batch in screen space, applies the tile/node ECEF transforms, converts only that feature to EPSG:25832, reconstructs its semantic mesh, and merges it as a passive edit proxy. The remote feature continues through the ordinary LoD2/LoD3/photo pipeline until an actual local mutation promotes the proxy to a geometry override. The source feature and batch IDs are retained; a selected passive LoD2 proxy upgrades automatically when matching LoD3 arrives. The 1,353-building center file and 68 surveyed textured LoD3 counterparts remain local editing/assets data rather than a second center-only display layer. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles.
+Official 3D building payloads are `.b3dm`/glTF, not CityJSON. On a building click, the editor resolves the picked batch in screen space, applies the tile/node ECEF transforms, converts only that feature to EPSG:25832, reconstructs its semantic mesh, and merges it as a passive edit proxy. The remote feature continues through the ordinary LoD1/LoD3/photo pipeline until an actual local mutation promotes the proxy to a geometry override. The source feature and batch IDs are retained; a selected passive LoD1 proxy upgrades automatically when matching LoD3 arrives. The 1,353-building center file and 68 surveyed textured LoD3 counterparts remain local editing/assets data rather than a second center-only display layer. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -120,6 +120,9 @@ The committed browser-safe files are:
 - `public/data/hamburg/hamburg-city-center-buildings.city.jsonl`
 - `public/data/hamburg/hamburg-city-center-roads.city.json`
 - `public/data/hamburg/hamburg-city-center-roads.osm`
+- `public/data/hamburg/buildings/catalog.json`
+- `public/data/hamburg/buildings/raster/**/*.png`
+- `public/data/hamburg/buildings/tiles/**/*.pbf`
 - `public/data/hamburg/roads/catalog.json`
 - `public/data/hamburg/roads/tiles/*.city.jsonl.gz`
 - `public/data/transportation/osm2streets-hamburg-short-intersection.city.json`
@@ -131,6 +134,22 @@ npm run data:hamburg-center
 npm run data:hamburg-center:osm
 npm run data:hamburg-center:roads
 ```
+
+### Citywide LoD0 footprints
+
+The reproducible builder downloads Hamburg's official INSPIRE ALKIS 2D GML,
+streams roughly 453,000 valid building polygons into a temporary SQLite index,
+and writes usage-coloured overview PNG plus compact raw MVT tiles:
+
+```powershell
+python -m pip install -r scripts/requirements-hamburg-building-tiles.txt
+npm run data:hamburg-building-footprints
+```
+
+Only the static browser tiles and their catalog are committed; the 1.43 GB
+uncompressed GML and temporary spatial index are not. The current catalog has
+453,216 footprints in 123 overview PNG and 5,116 MVT files, totalling 39,948,821
+tile bytes (38.1 MiB).
 
 ### Optional whole-city buildings
 
@@ -180,6 +199,20 @@ npm run data:hamburg-roads:pages
 ```
 
 The packager assigns each feature by extent centroid to a 1 km cell, preserves the millimetre grid, and writes relative gzip tile URLs. The current result is 930 files, 550,691 features (344,265 roads and 206,426 intersections), 1,666,587,937 bytes uncompressed, and 122,423,214 compressed tile bytes (about 116.75 MiB), plus the catalog. GitHub Pages is read-only, so edited road tiles are retained through **Save local** or **Export CityJSON**, not `Save seq`.
+
+Runtime memory stays bounded while moving through the city. Every viewport keeps
+its visible road cells, all exact seam-dependency cells, and at most two
+optional neighbouring cells. If a tile request is already running, the newest
+viewport is queued and replayed immediately afterward so a rapid zoom cannot
+leave a large intermediate tile set resident. Clean off-screen source features
+are evicted before the next merge, immutable Pages features discard write-back
+templates after import, and vertex compaction uses an in-place typed-array
+remap. The footprint MVT cache is binary and byte-limited, and native LoD1/LoD3
+streams use bounded request concurrency and GPU cache targets; textured LoD3
+uses the coarser refinement target because its decoded 20 cm atlases are the
+largest renderer-memory cost. Once a textured tile completes its first draw,
+the uploaded GPU texture remains active while the duplicate CPU-side decoded
+ImageBitmap is explicitly released; unload repeats the release defensively.
 
 ### osm2streets fork and WASM
 
@@ -305,6 +338,6 @@ The following work is intentionally not claimed as complete:
    regeneration/conflict-resolution workflow is added.
 4. Profile the complete whole-city road catalog on representative touch hardware and add spatial indexing if edit-focus filtering is not sufficient.
 5. Add a dedicated renderer for Hamburg's CORS-enabled Cesium quantized-mesh DGM terrain and drape the active MapLibre basemap onto it. Per-building grounding fixes floating models now; full terrain is required to preserve surveyed elevation differences and terrain breaklines visually.
-6. Add screenshot-based GPU regression coverage for official 3D Tiles and grounded mixed LoD2/LoD3 data on lower-end mobile devices. Structural grounding and tile-data regressions already have unit coverage.
+6. Add screenshot-based GPU regression coverage for official 3D Tiles and grounded mixed LoD1/LoD3 data on lower-end mobile devices. Structural grounding and tile-data regressions already have unit coverage.
 
 These are continuation tasks, not blockers for the committed demo or the exact attribute-editing workflow.

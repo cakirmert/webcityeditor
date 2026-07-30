@@ -645,7 +645,7 @@ export default function App() {
         Array.isArray((doc.appearance as { textures?: unknown[] } | undefined)?.textures) &&
         ((doc.appearance as { textures?: unknown[] }).textures?.length ?? 0) > 0,
     };
-  }, [coreState.cityjson]);
+  }, [coreState.cityjson, coreState.reloadToken]);
 
   const filteredForSelected = useMemo(() => {
     if (!coreState.cityjson || !coreState.selection) return null;

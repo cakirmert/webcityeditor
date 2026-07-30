@@ -99,7 +99,9 @@ describe('<BuildingDetailPreview />', () => {
     expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ lod: 'lod2', texturesEnabled: false })
     );
-    expect(screen.getByRole('switch', { name: 'Selected building textures' })).toBeDisabled();
+    expect(
+      screen.queryByRole('switch', { name: 'Selected building textures' })
+    ).not.toBeInTheDocument();
   });
 
   it('mirrors streamed LoD3 texture availability until local geometry overrides it', () => {
@@ -148,10 +150,8 @@ describe('<BuildingDetailPreview />', () => {
         initialTexturesEnabled
       />
     );
-    const overriddenSwitch = screen.getByRole('switch', {
-      name: 'Selected building textures',
-    });
-    expect(overriddenSwitch).toBeDisabled();
-    expect(overriddenSwitch).not.toBeChecked();
+    expect(
+      screen.queryByRole('switch', { name: 'Selected building textures' })
+    ).not.toBeInTheDocument();
   });
 });

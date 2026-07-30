@@ -1,17 +1,11 @@
 /** Flat LoD0 footprints are the only building geometry below this zoom. */
-export const BUILDING_BLOCK_MIN_ZOOM = 14;
-export const BUILDING_BLOCK_FULL_ZOOM = 15.25;
+export const BUILDING_BLOCK_MIN_ZOOM = 13.25;
+export const BUILDING_BLOCK_FULL_ZOOM = 14.25;
 
-/** Source LoD2 replaces the cheap LoD1 blocks at this zoom. */
-export const BUILDING_DETAIL_MIN_ZOOM = 15.25;
-export const BUILDING_DETAIL_FULL_ZOOM = 18;
-
-/**
- * Keep true LoD3 just beyond the completed LoD2 transition. This avoids
- * starting the high-detail/photo stream while the user is still navigating
- * the ordinary semantic city view.
- */
+/** True LoD3 replaces the lightweight LoD1 city at close building zoom. */
 export const BUILDING_LOD3_MIN_ZOOM = 18;
+export const BUILDING_DETAIL_MIN_ZOOM = BUILDING_LOD3_MIN_ZOOM;
+export const BUILDING_DETAIL_FULL_ZOOM = 18.75;
 
 export type BuildingMapDetailMode =
   | 'lod0'
@@ -30,14 +24,13 @@ export function buildingMapDetailMode(
   texturesEnabled: boolean
 ): BuildingMapDetailMode {
   if (zoom < BUILDING_BLOCK_MIN_ZOOM) return 'lod0';
-  if (zoom < BUILDING_DETAIL_MIN_ZOOM) return 'lod1';
-  if (zoom < BUILDING_LOD3_MIN_ZOOM) return 'lod2';
+  if (zoom < BUILDING_LOD3_MIN_ZOOM) return 'lod1';
   return texturesEnabled ? 'lod3-textured' : 'lod3-untextured';
 }
 
 /**
- * Road editing prioritises the lighter semantic city context. Preserve the
- * saved texture preference so closing Roads immediately restores LoD3.
+ * Road editing prioritises lightweight LoD1 context. Preserve the saved
+ * texture preference so closing Roads immediately restores LoD3.
  */
 export function capBuildingMapDetailForRoadEditing(
   mode: BuildingMapDetailMode,
@@ -47,7 +40,7 @@ export function capBuildingMapDetailForRoadEditing(
     roadEditing &&
     (mode === 'lod3-untextured' || mode === 'lod3-textured')
   ) {
-    return 'lod2';
+    return 'lod1';
   }
   return mode;
 }
@@ -58,9 +51,8 @@ export type EditorAssetMapDetailMode =
   | 'lod3-textured';
 
 /**
- * Ready-made editor assets currently ship with LoD3 geometry only. Promote
- * that local geometry as soon as the ordinary map enters its LoD2 range, but
- * keep it untextured until the close-zoom texture control is explicitly on.
+ * Ready-made editor assets currently ship with LoD3 geometry only. Keep their
+ * cheap blocks until the close-zoom LoD3 tier is active.
  */
 export function editorAssetMapDetailMode(
   zoom: number,
@@ -78,7 +70,7 @@ export function editorAssetMapDetailMode(
 /**
  * A pitched map has a much larger visible footprint than a top-down map. Start
  * with a useful neighbourhood instead of a tiny 24-building island, then widen
- * the detailed LoD2 region smoothly as the camera moves closer.
+ * the local editable-detail region smoothly as the camera moves closer.
  */
 export const BUILDING_DETAIL_MIN_OBJECTS = 120;
 export const BUILDING_DETAIL_MAX_OBJECTS = 720;

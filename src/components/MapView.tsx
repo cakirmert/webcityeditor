@@ -12,7 +12,7 @@ import {
   TextLayer,
 } from '@deck.gl/layers';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
-import { Tile3DLayer } from '@deck.gl/geo-layers';
+import { MVTLayer, Tile3DLayer } from '@deck.gl/geo-layers';
 import { PathStyleExtension } from '@deck.gl/extensions';
 import {
   COORDINATE_SYSTEM,
@@ -40,7 +40,7 @@ import {
   groundFootprintsForFlatMap,
   type Footprint,
 } from '../lib/footprints';
-import { tintByRoofType, tintByUsage, usageRgb } from '../lib/footprint-tint';
+import { tintByUsage, usageRgb } from '../lib/footprint-tint';
 import { findNearestZoneForPoint, findZoneForPoint, type ParcelZone } from '../lib/zoning';
 import type {
   OsmPointFeature,
@@ -124,6 +124,7 @@ import {
   hamburgLod3TilesetUrl,
   HAMBURG_LOD1_TILESET_URL,
   HAMBURG_LOD2_TILESET_URL,
+  releaseHamburgTileDecodedImages,
   styleHamburgBuildingTile,
 } from '../lib/hamburg-lod3-tiles';
 import {
@@ -139,6 +140,7 @@ import {
   type HamburgTile,
   type HamburgTilePickCandidate,
 } from '../lib/hamburg-3d-tiles-edit';
+import { publicAssetUrl } from '../lib/public-assets';
 import { Layers3, Map as MapIcon, Satellite } from 'lucide-react';
 
 /**
@@ -158,7 +160,24 @@ class HamburgTile3DLayer extends Tile3DLayer {
   }
 }
 
-/** Zoom stages keep LoD0, source LoD2, and close untextured-first LoD3 distinct. */
+function releaseHamburgTileImagesAfterFirstDraw(tile: HamburgTile): void {
+  let pendingFrames = 0;
+  const releaseWhenReady = () => {
+    if (!tile.content) return;
+    if (
+      (tile as HamburgTile & { tileDrawn?: boolean }).tileDrawn ||
+      pendingFrames >= 120
+    ) {
+      releaseHamburgTileDecodedImages(tile);
+      return;
+    }
+    pendingFrames++;
+    requestAnimationFrame(releaseWhenReady);
+  };
+  requestAnimationFrame(releaseWhenReady);
+}
+
+/** Zoom stages keep flat LoD0, lightweight LoD1, and close LoD3 distinct. */
 const DATA_FIT_PADDING = 56;
 const DATA_FIT_MAX_ZOOM = 14.25;
 const ROAD_DATA_FIT_MAX_ZOOM = 18;
@@ -166,6 +185,12 @@ const OSM_ROAD_HIT_WIDTH_PIXELS = 20;
 const DEFAULT_INITIAL_ZOOM = 12;
 const EDIT_FOCUS_PADDING_DEGREES = 0.0038;
 const ROAD_SNAP_RADIUS_PIXELS = 30;
+const ROAD_WORKSPACE_MARKING_MIN_ZOOM = 14;
+const ROAD_WORKSPACE_DIRECTION_MIN_ZOOM = 15;
+const HAMBURG_FOOTPRINT_CACHE_TILES = 48;
+const HAMBURG_FOOTPRINT_CACHE_BYTES = 16 * 1024 * 1024;
+const HAMBURG_FOOTPRINT_HANDOFF_MIN_ZOOM = 15.4;
+const HAMBURG_FOOTPRINT_HANDOFF_FULL_ZOOM = 16.2;
 const HAMBURG_CITY_CENTER_TREES_URL = 'data/hamburg/hamburg-city-center-trees.json';
 const CITYJSON_MAP_MESH_VERTEX_BUDGET = 280_000;
 const HAMBURG_STARTUP_SEED_ATTRIBUTE = '_webcityeditorHamburgSeed';
@@ -175,6 +200,57 @@ const HAMBURG_BUILDING_FOOTPRINT_WMS_URL =
   '&LAYERS=BU.Building%2CBU.BuildingPart&STYLES=' +
   '&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG%3A3857' +
   '&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}';
+const HAMBURG_BUILDING_FOOTPRINT_TILES_URL = publicAssetUrl(
+  'data/hamburg/buildings/tiles/{z}/{x}/{y}.pbf'
+);
+const HAMBURG_BUILDING_FOOTPRINT_OVERVIEW_URL = publicAssetUrl(
+  'data/hamburg/buildings/raster/{z}/{x}/{y}.png'
+);
+const HAMBURG_BUILDING_FOOTPRINT_BOUNDS: [
+  number,
+  number,
+  number,
+  number,
+] = [
+  8.429248601254255,
+  53.39768602821328,
+  10.319317135512419,
+  53.96219501816164,
+];
+const HAMBURG_FOOTPRINT_USAGE_KEYS = [
+  'residential',
+  'mixed',
+  'commercial',
+  'office',
+  'industrial',
+  'public',
+] as const;
+const HAMBURG_USAGE_LEGEND_ITEMS: ReadonlyArray<{
+  key: (typeof HAMBURG_FOOTPRINT_USAGE_KEYS)[number] | null;
+  label: string;
+}> = [
+  { key: 'residential', label: 'Residential' },
+  { key: 'mixed', label: 'Mixed / ancillary' },
+  { key: 'commercial', label: 'Commercial' },
+  { key: 'office', label: 'Office' },
+  { key: 'industrial', label: 'Industrial' },
+  { key: 'public', label: 'Public / transport' },
+  { key: null, label: 'Unknown' },
+];
+
+function hamburgFootprintFillColor(
+  usageCode: unknown
+): [number, number, number, number] {
+  const numericCode = Number(usageCode);
+  const usage =
+    Number.isInteger(numericCode) &&
+    numericCode >= 0 &&
+    numericCode < HAMBURG_FOOTPRINT_USAGE_KEYS.length
+      ? HAMBURG_FOOTPRINT_USAGE_KEYS[numericCode]
+      : undefined;
+  const [red, green, blue] = usageRgb(usage);
+  return [red, green, blue, 195];
+}
 function shortStableHash(value: string): string {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index++) {
@@ -317,18 +393,6 @@ function addCityObjectWithDescendants(
   for (const child of object.children ?? []) {
     addCityObjectWithDescendants(doc, child, target);
   }
-}
-
-function rootCityObjectId(doc: CityJsonDocument, id: string): string {
-  let currentId = id;
-  const visited = new Set<string>();
-  while (!visited.has(currentId)) {
-    visited.add(currentId);
-    const parentId = doc.CityObjects[currentId]?.parents?.[0];
-    if (!parentId || !doc.CityObjects[parentId]) break;
-    currentId = parentId;
-  }
-  return currentId;
 }
 
 function osmPointFeatureColor(feature: OsmPointFeature): Rgba {
@@ -571,7 +635,7 @@ interface Props {
     disableDataFit?: boolean;
   };
   precomputedFootprints?: Footprint[];
-  /** Show Hamburg's official citywide LoD1/LoD2/close-range LoD3 streams. */
+  /** Show Hamburg's citywide LoD0/LoD1 and close-range LoD3 streams. */
   hamburgBuildingTilesEnabled?: boolean;
   /** Materialize a picked remote batch feature as a local editable building. */
   onHamburgBuildingHandoff?: (
@@ -685,11 +749,10 @@ export default function MapView({
     'idle' | 'loading' | 'ready' | 'error'
   >('idle');
   const [officialLod1LoadedTiles, setOfficialLod1LoadedTiles] = useState(0);
-  const [officialLod2Status, setOfficialLod2Status] = useState<
+  const [, setOfficialLod2Status] = useState<
     'idle' | 'loading' | 'ready' | 'error'
   >('idle');
-  const [officialLod2LoadedTiles, setOfficialLod2LoadedTiles] = useState(0);
-  const [mapColorMode, setMapColorMode] = useState<'roof' | 'usage'>('roof');
+  const [, setOfficialLod2LoadedTiles] = useState(0);
   const zoomBuildingDetailMode = buildingMapDetailMode(
     zoom,
     texturesEnabled
@@ -699,7 +762,7 @@ export default function MapView({
     roadWorkspaceOpen
   );
   // Local edits can be LoD3-only, so Roads removes their photo textures but
-  // keeps their highest geometry visible while the remote city drops to LoD2.
+  // keeps their highest geometry visible while the remote city drops to LoD1.
   const localBuildingDetailMode =
     roadWorkspaceOpen && zoomBuildingDetailMode === 'lod3-textured'
       ? 'lod3-untextured'
@@ -950,7 +1013,10 @@ export default function MapView({
   );
 
   const roadSnapCandidates = useMemo(
-    () => buildRoadSnapCandidates(roadDraft, roadAreas, osmRoads),
+    () =>
+      roadDraft
+        ? buildRoadSnapCandidates(roadDraft, roadAreas, osmRoads)
+        : [],
     [roadDraft, roadAreas, osmRoads]
   );
   const roadSnapCandidatesRef = useRef(roadSnapCandidates);
@@ -1026,12 +1092,25 @@ export default function MapView({
     [roadAreas, editFocusBbox]
   );
 
+  const roadMarkingsVisible =
+    zoom >= 15 ||
+    (roadWorkspaceOpen && zoom >= ROAD_WORKSPACE_MARKING_MIN_ZOOM);
+  const roadDirectionsVisible =
+    zoom >= 16 ||
+    (roadWorkspaceOpen && zoom >= ROAD_WORKSPACE_DIRECTION_MIN_ZOOM);
   const roadDecorationAreas = useMemo(() => {
+    if (!roadMarkingsVisible && !roadDirectionsVisible) return [];
     const scope = editFocusBbox ?? viewportBbox;
     return scope
       ? renderedRoadAreas.filter((area) => polygonIntersectsBbox(area.polygon, scope))
       : renderedRoadAreas;
-  }, [renderedRoadAreas, editFocusBbox, viewportBbox]);
+  }, [
+    renderedRoadAreas,
+    editFocusBbox,
+    viewportBbox,
+    roadDirectionsVisible,
+    roadMarkingsVisible,
+  ]);
   // Keep the thousands of saved CityJSON markings stable while a finger moves
   // one draft handle. Only the tiny preview decoration is rebuilt per drag.
   const savedRoadVisuals = useMemo(
@@ -1049,9 +1128,11 @@ export default function MapView({
     }),
     [savedRoadVisuals, previewRoadVisuals]
   );
+  const roadConnectionsNeeded =
+    roadWorkspaceOpen && (!!selectedRoadAreaId || !!roadDraft);
   const roadConnectionIndex = useMemo(
-    () => buildRoadConnectionIndex(roadAreas),
-    [roadAreas]
+    () => buildRoadConnectionIndex(roadConnectionsNeeded ? roadAreas : []),
+    [roadAreas, roadConnectionsNeeded]
   );
   const selectedRoadConnections = useMemo(
     () =>
@@ -1164,24 +1245,18 @@ export default function MapView({
     zoom
   );
   const detailEnabled = zoom >= BUILDING_DETAIL_MIN_ZOOM;
-  const officialDetailLod: 'lod2' | 'lod3' =
+  const officialDetailLod: 'lod1' | 'lod3' =
     buildingDetailMode === 'lod3-untextured' ||
     buildingDetailMode === 'lod3-textured'
       ? 'lod3'
-      : 'lod2';
-  const localDetailLod: 'lod2' | 'lod3' =
+      : 'lod1';
+  const localDetailLod: 'lod1' | 'lod3' =
     localBuildingDetailMode === 'lod3-untextured' ||
     localBuildingDetailMode === 'lod3-textured'
       ? 'lod3'
-      : 'lod2';
+      : 'lod1';
   const roadEditingCapsBuildingDetail =
     roadWorkspaceOpen && officialDetailLod !== localDetailLod;
-  const officialLod1Requested =
-    hamburgBuildingTilesEnabled && buildingDetailMode === 'lod1';
-  const officialLod1Ready =
-    officialLod1Requested && officialLod1Status === 'ready';
-  const officialLod1Active =
-    officialLod1Requested && officialLod1Status !== 'error';
   const officialLod3Requested =
     hamburgBuildingTilesEnabled &&
     (buildingDetailMode === 'lod3-untextured' ||
@@ -1196,32 +1271,45 @@ export default function MapView({
     officialLod3Requested && officialLod3Status !== 'error';
   const officialLod3Ready =
     officialLod3Active && officialLod3Status === 'ready';
-  // Stream Hamburg's native lightweight LoD1 blocks in the same zoom range as
-  // the old local footprint extrusions. They stay native on the GPU; only one
-  // clicked feature is converted into an editable CityJSON proxy.
-  const officialLod2Requested =
+  // LoD1 is the ordinary 3D city tier and remains the loading fallback until
+  // the close LoD3 stream has produced a visible tile.
+  const officialLod1Requested =
     hamburgBuildingTilesEnabled &&
-    (buildingDetailMode === 'lod2' ||
-      buildingDetailMode === 'lod3-untextured' ||
-      buildingDetailMode === 'lod3-textured');
-  const officialLod2Ready =
-    officialLod2Requested && officialLod2Status === 'ready';
-  const officialLod2Active =
-    officialLod2Requested && officialLod2Status !== 'error';
+    (buildingDetailMode === 'lod1' ||
+      (officialLod3Requested && officialLod3Status !== 'ready'));
+  const officialLod1Ready =
+    officialLod1Requested && officialLod1Status === 'ready';
+  const officialLod1Active =
+    officialLod1Requested && officialLod1Status !== 'error';
+  const officialDetailedTierReady =
+    buildingDetailMode === 'lod1'
+      ? officialLod1Ready
+      : buildingDetailMode === 'lod3-untextured' ||
+          buildingDetailMode === 'lod3-textured'
+        ? officialLod1Ready || officialLod3Ready
+        : false;
+  const waitingForOfficialDetailedTier =
+    buildingDetailMode !== 'lod0' && !officialDetailedTierReady;
+  const citywideFootprintFade = waitingForOfficialDetailedTier
+    ? 0
+    : smoothZoomStep(
+        HAMBURG_FOOTPRINT_HANDOFF_MIN_ZOOM,
+        HAMBURG_FOOTPRINT_HANDOFF_FULL_ZOOM,
+        zoom
+      );
+  // Source LoD2 remains supported by the one-building conversion path, but it
+  // is deliberately not a visual map tier.
+  const officialLod2Requested = false;
+  const officialLod2Active = false;
   const officialLod1Generation =
-    `lod1:${mapColorMode}:${hiddenHamburgBuildingGenerationKey}`;
-  // LoD2 becomes a lighter fallback once the raw zoom tier reaches LoD3.
-  // Deriving the profile from the raw tier keeps it stable while Roads is
-  // open, so the already-loaded fallback can become foreground immediately.
-  const officialLod2Profile =
-    zoomBuildingDetailMode === 'lod3-untextured' ||
-    zoomBuildingDetailMode === 'lod3-textured'
-      ? 'fallback'
-      : 'foreground';
+    `lod1:semantic:${hiddenHamburgBuildingGenerationKey}`;
+  const officialLod2Profile = officialLod3Requested
+    ? 'fallback'
+    : 'foreground';
   const officialLod2Generation =
-    `lod2:${officialLod2Profile}:${mapColorMode}:${hiddenHamburgBuildingGenerationKey}`;
+    `lod2:${officialLod2Profile}:${hiddenHamburgBuildingGenerationKey}`;
   const officialLod3Generation =
-    `lod3:${officialLod3Variant}:${mapColorMode}:${hiddenHamburgBuildingGenerationKey}`;
+    `lod3:${officialLod3Variant}:${hiddenHamburgBuildingGenerationKey}`;
   officialLayerGenerationRef.current[1] = officialLod1Generation;
   officialLayerGenerationRef.current[2] = officialLod2Generation;
   officialLayerGenerationRef.current[3] = officialLod3Generation;
@@ -1347,7 +1435,7 @@ export default function MapView({
         }
         setOfficialLod3Status('error');
         setWarning(
-          `Official Hamburg LoD3 tileset is unavailable; LoD2 remains visible: ${
+          `Official Hamburg LoD3 tileset is unavailable; LoD1 remains visible: ${
             error instanceof Error ? error.message : String(error)
           }`
         );
@@ -1435,7 +1523,7 @@ export default function MapView({
       }
       try {
         groundHamburgLod3Tile(tile);
-        styleHamburgBuildingTile(tile, mapColorMode);
+        styleHamburgBuildingTile(tile, 'roof');
         hideHamburgTileBuildings(tile, hiddenHamburgBuildingIds);
       } catch (error) {
         setWarning(
@@ -1448,7 +1536,6 @@ export default function MapView({
     },
     [
       hiddenHamburgBuildingIds,
-      mapColorMode,
       officialLod1Generation,
       officialLod1Requested,
       trackOfficialTileLoad,
@@ -1491,7 +1578,7 @@ export default function MapView({
       try {
         groundHamburgLod3Tile(tile);
         if (officialLod3Variant !== 'lod3-textured') {
-          styleHamburgBuildingTile(tile, mapColorMode);
+          styleHamburgBuildingTile(tile, 'roof');
         }
         hideHamburgTileBuildings(tile, hiddenHamburgBuildingIds);
         if (
@@ -1526,11 +1613,16 @@ export default function MapView({
           }`
         );
       }
+      if (officialLod3Variant === 'lod3-textured') {
+        // ScenegraphLayer has copied every atlas into its GPU texture before
+        // tileDrawn becomes true. Releasing the CPU ImageBitmap here prevents
+        // the same 20 cm atlas from occupying both renderer and GPU memory.
+        releaseHamburgTileImagesAfterFirstDraw(tile);
+      }
       trackOfficialTileLoad(tile, 3, officialLod3Generation);
     },
     [
       hiddenHamburgBuildingIds,
-      mapColorMode,
       officialLod3Generation,
       officialLod3Variant,
       onHamburgBuildingHandoff,
@@ -1539,8 +1631,10 @@ export default function MapView({
     ]
   );
   const handleOfficialLod3TileUnload = useCallback(
-    (tile: HamburgTile) =>
-      trackOfficialTileUnload(tile, 3, officialLod3Generation),
+    (tile: HamburgTile) => {
+      releaseHamburgTileDecodedImages(tile);
+      trackOfficialTileUnload(tile, 3, officialLod3Generation);
+    },
     [officialLod3Generation, trackOfficialTileUnload]
   );
 
@@ -1556,7 +1650,7 @@ export default function MapView({
         officialLoadedTilesRef.current[3].size > 0 ? 'ready' : 'loading'
       );
       setWarning(
-        `One official Hamburg LoD3 tile failed; LoD2 remains visible there: ${
+        `One official Hamburg LoD3 tile failed; LoD1 remains visible there: ${
           firstMessage || 'unknown error'
         }${secondMessage ? ` (${secondMessage})` : ''}`
       );
@@ -1574,7 +1668,7 @@ export default function MapView({
       }
       try {
         groundHamburgLod3Tile(tile);
-        styleHamburgBuildingTile(tile, mapColorMode);
+        styleHamburgBuildingTile(tile, 'roof');
         hideHamburgTileBuildings(tile, hiddenHamburgBuildingIds);
         if (
           selectedPassiveHamburgProxy &&
@@ -1612,7 +1706,6 @@ export default function MapView({
     },
     [
       hiddenHamburgBuildingIds,
-      mapColorMode,
       officialLod2Generation,
       officialLod2Requested,
       onHamburgBuildingHandoff,
@@ -1655,46 +1748,34 @@ export default function MapView({
               editFocusBbox ? 'around this edit' : 'in view'
             }`
           : 'official street trees loading';
-  const officialTileColorLabel =
-    mapColorMode === 'usage'
-      ? 'building usage colors'
-      : 'semantic roof and wall colors';
   const officialBuildingDetailLabel =
     buildingDetailMode === 'lod0'
-      ? 'Official Hamburg ALKIS footprint overview · lightweight raster tiles'
+      ? 'Official Hamburg ALKIS footprint overview · coloured by building use · visible from regional zoom'
       : buildingDetailMode === 'lod1'
         ? officialLod1Status === 'error'
-          ? 'Official Hamburg LoD1 unavailable · ALKIS footprint fallback'
+          ? 'Official Hamburg LoD1 unavailable · coloured ALKIS footprint fallback'
           : officialLod1Ready
-            ? `Official Hamburg lightweight LoD1 blocks · ${officialLod1LoadedTiles} streamed tiles · citywide low-detail context · tap a building to edit locally`
-            : 'Streaming official Hamburg LoD1 blocks · ALKIS footprints remain visible while loading'
-        : buildingDetailMode === 'lod2'
-          ? officialLod2Status === 'error'
-            ? 'Official Hamburg LoD2 unavailable · ALKIS footprint fallback'
-            : officialLod2Ready
-              ? `Official Hamburg citywide LoD2 · ${officialLod2LoadedTiles} streamed tiles · ${officialTileColorLabel}${
-                  roadEditingCapsBuildingDetail
-                    ? ' · road editing temporarily keeps remote buildings at LoD2'
-                    : ' · tap a building to edit locally'
-                }`
-              : 'Streaming official Hamburg LoD2 · ALKIS footprints remain visible while loading'
-          : officialLod3Status === 'error'
+            ? `Official Hamburg lightweight LoD1 · ${officialLod1LoadedTiles} streamed tiles · red semantic roofs${
+                roadEditingCapsBuildingDetail
+                  ? ' · Roads keeps the remote city at LoD1'
+                  : ' · tap a building to edit locally'
+              }`
+            : 'Streaming official Hamburg LoD1 · coloured ALKIS footprints remain visible while loading'
+        : officialLod3Status === 'error'
             ? `Official ${
                 buildingDetailMode === 'lod3-textured' ? 'textured' : 'untextured'
-              } LoD3 unavailable · LoD2 fallback`
+              } LoD3 unavailable · LoD1 fallback`
             : officialLod3Ready
               ? `Official Hamburg ${
                   buildingDetailMode === 'lod3-textured'
                     ? '20 cm textured'
-                    : mapColorMode === 'usage'
-                      ? 'usage-color untextured'
-                      : 'semantic-color untextured'
+                    : 'semantic-color untextured'
                 } LoD3 · ${officialLod3LoadedTiles} streamed tiles · tap a building to edit locally`
               : `Streaming official Hamburg ${
                   buildingDetailMode === 'lod3-textured'
                     ? '20 cm textured LoD3'
                     : 'untextured LoD3 geometry'
-                } · LoD2 remains visible while loading`;
+                } · LoD1 remains visible while loading`;
   const localAssetObjectIds = useMemo(
     () => editorPlacedAssetObjectIds(cityjson),
     [cityjson, reloadToken]
@@ -1713,7 +1794,7 @@ export default function MapView({
     );
     // getBounds() becomes strongly skewed toward the horizon on a pitched
     // camera. Prioritise a screen-derived near focus instead of the geographic
-    // bbox centre, which previously produced a small distant cone of LoD2.
+    // bbox centre, which previously produced a small distant detail cone.
     const center: [number, number] = detailFocus ?? [
       (detailScopeBbox[0] + detailScopeBbox[2]) / 2,
       (detailScopeBbox[1] + detailScopeBbox[3]) / 2,
@@ -1745,7 +1826,7 @@ export default function MapView({
         addCityObjectWithDescendants(cityjson, selectedId, localIds);
       }
     }
-    // Editor-created assets have no LoD2 geometry. They use their dedicated
+    // Editor-created assets have no lightweight source geometry. They use their dedicated
     // local overlay throughout the detail zoom range instead of entering the
     // source LoD selector and disappearing before official LoD3 activates.
     for (const localAssetId of localAssetObjectIds) localIds.delete(localAssetId);
@@ -1768,18 +1849,6 @@ export default function MapView({
       ? detailSelection.localIds
       : null;
 
-  const detailObjectColors = useMemo(() => {
-    if (mapColorMode !== 'usage' || !detailObjectIds) return undefined;
-    const colors = new Map<string, readonly [number, number, number]>();
-    for (const objectId of detailObjectIds) {
-      const rootId = rootCityObjectId(cityjson, objectId);
-      if (colors.has(rootId)) continue;
-      const [red, green, blue] = usageRgb(cityjson.CityObjects[rootId]?.attributes?.function);
-      colors.set(rootId, [red / 255, green / 255, blue / 255]);
-    }
-    return colors;
-  }, [cityjson, detailObjectIds, mapColorMode]);
-
   const detailMesh = useMemo(
     () =>
       detailObjectIds
@@ -1791,14 +1860,12 @@ export default function MapView({
           texturesEnabled:
             localDetailLod === 'lod3' &&
             localBuildingDetailMode === 'lod3-textured',
-          objectColors: detailObjectColors,
           })
         : null,
     [
       cityjson,
       localDetailLod,
       localBuildingDetailMode,
-      detailObjectColors,
       detailObjectIds,
       reloadToken,
     ]
@@ -1936,12 +2003,12 @@ export default function MapView({
         return true;
       }
       if (handoff.sourceLod === 3) {
-        for (const entry of officialLoadedTilesRef.current[2].values()) {
-          if (entry.generation !== officialLod2Generation) continue;
+        for (const entry of officialLoadedTilesRef.current[1].values()) {
+          if (entry.generation !== officialLod1Generation) continue;
           const lowerHandoff = convertHamburgTileFeatureToCityJson(
             entry.tile,
             handoff.sourceFeatureId,
-            { sourceLod: 2 }
+            { sourceLod: 1 }
           );
           if (!lowerHandoff) continue;
           onHamburgBuildingHandoff?.(lowerHandoff);
@@ -1955,7 +2022,7 @@ export default function MapView({
       );
       return true;
     },
-    [officialLod2Generation, onHamburgBuildingHandoff]
+    [officialLod1Generation, onHamburgBuildingHandoff]
   );
   const handleOfficialBuildingClick = useCallback(
     (
@@ -2082,8 +2149,18 @@ export default function MapView({
             tileSize: 256,
             attribution:
               'Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung',
-            minzoom: 7,
+            minzoom: 5,
             maxzoom: 16,
+          },
+          hamburgBuildingFootprintUsage: {
+            type: 'raster',
+            tiles: [HAMBURG_BUILDING_FOOTPRINT_OVERVIEW_URL],
+            tileSize: 256,
+            bounds: HAMBURG_BUILDING_FOOTPRINT_BOUNDS,
+            attribution:
+              'Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung',
+            minzoom: 8,
+            maxzoom: 11,
           },
         },
         layers: [
@@ -2105,6 +2182,18 @@ export default function MapView({
             layout: { visibility: 'none' },
             paint: {
               'raster-opacity': 0.72,
+              'raster-fade-duration': 0,
+            },
+          },
+          {
+            id: 'hamburg-building-footprint-usage',
+            type: 'raster',
+            source: 'hamburgBuildingFootprintUsage',
+            minzoom: 8,
+            maxzoom: 12,
+            layout: { visibility: 'none' },
+            paint: {
+              'raster-opacity': 0.96,
               'raster-fade-duration': 0,
             },
           },
@@ -2549,7 +2638,8 @@ export default function MapView({
       if (
         !map.getLayer('topplus') ||
         !map.getLayer('satellite') ||
-        !map.getLayer('hamburg-building-footprints')
+        !map.getLayer('hamburg-building-footprints') ||
+        !map.getLayer('hamburg-building-footprint-usage')
       ) {
         return;
       }
@@ -2566,31 +2656,30 @@ export default function MapView({
         'raster-opacity',
         Math.max(0, Math.min(1, satelliteOpacity))
       );
-      const detailedTierReady =
-        buildingDetailMode === 'lod1'
-          ? officialLod1Ready
-          : buildingDetailMode === 'lod2'
-            ? officialLod2Ready
-            : buildingDetailMode === 'lod3-untextured' ||
-                buildingDetailMode === 'lod3-textured'
-              ? officialLod2Ready || officialLod3Ready
-              : false;
-      const waitingForDetailedTier =
-        buildingDetailMode !== 'lod0' && !detailedTierReady;
-      const footprintFade = waitingForDetailedTier
-        ? 0
-        : smoothZoomStep(15.4, 16.2, zoom);
       map.setLayoutProperty(
         'hamburg-building-footprints',
         'visibility',
         hamburgBuildingTilesEnabled ? 'visible' : 'none'
       );
+      const usageOverviewVisible =
+        hamburgBuildingTilesEnabled &&
+        zoom >= 8 &&
+        zoom < 12;
+      map.setLayoutProperty(
+        'hamburg-building-footprint-usage',
+        'visibility',
+        usageOverviewVisible ? 'visible' : 'none'
+      );
       map.setPaintProperty(
         'hamburg-building-footprints',
         'raster-opacity',
-        // Keep a citywide ALKIS safety net under opaque native tiles. A
-        // cached tile elsewhere must not make newly panned areas go blank.
-        Math.max(0, 0.72 * (1 - 0.35 * footprintFade))
+        // The WMS remains a low-zoom/loading safety net. The client-coloured
+        // vector footprint layer takes over from zoom 9 without a grey wash.
+        Math.max(
+          0,
+          (usageOverviewVisible ? 0 : zoom < 12 ? 0.72 : 0.12) *
+            (1 - 0.35 * citywideFootprintFade)
+        )
       );
     };
     if (map.isStyleLoaded()) apply();
@@ -2600,9 +2689,9 @@ export default function MapView({
     buildingDetailMode,
     hamburgBuildingTilesEnabled,
     officialLod1Ready,
-    officialLod2Ready,
     officialLod3Ready,
     satelliteOpacity,
+    citywideFootprintFade,
     zoom,
   ]);
 
@@ -2713,6 +2802,40 @@ export default function MapView({
     }
     const visibleSnapCandidates = [...visibleSnapCandidateMap.values()];
 
+    // Citywide flat LoD0 is a compact client-side vector layer, so building
+    // use can be coloured without changing the semantic colours of any 3D
+    // tier. It remains underneath LoD1/LoD3 as their loading safety net.
+    if (
+      hamburgBuildingTilesEnabled &&
+      (zoom < HAMBURG_FOOTPRINT_HANDOFF_FULL_ZOOM ||
+        waitingForOfficialDetailedTier)
+    ) {
+      layers.push(
+        new MVTLayer<{ u?: number }>({
+          id: 'hamburg-building-footprints-usage',
+          data: HAMBURG_BUILDING_FOOTPRINT_TILES_URL,
+          extent: HAMBURG_BUILDING_FOOTPRINT_BOUNDS,
+          minZoom: 12,
+          maxZoom: 14,
+          visibleMinZoom: 12,
+          tileSize: 512,
+          maxRequests: 4,
+          maxCacheSize: HAMBURG_FOOTPRINT_CACHE_TILES,
+          maxCacheByteSize: HAMBURG_FOOTPRINT_CACHE_BYTES,
+          binary: true,
+          filled: true,
+          stroked: false,
+          opacity: 1 - citywideFootprintFade,
+          getFillColor: (feature) =>
+            hamburgFootprintFillColor(feature.properties?.u),
+          pickable: false,
+          parameters: {
+            depthWriteEnabled: false,
+          } as any,
+        })
+      );
+    }
+
     // Keep the official b3dm/glTF payload native. Converting every visible tile
     // to CityJSON on the UI thread doubled projection and mesh work while
     // zooming. Only a clicked feature is converted for editing.
@@ -2725,7 +2848,8 @@ export default function MapView({
             gltf: { loadImages: false },
             tileset: {
               maximumScreenSpaceError: 12,
-              maximumMemoryUsage: 96,
+              maximumMemoryUsage: 64,
+              maxRequests: 3,
               throttleRequests: true,
             },
           },
@@ -2750,6 +2874,7 @@ export default function MapView({
                 officialLod2Profile === 'fallback' ? 16 : 8,
               maximumMemoryUsage:
                 officialLod2Profile === 'fallback' ? 96 : 192,
+              maxRequests: 3,
               throttleRequests: true,
             },
           },
@@ -2774,8 +2899,13 @@ export default function MapView({
               loadImages: buildingDetailMode === 'lod3-textured',
             },
             tileset: {
-              maximumScreenSpaceError: 4,
-              maximumMemoryUsage: 192,
+              // Textured LoD3 tiles are the renderer's largest memory users.
+              // A slightly coarser refinement target preserves the close-up
+              // textured model while avoiding dozens of decoded 20 cm
+              // textures being resident around the viewport at once.
+              maximumScreenSpaceError: 12,
+              maximumMemoryUsage: 64,
+              maxRequests: 2,
               throttleRequests: true,
             },
           },
@@ -2815,7 +2945,7 @@ export default function MapView({
             if (isMultiSelected) return [255, 180, 80, 120];
             const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
             if (!matched) return [120, 120, 130, 35]; // dimmed
-            return mapColorMode === 'usage' ? tintByUsage(d, 120) : tintByRoofType(d, 120);
+            return tintByUsage(d, 120);
           },
           getLineColor: (d) => {
             const isSelected = d.id === selectedId || (d.parentId && d.parentId === selectedId);
@@ -2833,7 +2963,11 @@ export default function MapView({
           extruded: false,
           pickable: buildingSelectionEnabled,
           updateTriggers: {
-            getFillColor: [selectedId, filteredIds, multiSelectedIds, mapColorMode],
+            getFillColor: [
+              selectedId,
+              filteredIds,
+              multiSelectedIds,
+            ],
             getLineColor: [selectedId, filteredIds, multiSelectedIds],
           },
           onClick: handleBuildingFootprintClick,
@@ -2931,7 +3065,7 @@ export default function MapView({
             if (isMultiSelected) return [255, 180, 80, 200];
             const matched = !filteredIds || filteredIds.has(d.id) || (d.parentId && filteredIds.has(d.parentId));
             if (!matched) return [120, 120, 130, 60]; // dimmed
-            return mapColorMode === 'usage' ? tintByUsage(d, 230) : tintByRoofType(d, 230);
+            return [184, 74, 44, 230];
           },
           extruded: true,
           opacity: blockOpacity,
@@ -2944,7 +3078,7 @@ export default function MapView({
             specularColor: [60, 64, 70],
           },
           updateTriggers: {
-            getFillColor: [selectedId, filteredIds, multiSelectedIds, mapColorMode],
+            getFillColor: [selectedId, filteredIds, multiSelectedIds],
           },
           onClick: handleBuildingFootprintClick,
         })
@@ -2952,8 +3086,8 @@ export default function MapView({
     }
 
     // Draw native photo geometry after semantic fallbacks. Until the textured
-    // tile is ready those fallbacks remain useful; once it arrives, later draw
-    // order prevents coincident LoD2 surfaces from covering the photographs.
+    // tile is ready LoD1 remains useful; once it arrives, later draw order
+    // prevents the fallback from covering the photographs.
     if (deferredTexturedLod3Layer) {
       layers.push(deferredTexturedLod3Layer);
     }
@@ -3321,7 +3455,7 @@ export default function MapView({
       );
     }
 
-    if ((zoom >= 15 || roadWorkspaceOpen) && roadVisuals.dividers.length > 0) {
+    if (roadMarkingsVisible && roadVisuals.dividers.length > 0) {
       layers.push(
         new PathLayer({
           id: 'cityjson-road-lane-markings',
@@ -3348,7 +3482,7 @@ export default function MapView({
       );
     }
 
-    if ((zoom >= 16 || roadWorkspaceOpen) && roadVisuals.directions.length > 0) {
+    if (roadDirectionsVisible && roadVisuals.directions.length > 0) {
       layers.push(
         new PolygonLayer({
           id: 'cityjson-road-direction-arrows',
@@ -3875,6 +4009,7 @@ export default function MapView({
     renderedRoadAreas,
     blockFootprints,
     blockOpacity,
+    citywideFootprintFade,
     renderedZones,
     detailMesh,
     localAssetOverlayMesh,
@@ -3887,6 +4022,8 @@ export default function MapView({
     onZoneSelect,
     roadPreviewAreas,
     roadVisuals,
+    roadDirectionsVisible,
+    roadMarkingsVisible,
     selectedRoadBandAreas,
     connectionRoadAreas,
     connectionJunctionAreas,
@@ -3915,12 +4052,12 @@ export default function MapView({
     roadOverlayOpacity,
     roadSnapCandidates,
     editFocusBbox,
-    mapColorMode,
     buildingSelectionEnabled,
     roadSelectionEnabled,
     roadWorkspaceOpen,
     planningSelectionEnabled,
     hamburgBuildingTilesEnabled,
+    waitingForOfficialDetailedTier,
     buildingDetailMode,
     officialLod1Active,
     officialLod1Generation,
@@ -4386,8 +4523,6 @@ export default function MapView({
         onSatelliteOpacityChange={onSatelliteOpacityChange}
         roadOverlayOpacity={roadOverlayOpacity}
         onRoadOverlayOpacityChange={onRoadOverlayOpacityChange}
-        mapColorMode={mapColorMode}
-        onMapColorModeChange={setMapColorMode}
         texturesEnabled={texturesEnabled}
         onTexturesEnabledChange={onTexturesEnabledChange}
         lod3Visible={officialDetailLod === 'lod3'}
@@ -4398,19 +4533,20 @@ export default function MapView({
               ? `${(detailMesh.maxLod ?? 0) >= 3 ? 'Untextured source LoD3' : 'Source LoD2'} · ${
                   detailMesh.objectCount
                 } nearby objects · ${
-                  mapColorMode === 'usage'
-                    ? 'building usage colours'
-                    : detailMesh.explicitOpeningSurfaceCount > 0
-                      ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
-                      : 'semantic roof, window, and wall colours'
+                  detailMesh.explicitOpeningSurfaceCount > 0
+                    ? `${detailMesh.explicitOpeningSurfaceCount} explicit window/door surfaces`
+                    : 'semantic roof, window, and wall colours'
                 } · ${treeDetailLabel}`
               : zoom >= BUILDING_DETAIL_MIN_ZOOM
                 ? `Source geometry unavailable here · ${treeDetailLabel}`
-                : `LoD0 footprints · lightweight LoD1 at 14 · source LoD2 at 15.25 · textured LoD3 at 18 · ${treeDetailLabel}`
+                : `Function-coloured LoD0 footprints · lightweight LoD1 at 13.25 · textured LoD3 at 18 · ${treeDetailLabel}`
         }
         focusActive={!!editFocusBbox}
         obscuredByInspector={roadWorkspaceOpen}
       />
+      {!layerControlOpen && !roadWorkspaceOpen && zones.length === 0 && (
+        <MapUsageLegend floating />
+      )}
     </>
   );
 }
@@ -4665,6 +4801,34 @@ function roadDirectionGlyph(direction?: string): string {
   return '—';
 }
 
+function MapUsageLegend({ floating = false }: { floating?: boolean }) {
+  return (
+    <div
+      className={`map-usage-legend ${
+        floating ? 'map-usage-legend--floating' : ''
+      }`}
+      role="list"
+      aria-label="Building usage legend"
+    >
+      {floating && (
+        <strong className="map-usage-legend__title">Building use</strong>
+      )}
+      {HAMBURG_USAGE_LEGEND_ITEMS.map(({ key, label }) => {
+        const [red, green, blue] = usageRgb(key);
+        return (
+          <span className="map-usage-legend__item" role="listitem" key={label}>
+            <i
+              aria-hidden="true"
+              style={{ backgroundColor: `rgb(${red}, ${green}, ${blue})` }}
+            />
+            {label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function MapLayerControl({
   open,
   onOpenChange,
@@ -4674,8 +4838,6 @@ function MapLayerControl({
   onSatelliteOpacityChange,
   roadOverlayOpacity,
   onRoadOverlayOpacityChange,
-  mapColorMode,
-  onMapColorModeChange,
   texturesEnabled,
   onTexturesEnabledChange,
   lod3Visible,
@@ -4691,8 +4853,6 @@ function MapLayerControl({
   onSatelliteOpacityChange?: (opacity: number) => void;
   roadOverlayOpacity: number;
   onRoadOverlayOpacityChange?: (opacity: number) => void;
-  mapColorMode: 'roof' | 'usage';
-  onMapColorModeChange: (mode: 'roof' | 'usage') => void;
   texturesEnabled: boolean;
   onTexturesEnabledChange: (enabled: boolean) => void;
   lod3Visible: boolean;
@@ -4740,27 +4900,8 @@ function MapLayerControl({
             </button>
           </div>
           <div className="map-layer-control__option">
-            <span>Building colours</span>
-            <div
-              className="map-layer-control__segment map-layer-control__segment--two"
-              role="group"
-              aria-label="Building colours"
-            >
-              <button
-                type="button"
-                className={mapColorMode === 'usage' ? 'is-active' : ''}
-                onClick={() => onMapColorModeChange('usage')}
-              >
-                Usage
-              </button>
-              <button
-                type="button"
-                className={mapColorMode === 'roof' ? 'is-active' : ''}
-                onClick={() => onMapColorModeChange('roof')}
-              >
-                Roof type
-              </button>
-            </div>
+            <span>Building usage</span>
+            <MapUsageLegend />
           </div>
           <label
             className={`map-layer-control__switch ${

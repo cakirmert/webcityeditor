@@ -88,19 +88,20 @@ export default function BuildingDetailPreview({
             LoD3
           </DetailButton>
         </div>
-        <label className={!textureOptionAvailable || lod !== 'lod3' ? 'is-disabled' : ''}>
-          <span>Textures</span>
-          <input
-            type="checkbox"
-            role="switch"
-            aria-label="Selected building textures"
-            checked={textureOptionAvailable && texturesEnabled}
-            disabled={!textureOptionAvailable || lod !== 'lod3'}
-            onChange={(event) =>
-              onTexturesEnabledChange(event.target.checked)
-            }
-          />
-        </label>
+        {textureOptionAvailable && lod === 'lod3' && (
+          <label>
+            <span>Textures</span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Selected building textures"
+              checked={texturesEnabled}
+              onChange={(event) =>
+                onTexturesEnabledChange(event.target.checked)
+              }
+            />
+          </label>
+        )}
       </div>
 
       <div className="building-detail-status">

@@ -54,6 +54,12 @@ data/
 !public/data/hamburg/hamburg-city-center-buildings.city.jsonl
 !public/data/hamburg/hamburg-city-center-roads.city.json
 !public/data/hamburg/hamburg-city-center-roads.osm
+!public/data/hamburg/buildings/
+!public/data/hamburg/buildings/catalog.json
+!public/data/hamburg/buildings/raster/
+!public/data/hamburg/buildings/raster/**/*.png
+!public/data/hamburg/buildings/tiles/
+!public/data/hamburg/buildings/tiles/**/*.pbf
 !public/data/hamburg/roads/
 !public/data/hamburg/roads/catalog.json
 !public/data/hamburg/roads/tiles/
