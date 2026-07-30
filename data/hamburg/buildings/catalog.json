@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "format": "mvt",
+  "layer": "buildings",
+  "tiles": "tiles/{z}/{x}/{y}.pbf",
+  "overviewTiles": "raster/{z}/{x}/{y}.png",
+  "source": {
+    "title": "INSPIRE HH Geb\u00e4ude ALKIS",
+    "url": "https://daten-hamburg.de/inspire/hh_inspire_gebaeude_2d_alkis/INSPIRE_HH_Gebaeude_2D_ALKIS_2020-07-15.zip",
+    "landingPage": "https://suche.transparenz.hamburg.de/dataset/inspire-hh-gebaeude-alkis12",
+    "snapshot": "2020-07-15",
+    "crs": "EPSG:25832"
+  },
+  "featureCount": 453216,
+  "skippedCount": 1355,
+  "usageCounts": {
+    "residential": 264861,
+    "mixed": 70789,
+    "commercial": 5535,
+    "office": 5458,
+    "industrial": 27041,
+    "public": 79523,
+    "unknown": 9
+  },
+  "usageProperty": "u",
+  "usageLegend": {
+    "0": "residential",
+    "1": "mixed",
+    "2": "commercial",
+    "3": "office",
+    "4": "industrial",
+    "5": "public",
+    "6": "unknown"
+  },
+  "bounds": [
+    8.429248601254255,
+    53.39768602821328,
+    10.319317135512419,
+    53.96219501816164
+  ],
+  "minZoom": 8,
+  "rasterMaxZoom": 11,
+  "vectorMinZoom": 12,
+  "maxZoom": 14,
+  "rasterTileCount": 123,
+  "rasterBytes": 1360686,
+  "rasterSeconds": 85.31,
+  "vectorTileCount": 5116,
+  "vectorNonemptyTileCount": 565,
+  "vectorEncodedFeatureCount": 1373965,
+  "vectorBytes": 38588135,
+  "vectorSeconds": 243.06,
+  "tileCount": 5239,
+  "totalBytes": 39948821
+}
