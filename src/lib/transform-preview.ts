@@ -1,6 +1,6 @@
 import proj4 from 'proj4';
 import type { CityJsonDocument } from '../types';
-import { extractFootprints } from './footprints';
+import { extractFootprints, type Footprint } from './footprints';
 import { detectCrs } from './projection';
 
 export interface PendingTransform {
@@ -24,12 +24,23 @@ export function computeTransformedFootprint(
   doc: CityJsonDocument,
   pending: PendingTransform
 ): { polygon: [number, number][]; height: number } | null {
+  const fp = extractFootprints(doc).find((candidate) => candidate.id === pending.id);
+  return fp ? computeTransformedFootprintFromFootprint(doc, pending, fp) : null;
+}
+
+/**
+ * Fast transform preview for callers that already keep an extracted footprint
+ * cache. Map dragging uses this path so one selected building can move without
+ * re-projecting every building in the loaded Hamburg document on each frame.
+ */
+export function computeTransformedFootprintFromFootprint(
+  doc: CityJsonDocument,
+  pending: PendingTransform,
+  fp: Footprint
+): { polygon: [number, number][]; height: number } | null {
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
-
-  const fps = extractFootprints(doc);
-  const fp = fps.find((f) => f.id === pending.id);
-  if (!fp) return null;
+  if (fp.id !== pending.id) return null;
 
   // Project the ring to CRS metres
   const projected: [number, number][] = fp.polygon.map(

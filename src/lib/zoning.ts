@@ -1,6 +1,7 @@
 export interface ParcelZone {
   id: string;
   polygon: [number, number][];
+  holes?: [number, number][][];
   allowedTypes: string[];
   label: string;
   color: [number, number, number, number];
@@ -26,10 +27,17 @@ export interface PlanningProvider {
 export const HAMBURG_XPLAN_BAUGEBIET_URL =
   'https://api.hamburg.de/datasets/v1/xplan/collections/bp_baugebietsteilflaeche/items';
 
+export const HAMBURG_FNP_OAF_URL =
+  'https://api.hamburg.de/datasets/v1/fnp/collections/fnp_nutzung/items';
+
 export const HAMBURG_FNP_WFS_URL = 'https://geodienste.hamburg.de/HH_WFS_FNP';
 
 const HAMBURG_WGS84_BBOX: Wgs84Bbox = [8.1, 53.35, 10.4, 54.05];
+export const HAMBURG_CITYWIDE_PLANNING_BBOX: Wgs84Bbox = [
+  ...HAMBURG_WGS84_BBOX,
+];
 export const PLANNING_PAGE_SIZE = 250;
+export const CITYWIDE_FNP_PAGE_SIZE = 10_000;
 export const MAX_PLANNING_VIEWPORT_SPAN_METERS = 4_500;
 export const MAX_PLANNING_FEATURES_PER_SOURCE = 20_000;
 
@@ -80,6 +88,20 @@ export function buildHamburgXPlanBaugebietUrl(
   });
   if (offset > 0) params.set('offset', String(offset));
   return `${HAMBURG_XPLAN_BAUGEBIET_URL}?${params.toString()}`;
+}
+
+export function buildHamburgFnpOafUrl(
+  bbox: Wgs84Bbox = HAMBURG_CITYWIDE_PLANNING_BBOX,
+  limit = CITYWIDE_FNP_PAGE_SIZE,
+  offset = 0
+): string {
+  const params = new URLSearchParams({
+    f: 'json',
+    bbox: bbox.join(','),
+    limit: String(limit),
+  });
+  if (offset > 0) params.set('offset', String(offset));
+  return `${HAMBURG_FNP_OAF_URL}?${params.toString()}`;
 }
 
 export function buildHamburgFnpNutzungUrl(
@@ -149,6 +171,49 @@ export function limitPlanningBboxSpan(
     centerLng + halfLng,
     centerLat + halfLat,
   ];
+}
+
+/**
+ * Prefer the live map location even when an overview must be reduced to a
+ * safe query window. Falling back to the loaded document first pinned the
+ * planning overlay to Hamburg's old centre seed after the map moved.
+ */
+export function choosePlanningQueryBbox({
+  viewportBbox,
+  footprintBbox,
+}: {
+  viewportBbox: Wgs84Bbox | null;
+  footprintBbox: Wgs84Bbox | null;
+}): Wgs84Bbox | null {
+  const viewportQueryBbox = viewportBbox
+    ? expandPlanningBbox(viewportBbox)
+    : null;
+  const footprintQueryBbox = footprintBbox
+    ? expandPlanningBbox(footprintBbox)
+    : null;
+
+  if (viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)) {
+    return isPlanningBboxLoadable(viewportQueryBbox)
+      ? viewportQueryBbox
+      : limitPlanningBboxSpan(viewportQueryBbox);
+  }
+  if (footprintQueryBbox && getPlanningProviderForBbox(footprintQueryBbox)) {
+    return isPlanningBboxLoadable(footprintQueryBbox)
+      ? footprintQueryBbox
+      : limitPlanningBboxSpan(footprintQueryBbox);
+  }
+  return viewportQueryBbox ?? footprintQueryBbox;
+}
+
+function expandPlanningBbox(
+  bbox: Wgs84Bbox,
+  ratio = 0.15,
+  minPad = 0.002
+): Wgs84Bbox {
+  const [west, south, east, north] = bbox;
+  const lngPad = Math.max((east - west) * ratio, minPad);
+  const latPad = Math.max((north - south) * ratio, minPad);
+  return [west - lngPad, south - latPad, east + lngPad, north + latPad];
 }
 
 function assertPlanningBboxLoadable(bbox: Wgs84Bbox): void {
@@ -227,6 +292,81 @@ export async function fetchHamburgPlanningZones(
   // queries apply their own source priority, so XPlan remains authoritative
   // wherever both sources overlap.
   return [...fnpZones, ...xplanZones];
+}
+
+/**
+ * Load Hamburg's broad FNP coverage once. At roughly 2,842 features this is
+ * small enough for one browser layer and avoids dozens of slow, uncached WMS
+ * image requests across the overview.
+ */
+export async function fetchHamburgCitywideFnpZones(
+  fetchImpl: typeof fetch = fetch,
+  options: PlanningFetchOptions = {}
+): Promise<ParcelZone[]> {
+  const pageSize = Math.floor(
+    options.pageSize ?? CITYWIDE_FNP_PAGE_SIZE
+  );
+  const maxFeatures = Math.floor(
+    options.maxFeatures ?? MAX_PLANNING_FEATURES_PER_SOURCE
+  );
+  if (!Number.isFinite(pageSize) || pageSize < 1) {
+    throw new Error('Planning page size must be a positive integer.');
+  }
+  if (!Number.isFinite(maxFeatures) || maxFeatures < 1) {
+    throw new Error('Planning feature limit must be a positive integer.');
+  }
+
+  let nextUrl: string | null = buildHamburgFnpOafUrl(
+    HAMBURG_CITYWIDE_PLANNING_BBOX,
+    pageSize
+  );
+  const features: GeoJsonFeature[] = [];
+  const seenUrls = new Set<string>();
+  const seenPageSignatures = new Set<string>();
+  while (nextUrl) {
+    if (seenUrls.has(nextUrl)) {
+      throw planningPaginationError('FNP OGC API returned a repeated next-page URL');
+    }
+    seenUrls.add(nextUrl);
+    const page = await fetchPlanningPage(nextUrl, 'FNP OGC API', fetchImpl);
+    assertPlanningPageProgress(
+      page.features,
+      'hamburg-fnp-nutzung',
+      seenPageSignatures
+    );
+    appendPlanningFeatures(features, page.features, maxFeatures, 'FNP');
+
+    const linkedNext = nextPlanningLink(page, nextUrl);
+    const numberMatched = finiteCount(page.numberMatched);
+    const hasMoreByCount =
+      numberMatched !== null && features.length < numberMatched;
+    const hasPossiblyFullPage =
+      numberMatched === null && page.features.length >= pageSize;
+    if (linkedNext) {
+      nextUrl = linkedNext;
+    } else if (hasMoreByCount || hasPossiblyFullPage) {
+      if (page.features.length === 0) {
+        throw planningPaginationError(
+          'FNP OGC API reported more features but returned an empty page'
+        );
+      }
+      nextUrl = buildHamburgFnpOafUrl(
+        HAMBURG_CITYWIDE_PLANNING_BBOX,
+        pageSize,
+        features.length
+      );
+    } else {
+      nextUrl = null;
+    }
+  }
+
+  return zonesFromPlanningGeoJson(
+    {
+      type: 'FeatureCollection',
+      features: dedupePlanningFeatures(features, 'hamburg-fnp-nutzung'),
+    },
+    'hamburg-fnp-nutzung'
+  );
 }
 
 export async function fetchHamburgXPlanZones(
@@ -435,11 +575,19 @@ export function zonesFromPlanningGeoJson(
     const featureIdentity = planningFeatureIdentity(feature);
     if (seenFeatures.has(featureIdentity)) return;
     seenFeatures.add(featureIdentity);
-    const rings = ringsFromGeometry(feature.geometry);
-    rings.forEach((polygon, ringIndex) => {
-      if (polygon.length < 4) return;
+    const polygons = polygonsFromGeometry(feature.geometry);
+    polygons.forEach(({ outer, holes }, polygonIndex) => {
+      if (outer.length < 4) return;
       zones.push(
-        zoneFromFeature(feature, polygon, source, featureIdentity, ringIndex, rings.length)
+        zoneFromFeature(
+          feature,
+          outer,
+          holes,
+          source,
+          featureIdentity,
+          polygonIndex,
+          polygons.length
+        )
       );
     });
   });
@@ -453,7 +601,7 @@ export function findZoneForPoint(
 ): ParcelZone | null {
   let bestZone: ParcelZone | null = null;
   for (const zone of zones) {
-    if (!pointInPolygon(point, zone.polygon)) continue;
+    if (!pointInZone(point, zone)) continue;
     if (!bestZone || planningSourcePriority(zone.source) > planningSourcePriority(bestZone.source)) {
       bestZone = zone;
     }
@@ -470,7 +618,7 @@ export function findNearestZoneForPoint(
   let bestDistance = Number.POSITIVE_INFINITY;
 
   for (const zone of zones) {
-    const distance = distanceToPolygonMeters(point, zone.polygon);
+    const distance = distanceToZoneMeters(point, zone);
     if (
       distance < bestDistance - 1e-6 ||
       (Math.abs(distance - bestDistance) <= 1e-6 &&
@@ -501,6 +649,7 @@ export function validateBuildingType(
 function zoneFromFeature(
   feature: GeoJsonFeature,
   polygon: [number, number][],
+  holes: [number, number][][],
   source: HamburgPlanningSource,
   featureIdentity: string,
   ringIndex: number,
@@ -512,6 +661,7 @@ function zoneFromFeature(
   return {
     id: `${source}:${featureIdentity}${ringCount > 1 ? `:polygon-${ringIndex + 1}` : ''}`,
     polygon,
+    holes: holes.length > 0 ? holes : undefined,
     allowedTypes,
     label,
     color: colorForAllowedTypes(allowedTypes, label),
@@ -631,24 +781,37 @@ function isFeatureCollection(input: unknown): input is GeoJsonFeatureCollection 
   );
 }
 
-function ringsFromGeometry(geometry: GeoJsonFeature['geometry']): [number, number][][] {
+interface PlanningPolygon {
+  outer: [number, number][];
+  holes: [number, number][][];
+}
+
+function polygonsFromGeometry(
+  geometry: GeoJsonFeature['geometry']
+): PlanningPolygon[] {
   if (!geometry || typeof geometry !== 'object') return [];
   if (geometry.type === 'Polygon') {
-    const ring = normalizeRing(firstPolygonRing(geometry.coordinates));
-    return ring ? [ring] : [];
+    const polygon = normalizePolygon(geometry.coordinates);
+    return polygon ? [polygon] : [];
   }
   if (geometry.type === 'MultiPolygon') {
     if (!Array.isArray(geometry.coordinates)) return [];
     return geometry.coordinates
-      .map((polygon) => normalizeRing(firstPolygonRing(polygon)))
-      .filter((ring): ring is [number, number][] => !!ring);
+      .map(normalizePolygon)
+      .filter((polygon): polygon is PlanningPolygon => !!polygon);
   }
   return [];
 }
 
-function firstPolygonRing(value: unknown): unknown {
+function normalizePolygon(value: unknown): PlanningPolygon | null {
   if (!Array.isArray(value)) return null;
-  return value[0];
+  const outer = normalizeRing(value[0]);
+  if (!outer) return null;
+  const holes = value
+    .slice(1)
+    .map(normalizeRing)
+    .filter((ring): ring is [number, number][] => !!ring);
+  return { outer, holes };
 }
 
 function normalizeRing(value: unknown): [number, number][] | null {
@@ -684,6 +847,26 @@ function pointInPolygon(point: [number, number], polygon: [number, number][]): b
     }
   }
   return inside;
+}
+
+function pointInZone(point: [number, number], zone: ParcelZone): boolean {
+  return (
+    pointInPolygon(point, zone.polygon) &&
+    !(zone.holes ?? []).some((hole) => pointInPolygon(point, hole))
+  );
+}
+
+function distanceToZoneMeters(
+  point: [number, number],
+  zone: ParcelZone
+): number {
+  if (pointInZone(point, zone)) return 0;
+  // A hole is explicitly outside this zone. Do not let the nearby-zone click
+  // tolerance snap a point in that excluded area back to its enclosing zone.
+  if ((zone.holes ?? []).some((hole) => pointInPolygon(point, hole))) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return distanceToPolygonMeters(point, zone.polygon);
 }
 
 function distanceToPolygonMeters(point: [number, number], polygon: [number, number][]): number {

@@ -2,31 +2,54 @@
 export const BUILDING_BLOCK_MIN_ZOOM = 14;
 export const BUILDING_BLOCK_FULL_ZOOM = 15.25;
 
-/** Source LoD2 replaces the cheap blocks progressively through the middle range. */
+/** Source LoD2 replaces the cheap LoD1 blocks at this zoom. */
 export const BUILDING_DETAIL_MIN_ZOOM = 15.25;
 export const BUILDING_DETAIL_FULL_ZOOM = 18;
 
-/** Textured Hamburg LoD3 is deliberately reserved for a very close street view. */
-export const BUILDING_LOD3_MIN_ZOOM = 18.25;
+/**
+ * Keep true LoD3 just beyond the completed LoD2 transition. This avoids
+ * starting the high-detail/photo stream while the user is still navigating
+ * the ordinary semantic city view.
+ */
+export const BUILDING_LOD3_MIN_ZOOM = 18;
 
 export type BuildingMapDetailMode =
   | 'lod0'
+  | 'lod1'
   | 'lod2'
   | 'lod3-untextured'
   | 'lod3-textured';
 
 /**
- * Close zoom always upgrades to the highest available LoD3 geometry. Photo
- * tiles are a separate, explicit opt-in so reaching LoD3 never starts their
- * network requests by itself.
+ * Close zoom always upgrades to the highest available LoD3 geometry. The map
+ * defaults its texture control on, while this pure resolver still supports an
+ * explicit untextured choice.
  */
 export function buildingMapDetailMode(
   zoom: number,
   texturesEnabled: boolean
 ): BuildingMapDetailMode {
-  if (zoom < BUILDING_DETAIL_MIN_ZOOM) return 'lod0';
+  if (zoom < BUILDING_BLOCK_MIN_ZOOM) return 'lod0';
+  if (zoom < BUILDING_DETAIL_MIN_ZOOM) return 'lod1';
   if (zoom < BUILDING_LOD3_MIN_ZOOM) return 'lod2';
   return texturesEnabled ? 'lod3-textured' : 'lod3-untextured';
+}
+
+/**
+ * Road editing prioritises the lighter semantic city context. Preserve the
+ * saved texture preference so closing Roads immediately restores LoD3.
+ */
+export function capBuildingMapDetailForRoadEditing(
+  mode: BuildingMapDetailMode,
+  roadEditing: boolean
+): BuildingMapDetailMode {
+  if (
+    roadEditing &&
+    (mode === 'lod3-untextured' || mode === 'lod3-textured')
+  ) {
+    return 'lod2';
+  }
+  return mode;
 }
 
 export type EditorAssetMapDetailMode =
@@ -41,10 +64,12 @@ export type EditorAssetMapDetailMode =
  */
 export function editorAssetMapDetailMode(
   zoom: number,
-  texturesEnabled: boolean
+  texturesEnabled: boolean,
+  roadEditing = false
 ): EditorAssetMapDetailMode {
   const mapMode = buildingMapDetailMode(zoom, texturesEnabled);
-  if (mapMode === 'lod0') return 'block';
+  if (mapMode === 'lod0' || mapMode === 'lod1') return 'block';
+  if (roadEditing) return 'lod3-untextured';
   return mapMode === 'lod3-textured'
     ? 'lod3-textured'
     : 'lod3-untextured';

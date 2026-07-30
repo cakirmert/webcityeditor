@@ -92,9 +92,12 @@ export function useImportExport(
       });
       const connection: CatalogConnection = {
         baseUrl: normalizeCatalogBaseUrl(catalogUrl).toString(),
+        catalogUrl,
         crs: loaded.crs,
         loadedTiles: new Map(loaded.tiles.map((tile) => [tile.catalog.id, tile])),
         loadMode: options.loadMode ?? 'viewport',
+        catalogType: loaded.catalogType,
+        readOnly: loaded.readOnly,
       };
       setCatalogConnection(connection);
       setCatalogStatus({
@@ -102,7 +105,9 @@ export function useImportExport(
         message:
           options.loadMode === 'all'
             ? `${tileCount} strict CityJSONSeq tile${tileCount === 1 ? '' : 's'} loaded from the full catalog`
-            : `${tileCount} strict CityJSONSeq tile${tileCount === 1 ? '' : 's'} loaded`,
+            : `${tileCount} strict CityJSONSeq tile${tileCount === 1 ? '' : 's'} loaded${
+                loaded.readOnly ? ' from static hosting' : ''
+              }`,
       });
       setPrimitiveValidation({
         kind: 'valid',

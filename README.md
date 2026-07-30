@@ -1,17 +1,17 @@
 # City Editor
 
-City Editor is a touch-friendly map editor for Hamburg buildings, roads, and planning data. Open the built-in city-centre example, tap an object, make a change, validate it, and export one editable CityJSON file.
+City Editor is a touch-friendly map editor for Hamburg buildings, roads, and planning data. The default map shows Hamburg's official ALKIS footprint overview, adds lightweight LoD1 blocks, switches to semantic-coloured LoD2 and then textured LoD3 as you zoom, streams our complete CityJSON road catalog from GitHub Pages, and turns a tapped streamed building into a local editable CityJSON copy on demand.
 
 **[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
 
-The demo starts automatically with 1,353 buildings, 1,608 roads, and 1,042 junctions. Close zooms show semantic LoD3 geometry without photographs by default; **Photo textures** can stream Hamburg’s official imagery for the LoD3 close view. The editable roads, attributes, and saved changes remain in CityJSON.
+The demo starts automatically with lightweight Hamburg-wide ALKIS raster footprints. Native LoD1 blocks fade in at zoom 14, native LoD2 replaces them at zoom 15.25 with the editor's red-roof/cream-wall colours, and native LoD3 takes over at zoom 18 with **Photo textures** enabled by default. Only road tiles for the visible viewport and their exact seam dependencies enter memory; the complete catalog contains 344,265 roads and 206,426 linked junctions. Roads and buildings copied for editing remain ordinary local CityJSON.
 
 ![City Editor showing the Hamburg CityJSON overview](assets/readme/city-overview.jpg)
 
 ## First minute
 
 1. Drag the map to move and use the wheel, pinch gesture, or `+` and `−` buttons to zoom.
-2. Tap a building to inspect it, or choose **Roads** and tap a road.
+2. Zoom to LoD2 or LoD3, then tap a building to copy that one streamed feature into local CityJSON and inspect it, or choose **Roads** and tap a loaded road.
 3. Use **Map layers** for TopPlus, satellite comparison, opacity, and building-colour choices.
 4. Unsaved changes are shown in the top bar. Choose **Export CityJSON** when you want a portable snapshot.
 
@@ -23,7 +23,7 @@ Open **Map layers** in the upper-left of the map.
 - **Satellite** is useful for checking building footprints and road alignment.
 - **Satellite image** and **Road surfaces** have separate opacity sliders.
 - **Building colours** defaults to **Roof type**. **Usage** also understands Hamburg’s official ALKIS function codes.
-- **Photo textures** is off by default and becomes available only in the close LoD3 view. With it off, LoD3 roofs, walls, windows, and doors retain distinct semantic colours.
+- **Photo textures** is on by default and becomes available only in the close LoD3 view. With it off, LoD3 roofs, walls, windows, and doors retain distinct semantic colours.
 - The status at the bottom explains which building detail level is currently visible.
 
 > **Screenshot to add — `assets/readme/map-layers.jpg`**
@@ -31,7 +31,7 @@ Open **Map layers** in the upper-left of the map.
 
 ## Inspect and edit a building
 
-1. Tap a building. Its outline turns orange and the building inspector opens on the right.
+1. At LoD2 or LoD3, tap a building. That one `.b3dm` batch feature becomes a passive local CityJSON edit proxy while the normal remote LoD remains visible. Saving a geometry or attribute edit promotes the local copy and hides only its remote duplicate. A selected LoD2 proxy automatically upgrades when its LoD3 tile arrives. The raster footprint overview is intentionally not pickable.
 2. Use **By surface**, **By object**, or **By usage** above the preview to understand the model.
 3. Change attributes such as measured height, storeys, function, or roof type.
 4. Choose **Start editing position** to move the building on the map.
@@ -40,7 +40,7 @@ Open **Map layers** in the upper-left of the map.
 
 ![Building attributes and highest-detail preview](assets/readme/building-editor.jpg)
 
-The loaded source geometry is protected. **Make editable (replace with parametric)** deliberately replaces it with a shape that can change roof geometry, windows, doors, overhangs, and subdivisions. Ordinary attribute edits do not need this conversion.
+The local copied mesh can be moved and its attributes can be edited immediately. **Make editable (replace with parametric)** deliberately replaces it with a shape that can change roof geometry, windows, doors, overhangs, and subdivisions. Ordinary attribute or position edits do not need that second conversion.
 
 The selected-building viewer loads only the selected CityJSON object. Use its **LoD2 / LoD3** control to compare source tiers and its separate **Textures** switch when that building contains a photo atlas; textures start off. Their photographed windows and doors are not automatically editable openings. Buildings are attached to the flat editor map using each building’s surveyed ground height.
 
@@ -63,6 +63,7 @@ The selected-building viewer loads only the selected CityJSON object. Use its **
 ## Edit an existing road
 
 1. Choose **Roads** in the top bar.
+   The remote city temporarily uses semantic LoD2 while this workspace is open, which keeps road interaction responsive; closing Roads restores the saved LoD3/photo setting.
 2. Tap a coloured road surface on the map, then choose **Edit road**.
 3. Tap a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
 4. Change its type, surface, width, direction, or order with the large controls. Lane dividers and direction arrows update from the road bands.
@@ -90,8 +91,8 @@ Attribute-only changes preserve imported osm2streets polygons and vertices. Movi
 
 ## Use the planning overlay
 
-1. Choose **Planning** in the top bar. It can be opened from the overview; the query is safely limited around the map centre.
-2. Wait for the planning legend and coloured areas to appear.
+1. Choose **Planning** in the top bar. Hamburg's official FNP areas load once for the whole city, including at overview zoom.
+2. Wait for the planning legend. Detailed XPlan polygons are added for close views and refresh automatically after you move outside the loaded detail window.
 3. Tap an area to inspect its planning category.
 4. Open **Map layers** if you need a different basemap or opacity while comparing the plan.
 5. Choose **Planning** again, or use the legend’s hide action, to turn the overlay off.
@@ -138,6 +139,6 @@ npm ci
 npm run dev
 ```
 
-Open the local address printed in the terminal. The committed demo is enough for the default workflow.
+Open the local address printed in the terminal. The committed static road catalog is enough for the default road workflow; the building context is fetched from Hamburg's CORS-enabled 3D Tiles service.
 
-The buildings come from Hamburg’s [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).
+The citywide overview comes from Hamburg’s official ALKIS building WMS, the intermediate blocks from its native LoD1 tiles, normal detail from the [official LoD2 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg1), and close detail from the [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Planning loads the official citywide FNP feature collection once and adds live viewport-local XPlan detail. Close views add measured trees from the official [3D street-tree register](https://metaver.de/trefferanzeige?docuuid=24513F73-D928-450C-A334-E30037945729). TopPlusOpen is provided by Germany’s Federal Agency for Cartography and Geodesy. Architecture, data preparation, contributor commands, and the remaining roadmap are in [PROJECT.md](PROJECT.md).

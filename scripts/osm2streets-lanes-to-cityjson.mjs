@@ -24,6 +24,9 @@ const sourceNetwork = args.network
   ? JSON.parse(await readFile(resolve(String(args.network)), 'utf8'))
   : null;
 const roadMetadataById = sourceNetwork ? readRoadMetadata(sourceNetwork) : new Map();
+const roadMapEdgeEndpointsById = sourceNetwork
+  ? readRoadMapEdgeEndpoints(sourceNetwork, roadMetadataById)
+  : new Map();
 const cityjson = convertLanePolygonsToCityJson(
   JSON.parse(await readFile(lanesPath, 'utf8')),
   {
@@ -31,6 +34,7 @@ const cityjson = convertLanePolygonsToCityJson(
     sourceLabel,
     idPrefix,
     roadMetadataById,
+    roadMapEdgeEndpointsById,
     sourceNetwork,
   }
 );
@@ -69,6 +73,7 @@ function convertLanePolygonsToCityJson(geojson, options) {
         group,
         options.idPrefix,
         options.roadMetadataById,
+        options.roadMapEdgeEndpointsById,
         options.sourceNetwork
       )
     )
@@ -252,7 +257,13 @@ function groupLaneFeatures(features) {
   return [...groups.values()].sort((a, b) => String(a.roadId).localeCompare(String(b.roadId)));
 }
 
-function projectRoadGroup(group, idPrefix, roadMetadataById, sourceNetwork) {
+function projectRoadGroup(
+  group,
+  idPrefix,
+  roadMetadataById,
+  roadMapEdgeEndpointsById,
+  sourceNetwork
+) {
   const cityObjectId = cityObjectIdForRoad(group.roadId, idPrefix);
   const roadMetadata = roadMetadataById.get(String(group.roadId)) ?? null;
   const sourceOsmWayIds = uniqueValues([
@@ -295,6 +306,8 @@ function projectRoadGroup(group, idPrefix, roadMetadataById, sourceNetwork) {
     cityObjectId,
     roadMetadata,
     sourceCenterlineWgs84: roadCenterlineWgs84(roadMetadata, sourceNetwork),
+    sourceMapEdgeEndpointsWgs84:
+      roadMapEdgeEndpointsById.get(String(group.roadId)) ?? null,
     sourceOsmWayIds,
     surfaces,
   };
@@ -333,6 +346,9 @@ function roadObjectFromProjectedGroup(group, transform, vertices, generatedAt) {
       _source: 'osm2streets',
       _osm2streetsRoadId: String(group.roadId),
       _sourceCenterlineWgs84: group.sourceCenterlineWgs84,
+      ...(group.sourceMapEdgeEndpointsWgs84
+        ? { _sourceMapEdgeEndpointsWgs84: group.sourceMapEdgeEndpointsWgs84 }
+        : {}),
       _osmWayIds: sourceOsmWayIds,
       _osm2streetsLaneCount: group.surfaces.length,
       _highwayType: group.roadMetadata?.highway_type ?? null,
@@ -501,6 +517,47 @@ function readRoadMetadata(network) {
     if (!Array.isArray(entry) || entry.length < 2 || !isObject(entry[1])) continue;
     result.set(String(entry[0]), entry[1]);
   }
+  return result;
+}
+
+function readRoadMapEdgeEndpoints(network, roadMetadataById) {
+  const result = new Map();
+  const toWgs84 = networkPointToWgs84(network);
+  if (!toWgs84 || !Array.isArray(network?.intersections)) return result;
+
+  for (const entry of network.intersections) {
+    if (!Array.isArray(entry) || !isObject(entry[1])) continue;
+    const intersectionId = String(entry[0]);
+    const intersection = entry[1];
+    if (intersection.kind !== 'MapEdge' || !Array.isArray(intersection.roads)) continue;
+
+    for (const rawRoadId of intersection.roads) {
+      const roadId = String(rawRoadId);
+      const road = roadMetadataById.get(roadId);
+      if (!road) continue;
+      const endpoint =
+        String(road.src_i) === intersectionId
+          ? 'start'
+          : String(road.dst_i) === intersectionId
+            ? 'end'
+            : null;
+      if (!endpoint) continue;
+      const referencePoints = road.reference_line?.pts ?? road.center_line?.pts;
+      if (!Array.isArray(referencePoints) || referencePoints.length < 2) continue;
+      const point = endpoint === 'start' ? referencePoints[0] : referencePoints.at(-1);
+      if (
+        !isObject(point) ||
+        !Number.isFinite(Number(point.x)) ||
+        !Number.isFinite(Number(point.y))
+      ) {
+        continue;
+      }
+      const endpoints = result.get(roadId) ?? {};
+      endpoints[endpoint] = toWgs84(point);
+      result.set(roadId, endpoints);
+    }
+  }
+
   return result;
 }
 

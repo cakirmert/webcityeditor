@@ -50,9 +50,14 @@ import type { SplitAxis } from './lib/subdivision';
 
 export interface CatalogConnection {
   baseUrl: string;
+  /** Original catalog endpoint or static catalog JSON URL used for viewport reads. */
+  catalogUrl?: string;
   crs: string;
   loadedTiles: Map<string, CityJsonSeqLoadedTile>;
   loadMode?: 'viewport' | 'all';
+  catalogType?: string;
+  /** Static GitHub Pages catalogs can be edited in memory, but not written back. */
+  readOnly?: boolean;
 }
 
 export type PrimitiveValidationState = {

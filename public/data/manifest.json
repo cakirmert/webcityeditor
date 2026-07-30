@@ -2,7 +2,7 @@
   "cityjsonSamples": [
     {
       "label": "Hamburg city center - official LoD2 buildings",
-      "description": "Same-origin CityJSONSeq LoD2 building showcase from the Elbe waterfront through Rathaus to Jungfernstieg. The default app merges it with the committed matching osm2streets CityJSON roads; no OSM XML conversion runs at startup.",
+      "description": "Local editable fallback from the Elbe waterfront through Rathaus to Jungfernstieg. The default citywide display streams official Hamburg LoD1, LoD2, and LoD3 3D Tiles and materializes any picked detailed remote building into CityJSON on demand.",
       "url": "data/hamburg/hamburg-city-center-buildings.city.jsonl",
       "enabled": true,
       "checkAvailability": true,
@@ -10,7 +10,7 @@
     },
     {
       "label": "Hamburg city center - editable CityJSON roads",
-      "description": "Precomputed osm2streets lane surfaces stored as CityJSON Transportation Road objects. This is the default and exported road source of truth.",
+      "description": "Compact precomputed center sample retained for manual loading. The default app now viewport-streams the complete static gzip CityJSONSeq catalog.",
       "url": "data/hamburg/hamburg-city-center-roads.city.json",
       "enabled": true,
       "checkAvailability": true,
@@ -25,16 +25,41 @@
       "source": "test-fixtures/osm2streets/hamburg-short-intersection.osm"
     }
   ],
+  "streamingSources": [
+    {
+      "label": "Hamburg citywide official LoD1 overview",
+      "url": "https://daten-hamburg.de/gdi3d/datasource-data/LoD1/tileset.json",
+      "format": "3D Tiles b3dm",
+      "editing": "Read-only overview source; zoom to LoD2 or LoD3 to materialize a building for editing."
+    },
+    {
+      "label": "Hamburg citywide official LoD2 buildings",
+      "url": "https://daten-hamburg.de/gdi3d/datasource-data/LoD2/tileset.json",
+      "format": "3D Tiles b3dm",
+      "editing": "Semantic roof/wall colours are applied in the streamed tile; the picked batch feature is converted into local EPSG:25832 CityJSON and its remote duplicate is hidden."
+    },
+    {
+      "label": "Complete Hamburg osm2streets CityJSON roads",
+      "url": "data/hamburg/roads/catalog.json",
+      "format": "930 static 1 km CityJSONSeq gzip tiles; 344,265 roads and 206,426 linked intersections",
+      "editing": "Visible tiles are editable in memory; use Save local or Export CityJSON because GitHub Pages is read-only."
+    }
+  ],
   "planningLayers": [
+    {
+      "label": "Hamburg citywide FNP planning areas",
+      "source": "https://api.hamburg.de/datasets/v1/fnp/collections/fnp_nutzung/items?f=json",
+      "notes": "Loaded once as interactive vectors across Hamburg and cached for the browser session."
+    },
     {
       "label": "Hamburg XPlan building-use areas",
       "source": "https://api.hamburg.de/datasets/v1/xplan/collections/bp_baugebietsteilflaeche/items?f=json",
-      "notes": "Fetched live by bbox; no backend needed while CORS remains open."
+      "notes": "Fetched live for the settled viewport and refreshed after pan/zoom; no backend needed while CORS remains open."
     },
     {
       "label": "Hamburg FNP land-use fallback",
       "source": "https://geodienste.hamburg.de/HH_WFS_FNP?SERVICE=WFS&REQUEST=GetCapabilities",
-      "notes": "Fetched as GeoJSON by bbox when XPlan has no polygons for the viewport."
+      "notes": "Available as a bbox-scoped fallback; the default citywide overview uses the OGC API collection above."
     }
   ]
 }

@@ -189,9 +189,12 @@ export function evictCleanCityJsonSeqTiles(
   doc: CityJsonDocument,
   tiles: ReadonlyMap<string, CityJsonSeqLoadedTile>,
   retainedTileIds: ReadonlySet<string>,
-  dirtyObjectIds: ReadonlySet<string>
+  dirtyObjectIds: ReadonlySet<string>,
+  options: { sourceOnly?: boolean } = {}
 ): { evictedTileIds: string[]; tiles: Map<string, CityJsonSeqLoadedTile> } {
-  const plan = planCatalogWriteback(doc, tiles, dirtyObjectIds);
+  const plan = options.sourceOnly
+    ? planCatalogSourceEviction(doc, tiles, dirtyObjectIds)
+    : planCatalogWriteback(doc, tiles, dirtyObjectIds);
   const evictedTileIds = [...tiles.keys()].filter(
     (tileId) => !retainedTileIds.has(tileId) && !plan.dirtyTileIds.has(tileId)
   );
@@ -206,6 +209,36 @@ export function evictCleanCityJsonSeqTiles(
   const next = new Map(tiles);
   for (const tileId of evictedTileIds) next.delete(tileId);
   return { evictedTileIds, tiles: next };
+}
+
+/**
+ * Static catalogs are immutable context. Only their original feature graphs
+ * participate in eviction, so locally merged demo buildings and newly drawn
+ * objects remain in memory when an off-screen road tile is unloaded.
+ */
+function planCatalogSourceEviction(
+  doc: CityJsonDocument,
+  tiles: ReadonlyMap<string, CityJsonSeqLoadedTile>,
+  dirtyObjectIds: ReadonlySet<string>
+): CatalogWritebackPlan {
+  const featureTileIds = new Map<string, string>();
+  const objectFeatureIds = new Map<string, string>();
+  for (const [tileId, tile] of tiles) {
+    for (const feature of tile.features) {
+      featureTileIds.set(feature.id, tileId);
+      for (const objectId of feature.objectIds) objectFeatureIds.set(objectId, feature.id);
+    }
+  }
+
+  const dirtyTileIds = new Set<string>();
+  for (const objectId of dirtyObjectIds) {
+    const featureId =
+      objectFeatureIds.get(objectId) ??
+      findOwningFeatureId(doc, objectId, objectFeatureIds, featureTileIds);
+    const tileId = featureId ? featureTileIds.get(featureId) : undefined;
+    if (tileId) dirtyTileIds.add(tileId);
+  }
+  return { dirtyTileIds, featureTileIds, objectFeatureIds };
 }
 
 function serializeFeature(

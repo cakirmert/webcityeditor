@@ -25,6 +25,7 @@
     "data:hamburg-trees": "node scripts/build-hamburg-city-center-trees.mjs",
     "data:hamburg-roads": "node scripts/build-hamburg-osm2streets-roads.mjs",
     "data:hamburg-roads:catalog": "node scripts/build-hamburg-osm2streets-road-catalog.mjs",
+    "data:hamburg-roads:pages": "node scripts/build-hamburg-road-pages-catalog.mjs",
     "data:hamburg-roads:prepare": "node scripts/prepare-hamburg-road-catalog.mjs",
     "data:hamburg-roads:serve": "node scripts/dev.mjs --catalog roads --server-only",
     "cityjson:to-citygml": "node scripts/cityjson-to-citygml.mjs",

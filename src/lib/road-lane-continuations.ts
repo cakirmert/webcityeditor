@@ -61,6 +61,24 @@ interface RoadConnectionJunction {
   position: [number, number];
   externalRoadIds: string[];
   roadIds: string[];
+  roadEndpoints?: Record<string, 'start' | 'end'>;
+}
+
+interface SourceSeamEndpoint {
+  ref: string;
+  roadId: string;
+  sourceNamespace: string;
+  endpoint: 'start' | 'end';
+  position: [number, number];
+  inwardTangent: [number, number];
+}
+
+interface SourceSeamCandidate {
+  key: string;
+  left: SourceSeamEndpoint;
+  right: SourceSeamEndpoint;
+  distanceM: number;
+  externalRoadIds: Set<string>;
 }
 
 export interface RoadConnectionIndex {
@@ -81,6 +99,10 @@ export interface SelectedRoadConnections {
 
 const APPROACH_LENGTH_M = 8;
 const ACTIVE_DRAFT_ROAD_ID = '__road_preview__';
+const MAX_JUNCTION_APPROACH_DISTANCE_M = 120;
+const MAX_SOURCE_SEAM_REFERENCE_DISTANCE_M = 0.5;
+const MAX_SOURCE_SEAM_INWARD_DOT = -0.8;
+const SOURCE_SEAM_AMBIGUITY_DISTANCE_M = 0.05;
 
 /**
  * Build render-only lane continuations for confirmed editable CityJSON road
@@ -201,7 +223,8 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
   const areaById = new Map<string, RoadArea>();
   const areasByRoadId = new Map<string, RoadArea[]>();
   const editableDraftsByRoadId = new Map<string, RoadDraft>();
-  const cityRoadIdsByExternalId = new Map<string, Set<string>>();
+  const generatedCityRoadIdsByScopedExternalId = new Map<string, Set<string>>();
+  const legacyCityRoadIdsByExternalId = new Map<string, Set<string>>();
 
   for (const area of areas) {
     areaById.set(area.id, area);
@@ -214,9 +237,18 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
     if (!isIntersectionArea(area)) {
       const externalRoadId = normalizeExternalId(area.attributes.osm2streetsRoadId);
       if (externalRoadId) {
-        const cityRoadIds = cityRoadIdsByExternalId.get(externalRoadId) ?? new Set();
+        const sourceNamespace = generatedOsm2StreetsNamespace(area.roadId, 'road');
+        const targetIndex =
+          sourceNamespace === null
+            ? legacyCityRoadIdsByExternalId
+            : generatedCityRoadIdsByScopedExternalId;
+        const key =
+          sourceNamespace === null
+            ? externalRoadId
+            : scopedExternalRoadId(sourceNamespace, externalRoadId);
+        const cityRoadIds = targetIndex.get(key) ?? new Set();
         cityRoadIds.add(area.roadId);
-        cityRoadIdsByExternalId.set(externalRoadId, cityRoadIds);
+        targetIndex.set(key, cityRoadIds);
       }
     }
   }
@@ -233,8 +265,15 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       ),
     ];
     const connectedCityRoadIds = new Set<string>();
+    const sourceNamespace = generatedOsm2StreetsNamespace(roadId, 'intersection');
     for (const externalRoadId of externalRoadIds) {
-      for (const cityRoadId of cityRoadIdsByExternalId.get(externalRoadId) ?? []) {
+      const candidates =
+        sourceNamespace === null
+          ? legacyCityRoadIdsByExternalId.get(externalRoadId)
+          : generatedCityRoadIdsByScopedExternalId.get(
+              scopedExternalRoadId(sourceNamespace, externalRoadId)
+            );
+      for (const cityRoadId of candidates ?? []) {
         connectedCityRoadIds.add(cityRoadId);
       }
     }
@@ -247,6 +286,7 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       roadIds: [...connectedCityRoadIds].sort(),
     });
   }
+  junctions.push(...inferGeneratedOsm2StreetsSourceSeams(areasByRoadId));
 
   return {
     areas,
@@ -327,9 +367,15 @@ function buildJunctionRoadLaneContinuations(
       .map((roadId) => {
         const draft = resolveRoadDraft(index, roadId, activeDraft, draftCache);
         const endpoint = draft
-          ? closestDraftEndpoint(draft, junction.position)
+          ? closestDraftEndpoint(
+              draft,
+              junction.position,
+              junction.roadEndpoints?.[roadId]
+            )
           : null;
-        return endpoint ? { roadId, ...endpoint } : null;
+        return endpoint && endpoint.distanceM <= MAX_JUNCTION_APPROACH_DISTANCE_M
+          ? { roadId, ...endpoint }
+          : null;
       })
       .filter(
         (
@@ -338,6 +384,7 @@ function buildJunctionRoadLaneContinuations(
           roadId: string;
           section: RoadSectionDraft;
           endpoint: 'start' | 'end';
+          distanceM: number;
         } => !!approach
       );
 
@@ -539,8 +586,13 @@ function resolveRoadDraft(
 
 function closestDraftEndpoint(
   draft: RoadDraft,
-  position: [number, number]
-): { section: RoadSectionDraft; endpoint: 'start' | 'end' } | null {
+  position: [number, number],
+  requiredEndpoint?: 'start' | 'end'
+): {
+  section: RoadSectionDraft;
+  endpoint: 'start' | 'end';
+  distanceM: number;
+} | null {
   let closest:
     | {
         section: RoadSectionDraft;
@@ -552,6 +604,7 @@ function closestDraftEndpoint(
     const line = sampleRoadSectionCenterlineWgs84(section);
     if (line.length < 2) continue;
     for (const endpoint of ['start', 'end'] as const) {
+      if (requiredEndpoint && endpoint !== requiredEndpoint) continue;
       const point = endpoint === 'start' ? line[0] : line[line.length - 1];
       const distance = approximateDistanceMeters(point, position);
       if (!closest || distance < closest.distance) {
@@ -560,7 +613,11 @@ function closestDraftEndpoint(
     }
   }
   return closest
-    ? { section: closest.section, endpoint: closest.endpoint }
+    ? {
+        section: closest.section,
+        endpoint: closest.endpoint,
+        distanceM: closest.distance,
+      }
     : null;
 }
 
@@ -696,6 +753,219 @@ function normalizeExternalId(value: unknown): string | null {
   return typeof value === 'string' || typeof value === 'number'
     ? String(value)
     : null;
+}
+
+function generatedOsm2StreetsNamespace(
+  cityObjectId: string,
+  kind: 'road' | 'intersection'
+): string | null {
+  const marker = `osm2streets-${kind}-`;
+  const markerIndex = cityObjectId.lastIndexOf(marker);
+  return markerIndex >= 0 ? cityObjectId.slice(0, markerIndex) : null;
+}
+
+function scopedExternalRoadId(sourceNamespace: string, externalRoadId: string): string {
+  return `${sourceNamespace}\u0000${externalRoadId}`;
+}
+
+function inferGeneratedOsm2StreetsSourceSeams(
+  areasByRoadId: Map<string, RoadArea[]>
+): RoadConnectionJunction[] {
+  const endpointsByOsmWayId = new Map<string, SourceSeamEndpoint[]>();
+
+  for (const [roadId, roadAreas] of areasByRoadId) {
+    const sourceNamespace = generatedOsm2StreetsNamespace(roadId, 'road');
+    const area = roadAreas.find((candidate) => !isIntersectionArea(candidate));
+    if (!sourceNamespace || !area) continue;
+    const centerline = readWgs84Line(area.attributes.sourceCenterlineWgs84);
+    const osmWayIds = [
+      ...new Set(
+        roadAreas.flatMap((candidate) =>
+          normalizeExternalIds(candidate.attributes.osmWayIds)
+        )
+      ),
+    ];
+    const mapEdgeEndpoints = readSourceMapEdgeEndpoints(
+      area.attributes.sourceMapEdgeEndpointsWgs84
+    );
+    if (!centerline || osmWayIds.length === 0 || mapEdgeEndpoints.length === 0) {
+      continue;
+    }
+
+    for (const mapEdge of mapEdgeEndpoints) {
+      const inwardTangent = sourceSeamInwardTangent(centerline, mapEdge.endpoint);
+      if (!inwardTangent) continue;
+      const endpoint: SourceSeamEndpoint = {
+        ref: `${roadId}#${mapEdge.endpoint}`,
+        roadId,
+        sourceNamespace,
+        endpoint: mapEdge.endpoint,
+        position: mapEdge.position,
+        inwardTangent,
+      };
+      for (const osmWayId of osmWayIds) {
+        const group = endpointsByOsmWayId.get(osmWayId) ?? [];
+        group.push(endpoint);
+        endpointsByOsmWayId.set(osmWayId, group);
+      }
+    }
+  }
+
+  const candidatesByKey = new Map<string, SourceSeamCandidate>();
+  for (const [osmWayId, endpoints] of endpointsByOsmWayId) {
+    for (let leftIndex = 0; leftIndex < endpoints.length; leftIndex += 1) {
+      const left = endpoints[leftIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < endpoints.length; rightIndex += 1) {
+        const right = endpoints[rightIndex];
+        if (
+          left.roadId === right.roadId ||
+          left.sourceNamespace === right.sourceNamespace
+        ) {
+          continue;
+        }
+        const distanceM = approximateDistanceMeters(left.position, right.position);
+        if (distanceM > MAX_SOURCE_SEAM_REFERENCE_DISTANCE_M) continue;
+        const inwardDot =
+          left.inwardTangent[0] * right.inwardTangent[0] +
+          left.inwardTangent[1] * right.inwardTangent[1];
+        if (inwardDot > MAX_SOURCE_SEAM_INWARD_DOT) continue;
+
+        const key =
+          left.ref < right.ref
+            ? `${left.ref}|${right.ref}`
+            : `${right.ref}|${left.ref}`;
+        const current = candidatesByKey.get(key);
+        if (current) {
+          current.externalRoadIds.add(osmWayId);
+        } else {
+          candidatesByKey.set(key, {
+            key,
+            left,
+            right,
+            distanceM,
+            externalRoadIds: new Set([osmWayId]),
+          });
+        }
+      }
+    }
+  }
+
+  const candidatesByEndpoint = new Map<string, SourceSeamCandidate[]>();
+  for (const candidate of candidatesByKey.values()) {
+    for (const endpointRef of [candidate.left.ref, candidate.right.ref]) {
+      const endpointCandidates = candidatesByEndpoint.get(endpointRef) ?? [];
+      endpointCandidates.push(candidate);
+      candidatesByEndpoint.set(endpointRef, endpointCandidates);
+    }
+  }
+  for (const endpointCandidates of candidatesByEndpoint.values()) {
+    endpointCandidates.sort(
+      (left, right) =>
+        left.distanceM - right.distanceM || left.key.localeCompare(right.key)
+    );
+  }
+
+  const junctions: RoadConnectionJunction[] = [];
+  for (const candidate of candidatesByKey.values()) {
+    const leftCandidates = candidatesByEndpoint.get(candidate.left.ref) ?? [];
+    const rightCandidates = candidatesByEndpoint.get(candidate.right.ref) ?? [];
+    if (
+      leftCandidates[0] !== candidate ||
+      rightCandidates[0] !== candidate ||
+      sourceSeamBestCandidateIsAmbiguous(leftCandidates) ||
+      sourceSeamBestCandidateIsAmbiguous(rightCandidates)
+    ) {
+      continue;
+    }
+    const position: [number, number] = [
+      (candidate.left.position[0] + candidate.right.position[0]) / 2,
+      (candidate.left.position[1] + candidate.right.position[1]) / 2,
+    ];
+    const id = `osm2streets-source-seam:${candidate.key}`;
+    junctions.push({
+      id,
+      roadId: id,
+      areaIds: [],
+      position,
+      externalRoadIds: [...candidate.externalRoadIds].sort(),
+      roadIds: [candidate.left.roadId, candidate.right.roadId].sort(),
+      roadEndpoints: {
+        [candidate.left.roadId]: candidate.left.endpoint,
+        [candidate.right.roadId]: candidate.right.endpoint,
+      },
+    });
+  }
+  return junctions.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function sourceSeamBestCandidateIsAmbiguous(
+  candidates: SourceSeamCandidate[]
+): boolean {
+  return (
+    candidates.length > 1 &&
+    candidates[1].distanceM - candidates[0].distanceM <=
+      SOURCE_SEAM_AMBIGUITY_DISTANCE_M
+  );
+}
+
+function readSourceMapEdgeEndpoints(
+  value: unknown
+): Array<{
+  endpoint: 'start' | 'end';
+  position: [number, number];
+}> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const result: Array<{
+    endpoint: 'start' | 'end';
+    position: [number, number];
+  }> = [];
+  for (const endpoint of ['start', 'end'] as const) {
+    const position = readWgs84Point(record[endpoint]);
+    if (position) result.push({ endpoint, position });
+  }
+  return result;
+}
+
+function readWgs84Line(value: unknown): [number, number][] | null {
+  if (!Array.isArray(value)) return null;
+  const line = value
+    .map(readWgs84Point)
+    .filter((point): point is [number, number] => !!point);
+  return line.length === value.length && line.length >= 2 ? line : null;
+}
+
+function readWgs84Point(value: unknown): [number, number] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length < 2 ||
+    typeof value[0] !== 'number' ||
+    typeof value[1] !== 'number' ||
+    !Number.isFinite(value[0]) ||
+    !Number.isFinite(value[1])
+  ) {
+    return null;
+  }
+  return [value[0], value[1]];
+}
+
+function sourceSeamInwardTangent(
+  centerline: [number, number][],
+  endpoint: 'start' | 'end'
+): [number, number] | null {
+  const endpointPosition =
+    endpoint === 'start' ? centerline[0] : centerline[centerline.length - 1];
+  for (let offset = 1; offset < centerline.length; offset += 1) {
+    const innerPosition =
+      endpoint === 'start'
+        ? centerline[offset]
+        : centerline[centerline.length - 1 - offset];
+    const vector = localVectorMeters(endpointPosition, innerPosition);
+    if (Math.hypot(vector[0], vector[1]) > 1e-6) {
+      return normalizeVector(vector);
+    }
+  }
+  return null;
 }
 
 function polygonGroupCenter(areas: RoadArea[]): [number, number] {

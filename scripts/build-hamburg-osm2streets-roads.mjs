@@ -37,10 +37,14 @@ const validate = args.validate !== false && args.validate !== 'false';
 const clean = args.clean === true || args.clean === 'true';
 const seqOnly = args['seq-only'] === true || args['seq-only'] === 'true';
 const discardWork = args['discard-work'] === true || args['discard-work'] === 'true';
+const reuseWork = args['reuse-work'] === true || args['reuse-work'] === 'true';
 const singleOutput = args.output ? resolvePath(args.output) : null;
 
 if (minDepth > maxDepth) {
   throw new Error('--min-depth cannot be greater than --max-depth');
+}
+if (reuseWork && discardWork) {
+  throw new Error('--reuse-work cannot be combined with --discard-work');
 }
 
 if (!existsSync(osmPath)) {
@@ -52,7 +56,7 @@ if (!existsSync(exporter)) {
 
 if (clean) {
   rmSync(outputDir, { recursive: true, force: true });
-  rmSync(workDir, { recursive: true, force: true });
+  if (!reuseWork) rmSync(workDir, { recursive: true, force: true });
 }
 mkdirSync(outputDir, { recursive: true });
 mkdirSync(workDir, { recursive: true });
@@ -145,6 +149,7 @@ const summary = {
   outputMode: {
     cityjsonseqOnly: seqOnly,
     discardSuccessfulWork: discardWork,
+    reusedNativeWork: reuseWork,
   },
   tiles: successful,
   failed,
@@ -171,35 +176,49 @@ async function runTile(tile) {
   const tileWorkDir = resolve(workDir, tile.id);
   const tileOutJson = resolve(outputDir, `${tile.id}.city.json`);
   const tileOutSeq = resolve(outputDir, `${tile.id}.city.jsonl`);
-  rmSync(tileWorkDir, { recursive: true, force: true });
   rmSync(tileOutJson, { force: true });
   rmSync(tileOutSeq, { force: true });
-  mkdirSync(tileWorkDir, { recursive: true });
-
-  const native = spawnSync(
-    exporter,
-    [
-      '--osm',
-      osmPath,
-      '--clip-geojson',
-      clipGeoJson(tile.bbox),
-      '--options-json',
-      JSON.stringify(defaultOptions()),
-      '--out-dir',
-      tileWorkDir,
-    ],
-    { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
-  );
   const logPath = resolve(tileWorkDir, 'native-export.log');
-  writeFileSync(logPath, `${native.stdout ?? ''}${native.stderr ?? ''}`, 'utf8');
-  if (native.error || native.status !== 0) {
-    return {
-      ok: false,
-      error: native.error?.message ?? `native exporter exited ${native.status}`,
-      log: logPath,
-      stage: 'native_export',
-      panicSignature: panicSignature(`${native.stdout ?? ''}\n${native.stderr ?? ''}`),
-    };
+  if (reuseWork) {
+    if (
+      !existsSync(tileWorkDir) ||
+      !existsSync(resolve(tileWorkDir, 'summary.json')) ||
+      !existsSync(resolve(tileWorkDir, 'lane-polygons.geojson'))
+    ) {
+      return {
+        ok: false,
+        error: `reusable native output is missing for ${tile.id}`,
+        log: logPath,
+        stage: 'reuse_native_export',
+      };
+    }
+  } else {
+    rmSync(tileWorkDir, { recursive: true, force: true });
+    mkdirSync(tileWorkDir, { recursive: true });
+    const native = spawnSync(
+      exporter,
+      [
+        '--osm',
+        osmPath,
+        '--clip-geojson',
+        clipGeoJson(tile.bbox),
+        '--options-json',
+        JSON.stringify(defaultOptions()),
+        '--out-dir',
+        tileWorkDir,
+      ],
+      { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
+    );
+    writeFileSync(logPath, `${native.stdout ?? ''}${native.stderr ?? ''}`, 'utf8');
+    if (native.error || native.status !== 0) {
+      return {
+        ok: false,
+        error: native.error?.message ?? `native exporter exited ${native.status}`,
+        log: logPath,
+        stage: 'native_export',
+        panicSignature: panicSignature(`${native.stdout ?? ''}\n${native.stderr ?? ''}`),
+      };
+    }
   }
 
   const lanes = resolve(tileWorkDir, 'lane-polygons.geojson');

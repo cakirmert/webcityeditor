@@ -58,7 +58,14 @@ function roadArea(
 function exactRoadArea(
   roadId: string,
   osm2streetsRoadId: string,
-  centerlineWgs84: [number, number][]
+  centerlineWgs84: [number, number][],
+  options: {
+    osmWayIds?: string[];
+    sourceMapEdgeEndpointsWgs84?: Partial<
+      Record<'start' | 'end', [number, number]>
+    >;
+    trafficDirection?: 'forward' | 'backward' | 'both';
+  } = {}
 ): RoadArea {
   return {
     id: `${roadId}-surface`,
@@ -80,10 +87,45 @@ function exactRoadArea(
     attributes: {
       osm2streetsRoadId,
       sourceCenterlineWgs84: centerlineWgs84,
+      ...(options.osmWayIds ? { osmWayIds: options.osmWayIds } : {}),
+      ...(options.sourceMapEdgeEndpointsWgs84
+        ? {
+            sourceMapEdgeEndpointsWgs84:
+              options.sourceMapEdgeEndpointsWgs84,
+          }
+        : {}),
       transportationUsage: 'car_lane',
       sourceType: 'Driving',
-      trafficDirection: 'both',
+      trafficDirection: options.trafficDirection ?? 'both',
       allowedModes: ['car'],
+    },
+  };
+}
+
+function junctionArea(
+  roadId: string,
+  connectedRoadIds: string[],
+  center: [number, number] = [10, 53.55]
+): RoadArea {
+  const [lng, lat] = center;
+  return {
+    id: `${roadId}-surface`,
+    roadId,
+    sectionId: '',
+    bandId: '',
+    surfaceIndex: 0,
+    surfaceType: 'TrafficArea',
+    function: 'intersection',
+    polygon: [
+      [lng - 0.00005, lat - 0.00005],
+      [lng + 0.00005, lat - 0.00005],
+      [lng + 0.00005, lat + 0.00005],
+      [lng - 0.00005, lat + 0.00005],
+      [lng - 0.00005, lat - 0.00005],
+    ],
+    attributes: {
+      transportationUsage: 'intersection',
+      connectedRoadIds,
     },
   };
 }
@@ -403,6 +445,172 @@ describe('confirmed road lane continuations', () => {
     expect(selection.nodes).toHaveLength(1);
     expect(selection.continuations).toHaveLength(1);
     expect(selection.continuations[0].path.length).toBeGreaterThan(2);
+  });
+
+  it('keeps generated osm2streets road ids scoped to their source network', () => {
+    const networkARoad = exactRoadArea(
+      'network-a-osm2streets-road-42',
+      '42',
+      [[9.999, 53.55], [10, 53.55]]
+    );
+    const networkBRoad = exactRoadArea(
+      'network-b-osm2streets-road-42',
+      '42',
+      [[10.029, 53.57], [10.03, 53.57]]
+    );
+    const networkAJunction = junctionArea(
+      'network-a-osm2streets-intersection-7',
+      ['42']
+    );
+    const networkBJunction = junctionArea(
+      'network-b-osm2streets-intersection-7',
+      ['42'],
+      [10.03, 53.57]
+    );
+    const index = buildRoadConnectionIndex([
+      networkARoad,
+      networkBRoad,
+      networkAJunction,
+      networkBJunction,
+    ]);
+
+    const roadSelection = buildSelectedRoadConnections(index, networkARoad.id);
+    const junctionSelection = buildSelectedRoadConnections(
+      index,
+      networkAJunction.id
+    );
+
+    expect([...roadSelection.roadIds]).toEqual([networkARoad.roadId]);
+    expect([...roadSelection.junctionAreaIds]).toEqual([networkAJunction.id]);
+    expect([...junctionSelection.roadIds]).toEqual([networkARoad.roadId]);
+  });
+
+  it('stitches exact MapEdge endpoints for the same OSM way across source networks', () => {
+    const west = exactRoadArea(
+      'network-west-osm2streets-road-1',
+      '1',
+      [[10.0001, 53.55], [9.9999, 53.55]],
+      {
+        osmWayIds: ['3100'],
+        sourceMapEdgeEndpointsWgs84: { start: [10, 53.55] },
+        trafficDirection: 'forward',
+      }
+    );
+    const east = exactRoadArea(
+      'network-east-osm2streets-road-8',
+      '8',
+      [[10.0002, 53.55], [9.9998, 53.55]],
+      {
+        osmWayIds: ['3100'],
+        sourceMapEdgeEndpointsWgs84: {
+          end: [10.000001, 53.55],
+        },
+        trafficDirection: 'forward',
+      }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([west, east]),
+      west.id
+    );
+
+    expect([...selection.roadIds].sort()).toEqual(
+      [west.roadId, east.roadId].sort()
+    );
+    expect(selection.junctionAreaIds.size).toBe(0);
+    expect(selection.nodes).toHaveLength(1);
+    expect(selection.nodes[0]).toMatchObject({
+      kind: 'junction',
+      roadIds: [east.roadId, west.roadId].sort(),
+    });
+    expect(selection.nodes[0].position[0]).toBeCloseTo(10.0000005, 7);
+    expect(selection.continuations).toHaveLength(1);
+    expect(selection.continuations[0].turn).toBe('through');
+  });
+
+  it('rejects source-seam guesses without exact MapEdge, OSM-way, and direction agreement', () => {
+    const selected = exactRoadArea(
+      'network-west-osm2streets-road-1',
+      '1',
+      [[9.999, 53.55], [9.9999, 53.55]],
+      {
+        osmWayIds: ['3100'],
+        sourceMapEdgeEndpointsWgs84: { end: [10, 53.55] },
+      }
+    );
+    const missingMapEdge = exactRoadArea(
+      'network-east-osm2streets-road-2',
+      '2',
+      [[10.0001, 53.55], [10.001, 53.55]],
+      { osmWayIds: ['3100'] }
+    );
+    const differentWay = exactRoadArea(
+      'network-east-osm2streets-road-3',
+      '3',
+      [[10.0001, 53.55], [10.001, 53.55]],
+      {
+        osmWayIds: ['9999'],
+        sourceMapEdgeEndpointsWgs84: { start: [10, 53.55] },
+      }
+    );
+    const sameDirection = exactRoadArea(
+      'network-east-osm2streets-road-4',
+      '4',
+      [[10.0001, 53.55], [9.9992, 53.55]],
+      {
+        osmWayIds: ['3100'],
+        sourceMapEdgeEndpointsWgs84: { start: [10, 53.55] },
+      }
+    );
+    const distantReference = exactRoadArea(
+      'network-east-osm2streets-road-5',
+      '5',
+      [[10.0001, 53.55], [10.001, 53.55]],
+      {
+        osmWayIds: ['3100'],
+        sourceMapEdgeEndpointsWgs84: { start: [10.00002, 53.55] },
+      }
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([
+        selected,
+        missingMapEdge,
+        differentWay,
+        sameDirection,
+        distantReference,
+      ]),
+      selected.id
+    );
+
+    expect([...selection.roadIds]).toEqual([selected.roadId]);
+    expect(selection.nodes).toEqual([]);
+    expect(selection.continuations).toEqual([]);
+  });
+
+  it('does not render a junction continuation to approaches over one kilometre away', () => {
+    const west = exactRoadArea(
+      'network-a-osm2streets-road-1',
+      '1',
+      [[10.029, 53.55], [10.03, 53.55]]
+    );
+    const east = exactRoadArea(
+      'network-a-osm2streets-road-2',
+      '2',
+      [[10.03, 53.5501], [10.031, 53.5501]]
+    );
+    const junction = junctionArea(
+      'network-a-osm2streets-intersection-9',
+      ['1', '2']
+    );
+
+    const selection = buildSelectedRoadConnections(
+      buildRoadConnectionIndex([west, east, junction]),
+      junction.id
+    );
+
+    expect([...selection.roadIds].sort()).toEqual([east.roadId, west.roadId].sort());
+    expect(selection.continuations).toEqual([]);
   });
 
   it('shows a snapped connection before a new road has been saved', () => {

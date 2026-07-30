@@ -2,7 +2,10 @@ import proj4 from 'proj4';
 import type { CityJsonDocument } from '../types';
 import { extractFootprints, footprintPolygonToWgs84, type Footprint } from './footprints';
 import { detectCrs } from './projection';
-import { computeTransformedFootprint, type PendingTransform } from './transform-preview';
+import {
+  computeTransformedFootprintFromFootprint,
+  type PendingTransform,
+} from './transform-preview';
 
 export interface TerrainSnap {
   sourceBaseElevation: number;
@@ -26,6 +29,10 @@ interface ProjectedFootprint {
 }
 
 const TERRAIN_MATCH_TOLERANCE_METERS = 0.01;
+const projectedFootprintCache = new WeakMap<
+  readonly Footprint[],
+  { crsCode: string; samples: ProjectedFootprint[] }
+>();
 
 /**
  * Estimate the ground elevation for a pending building transform.
@@ -37,25 +44,24 @@ const TERRAIN_MATCH_TOLERANCE_METERS = 0.01;
  */
 export function estimateTerrainSnap(
   doc: CityJsonDocument,
-  pending: PendingTransform
+  pending: PendingTransform,
+  preparedFootprints?: readonly Footprint[]
 ): TerrainSnap | null {
   const crs = detectCrs(doc);
   if (!crs.supported) return null;
 
-  const footprints = extractFootprints(doc);
+  const footprints = preparedFootprints ?? extractFootprints(doc);
   const source = footprints.find((fp) => fp.id === pending.id);
   if (!source) return null;
 
-  const target = computeTransformedFootprint(doc, pending);
+  const target = computeTransformedFootprintFromFootprint(doc, pending, source);
   if (!target) return null;
 
   const targetRing = projectRing(target.polygon, crs.code);
   if (!targetRing || targetRing.length < 3) return null;
   const targetCenter = centroid(targetRing);
 
-  const samples = footprints
-    .map((fp) => projectFootprint(fp, crs.code))
-    .filter((fp): fp is ProjectedFootprint => fp !== null);
+  const samples = projectedTerrainSamples(footprints, crs.code);
 
   const otherSamples = samples.filter((sample) => sample.id !== pending.id);
   const containing = nearestByDistance(
@@ -87,6 +93,19 @@ export function estimateTerrainSnap(
     matchedBuildingId: matched.id,
     distanceMeters: distance(targetCenter, matched.centroid),
   };
+}
+
+function projectedTerrainSamples(
+  footprints: readonly Footprint[],
+  crsCode: string
+): ProjectedFootprint[] {
+  const cached = projectedFootprintCache.get(footprints);
+  if (cached?.crsCode === crsCode) return cached.samples;
+  const samples = footprints
+    .map((fp) => projectFootprint(fp, crsCode))
+    .filter((fp): fp is ProjectedFootprint => fp !== null);
+  projectedFootprintCache.set(footprints, { crsCode, samples });
+  return samples;
 }
 
 export function snapTransformToTerrain(

@@ -54,6 +54,10 @@ data/
 !public/data/hamburg/hamburg-city-center-buildings.city.jsonl
 !public/data/hamburg/hamburg-city-center-roads.city.json
 !public/data/hamburg/hamburg-city-center-roads.osm
+!public/data/hamburg/roads/
+!public/data/hamburg/roads/catalog.json
+!public/data/hamburg/roads/tiles/
+!public/data/hamburg/roads/tiles/*.city.jsonl.gz
 !public/data/assets/hamburg-lod3/*.city.json
 !public/data/transportation/
 !public/data/transportation/osm2streets-hamburg-short-intersection.city.json

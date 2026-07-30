@@ -1111,6 +1111,11 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             sourceCenterlineWgs84: (
               surface.sourceCenterlineWgs84 ?? object.attributes?._sourceCenterlineWgs84 ?? null
             ) as JsonValue,
+            sourceMapEdgeEndpointsWgs84: (
+              surface.sourceMapEdgeEndpointsWgs84 ??
+              object.attributes?._sourceMapEdgeEndpointsWgs84 ??
+              null
+            ) as JsonValue,
             osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
             osm2streetsIntersectionId: (surface.osm2streetsIntersectionId ?? null) as JsonValue,
             connectedRoadIds: (surface.connectedRoadIds ?? null) as JsonValue,

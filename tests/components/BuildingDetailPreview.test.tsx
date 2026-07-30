@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CityJsonDocument } from '../../src/types';
 
@@ -12,6 +13,28 @@ vi.mock('../../src/components/Viewer', () => ({
 }));
 
 import BuildingDetailPreview from '../../src/components/BuildingDetailPreview';
+
+function PreviewHarness({
+  cityjson,
+  initialTexturesEnabled = false,
+}: {
+  cityjson: CityJsonDocument;
+  initialTexturesEnabled?: boolean;
+}) {
+  const [texturesEnabled, setTexturesEnabled] = useState(
+    initialTexturesEnabled
+  );
+  return (
+    <BuildingDetailPreview
+      cityjson={cityjson}
+      buildingId="selected"
+      reloadToken={0}
+      splitPreview={null}
+      texturesEnabled={texturesEnabled}
+      onTexturesEnabledChange={setTexturesEnabled}
+    />
+  );
+}
 
 function detailDocument(): CityJsonDocument {
   return {
@@ -52,12 +75,7 @@ describe('<BuildingDetailPreview />', () => {
 
   it('loads only the selected building and defaults to untextured LoD3', () => {
     render(
-      <BuildingDetailPreview
-        cityjson={detailDocument()}
-        buildingId="selected"
-        reloadToken={0}
-        splitPreview={null}
-      />
+      <PreviewHarness cityjson={detailDocument()} />
     );
 
     const firstProps = viewerSpy.mock.calls.at(-1)?.[0] as {
@@ -82,5 +100,58 @@ describe('<BuildingDetailPreview />', () => {
       expect.objectContaining({ lod: 'lod2', texturesEnabled: false })
     );
     expect(screen.getByRole('switch', { name: 'Selected building textures' })).toBeDisabled();
+  });
+
+  it('mirrors streamed LoD3 texture availability until local geometry overrides it', () => {
+    const streamed = detailDocument();
+    const selected = streamed.CityObjects.selected;
+    selected.attributes = {
+      _hamburgTileTexturesAvailable: true,
+      _hamburgTileSelectionProxy: true,
+      _hamburgTileGeometryOverride: false,
+    };
+    const lod3 = selected.geometry?.[1] as Record<string, unknown>;
+    delete lod3.texture;
+    delete streamed.appearance;
+
+    const { unmount } = render(
+      <PreviewHarness
+        cityjson={streamed}
+        initialTexturesEnabled
+      />
+    );
+
+    const streamedSwitch = screen.getByRole('switch', {
+      name: 'Selected building textures',
+    });
+    expect(streamedSwitch).toBeEnabled();
+    expect(streamedSwitch).toBeChecked();
+    expect(viewerSpy.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ lod: 'lod3', texturesEnabled: false })
+    );
+    expect(screen.getByText(/Selected building only/)).toHaveTextContent(
+      'photo textures visible on map'
+    );
+
+    fireEvent.click(streamedSwitch);
+    expect(streamedSwitch).not.toBeChecked();
+    expect(screen.getByText(/Selected building only/)).toHaveTextContent(
+      'photo textures off'
+    );
+
+    unmount();
+    selected.attributes._hamburgTileGeometryOverride = true;
+    selected.attributes._hamburgTileSelectionProxy = false;
+    render(
+      <PreviewHarness
+        cityjson={streamed}
+        initialTexturesEnabled
+      />
+    );
+    const overriddenSwitch = screen.getByRole('switch', {
+      name: 'Selected building textures',
+    });
+    expect(overriddenSwitch).toBeDisabled();
+    expect(overriddenSwitch).not.toBeChecked();
   });
 });

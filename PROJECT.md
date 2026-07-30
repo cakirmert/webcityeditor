@@ -5,16 +5,21 @@ This file is the single technical handoff for City Editor. It consolidates the f
 ## What the project guarantees
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
-- The committed Hamburg city-center demo starts by merging its LoD2 context, 68 surveyed textured LoD3 buildings with 1,043 detailed installations, and 1,608 precomputed osm2streets Road objects from CityJSON. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
-- CityJSON is the editable source of truth for both buildings and `Transportation` `Road` objects.
+- The default demo starts with lightweight citywide ALKIS raster footprints, streams native LoD1 blocks from zoom 14, switches to semantic-coloured native LoD2 at zoom 15.25, and switches to photo-textured native LoD3 at zoom 18. Tapping a streamed batch feature creates a passive local CityJSON edit proxy; the streamed object is hidden only after a local mutation is saved.
+- The complete 550,691-feature osm2streets catalog—344,265 roads plus 206,426 linked intersections—is packaged as 930 static 1 km gzip CityJSONSeq tiles and streamed from GitHub Pages by viewport. Its 122.6 MB gzip payload replaces 1.67 GB of raw CityJSONSeq and includes exact cross-tile seam dependencies. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
+- CityJSON is the editable source of truth for roads, locally loaded buildings, and buildings handed off from the remote stream.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
-- Close building views use semantic, untextured CityJSON LoD3 by default. An explicit LoD3-only switch streams Hamburg's official textured 3D Tiles; editable CityJSON remains the source of truth and distant context falls back to grounded LoD2, outlines, or blocks.
+- Close building views replace the official LoD2 stream with Hamburg's official LoD3 stream. Editable local CityJSON remains the source of truth for selected/changed objects.
 - Road and building edit modes cull unrelated distant geometry and expensive street-point overlays.
 - All primary controls use pointer events and touch-sized targets. Road drawing and editing always expose **Finish**, **Cancel**, **Save**, and **Discard**.
 
 ```mermaid
 flowchart LR
-  A["CityJSON / CityJSONSeq / IFC"] --> B["Browser editor"]
+  F["Hamburg ALKIS raster footprints"] --> B["Browser editor"]
+  H["Hamburg LoD1/LoD2/LoD3 3D Tiles"] --> B
+  H --> C["Picked feature to local CityJSON"]
+  R["Pages gzip CityJSONSeq roads"] --> B
+  A["Local CityJSON / CityJSONSeq / IFC"] --> B
   O["Optional OSM refresh"] --> S["osm2streets WASM"]
   S --> P["Exact lane and junction polygons"]
   P --> B
@@ -46,9 +51,9 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 
 ### Buildings and LoD
 
-The loader keeps every geometry supplied by CityJSON. At overview zoom the map draws LoD0 footprint context; cheap blocks blend in from zoom 14 to 15.25. From zoom 15.25 to 18 it progressively replaces nearby blocks with source LoD2 geometry. At zoom 18.25 it selects source LoD3 where available while keeping the same geometry untextured and colouring RoofSurface, WallSurface, Window, and Door faces semantically. Each root building group is normalized by its own minimum source elevation, rather than one viewport-wide minimum, so every building touches the flat editor map while installations remain at the correct relative height. The optional photo-texture switch replaces that close stage with official textured 3D Tiles and has no effect at lower zooms. The map listens during the zoom gesture, not only at `zoomend`, so trackpad and pinch changes are continuous. The selected-building viewer filters to one object and offers independent LoD2/LoD3 and texture controls, with textures off by default.
+The citywide overview is the official ALKIS building-footprint WMS rendered as lightweight raster tiles. At zoom 14 the map streams Hamburg's native LoD1 blocks and fades them in through the old low-detail block range without whole-tile CityJSON conversion. At zoom 15.25 it requests official LoD2 and styles its native streamed glTF triangles with bright terracotta roofs, cream walls, and semantic ground or usage-coloured PBR materials. At zoom 18 it requests official photo-textured LoD3 by default. A coarse native LoD2 fallback remains behind LoD3 without writing depth, so new viewport areas do not go blank and cannot cover the later LoD3/photo surfaces. Opening Roads temporarily promotes that same fallback to the active remote city layer; local LoD3-only edits remain visible without photos, and closing Roads restores the saved texture preference. The photo-texture switch can select the smaller untextured LoD3 variant instead. Zoom updates are quantized to twentieths of a level during the gesture and settle to the exact final value.
 
-The wide Hamburg context is LoD2. The editable close-up data preserves that geometry and adds 68 matching surveyed LoD3 counterparts from official Area 1 tile `6433`; 68 JPG atlases, UV coordinates, and 1,043 BuildingInstallation objects ship as an offline/editing fallback. When Photo textures is enabled, the close map streams `https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json`, the CORS-enabled PBR hierarchy used by Hamburg's geoportal, at a screen-space error of four pixels. Each b3dm batch feature is shifted by its own `Grundhöhe NN` metadata (or its minimum vertex when missing), which attaches it to the flat map without flattening roof detail. Four placeable, single-root assets are extracted from tile `6433` with their complete BuildingInstallation descendants and correct texture atlas. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles, retaining exact positions, ALS heights, crown diameters, genus/species, planting years, and streets. The renderer selects rounded, spreading, columnar, or conical higher-resolution crowns from that botanical data. Edit focus hides the tree context to preserve interaction performance.
+Official building payloads are `.b3dm`/glTF, not CityJSON. On a building click, the editor resolves the picked batch in screen space, applies the tile/node ECEF transforms, converts only that feature to EPSG:25832, reconstructs its semantic mesh, and merges it as a passive edit proxy. The remote feature continues through the ordinary LoD2/LoD3/photo pipeline until an actual local mutation promotes the proxy to a geometry override. The source feature and batch IDs are retained; a selected passive LoD2 proxy upgrades automatically when matching LoD3 arrives. The 1,353-building center file and 68 surveyed textured LoD3 counterparts remain local editing/assets data rather than a second center-only display layer. At zoom 16.5 and closer, the map instances 2,110 city-center trees converted from Hamburg's official summer 3D street-tree tiles.
 
 Imported buildings are intentionally read-only for topology-changing tools until **Make editable** is chosen. Attribute edits remain lightweight. Parametric conversion enables footprint, roof, openings, overhang, subdivision, and transform workflows, but it replaces the imported geometry and is therefore explicit.
 
@@ -99,7 +104,7 @@ Connection metadata confirms graph topology. It does not yet synthesize a comple
 - Map/satellite mode, satellite opacity, and road-overlay opacity are directly inside the road sheet. The generic **Map layers** control starts collapsed and closes when another map tool opens.
 - Road-network connection highlights exist only while the Roads workspace is open. Closing it or selecting unrelated map content clears every saved-road, OSM, lane, and junction highlight. Connections use a bright cyan/ice stroke over a dark navy halo so they remain distinct over dark, grey, blue, and red road surfaces as well as pale basemap areas.
 - Phone layouts retain only Data, Roads, New Building, and More in the primary toolbar. Planning, list, export, validation, and secondary tools use the touch-sized More menu.
-- Planning can be enabled at overview zoom. Requests remain bounded to a safe city-center window, while the scrollable legend stays at the lower left and Map layers stays at the upper left.
+- Planning can be enabled at overview zoom. A single official FNP OGC API request supplies 2,842 interactive polygons across Hamburg and is cached in session; bounded XPlan detail queries run only when the viewport is within the safe 4.5 km range and refresh after the camera leaves the padded query coverage. The scrollable legend stays at the lower left and Map layers stays at the upper left.
 - Drawing uses capture-phase Pointer Events and pointer capture. Do not add `event.buttons === 0` as a drag-ending condition; trackpads and overlay sequences can report it mid-drag.
 - Edit focus computes a padded bounding box around the active road or building, then filters buildings, roads, zones, OSM centre-lines, osm2streets polygons, and street objects outside it.
 - Tagged OSM street points stay hidden below close zoom unless edit focus needs them.
@@ -115,9 +120,11 @@ The committed browser-safe files are:
 - `public/data/hamburg/hamburg-city-center-buildings.city.jsonl`
 - `public/data/hamburg/hamburg-city-center-roads.city.json`
 - `public/data/hamburg/hamburg-city-center-roads.osm`
+- `public/data/hamburg/roads/catalog.json`
+- `public/data/hamburg/roads/tiles/*.city.jsonl.gz`
 - `public/data/transportation/osm2streets-hamburg-short-intersection.city.json`
 
-The `.city.json` road file is the default and export source of truth. The `.osm` file is retained only for an optional refresh/comparison. Regenerate the center samples with:
+The center `.city.json` road file is retained as a compact fallback. The default uses the static catalog; visible road tiles become the editable/exportable source of truth in memory. The `.osm` file is retained only for optional refresh/comparison. Regenerate the center samples with:
 
 ```powershell
 npm run data:hamburg-center
@@ -156,7 +163,7 @@ npm run data:hamburg-lod3-assets
 
 The normalizer is `scripts/build-hamburg-lod3-assets.mjs`. The output is licensed under Datenlizenz Deutschland – Namensnennung – Version 2.0; attribution is **Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung**. The source dataset is <https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17>.
 
-### Optional whole-city roads
+### Whole-city Pages road stream
 
 On Windows, inspect, prepare, or serve the complete reproducible catalog with:
 
@@ -166,7 +173,13 @@ On Windows, inspect, prepare, or serve the complete reproducible catalog with:
 .\PREPARE_HAMBURG_ROADS.cmd -Serve
 ```
 
-Equivalent npm commands are `npm run data:hamburg-roads:prepare` and `npm run dev:hamburg-roads`. Generated CityJSONSeq road tiles stay in `Data/hamburg-roads-osm2streets/cityjsonseq/` and must not be committed. The retained complete catalog is roughly 2.3 GiB and reproducible from the local OSM input.
+Equivalent npm commands are `npm run data:hamburg-roads:prepare` and `npm run dev:hamburg-roads`. The raw strict CityJSONSeq source stays under ignored `Data/`. Package a complete, failure-free source catalog for Pages with:
+
+```powershell
+npm run data:hamburg-roads:pages
+```
+
+The packager assigns each feature by extent centroid to a 1 km cell, preserves the millimetre grid, and writes relative gzip tile URLs. The current result is 930 files, 550,691 features (344,265 roads and 206,426 intersections), 1,666,587,937 bytes uncompressed, and 122,423,214 compressed tile bytes (about 116.75 MiB), plus the catalog. GitHub Pages is read-only, so edited road tiles are retained through **Save local** or **Export CityJSON**, not `Save seq`.
 
 ### osm2streets fork and WASM
 

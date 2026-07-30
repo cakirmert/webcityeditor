@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildHamburgFnpNutzungUrl,
+  buildHamburgFnpOafUrl,
   buildHamburgXPlanBaugebietUrl,
+  choosePlanningQueryBbox,
   fetchHamburgFnpZones,
+  fetchHamburgCitywideFnpZones,
   fetchPlanningZones,
   fetchHamburgPlanningZones,
   fetchHamburgXPlanZones,
@@ -85,6 +88,16 @@ describe('Hamburg planning URL builders', () => {
     expect(next.searchParams.get('STARTINDEX')).toBe('100');
   });
 
+  it('builds the citywide FNP OGC API URL with bbox paging', () => {
+    const url = new URL(buildHamburgFnpOafUrl(undefined, 1000, 2000));
+    expect(url.hostname).toBe('api.hamburg.de');
+    expect(url.pathname).toContain('/fnp/collections/fnp_nutzung/items');
+    expect(url.searchParams.get('f')).toBe('json');
+    expect(url.searchParams.get('limit')).toBe('1000');
+    expect(url.searchParams.get('offset')).toBe('2000');
+    expect(url.searchParams.get('bbox')).toBe('8.1,53.35,10.4,54.05');
+  });
+
   it('detects whether a query bbox intersects Hamburg', () => {
     expect(isBboxNearHamburg(HAMBURG_BBOX)).toBe(true);
     expect(isBboxNearHamburg([4.3, 52.0, 4.4, 52.1])).toBe(false);
@@ -100,6 +113,20 @@ describe('Hamburg planning URL builders', () => {
     expect(isPlanningBboxLoadable(overviewQuery)).toBe(true);
     expect((overviewQuery[0] + overviewQuery[2]) / 2).toBeCloseTo(10, 6);
     expect((overviewQuery[1] + overviewQuery[3]) / 2).toBeCloseTo(53.55, 6);
+  });
+
+  it('keeps a wide planning query centred on the live viewport, not the loaded seed', () => {
+    const viewport: [number, number, number, number] = [
+      10.12, 53.48, 10.38, 53.68,
+    ];
+    const query = choosePlanningQueryBbox({
+      viewportBbox: viewport,
+      footprintBbox: HAMBURG_BBOX,
+    });
+    expect(query).not.toBeNull();
+    expect(isPlanningBboxLoadable(query!)).toBe(true);
+    expect((query![0] + query![2]) / 2).toBeCloseTo(10.25, 4);
+    expect((query![1] + query![3]) / 2).toBeCloseTo(53.58, 4);
   });
 
   it('exposes the current planning coverage through a generic provider API', () => {
@@ -233,6 +260,46 @@ describe('zonesFromPlanningGeoJson', () => {
     expect(zones[0].allowedTypes).toEqual(['commercial', 'mixed']);
   });
 
+  it('preserves polygon holes for rendering and point queries', () => {
+    const zones = zonesFromPlanningGeoJson(
+      {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'fnp-with-hole',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [10, 53.5],
+                  [10.02, 53.5],
+                  [10.02, 53.52],
+                  [10, 53.52],
+                  [10, 53.5],
+                ],
+                [
+                  [10.005, 53.505],
+                  [10.015, 53.505],
+                  [10.015, 53.515],
+                  [10.005, 53.515],
+                  [10.005, 53.505],
+                ],
+              ],
+            },
+            properties: { nutzung: 'Wohnbauflächen' },
+          },
+        ],
+      },
+      'hamburg-fnp-nutzung'
+    );
+
+    expect(zones).toHaveLength(1);
+    expect(zones[0].holes).toHaveLength(1);
+    expect(findZoneForPoint(zones, [10.002, 53.502])).toBe(zones[0]);
+    expect(findZoneForPoint(zones, [10.01, 53.51])).toBeNull();
+  });
+
   it('returns no zones for non-GeoJSON or unsupported geometry', () => {
     expect(zonesFromPlanningGeoJson({ type: 'FeatureCollection', features: [] }, 'hamburg-fnp-nutzung')).toEqual([]);
     expect(
@@ -248,6 +315,43 @@ describe('zonesFromPlanningGeoJson', () => {
 });
 
 describe('fetchHamburgPlanningZones', () => {
+  it('loads the complete Hamburg FNP overview through OGC API pagination', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        planningResponse({
+          type: 'FeatureCollection',
+          numberMatched: 3,
+          numberReturned: 2,
+          features: [
+            planningFeature('fnp-1', { nutzungstext: 'Wohnbauflächen' }),
+            planningFeature('fnp-2', { nutzungstext: 'Grünflächen' }, 10.01),
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        planningResponse({
+          type: 'FeatureCollection',
+          numberMatched: 3,
+          numberReturned: 1,
+          features: [
+            planningFeature('fnp-3', { nutzungstext: 'Gewerbliche Bauflächen' }, 10.02),
+          ],
+        })
+      );
+
+    const zones = await fetchHamburgCitywideFnpZones(fetchImpl, {
+      pageSize: 2,
+    });
+    expect(zones).toHaveLength(3);
+    expect(zones.every((zone) => zone.source === 'hamburg-fnp-nutzung')).toBe(
+      true
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const secondUrl = new URL(String(fetchImpl.mock.calls[1][0]));
+    expect(secondUrl.searchParams.get('offset')).toBe('2');
+  });
+
   it('uses XPlan results when they are available', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -510,6 +614,22 @@ describe('findZoneForPoint', () => {
     const z = findZoneForPoint([makeZone(['residential'])], [10, 10]);
     expect(z).toBeNull();
   });
+
+  it('does not select a zone through one of its holes', () => {
+    const zone = {
+      ...makeZone(['residential']),
+      holes: [[
+        [0.25, 0.25],
+        [0.75, 0.25],
+        [0.75, 0.75],
+        [0.25, 0.75],
+        [0.25, 0.25],
+      ]] as [number, number][][],
+    };
+
+    expect(findZoneForPoint([zone], [0.5, 0.5])).toBeNull();
+    expect(findZoneForPoint([zone], [0.1, 0.1])).toBe(zone);
+  });
 });
 
 describe('findNearestZoneForPoint', () => {
@@ -521,6 +641,21 @@ describe('findNearestZoneForPoint', () => {
   it('returns null when the nearest zone is beyond the distance tolerance', () => {
     const z = findNearestZoneForPoint([makeZone(['residential'])], [1.01, 0.5], 100);
     expect(z).toBeNull();
+  });
+
+  it('does not snap a point inside a small hole back to its enclosing zone', () => {
+    const zone = {
+      ...makeZone(['residential']),
+      holes: [[
+        [0.4995, 0.4995],
+        [0.5005, 0.4995],
+        [0.5005, 0.5005],
+        [0.4995, 0.5005],
+        [0.4995, 0.4995],
+      ]] as [number, number][][],
+    };
+
+    expect(findNearestZoneForPoint([zone], [0.5, 0.5], 150)).toBeNull();
   });
 });
 

@@ -68,7 +68,8 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
           doc,
           source.loadedTiles,
           retainedTileIds,
-          dirtyIdsRef.current
+          dirtyIdsRef.current,
+          { sourceOnly: source.readOnly === true }
         );
         if (eviction.evictedTileIds.length > 0) {
           const next = { ...source, loadedTiles: eviction.tiles };
@@ -85,7 +86,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
         setCatalogStatus({
           kind: 'ok',
           message:
-            `Zoom in to stream building tiles for this view; ${eviction.tiles.size} tile` +
+            `Zoom in to stream detailed data for this view; ${eviction.tiles.size} tile` +
             `${eviction.tiles.size === 1 ? '' : 's'} kept loaded` +
             (eviction.evictedTileIds.length > 0
               ? `; unloaded ${eviction.evictedTileIds.length} clean off-screen tiles`
@@ -98,7 +99,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
         message: `${source.loadedTiles.size} tiles loaded; checking viewport...`,
       });
       const loaded = await fetchCityJsonSeqViewport(
-        source.baseUrl,
+        source.catalogUrl ?? source.baseUrl,
         bbox,
         new Set(source.loadedTiles.keys())
       );
@@ -112,7 +113,8 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
         doc,
         loadedTiles,
         new Set(loaded.intersectingTileIds),
-        dirtyIdsRef.current
+        dirtyIdsRef.current,
+        { sourceOnly: source.readOnly === true }
       );
       const next = { ...source, loadedTiles: eviction.tiles };
       catalogConnectionRef.current = next;
@@ -156,6 +158,13 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
     const source = catalogConnectionRef.current;
     const doc = cityjsonRef.current;
     if (!source || !doc || catalogLoadingRef.current || dirtyIdsRef.current.size === 0) return;
+    if (source.readOnly) {
+      setCatalogStatus({
+        kind: 'error',
+        message: 'This catalog is streamed from static hosting. Export or save locally to keep edits.',
+      });
+      return;
+    }
     catalogLoadingRef.current = true;
     setCatalogStatus({
       kind: 'loading',

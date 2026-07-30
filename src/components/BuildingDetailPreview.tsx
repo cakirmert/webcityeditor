@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CityJsonDocument } from '../types';
 import { filterToBuilding } from '../lib/footprints';
+import {
+  HAMBURG_TILE_GEOMETRY_OVERRIDE_ATTRIBUTE,
+  HAMBURG_TILE_SELECTION_PROXY_ATTRIBUTE,
+  HAMBURG_TILE_TEXTURES_AVAILABLE_ATTRIBUTE,
+} from '../lib/hamburg-3d-tiles-edit';
 import Viewer, { type SplitPreviewInfo } from './Viewer';
 
 interface Props {
@@ -8,6 +13,8 @@ interface Props {
   buildingId: string;
   reloadToken: number;
   splitPreview: SplitPreviewInfo | null;
+  texturesEnabled: boolean;
+  onTexturesEnabledChange: (enabled: boolean) => void;
   onAdjustSplit?: (index: number, delta: number) => void;
 }
 
@@ -16,6 +23,8 @@ export default function BuildingDetailPreview({
   buildingId,
   reloadToken,
   splitPreview,
+  texturesEnabled,
+  onTexturesEnabledChange,
   onAdjustSplit,
 }: Props) {
   const selectedDocument = useMemo(
@@ -29,14 +38,26 @@ export default function BuildingDetailPreview({
   const [lod, setLod] = useState<'lod2' | 'lod3'>(
     availability.lod3 ? 'lod3' : 'lod2'
   );
-  const [texturesEnabled, setTexturesEnabled] = useState(false);
 
   useEffect(() => {
     setLod(availability.lod3 ? 'lod3' : 'lod2');
-    setTexturesEnabled(false);
   }, [availability.lod3, buildingId]);
 
-  const texturesActive = lod === 'lod3' && availability.lod3Textures && texturesEnabled;
+  const textureOptionAvailable =
+    availability.lod3Textures || availability.remoteLod3Textures;
+  const texturesActive =
+    lod === 'lod3' && availability.lod3Textures && texturesEnabled;
+  const remoteMapTexturesActive =
+    lod === 'lod3' &&
+    availability.remoteLod3Textures &&
+    texturesEnabled;
+  const textureStatus = texturesActive
+    ? 'photo textures on'
+    : remoteMapTexturesActive
+      ? 'photo textures visible on map · semantic editable preview'
+      : availability.remoteLod3Textures
+        ? 'photo textures off · semantic editable preview'
+        : 'semantic surface colours';
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
@@ -67,22 +88,24 @@ export default function BuildingDetailPreview({
             LoD3
           </DetailButton>
         </div>
-        <label className={!availability.lod3Textures || lod !== 'lod3' ? 'is-disabled' : ''}>
+        <label className={!textureOptionAvailable || lod !== 'lod3' ? 'is-disabled' : ''}>
           <span>Textures</span>
           <input
             type="checkbox"
             role="switch"
             aria-label="Selected building textures"
-            checked={texturesEnabled}
-            disabled={!availability.lod3Textures || lod !== 'lod3'}
-            onChange={(event) => setTexturesEnabled(event.target.checked)}
+            checked={textureOptionAvailable && texturesEnabled}
+            disabled={!textureOptionAvailable || lod !== 'lod3'}
+            onChange={(event) =>
+              onTexturesEnabledChange(event.target.checked)
+            }
           />
         </label>
       </div>
 
       <div className="building-detail-status">
         Selected building only · {lod === 'lod3' ? 'LoD3' : 'LoD2'} ·{' '}
-        {texturesActive ? 'photo textures on' : 'semantic surface colours'}
+        {textureStatus}
         {!availability.lod3 && ' · no LoD3 geometry in this object'}
       </div>
     </div>
@@ -116,11 +139,20 @@ function inspectDetailAvailability(doc: CityJsonDocument): {
   lod2: boolean;
   lod3: boolean;
   lod3Textures: boolean;
+  remoteLod3Textures: boolean;
 } {
   let lod2 = false;
   let lod3 = false;
   let lod3Textures = false;
+  let remoteLod3Textures = false;
   for (const object of Object.values(doc.CityObjects)) {
+    if (
+      object.attributes?.[HAMBURG_TILE_TEXTURES_AVAILABLE_ATTRIBUTE] === true &&
+      object.attributes?.[HAMBURG_TILE_SELECTION_PROXY_ATTRIBUTE] === true &&
+      object.attributes?.[HAMBURG_TILE_GEOMETRY_OVERRIDE_ATTRIBUTE] !== true
+    ) {
+      remoteLod3Textures = true;
+    }
     for (const geometry of object.geometry ?? []) {
       const candidate = geometry as { lod?: string | number; texture?: unknown };
       const value = Number.parseFloat(String(candidate.lod ?? ''));
@@ -135,5 +167,5 @@ function inspectDetailAvailability(doc: CityJsonDocument): {
   }
   const appearance = doc.appearance as { textures?: unknown[] } | undefined;
   lod3Textures = lod3Textures && !!appearance?.textures?.length;
-  return { lod2, lod3, lod3Textures };
+  return { lod2, lod3, lod3Textures, remoteLod3Textures };
 }

@@ -23,21 +23,30 @@ import { extractFootprints, filterToBuilding } from './lib/footprints';
 import { matchingIds, isFilterEmpty, applyFilter } from './lib/filter';
 import { estimateTerrainSnap } from './lib/terrain';
 import { buildPreviewMesh } from './lib/preview-mesh';
-import { computeTransformedFootprint } from './lib/transform-preview';
+import { computeTransformedFootprintFromFootprint } from './lib/transform-preview';
 import { detectCrs } from './lib/projection';
 import { parseCityJson } from './lib/cityjson';
 import { mergeCityJson } from './lib/merge';
 import {
+  DEFAULT_HAMBURG_VIEWPORT_BBOX,
+  fetchCityJsonSeqViewport,
+  HAMBURG_ROAD_CATALOG_TYPE,
   parseCityJsonSeqStrict,
   type CityJsonSeqViewportLoad,
 } from './lib/cityjsonseq-catalog';
 import { publicAssetUrl } from './lib/public-assets';
 import type { HamburgCityTree } from './lib/hamburg-trees';
 import {
-  fetchPlanningZones,
+  ensureHamburgEditableLodFallback,
+  promoteHamburgTileSelectionProxy,
+  type HamburgBuildingHandoff,
+} from './lib/hamburg-3d-tiles-edit';
+import {
+  choosePlanningQueryBbox,
+  fetchHamburgCitywideFnpZones,
+  fetchHamburgXPlanZones,
   getPlanningProviderForBbox,
   isPlanningBboxLoadable,
-  limitPlanningBboxSpan,
   planningCoverageSummary,
   planningSourceLabel,
   type ParcelZone,
@@ -55,12 +64,11 @@ const HAMBURG_OVERVIEW_ZOOM = 9.75;
 const HAMBURG_CITY_CENTER_DEMO_URL =
   'data/hamburg/hamburg-city-center-buildings.city.jsonl';
 const HAMBURG_CITY_CENTER_DEMO_NAME = 'hamburg-city-center-buildings.city.jsonl';
-const HAMBURG_CITY_CENTER_ROADS_URL =
-  'data/hamburg/hamburg-city-center-roads.city.json';
+const HAMBURG_ROADS_CATALOG_URL = 'data/hamburg/roads/catalog.json';
 const HAMBURG_LOD3_SHOWCASE_URL =
   'data/hamburg/hamburg-lod3-showcase.city.json';
-const HAMBURG_CITY_CENTER_COMBINED_NAME = 'hamburg-city-center.city.json';
-const HAMBURG_LOD3_SHOWCASE_CENTER: [number, number] = [9.9803, 53.5473];
+const HAMBURG_CITYWIDE_DEMO_NAME = 'hamburg-citywide-stream.city.json';
+const HAMBURG_STARTUP_SEED_ATTRIBUTE = '_webcityeditorHamburgSeed';
 
 export default function App() {
   const coreState = useCoreState();
@@ -69,6 +77,7 @@ export default function App() {
   const importExport = useImportExport(coreState, undoRedo, catalog);
 
   const [sidePanelWide, setSidePanelWide] = useState(false);
+  const [buildingTexturesEnabled, setBuildingTexturesEnabled] = useState(true);
   const [showBuildingStart, setShowBuildingStart] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const autoHamburgLoadStartedRef = useRef(false);
@@ -78,32 +87,148 @@ export default function App() {
   } | null>(null);
 
   // ── Planning layer (zones) ────────────────────────────────────────────────
-  const [zones, setZones] = useState<ParcelZone[]>([]);
+  const [planningOverviewZones, setPlanningOverviewZones] = useState<
+    ParcelZone[]
+  >([]);
+  const [planningDetailZones, setPlanningDetailZones] = useState<ParcelZone[]>(
+    []
+  );
+  const zones = useMemo(
+    () => [...planningOverviewZones, ...planningDetailZones],
+    [planningDetailZones, planningOverviewZones]
+  );
   const [selectedZone, setSelectedZone] = useState<ParcelZone | null>(null);
   const [zoningEnabled, setZoningEnabled] = useState(false);
-  const [zoningLoading, setZoningLoading] = useState(false);
-  const planningAbortRef = useRef<AbortController | null>(null);
-  const planningRequestIdRef = useRef(0);
+  const [planningOverviewLoading, setPlanningOverviewLoading] = useState(false);
+  const [planningDetailLoading, setPlanningDetailLoading] = useState(false);
+  const zoningLoading = planningOverviewLoading || planningDetailLoading;
+  const [planningViewportBbox, setPlanningViewportBbox] =
+    useState<Wgs84Bbox | null>(null);
+  const planningOverviewAbortRef = useRef<AbortController | null>(null);
+  const planningDetailAbortRef = useRef<AbortController | null>(null);
+  const planningOverviewRequestIdRef = useRef(0);
+  const planningDetailRequestIdRef = useRef(0);
+  const lastPlanningQueryKeyRef = useRef('');
+  const planningDetailCoverageRef = useRef<Wgs84Bbox | null>(null);
 
   const handleHideZoning = useCallback(() => {
-    planningRequestIdRef.current += 1;
-    planningAbortRef.current?.abort();
-    planningAbortRef.current = null;
-    setZoningLoading(false);
+    planningOverviewRequestIdRef.current += 1;
+    planningDetailRequestIdRef.current += 1;
+    planningOverviewAbortRef.current?.abort();
+    planningDetailAbortRef.current?.abort();
+    planningOverviewAbortRef.current = null;
+    planningDetailAbortRef.current = null;
+    setPlanningOverviewLoading(false);
+    setPlanningDetailLoading(false);
     setZoningEnabled(false);
-    setZones([]);
+    setPlanningDetailZones([]);
     setSelectedZone(null);
+    lastPlanningQueryKeyRef.current = '';
+    planningDetailCoverageRef.current = null;
   }, []);
 
+  const ensurePlanningOverview = useCallback(async (
+    options: { reportError?: boolean } = {}
+  ) => {
+    if (planningOverviewZones.length > 0) return;
+    planningOverviewAbortRef.current?.abort();
+    const controller = new AbortController();
+    planningOverviewAbortRef.current = controller;
+    const requestId = planningOverviewRequestIdRef.current + 1;
+    planningOverviewRequestIdRef.current = requestId;
+    const sourceCityJson = coreState.cityjsonRef.current;
+    const fetchWithSignal: typeof fetch = (input, init) =>
+      fetch(input, { ...init, signal: controller.signal });
+
+    setPlanningOverviewLoading(true);
+    try {
+      const nextZones = await fetchHamburgCitywideFnpZones(fetchWithSignal);
+      if (
+        planningOverviewRequestIdRef.current !== requestId ||
+        coreState.cityjsonRef.current !== sourceCityJson
+      ) {
+        return;
+      }
+      setPlanningOverviewZones(nextZones);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(error);
+      if (options.reportError) {
+        alert(`Hamburg-wide planning overview failed: ${message}`);
+      }
+    } finally {
+      if (planningOverviewRequestIdRef.current === requestId) {
+        planningOverviewAbortRef.current = null;
+        setPlanningOverviewLoading(false);
+      }
+    }
+  }, [coreState.cityjsonRef, planningOverviewZones.length]);
+
+  const requestPlanningDetailZones = useCallback(async (
+    queryBbox: Wgs84Bbox,
+    options: { reportError?: boolean } = {}
+  ) => {
+    const queryKey = planningQueryKey(queryBbox);
+    if (queryKey === lastPlanningQueryKeyRef.current) {
+      return;
+    }
+    planningDetailAbortRef.current?.abort();
+    const controller = new AbortController();
+    planningDetailAbortRef.current = controller;
+    const requestId = planningDetailRequestIdRef.current + 1;
+    planningDetailRequestIdRef.current = requestId;
+    const sourceCityJson = coreState.cityjsonRef.current;
+    const fetchWithSignal: typeof fetch = (input, init) =>
+      fetch(input, { ...init, signal: controller.signal });
+
+    lastPlanningQueryKeyRef.current = queryKey;
+    setPlanningDetailLoading(true);
+    try {
+      const nextZones = await fetchHamburgXPlanZones(
+        queryBbox,
+        fetchWithSignal
+      );
+      if (
+        planningDetailRequestIdRef.current !== requestId ||
+        coreState.cityjsonRef.current !== sourceCityJson
+      ) {
+        return;
+      }
+      setPlanningDetailZones(nextZones);
+      planningDetailCoverageRef.current = [...queryBbox];
+      setSelectedZone((current) =>
+        current?.source === 'hamburg-xplan-baugebiet'
+          ? nextZones.find((zone) => zone.id === current.id) ?? null
+          : current
+      );
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return;
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(e);
+      if (options.reportError) alert(`Planning layer failed: ${message}`);
+      if (lastPlanningQueryKeyRef.current === queryKey) {
+        lastPlanningQueryKeyRef.current = '';
+      }
+    } finally {
+      if (planningDetailRequestIdRef.current === requestId) {
+        planningDetailAbortRef.current = null;
+        setPlanningDetailLoading(false);
+      }
+    }
+  }, [coreState.cityjsonRef]);
+
   const handleToggleZoning = useCallback(async () => {
-    if (!coreState.cityjson || zoningLoading) return;
+    if (!coreState.cityjson) return;
     if (zoningEnabled) {
       handleHideZoning();
       return;
     }
+    if (zoningLoading) return;
 
+    const viewportBbox = coreState.mapBboxRef.current;
     const queryBbox = choosePlanningQueryBbox({
-      viewportBbox: coreState.mapBboxRef.current,
+      viewportBbox,
       footprintBbox: computeFootprintBbox(extractFootprints(coreState.cityjson)),
     });
     if (!queryBbox) {
@@ -120,54 +245,77 @@ export default function App() {
       return;
     }
 
-    planningAbortRef.current?.abort();
-    const controller = new AbortController();
-    planningAbortRef.current = controller;
-    const requestId = planningRequestIdRef.current + 1;
-    planningRequestIdRef.current = requestId;
-    const sourceCityJson = coreState.cityjson;
-    const fetchWithSignal: typeof fetch = (input, init) =>
-      fetch(input, { ...init, signal: controller.signal });
-
-    setZoningLoading(true);
-    try {
-      const nextZones = await fetchPlanningZones(queryBbox, fetchWithSignal);
-      if (
-        planningRequestIdRef.current !== requestId ||
-        coreState.cityjsonRef.current !== sourceCityJson
-      ) {
-        return;
-      }
-      if (nextZones.length === 0) {
-        alert('No planning polygons returned for this viewport.');
-        return;
-      }
-      setZones(nextZones);
-      setSelectedZone(null);
-      setZoningEnabled(true);
-    } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') return;
-      console.error(e);
-      alert(`Planning layer failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      if (planningRequestIdRef.current === requestId) {
-        planningAbortRef.current = null;
-        setZoningLoading(false);
-      }
+    coreState.setSelection(null);
+    setZoningEnabled(true);
+    const requests: Promise<void>[] = [
+      ensurePlanningOverview({ reportError: true }),
+    ];
+    if (viewportBbox && isPlanningBboxLoadable(viewportBbox)) {
+      requests.push(
+        requestPlanningDetailZones(queryBbox, { reportError: true })
+      );
     }
+    await Promise.all(requests);
   }, [
     coreState.cityjson,
-    coreState.cityjsonRef,
     coreState.mapBboxRef,
+    coreState.setSelection,
+    ensurePlanningOverview,
     handleHideZoning,
+    requestPlanningDetailZones,
     zoningEnabled,
     zoningLoading,
   ]);
 
+  useEffect(() => {
+    if (!zoningEnabled || !planningViewportBbox || !coreState.cityjson) return;
+    if (!isPlanningBboxLoadable(planningViewportBbox)) {
+      // A close-view XPlan request can still be in flight while the user
+      // zooms out. Invalidate it before clearing the detail layer so its late
+      // response cannot recreate a rectangular local patch over the overview.
+      planningDetailRequestIdRef.current += 1;
+      planningDetailAbortRef.current?.abort();
+      planningDetailAbortRef.current = null;
+      planningDetailCoverageRef.current = null;
+      lastPlanningQueryKeyRef.current = '';
+      setPlanningDetailLoading(false);
+      setPlanningDetailZones([]);
+      setSelectedZone((current) =>
+        current?.source === 'hamburg-xplan-baugebiet' ? null : current
+      );
+      return;
+    }
+    if (
+      planningDetailCoverageRef.current &&
+      planningBboxContains(
+        planningDetailCoverageRef.current,
+        planningViewportBbox
+      )
+    ) {
+      return;
+    }
+    const queryBbox = choosePlanningQueryBbox({
+      viewportBbox: planningViewportBbox,
+      footprintBbox: computeFootprintBbox(extractFootprints(coreState.cityjson)),
+    });
+    if (!queryBbox || !getPlanningProviderForBbox(queryBbox)) return;
+    const timer = window.setTimeout(() => {
+      void requestPlanningDetailZones(queryBbox);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [
+    coreState.cityjson,
+    planningViewportBbox,
+    requestPlanningDetailZones,
+    zoningEnabled,
+  ]);
+
   useEffect(
     () => () => {
-      planningRequestIdRef.current += 1;
-      planningAbortRef.current?.abort();
+      planningOverviewRequestIdRef.current += 1;
+      planningDetailRequestIdRef.current += 1;
+      planningOverviewAbortRef.current?.abort();
+      planningDetailAbortRef.current?.abort();
     },
     []
   );
@@ -182,6 +330,10 @@ export default function App() {
     trees: hamburgTrees,
   });
   const buildingEditor = useBuildingEditor(coreState, undoRedo, { zones, zoningEnabled });
+
+  useEffect(() => {
+    if (zoningEnabled) buildingEditor.setMultiSelection(new Set());
+  }, [buildingEditor.setMultiSelection, zoningEnabled]);
 
   const handleLoadedForApp = useCallback(
     (doc: CityJsonDocument, fileName: string, rawText: string | null) => {
@@ -219,51 +371,70 @@ export default function App() {
     autoHamburgLoadStartedRef.current = true;
     setAutoHamburgStatus({
       kind: 'loading',
-      message: 'Loading the Hamburg city-center buildings and roads demo...',
+      message: 'Connecting Hamburg citywide buildings and streamed roads...',
     });
     catalog.setCatalogStatus({
       kind: 'loading',
-      message: 'Loading the committed Hamburg city-center demo...',
+      message: 'Loading initial static road tiles from Pages...',
     });
     importExport.setLoadModalOpen(false);
 
     void (async () => {
       try {
-        const [buildingResult, roadResult, lod3Result] = await Promise.allSettled([
+        const roadCatalogUrl = publicAssetUrl(HAMBURG_ROADS_CATALOG_URL);
+        const [roadsLoaded, buildingResult, lod3Result] = await Promise.all([
+          fetchCityJsonSeqViewport(
+            roadCatalogUrl,
+            DEFAULT_HAMBURG_VIEWPORT_BBOX
+          ),
           fetch(publicAssetUrl(HAMBURG_CITY_CENTER_DEMO_URL)),
-          fetch(publicAssetUrl(HAMBURG_CITY_CENTER_ROADS_URL)),
           fetch(publicAssetUrl(HAMBURG_LOD3_SHOWCASE_URL)),
         ]);
-        if (buildingResult.status === 'rejected') throw buildingResult.reason;
-        const response = buildingResult.value;
+        if (!roadsLoaded.doc || roadsLoaded.tileIds.length === 0) {
+          throw new Error('The static Hamburg road catalog returned no tiles for the initial view');
+        }
+
+        const response = buildingResult;
         if (!response.ok) {
           throw new Error(`HTTP ${response.status} ${response.statusText}`);
         }
         const text = await response.text();
-        const doc = parseCityJsonSeqStrict(text, HAMBURG_CITY_CENTER_DEMO_NAME);
-
-        if (roadResult.status === 'rejected') throw roadResult.reason;
-        const roadResponse = roadResult.value;
-        if (!roadResponse.ok) {
-          throw new Error(`Road CityJSON: HTTP ${roadResponse.status} ${roadResponse.statusText}`);
+        const centerBuildings = parseCityJsonSeqStrict(text, HAMBURG_CITY_CENTER_DEMO_NAME);
+        for (const object of Object.values(centerBuildings.CityObjects)) {
+          object.attributes = {
+            ...(object.attributes ?? {}),
+            [HAMBURG_STARTUP_SEED_ATTRIBUTE]: true,
+          };
         }
-        const parsedRoads = parseCityJson(await roadResponse.text());
-        if (!parsedRoads.ok) throw new Error(`Road CityJSON: ${parsedRoads.error}`);
-        const merge = mergeCityJson(doc, parsedRoads.doc);
-        if (!merge.ok) throw new Error(`Road CityJSON merge failed: ${merge.reason}`);
+        const doc = roadsLoaded.doc;
+        const centerMerge = mergeCityJson(doc, centerBuildings);
+        if (!centerMerge.ok) {
+          throw new Error(`Center building merge failed: ${centerMerge.reason}`);
+        }
 
-        if (lod3Result.status === 'rejected') throw lod3Result.reason;
-        const lod3Response = lod3Result.value;
+        const lod3Response = lod3Result;
         if (!lod3Response.ok) {
           throw new Error(`LoD3 CityJSON: HTTP ${lod3Response.status} ${lod3Response.statusText}`);
         }
         const parsedLod3 = parseCityJson(await lod3Response.text());
         if (!parsedLod3.ok) throw new Error(`LoD3 CityJSON: ${parsedLod3.error}`);
+        // The bundled showcase is retained only as a local/offline edit seed.
+        // Mark it exactly like the center LoD2 sample so it cannot become a
+        // second, early-loading island over the uniform remote city stream.
+        for (const object of Object.values(parsedLod3.doc.CityObjects)) {
+          object.attributes = {
+            ...(object.attributes ?? {}),
+            [HAMBURG_STARTUP_SEED_ATTRIBUTE]: true,
+          };
+        }
         const lod3RootIds = Object.entries(parsedLod3.doc.CityObjects)
           .filter(([, object]) => object.type === 'Building')
           .map(([id]) => id);
         const lod2GeometryById = new Map(
-          lod3RootIds.map((id) => [id, structuredClone(doc.CityObjects[id]?.geometry ?? [])])
+          lod3RootIds.map((id) => [
+            id,
+            structuredClone(doc.CityObjects[id]?.geometry ?? []),
+          ])
         );
         for (const id of lod3RootIds) removeCityObjectTree(doc, id);
         const lod3Merge = mergeCityJson(doc, parsedLod3.doc);
@@ -276,18 +447,30 @@ export default function App() {
           }
         }
         if (!doc.metadata) doc.metadata = {};
-        doc.metadata.title = 'Hamburg city center LoD2/LoD3 buildings and editable roads';
+        doc.metadata.title =
+          'Hamburg citywide official LoD2 tiles with streamed editable CityJSON roads';
         doc.metadata.sourceDescription =
-          `Official Hamburg LoD2 context, ${lod3RootIds.length} surveyed textured LoD3 buildings, and precomputed osm2streets CityJSON Transportation roads.`;
+          `Official Hamburg remote LoD1/LoD2/LoD3 context with viewport-streamed osm2streets CityJSON Transportation roads; ${lod3RootIds.length} bundled LoD3 buildings are retained only as hidden offline seeds.`;
 
-        handleLoadedForApp(doc, HAMBURG_CITY_CENTER_COMBINED_NAME, null);
+        handleCatalogLoadedForApp(roadsLoaded, roadCatalogUrl, {
+          loadMode: 'viewport',
+        });
+        coreState.setFileName(HAMBURG_CITYWIDE_DEMO_NAME);
+        catalog.setCatalogStatus({
+          kind: 'ok',
+          message:
+            `${roadsLoaded.tiles.length} static road tiles loaded from Pages; ` +
+            `${roadsLoaded.features.toLocaleString()} road features in the initial view. ` +
+            'Move or zoom the map to stream more.',
+        });
         coreState.setPrimitiveValidation({
           kind: 'valid',
           message:
-            `The close showcase area contains ${lod3RootIds.length} official textured Hamburg LoD3 buildings; zoomed-out views use the preserved LoD2 source geometry.`,
+            `The Pages road tiles use the validated complete Hamburg catalog. ` +
+            'Citywide buildings stream read-only from Hamburg and become local CityJSON only when selected for editing.',
         });
         roadEditor.setRoadStatus(
-          `Loaded ${Object.values(parsedRoads.doc.CityObjects).filter((object) => object.attributes?._transportationKind !== 'intersection').length} CityJSON roads, ${Object.values(parsedRoads.doc.CityObjects).filter((object) => object.attributes?._transportationKind === 'intersection').length} junctions, and ${lod3RootIds.length} official LoD3 buildings. Tap Roads, then tap a road on the map to edit it.`
+          `Streamed ${roadsLoaded.features.toLocaleString()} CityJSON road features for the initial view. Tap Roads, then a road, to edit it in memory.`
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -305,7 +488,7 @@ export default function App() {
   }, [
     catalog,
     coreState,
-    handleLoadedForApp,
+    handleCatalogLoadedForApp,
     importExport,
     roadEditor.setRoadStatus,
   ]);
@@ -316,6 +499,7 @@ export default function App() {
       // overlays, and OSM road fetches. Keep the shared core ref current, then
       // let the catalog hook decide whether it needs to load more sequence tiles.
       coreState.mapBboxRef.current = bbox;
+      setPlanningViewportBbox(bbox);
       catalog.handleViewportChange(bbox);
     },
     [catalog.handleViewportChange, coreState.mapBboxRef]
@@ -395,6 +579,26 @@ export default function App() {
     return extractFootprints(coreState.cityjson);
   }, [coreState.cityjson, coreState.reloadToken]);
 
+  const pendingTransformPreview = useMemo(() => {
+    const doc = coreState.cityjson;
+    const pending = buildingEditor.pendingTransform;
+    if (!doc || !pending) return null;
+    const footprint = footprintsForFilter.find(
+      (candidate) => candidate.id === pending.id
+    );
+    return footprint
+      ? computeTransformedFootprintFromFootprint(doc, pending, footprint)
+      : null;
+  }, [buildingEditor.pendingTransform, coreState.cityjson, footprintsForFilter]);
+
+  const pendingTerrainSnap = useMemo(() => {
+    const doc = coreState.cityjson;
+    const pending = buildingEditor.pendingTransform;
+    return doc && pending
+      ? estimateTerrainSnap(doc, pending, footprintsForFilter)
+      : null;
+  }, [buildingEditor.pendingTransform, coreState.cityjson, footprintsForFilter]);
+
   const filteredIds = useMemo(
     () => matchingIds(footprintsForFilter, coreState.filter),
     [footprintsForFilter, coreState.filter]
@@ -450,16 +654,7 @@ export default function App() {
 
   const initialMapView = useMemo(() => {
     const saved = readInitialMapView(coreState.cityjson);
-    if (saved) {
-      return coreState.fileName === HAMBURG_CITY_CENTER_COMBINED_NAME
-        ? {
-            ...saved,
-            center: HAMBURG_LOD3_SHOWCASE_CENTER,
-            zoom: Math.min(saved.zoom, 14.85),
-            pitch: Math.max(saved.pitch ?? 0, 62),
-          }
-        : saved;
-    }
+    if (saved) return saved;
     return catalog.catalogConnection
       ? {
           center: HAMBURG_CITY_CENTER,
@@ -471,6 +666,7 @@ export default function App() {
 
   const handleSelect = useCallback(
     (info: SelectionInfo | null) => {
+      if (zoningEnabled) return;
       if (
         roadEditor.showRoadEditor ||
         roadEditor.selectedRoadArea ||
@@ -497,7 +693,113 @@ export default function App() {
         coreState.originals.set(info.objectId, { ...(obj?.attributes ?? {}) });
       }
     },
-    [coreState, buildingEditor, roadEditor]
+    [coreState, buildingEditor, roadEditor, zoningEnabled]
+  );
+
+  const handleHamburgBuildingHandoff = useCallback(
+    (handoff: HamburgBuildingHandoff): string | null => {
+      const doc = coreState.cityjsonRef.current;
+      if (!doc) return null;
+      const existing = doc.CityObjects[handoff.objectId];
+      let localId = handoff.objectId;
+      const sameSourceFeature =
+        existing?.attributes?._hamburgTileFeatureId ===
+        handoff.sourceFeatureId;
+      const existingSourceLod = Number(
+        existing?.attributes?._hamburgTileLod ?? 0
+      );
+      const existingIsPassiveSelectionProxy =
+        existing?.attributes?._hamburgTileSelectionProxy === true &&
+        existing?.attributes?._hamburgTileGeometryOverride !== true;
+      const shouldUpgradeSelectionProxy =
+        sameSourceFeature &&
+        existingIsPassiveSelectionProxy &&
+        handoff.sourceLod > existingSourceLod;
+      let createdGeometryOverride = false;
+
+      if (!sameSourceFeature || shouldUpgradeSelectionProxy) {
+        undoRedo.pushUndo(`Make ${handoff.objectId} editable`);
+        const existingIsStartupSeed =
+          existing?.attributes?.[HAMBURG_STARTUP_SEED_ATTRIBUTE] === true;
+        const existingHasDetailedGeometry = (existing?.geometry ?? []).some(
+          (geometry) => {
+            const lod = Number.parseFloat(
+              String((geometry as { lod?: unknown }).lod ?? '')
+            );
+            return Number.isFinite(lod) && lod >= 2;
+          }
+        );
+        if (
+          existing &&
+          existingHasDetailedGeometry &&
+          !existingIsStartupSeed &&
+          !shouldUpgradeSelectionProxy
+        ) {
+          createdGeometryOverride = true;
+          coreState.originals.set(
+            handoff.objectId,
+            { ...(existing.attributes ?? {}) }
+          );
+          existing.attributes = {
+            ...(existing.attributes ?? {}),
+            _hamburgTileFeatureId: handoff.sourceFeatureId,
+            _hamburgTileBatchId: handoff.batchId,
+            _hamburgTileUrl: handoff.sourceTileUrl,
+            _hamburgTileLod: handoff.sourceLod,
+            _hamburgTileSelectionProxy: false,
+            _hamburgTileGeometryOverride: true,
+          };
+        } else {
+          const removedSeedObjects =
+            existing &&
+            (existingIsStartupSeed || shouldUpgradeSelectionProxy)
+              ? removeCityObjectTree(doc, handoff.objectId)
+              : null;
+          if (existing && !existingIsStartupSeed) {
+            delete doc.CityObjects[handoff.objectId];
+          }
+          const merged = mergeCityJson(doc, handoff.document);
+          if (!merged.ok) {
+            if (removedSeedObjects) {
+              Object.assign(doc.CityObjects, removedSeedObjects);
+            } else if (existing) {
+              doc.CityObjects[handoff.objectId] = existing;
+            }
+            alert(`Could not create the local building copy: ${merged.reason}`);
+            return null;
+          }
+          localId = merged.renameMap?.[handoff.objectId] ?? handoff.objectId;
+          const local = doc.CityObjects[localId];
+          if (local) {
+            ensureHamburgEditableLodFallback(
+              local,
+              shouldUpgradeSelectionProxy ? existing : undefined,
+              handoff.sourceLod
+            );
+            coreState.originals.set(localId, {
+              ...(local.attributes ?? {}),
+            });
+          }
+        }
+        if (createdGeometryOverride) {
+          coreState.setDirtyIds((current) => {
+            const next = new Set(current);
+            next.add(localId);
+            return next;
+          });
+          coreState.markGeometryChanged(
+            'A local building now overrides its streamed Hamburg counterpart; run Check 3D before export.'
+          );
+        }
+        coreState.setReloadToken((token) => token + 1);
+      }
+
+      roadEditor.handleCloseRoadWorkspace();
+      buildingEditor.setMultiSelection(new Set());
+      coreState.setSelection({ objectId: localId });
+      return localId;
+    },
+    [buildingEditor, coreState, roadEditor, undoRedo]
   );
 
   const handleAttributeChange = useCallback(
@@ -508,6 +810,7 @@ export default function App() {
       const prev = obj.attributes?.[key];
       if (prev === value) return;
       undoRedo.pushUndo(`Edit ${id}.${key}`);
+      promoteHamburgTileSelectionProxy(coreState.cityjson, id);
       if (!obj.attributes) obj.attributes = {};
       obj.attributes[key] = value;
       coreState.setDirtyIds((prevSet) => {
@@ -515,6 +818,7 @@ export default function App() {
         next.add(id);
         return next;
       });
+      coreState.setReloadToken((token) => token + 1);
     },
     [coreState, undoRedo]
   );
@@ -530,12 +834,15 @@ export default function App() {
         next.delete(id);
         return next;
       });
+      coreState.setReloadToken((token) => token + 1);
       coreState.setSelection((s) => (s ? { ...s } : s));
     },
     [coreState]
   );
 
   const autoHamburgLoading = autoHamburgStatus?.kind === 'loading';
+  const hamburgBuildingTilesEnabled =
+    catalog.catalogConnection?.catalogType === HAMBURG_ROAD_CATALOG_TYPE;
   const showFileLoader =
     importExport.loadModalOpen || (!coreState.cityjson && !autoHamburgLoading);
 
@@ -658,7 +965,11 @@ export default function App() {
               }
             : undefined
         }
-        onPersistCatalog={catalog.catalogConnection ? catalog.handlePersistCatalog : undefined}
+        onPersistCatalog={
+          catalog.catalogConnection && !catalog.catalogConnection.readOnly
+            ? catalog.handlePersistCatalog
+            : undefined
+        }
       />
       <div className="main">
         {filtersOpen && coreState.cityjson && footprintsForFilter.length > 0 && (
@@ -792,6 +1103,11 @@ export default function App() {
               onSelect={handleSelect}
               reloadToken={coreState.reloadToken}
               precomputedFootprints={footprintsForFilter}
+              hamburgBuildingTilesEnabled={hamburgBuildingTilesEnabled}
+              onHamburgBuildingHandoff={handleHamburgBuildingHandoff}
+              planningInteractionOnly={zoningEnabled}
+              texturesEnabled={buildingTexturesEnabled}
+              onTexturesEnabledChange={setBuildingTexturesEnabled}
               initialView={initialMapView}
               drawMode={coreState.drawMode}
               onFootprintDrawn={(ring) => {
@@ -820,6 +1136,7 @@ export default function App() {
               onViewportChange={handleMapViewportChange}
               dragTransformId={buildingEditor.pendingTransform?.id ?? null}
               onDragMove={buildingEditor.handleDragMove}
+              onDragEnd={buildingEditor.handleDragEnd}
               multiSelectedIds={buildingEditor.multiSelection.size > 0 ? buildingEditor.multiSelection : null}
               zones={zoningEnabled ? zones : []}
               onZoneSelect={handleZoneSelect}
@@ -894,11 +1211,11 @@ export default function App() {
                       polygon: buildingEditor.pendingFootprint,
                       height: buildingEditor.pendingForm.totalHeight,
                     }
-                  : buildingEditor.pendingTransform
-                  ? (() => {
-                      const t = computeTransformedFootprint(coreState.cityjson, buildingEditor.pendingTransform);
-                      return t ? { polygon: t.polygon, height: t.height } : null;
-                    })()
+                  : pendingTransformPreview
+                  ? {
+                      polygon: pendingTransformPreview.polygon,
+                      height: pendingTransformPreview.height,
+                    }
                   : null
               }
             />
@@ -943,6 +1260,7 @@ export default function App() {
         </div>
 
         {coreState.cityjson &&
+          !zoningEnabled &&
           coreState.selection &&
           filteredForSelected &&
           coreState.cityjson.CityObjects[coreState.selection.objectId]?.type !== 'Road' && (
@@ -990,6 +1308,8 @@ export default function App() {
                       }
                     : null
                 }
+                texturesEnabled={buildingTexturesEnabled}
+                onTexturesEnabledChange={setBuildingTexturesEnabled}
                 onAdjustSplit={buildingEditor.handleAdjustSplit}
               />
             </div>
@@ -1012,7 +1332,7 @@ export default function App() {
               }
               terrainSnap={
                 buildingEditor.pendingTransform?.id === coreState.selection.objectId
-                  ? estimateTerrainSnap(coreState.cityjson, buildingEditor.pendingTransform)
+                  ? pendingTerrainSnap
                   : null
               }
               onStartTransform={buildingEditor.handleStartTransform}
@@ -1058,6 +1378,22 @@ function computeFootprintBbox(
   return any ? [west, south, east, north] : null;
 }
 
+function planningQueryKey(bbox: Wgs84Bbox): string {
+  return bbox.map((value) => value.toFixed(5)).join(':');
+}
+
+function planningBboxContains(
+  coverage: Wgs84Bbox,
+  viewport: Wgs84Bbox
+): boolean {
+  return (
+    coverage[0] <= viewport[0] &&
+    coverage[1] <= viewport[1] &&
+    coverage[2] >= viewport[2] &&
+    coverage[3] >= viewport[3]
+  );
+}
+
 function readInitialMapView(doc: CityJsonDocument | null):
   | {
       center: [number, number];
@@ -1090,51 +1426,6 @@ function readInitialMapView(doc: CityJsonDocument | null):
     ...(typeof bearing === 'number' && Number.isFinite(bearing) ? { bearing } : {}),
     disableDataFit: true,
   };
-}
-
-/**
- * Decide which bbox to use for the planning request.
- *
- * Prefer the current viewport when it is covered by a provider because the user
- * usually expects the toolbar action to apply to what they are looking at. If
- * the viewport is outside known coverage but the loaded CityJSON is inside
- * coverage, use the data bbox instead. Returning an unsupported bbox is
- * intentional: the caller can then show a helpful "coverage unavailable"
- * message rather than silently doing nothing.
- */
-function choosePlanningQueryBbox({
-  viewportBbox,
-  footprintBbox,
-}: {
-  viewportBbox: Wgs84Bbox | null;
-  footprintBbox: Wgs84Bbox | null;
-}): Wgs84Bbox | null {
-  const viewportQueryBbox = viewportBbox ? expandBbox(viewportBbox) : null;
-  const footprintQueryBbox = footprintBbox ? expandBbox(footprintBbox) : null;
-
-  if (
-    viewportQueryBbox &&
-    getPlanningProviderForBbox(viewportQueryBbox) &&
-    isPlanningBboxLoadable(viewportQueryBbox)
-  ) {
-    return viewportQueryBbox;
-  }
-  if (footprintQueryBbox && getPlanningProviderForBbox(footprintQueryBbox)) {
-    const limitedFootprints = limitPlanningBboxSpan(footprintQueryBbox);
-    if (getPlanningProviderForBbox(limitedFootprints)) return limitedFootprints;
-  }
-  if (viewportQueryBbox && getPlanningProviderForBbox(viewportQueryBbox)) {
-    const limitedViewport = limitPlanningBboxSpan(viewportQueryBbox);
-    if (getPlanningProviderForBbox(limitedViewport)) return limitedViewport;
-  }
-  return viewportQueryBbox ?? footprintQueryBbox;
-}
-
-function expandBbox(bbox: Wgs84Bbox, ratio = 0.15, minPad = 0.002): Wgs84Bbox {
-  const [west, south, east, north] = bbox;
-  const lngPad = Math.max((east - west) * ratio, minPad);
-  const latPad = Math.max((north - south) * ratio, minPad);
-  return [west - lngPad, south - latPad, east + lngPad, north + latPad];
 }
 
 // Attribute panel without its own header
@@ -1321,7 +1612,7 @@ function ZoneLegend({
         </button>
       </div>
       <div style={{ marginBottom: 4, color: 'rgba(255,255,255,0.75)' }}>
-        {zones.length} polygons loaded for this view
+        {zones.length} polygons loaded across Hamburg and the close view
       </div>
       {visibleZones.map((z) => (
         <div
@@ -1566,11 +1857,19 @@ function AssetPlacementBanner({
   );
 }
 
-function removeCityObjectTree(doc: CityJsonDocument, id: string): void {
+function removeCityObjectTree(
+  doc: CityJsonDocument,
+  id: string,
+  removed: CityJsonDocument['CityObjects'] = {}
+): CityJsonDocument['CityObjects'] {
   const object = doc.CityObjects[id];
-  if (!object) return;
-  for (const child of object.children ?? []) removeCityObjectTree(doc, child);
+  if (!object) return removed;
+  removed[id] = object;
+  for (const child of object.children ?? []) {
+    removeCityObjectTree(doc, child, removed);
+  }
   delete doc.CityObjects[id];
+  return removed;
 }
 
 function maximumBuildingLod(doc: CityJsonDocument): number | null {

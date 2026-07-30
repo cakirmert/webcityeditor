@@ -33,17 +33,25 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
           boundary_polygon: {
             rings: [{ pts: [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 1000 }] }],
           },
-          roads: [
-            [7, {
-              name: 'Fixture Avenue',
-              highway_type: 'primary',
-              layer: 0,
-              osm_ids: [3100],
-              center_line: { pts: [{ x: 100, y: 100 }, { x: 900, y: 100 }] },
-            }],
-            [9, { name: 'Lower Lane', highway_type: 'service', layer: -1, osm_ids: [4100] }],
-          ],
-        })
+           roads: [
+             [7, {
+               id: 7,
+               name: 'Fixture Avenue',
+               highway_type: 'primary',
+               layer: 0,
+               osm_ids: [3100],
+               src_i: 100,
+               dst_i: 101,
+               reference_line: { pts: [{ x: 0, y: 100 }, { x: 1000, y: 100 }] },
+               center_line: { pts: [{ x: 100, y: 100 }, { x: 900, y: 100 }] },
+             }],
+             [9, { name: 'Lower Lane', highway_type: 'service', layer: -1, osm_ids: [4100] }],
+           ],
+           intersections: [
+             [100, { kind: 'MapEdge', roads: [7] }],
+             [101, { kind: 'MapEdge', roads: [7] }],
+           ],
+         })
       );
 
       execFileSync(
@@ -79,8 +87,12 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
       expect(road7.attributes).toMatchObject({
         _source: 'osm2streets',
         _osm2streetsRoadId: '7',
-        _osmWayIds: ['3100'],
-        _sourceCenterlineWgs84: [[9.992, 53.558], [10.008, 53.558]],
+         _osmWayIds: ['3100'],
+         _sourceCenterlineWgs84: [[9.992, 53.558], [10.008, 53.558]],
+         _sourceMapEdgeEndpointsWgs84: {
+           start: [9.99, 53.558],
+           end: [10.01, 53.558],
+         },
         _osm2streetsLaneCount: 4,
         name: 'Fixture Avenue',
         _highwayType: 'primary',
@@ -128,10 +140,17 @@ describe('osm2streets-lanes-to-cityjson CLI', () => {
       const areas = extractTransportationAreas(parsed.doc);
       expect(areas).toHaveLength(5);
       expect(areas.filter((area) => area.roadId === 'osm2streets-road-7')).toHaveLength(4);
-      expect(
-        areas.find((area) => area.roadId === 'osm2streets-road-7')
-          ?.attributes.sourceCenterlineWgs84
-      ).toEqual([[9.992, 53.558], [10.008, 53.558]]);
+       expect(
+         areas.find((area) => area.roadId === 'osm2streets-road-7')
+           ?.attributes.sourceCenterlineWgs84
+       ).toEqual([[9.992, 53.558], [10.008, 53.558]]);
+       expect(
+         areas.find((area) => area.roadId === 'osm2streets-road-7')
+           ?.attributes.sourceMapEdgeEndpointsWgs84
+       ).toEqual({
+         start: [9.99, 53.558],
+         end: [10.01, 53.558],
+       });
       expect(
         areas
           .filter((area) => area.roadId === 'osm2streets-road-7')

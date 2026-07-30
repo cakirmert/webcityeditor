@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
 import type { CityJsonDocument, NewBuildingForm } from '../types';
@@ -35,6 +35,7 @@ import {
   type BuildingAssetPlacementPreview,
   type BuildingAssetDefinition,
 } from '../lib/building-assets';
+import { promoteHamburgTileSelectionProxy } from '../lib/hamburg-3d-tiles-edit';
 
 export function useBuildingEditor(
   coreState: CoreState,
@@ -100,6 +101,7 @@ export function useBuildingEditor(
       runStructurallyGuardedMutation(cityjson, `Moving ${opening.type} on ${buildingId}`, () =>
         moveOpening(cityjson, buildingId, opening, dx, dy, dz)
       );
+      promoteHamburgTileSelectionProxy(cityjson, buildingId);
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(buildingId);
@@ -139,6 +141,7 @@ export function useBuildingEditor(
         alert(`Reshape failed: ${r.reason}`);
         return;
       }
+      promoteHamburgTileSelectionProxy(cityjson, id);
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(id);
@@ -170,6 +173,7 @@ export function useBuildingEditor(
         alert(`Couldn't make this building editable: ${r.reason}`);
         return;
       }
+      promoteHamburgTileSelectionProxy(cityjson, buildingId);
       setDirtyIds((prev) => {
         const next = new Set(prev);
         next.add(buildingId);
@@ -241,6 +245,7 @@ export function useBuildingEditor(
           `Splitting ${id} into floors`,
           () => splitBuildingByFloor(cityjson, id, floorCount)
         );
+        promoteHamburgTileSelectionProxy(cityjson, id);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -266,6 +271,7 @@ export function useBuildingEditor(
           `Splitting ${id} with custom floor heights`,
           () => splitBuildingByFloorHeights(cityjson, id, heights)
         );
+        promoteHamburgTileSelectionProxy(cityjson, id);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -291,6 +297,7 @@ export function useBuildingEditor(
           `Splitting ${id} into floor-plan sections`,
           () => splitBuildingByFloorPlans(cityjson, id, heights, floorPlans)
         );
+        promoteHamburgTileSelectionProxy(cityjson, id);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -317,6 +324,7 @@ export function useBuildingEditor(
           `Splitting ${id} into side parts`,
           () => splitBuildingBySide(cityjson, id, partCount, axis)
         );
+        promoteHamburgTileSelectionProxy(cityjson, id);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -371,6 +379,7 @@ export function useBuildingEditor(
       }
       const result = commitBuildingTransformFromEditor(cityjson, pendingTransform);
       if (result.changed) {
+        promoteHamburgTileSelectionProxy(cityjson, id);
         setDirtyIds((prev) => {
           const next = new Set(prev);
           next.add(id);
@@ -430,6 +439,7 @@ export function useBuildingEditor(
       alert(res.reason ?? 'Could not regenerate building');
       return;
     }
+    promoteHamburgTileSelectionProxy(cityjson, footprintEdit.buildingId);
     setDirtyIds((prev) => {
       const next = new Set(prev);
       next.add(footprintEdit.buildingId);
@@ -740,24 +750,26 @@ export function useBuildingEditor(
     return () => window.removeEventListener('keydown', onKey);
   }, [ifcPending]);
 
-  const dragBaseRef = useRef<{ dx: number; dy: number } | null>(null);
   const handleDragMove = useCallback(
     (dx: number, dy: number) => {
       setPendingTransform((cur) => {
         if (!cur) return cur;
-        if (!dragBaseRef.current) {
-          dragBaseRef.current = { dx: cur.dx, dy: cur.dy };
-        }
-        const next = { ...cur, dx: dragBaseRef.current.dx + dx, dy: dragBaseRef.current.dy + dy };
-        return cityjson && next.autoTerrain ? snapTransformToTerrain(cityjson, next) : next;
+        // MapView supplies frame-coalesced incremental CRS deltas. Terrain is
+        // snapped once when the gesture ends instead of scanning the entire
+        // loaded city for every raw mousemove.
+        return { ...cur, dx: cur.dx + dx, dy: cur.dy + dy };
       });
     },
-    [cityjson]
+    []
   );
 
-  useEffect(() => {
-    if (!pendingTransform) dragBaseRef.current = null;
-  }, [pendingTransform]);
+  const handleDragEnd = useCallback(() => {
+    setPendingTransform((cur) =>
+      cur && cityjson && cur.autoTerrain
+        ? snapTransformToTerrain(cityjson, cur)
+        : cur
+    );
+  }, [cityjson]);
 
   return {
     pendingFootprint,
@@ -815,6 +827,7 @@ export function useBuildingEditor(
     handleConfirmAssetPlacement,
     handleCancelAssetPlacement,
     handleDragMove,
+    handleDragEnd,
   };
 }
 

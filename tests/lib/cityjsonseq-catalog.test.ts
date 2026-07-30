@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { gzipSync } from 'node:zlib';
 import {
   fetchCityJsonSeqCatalog,
   fetchCityJsonSeqViewport,
@@ -78,6 +79,16 @@ function response(body: unknown): Response {
   } as unknown as Response;
 }
 
+function binaryResponse(body: Uint8Array): Response {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    arrayBuffer: async () =>
+      body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+  } as unknown as Response;
+}
+
 describe('fetchCityJsonSeqViewport', () => {
   it('fetches matching seq tiles and re-encodes different local transforms exactly', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
@@ -133,6 +144,179 @@ describe('fetchCityJsonSeqViewport', () => {
       )
     ).rejects.toThrow(/Zoom in/);
   });
+
+  it('filters a static Pages catalog and decompresses relative gzip tile URLs', async () => {
+    const staticCatalog = {
+      type: 'HamburgOsm2StreetsRoadCityJSONSeqCatalog',
+      crs: 'EPSG:25832',
+      tiles: queryResponse().tiles.map((tile) => ({
+        ...tile,
+        url: `tiles/${tile.file}.gz`,
+      })),
+    };
+    const compressed = gzipSync(tileText('Building_A', 565000));
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://example.test/hamburg/roads/catalog.json') {
+        return response(staticCatalog);
+      }
+      if (url === 'https://example.test/hamburg/roads/tiles/tile-a.city.jsonl.gz') {
+        return binaryResponse(compressed);
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const loaded = await fetchCityJsonSeqViewport(
+      'https://example.test/hamburg/roads/catalog.json',
+      [565000, 5936000, 565500, 5937000],
+      new Set(),
+      fetchImpl
+    );
+
+    expect(loaded.catalogType).toBe('HamburgOsm2StreetsRoadCityJSONSeqCatalog');
+    expect(loaded.readOnly).toBe(true);
+    expect(loaded.tileIds).toEqual(['tile-a']);
+    expect(Object.keys(loaded.doc!.CityObjects)).toEqual(['Building_A']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('adds a one-cell road halo without exceeding the viewport tile cap', async () => {
+    const staticCatalog = {
+      type: 'HamburgOsm2StreetsRoadCityJSONSeqCatalog',
+      crs: 'EPSG:25832',
+      packaging: { cellSizeMeters: 1000 },
+      tiles: [
+        {
+          id: 'tile-a',
+          file: 'tile-a.city.jsonl',
+          url: 'tiles/tile-a.city.jsonl',
+          extent: [565100, 5936100, 0, 565200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+        {
+          id: 'tile-b',
+          file: 'tile-b.city.jsonl',
+          url: 'tiles/tile-b.city.jsonl',
+          extent: [565500, 5936100, 0, 565600, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+        {
+          id: 'tile-c',
+          file: 'tile-c.city.jsonl',
+          url: 'tiles/tile-c.city.jsonl',
+          extent: [566100, 5936100, 0, 566200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+      ],
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://example.test/hamburg/roads/catalog.json') {
+        return response(staticCatalog);
+      }
+      if (url.endsWith('/tiles/tile-a.city.jsonl')) {
+        return response(tileText('Building_A', 565000));
+      }
+      if (url.endsWith('/tiles/tile-b.city.jsonl')) {
+        return response(tileText('Building_B', 566000));
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const loaded = await fetchCityJsonSeqViewport(
+      'https://example.test/hamburg/roads/catalog.json',
+      [565100, 5936100, 565200, 5936200],
+      new Set(),
+      fetchImpl,
+      2
+    );
+
+    expect(loaded.queriedTileCount).toBe(2);
+    expect(loaded.tileIds).toEqual(['tile-a', 'tile-b']);
+    expect(Object.keys(loaded.doc!.CityObjects).sort()).toEqual([
+      'Building_A',
+      'Building_B',
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('loads exact road seam dependencies before optional halo tiles', async () => {
+    const staticCatalog = {
+      type: 'HamburgOsm2StreetsRoadCityJSONSeqCatalog',
+      crs: 'EPSG:25832',
+      packaging: { cellSizeMeters: 1000 },
+      tiles: [
+        {
+          id: 'tile-visible',
+          file: 'tile-visible.city.jsonl',
+          url: 'tiles/tile-visible.city.jsonl',
+          extent: [565100, 5936100, 0, 565200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+          dependencies: ['tile-seam'],
+        },
+        {
+          id: 'tile-halo',
+          file: 'tile-halo.city.jsonl',
+          url: 'tiles/tile-halo.city.jsonl',
+          extent: [565500, 5936100, 0, 565600, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+        {
+          id: 'tile-seam',
+          file: 'tile-seam.city.jsonl',
+          url: 'tiles/tile-seam.city.jsonl',
+          extent: [568100, 5936100, 0, 568200, 5936200, 10],
+          features: 1,
+          cityObjects: 1,
+          vertices: 4,
+          syntheticRootsAdded: 0,
+        },
+      ],
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://example.test/hamburg/roads/catalog.json') {
+        return response(staticCatalog);
+      }
+      if (url.endsWith('/tiles/tile-visible.city.jsonl')) {
+        return response(tileText('Building_Visible', 565000));
+      }
+      if (url.endsWith('/tiles/tile-seam.city.jsonl')) {
+        return response(tileText('Building_Seam', 568000));
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const loaded = await fetchCityJsonSeqViewport(
+      'https://example.test/hamburg/roads/catalog.json',
+      [565100, 5936100, 565200, 5936200],
+      new Set(),
+      fetchImpl,
+      2
+    );
+
+    expect(loaded.tileIds).toEqual(['tile-visible', 'tile-seam']);
+    expect(Object.keys(loaded.doc!.CityObjects).sort()).toEqual([
+      'Building_Seam',
+      'Building_Visible',
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe('fetchCityJsonSeqCatalog', () => {
@@ -165,6 +349,9 @@ describe('CityJSONSeq catalog helpers', () => {
     expect(normalizeCatalogBaseUrl('http://127.0.0.1:8787/api/hamburg/catalog').toString()).toBe(
       'http://127.0.0.1:8787/'
     );
+    expect(
+      normalizeCatalogBaseUrl('https://example.test/webcityeditor/data/roads/catalog.json').toString()
+    ).toBe('https://example.test/webcityeditor/data/roads/');
   });
 
   it('projects a Hamburg WGS84 viewport into EPSG:25832 metres', () => {
