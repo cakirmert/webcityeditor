@@ -160,27 +160,6 @@ export interface RoadBand {
   maxspeedKmh?: number | null;
 }
 
-export type RoadLaneMovementDecisionStatus = 'proposed' | 'confirmed' | 'rejected';
-
-export interface RoadLaneMovementReference {
-  roadId: string;
-  sectionId: string;
-  endpoint: 'start' | 'end';
-  bandId: string;
-}
-
-export interface RoadLaneMovementDecision {
-  id: string;
-  status: RoadLaneMovementDecisionStatus;
-  source: RoadLaneMovementReference;
-  target: RoadLaneMovementReference;
-  mode: string;
-  provenance: {
-    source: 'osm2streets' | 'cityjson' | 'user';
-    sourceId?: string;
-  };
-}
-
 export interface RoadSectionDraft {
   id: string;
   /** User-facing anchors. Rendered and exported ribbons are sampled between them. */
@@ -202,7 +181,6 @@ export interface RoadDraft {
   osmTags?: Record<string, string>;
   vertical?: RoadVerticalProfile;
   userVerified?: boolean;
-  laneMovementDecisions?: RoadLaneMovementDecision[];
   sections: RoadSectionDraft[];
 }
 
@@ -2242,9 +2220,8 @@ export function readEditableRoadDraftFromCityObject(object: CityObject): RoadDra
 }
 
 /**
- * Remove one stable lane band and any persisted movement decisions that
- * reference it. References use band ids, so reordering surviving bands does
- * not invalidate their decisions.
+ * Remove one lane band while keeping the nearest surviving band selection
+ * stable in the caller.
  */
 export function removeRoadBandFromDraft(
   draft: RoadDraft,
@@ -2261,7 +2238,6 @@ export function removeRoadBandFromDraft(
     return draft;
   }
 
-  const removedBandId = section.bands[bandIndex]?.id;
   const sections = draft.sections.map((candidate) =>
     candidate.id === sectionId
       ? {
@@ -2270,44 +2246,10 @@ export function removeRoadBandFromDraft(
         }
       : candidate
   );
-  const laneMovementDecisions = removedBandId
-    ? draft.laneMovementDecisions?.filter(
-        (decision) =>
-          !laneMovementReferenceMatchesBand(
-            decision.source,
-            draft.id,
-            sectionId,
-            removedBandId
-          ) &&
-          !laneMovementReferenceMatchesBand(
-            decision.target,
-            draft.id,
-            sectionId,
-            removedBandId
-          )
-      )
-    : draft.laneMovementDecisions;
-
   return {
     ...draft,
     sections,
-    ...(laneMovementDecisions?.length
-      ? { laneMovementDecisions }
-      : { laneMovementDecisions: undefined }),
   };
-}
-
-function laneMovementReferenceMatchesBand(
-  reference: RoadLaneMovementReference,
-  draftId: string | undefined,
-  sectionId: string,
-  bandId: string
-): boolean {
-  return (
-    reference.sectionId === sectionId &&
-    reference.bandId === bandId &&
-    (!draftId || reference.roadId === draftId)
-  );
 }
 
 /**
@@ -2360,171 +2302,6 @@ export function synchronizeRoadConnectionMetadata(
     }
   }
   return [...changedTargets];
-}
-
-export interface RoadLaneMovementSynchronizationResult {
-  updatedRoadIds: string[];
-  mirroredDecisionCount: number;
-  removedDecisionCount: number;
-}
-
-/**
- * Mirror lane-movement decisions into the other editable Road participating
- * in each movement. The peer stores the same stable decision id with its local
- * lane as the source, so either Road can reopen and review the decision.
- *
- * The previous source layout is used to remove mirrored peer records when a
- * source lane (and therefore its decision) is removed. Geometry is untouched.
- */
-export function synchronizeRoadLaneMovementMetadata(
-  doc: CityJsonDocument,
-  sourceRoadId: string,
-  sourceDraft: RoadDraft,
-  previousSourceDraft: RoadDraft | null = null
-): RoadLaneMovementSynchronizationResult {
-  const currentByPeer = laneMovementDecisionsByPeer(
-    sourceRoadId,
-    sourceDraft.laneMovementDecisions
-  );
-  const previousByPeer = laneMovementDecisionsByPeer(
-    sourceRoadId,
-    previousSourceDraft?.laneMovementDecisions
-  );
-  const peerRoadIds = new Set([
-    ...currentByPeer.keys(),
-    ...previousByPeer.keys(),
-  ]);
-  const updatedRoadIds = new Set<string>();
-  let mirroredDecisionCount = 0;
-  let removedDecisionCount = 0;
-
-  for (const peerRoadId of peerRoadIds) {
-    const peerObject = doc.CityObjects[peerRoadId];
-    if (!peerObject || peerObject.type !== 'Road') continue;
-    const peerDraft = readEditableRoadDraftFromCityObject(peerObject);
-    if (!peerDraft) continue;
-
-    const previousIds = new Set(
-      (previousByPeer.get(peerRoadId) ?? []).map((decision) => decision.id)
-    );
-    const currentDecisions = (currentByPeer.get(peerRoadId) ?? [])
-      .filter((decision) =>
-        roadLaneMovementDecisionReferencesExistingBands(
-          decision,
-          sourceRoadId,
-          sourceDraft,
-          peerRoadId,
-          peerDraft
-        )
-      )
-      .map((decision) => orientLaneMovementDecisionForRoad(decision, peerRoadId));
-    const currentIds = new Set(currentDecisions.map((decision) => decision.id));
-    const replacedIds = new Set([...previousIds, ...currentIds]);
-    const existingDecisions = peerDraft.laneMovementDecisions ?? [];
-    const retained = existingDecisions.filter(
-      (decision) =>
-        !(
-          replacedIds.has(decision.id) &&
-          laneMovementDecisionConnectsRoads(
-            decision,
-            sourceRoadId,
-            peerRoadId
-          )
-        )
-    );
-    removedDecisionCount += existingDecisions.length - retained.length;
-    const nextDecisions = [...retained, ...currentDecisions];
-    const changed =
-      JSON.stringify(existingDecisions) !== JSON.stringify(nextDecisions);
-    if (!changed) continue;
-
-    peerDraft.laneMovementDecisions =
-      nextDecisions.length > 0 ? nextDecisions : undefined;
-    peerObject.attributes = {
-      ...(peerObject.attributes ?? {}),
-      _roadLayout: roadDraftToJson(peerDraft),
-      _updatedAt: new Date().toISOString(),
-    };
-    updatedRoadIds.add(peerRoadId);
-    mirroredDecisionCount += currentDecisions.length;
-  }
-
-  return {
-    updatedRoadIds: [...updatedRoadIds],
-    mirroredDecisionCount,
-    removedDecisionCount,
-  };
-}
-
-function laneMovementDecisionsByPeer(
-  sourceRoadId: string,
-  decisions: RoadLaneMovementDecision[] | undefined
-): Map<string, RoadLaneMovementDecision[]> {
-  const byPeer = new Map<string, RoadLaneMovementDecision[]>();
-  for (const decision of decisions ?? []) {
-    const peerRoadId =
-      decision.source.roadId === sourceRoadId
-        ? decision.target.roadId
-        : decision.target.roadId === sourceRoadId
-          ? decision.source.roadId
-          : null;
-    if (!peerRoadId || peerRoadId === sourceRoadId) continue;
-    const peerDecisions = byPeer.get(peerRoadId) ?? [];
-    peerDecisions.push(decision);
-    byPeer.set(peerRoadId, peerDecisions);
-  }
-  return byPeer;
-}
-
-function orientLaneMovementDecisionForRoad(
-  decision: RoadLaneMovementDecision,
-  roadId: string
-): RoadLaneMovementDecision {
-  const oriented =
-    decision.source.roadId === roadId
-      ? decision
-      : { ...decision, source: decision.target, target: decision.source };
-  return JSON.parse(JSON.stringify(oriented)) as RoadLaneMovementDecision;
-}
-
-function roadLaneMovementDecisionReferencesExistingBands(
-  decision: RoadLaneMovementDecision,
-  sourceRoadId: string,
-  sourceDraft: RoadDraft,
-  peerRoadId: string,
-  peerDraft: RoadDraft
-): boolean {
-  const sourceReference =
-    decision.source.roadId === sourceRoadId ? decision.source : decision.target;
-  const peerReference =
-    decision.source.roadId === peerRoadId ? decision.source : decision.target;
-  return (
-    roadLaneMovementReferenceExists(sourceReference, sourceDraft) &&
-    roadLaneMovementReferenceExists(peerReference, peerDraft)
-  );
-}
-
-function roadLaneMovementReferenceExists(
-  reference: RoadLaneMovementReference,
-  draft: RoadDraft
-): boolean {
-  const section = draft.sections.find(
-    (candidate) => candidate.id === reference.sectionId
-  );
-  return !!section?.bands.some((band) => band.id === reference.bandId);
-}
-
-function laneMovementDecisionConnectsRoads(
-  decision: RoadLaneMovementDecision,
-  firstRoadId: string,
-  secondRoadId: string
-): boolean {
-  return (
-    (decision.source.roadId === firstRoadId &&
-      decision.target.roadId === secondRoadId) ||
-    (decision.source.roadId === secondRoadId &&
-      decision.target.roadId === firstRoadId)
-  );
 }
 
 export interface StaleReciprocalRoadConnection {
@@ -2772,21 +2549,6 @@ export function deleteRoadFromCityJson(
         delete section.connections;
       }
     }
-    const survivingDecisions = draft.laneMovementDecisions?.filter(
-      (decision) =>
-        decision.source.roadId !== roadId &&
-        decision.target.roadId !== roadId
-    );
-    if (
-      (draft.laneMovementDecisions?.length ?? 0) !==
-      (survivingDecisions?.length ?? 0)
-    ) {
-      draft.laneMovementDecisions = survivingDecisions?.length
-        ? survivingDecisions
-        : undefined;
-      changed = true;
-    }
-
     if (!changed) continue;
     candidate.attributes = {
       ...(candidate.attributes ?? {}),
@@ -2844,91 +2606,7 @@ function readRoadDraft(value: unknown): RoadDraft | null {
   if (osmTags) draft.osmTags = osmTags;
   if (vertical) draft.vertical = vertical;
   if (typeof record.userVerified === 'boolean') draft.userVerified = record.userVerified;
-  if (Array.isArray(record.laneMovementDecisions)) {
-    const laneMovementDecisions = record.laneMovementDecisions
-      .map(readRoadLaneMovementDecision)
-      .filter(
-        (decision): decision is RoadLaneMovementDecision => decision !== null
-      );
-    if (laneMovementDecisions.length > 0) {
-      draft.laneMovementDecisions = laneMovementDecisions;
-    }
-  }
   return draft;
-}
-
-function readRoadLaneMovementDecision(
-  value: unknown
-): RoadLaneMovementDecision | null {
-  const record = unknownRecord(value);
-  if (!record || typeof record.id !== 'string' || !record.id) return null;
-  const statuses: RoadLaneMovementDecisionStatus[] = [
-    'proposed',
-    'confirmed',
-    'rejected',
-  ];
-  if (!statuses.includes(record.status as RoadLaneMovementDecisionStatus)) {
-    return null;
-  }
-  const source = readRoadLaneMovementReference(record.source);
-  const target = readRoadLaneMovementReference(record.target);
-  const provenanceRecord = unknownRecord(record.provenance);
-  const provenanceSources: RoadLaneMovementDecision['provenance']['source'][] = [
-    'osm2streets',
-    'cityjson',
-    'user',
-  ];
-  if (
-    !source ||
-    !target ||
-    typeof record.mode !== 'string' ||
-    !record.mode ||
-    !provenanceRecord ||
-    !provenanceSources.includes(
-      provenanceRecord.source as RoadLaneMovementDecision['provenance']['source']
-    )
-  ) {
-    return null;
-  }
-
-  return {
-    id: record.id,
-    status: record.status as RoadLaneMovementDecisionStatus,
-    source,
-    target,
-    mode: record.mode,
-    provenance: {
-      source:
-        provenanceRecord.source as RoadLaneMovementDecision['provenance']['source'],
-      ...(typeof provenanceRecord.sourceId === 'string' && provenanceRecord.sourceId
-        ? { sourceId: provenanceRecord.sourceId }
-        : {}),
-    },
-  };
-}
-
-function readRoadLaneMovementReference(
-  value: unknown
-): RoadLaneMovementReference | null {
-  const record = unknownRecord(value);
-  if (
-    !record ||
-    typeof record.roadId !== 'string' ||
-    !record.roadId ||
-    typeof record.sectionId !== 'string' ||
-    !record.sectionId ||
-    (record.endpoint !== 'start' && record.endpoint !== 'end') ||
-    typeof record.bandId !== 'string' ||
-    !record.bandId
-  ) {
-    return null;
-  }
-  return {
-    roadId: record.roadId,
-    sectionId: record.sectionId,
-    endpoint: record.endpoint,
-    bandId: record.bandId,
-  };
 }
 
 function readRoadSectionDraft(value: unknown): RoadSectionDraft | null {

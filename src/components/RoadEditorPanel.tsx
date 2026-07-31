@@ -32,8 +32,6 @@ import {
   type RoadBandKind,
   type RoadDirection,
   type RoadDraft,
-  type RoadLaneMovementDecisionStatus,
-  type RoadLaneMovementReference,
   type RoadVerticalPlacement,
 } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
@@ -235,7 +233,6 @@ export default function RoadEditorPanel({
       count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
     0
   ) ?? 0;
-  const laneMovementDecisions = draft?.laneMovementDecisions ?? [];
 
   const updateSection = (
     sectionId: string,
@@ -253,36 +250,6 @@ export default function RoadEditorPanel({
       },
       label,
       historyGroup
-    );
-  };
-
-  const updateLaneMovementDecision = (
-    decisionId: string,
-    status: RoadLaneMovementDecisionStatus
-  ) => {
-    if (!draft?.laneMovementDecisions) return;
-    const currentDecision = draft.laneMovementDecisions.find(
-      (decision) => decision.id === decisionId
-    );
-    if (!currentDecision || currentDecision.status === status) return;
-    onDraftChange(
-      {
-        ...draft,
-        laneMovementDecisions: draft.laneMovementDecisions.map((decision) =>
-          decision.id === decisionId
-            ? {
-                ...decision,
-                status,
-                provenance: {
-                  ...decision.provenance,
-                  source: 'user',
-                },
-              }
-            : decision
-        ),
-      },
-      `${status === 'confirmed' ? 'Confirm' : status === 'rejected' ? 'Reject' : 'Reset'} lane movement`,
-      `lane-movement-${decisionId}`
     );
   };
 
@@ -671,60 +638,6 @@ export default function RoadEditorPanel({
                 with a finger or trackpad.
               </p>
             </div>
-
-            {laneMovementDecisions.length > 0 && (
-              <section className="road-movement-decisions" aria-label="Lane movement decisions">
-                <div className="road-movement-decisions__header">
-                  <div>
-                    <b>Lane movements</b>
-                    <span>Confirm valid continuations or reject guides that should stay hidden.</span>
-                  </div>
-                  <span>{laneMovementDecisions.length}</span>
-                </div>
-                <div className="road-movement-decisions__list">
-                  {laneMovementDecisions.map((decision) => (
-                    <article
-                      key={decision.id}
-                      className="road-movement-decision"
-                      data-testid={`road-movement-decision-${decision.id}`}
-                    >
-                      <div className="road-movement-decision__summary">
-                        <b>{decision.mode} movement</b>
-                        <span>
-                          {formatLaneMovementReference(decision.source, draft)}
-                          {' → '}
-                          {formatLaneMovementReference(decision.target, draft)}
-                        </span>
-                        <small>
-                          {decision.provenance.source}
-                          {decision.provenance.sourceId
-                            ? ` · ${decision.provenance.sourceId}`
-                            : ''}
-                        </small>
-                      </div>
-                      <div
-                        className="road-movement-decision__status"
-                        role="group"
-                        aria-label={`${decision.mode} movement ${decision.id}`}
-                      >
-                        {(['proposed', 'confirmed', 'rejected'] as const).map((status) => (
-                          <button
-                            key={status}
-                            type="button"
-                            className={decision.status === status ? 'is-active' : ''}
-                            aria-pressed={decision.status === status}
-                            aria-label={`Set ${decision.mode} movement ${decision.id} to ${status}`}
-                            onClick={() => updateLaneMovementDecision(decision.id, status)}
-                          >
-                            {status}
-                          </button>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            )}
 
             <div className="road-curve-control">
               <div className="road-curve-control__header">
@@ -1353,22 +1266,6 @@ function stringAttr(value: unknown): string | null {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return null;
-}
-
-function formatLaneMovementReference(
-  reference: RoadLaneMovementReference,
-  draft: RoadDraft
-): string {
-  const localBand =
-    reference.roadId === draft.id
-      ? draft.sections
-          .find((section) => section.id === reference.sectionId)
-          ?.bands.find((band) => band.id === reference.bandId)
-      : undefined;
-  const bandLabel = localBand
-    ? labelBand(localBand.kind, localBand.sourceType)
-    : reference.bandId;
-  return `${reference.roadId} ${reference.endpoint} · ${bandLabel}`;
 }
 
 function defaultModes(kind: RoadBandKind): string[] {

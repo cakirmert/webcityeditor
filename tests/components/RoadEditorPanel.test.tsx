@@ -262,86 +262,20 @@ describe('<RoadEditorPanel />', () => {
     });
   });
 
-  it('lets the user confirm or reject persisted lane-movement decisions', () => {
-    const onDraftChange = vi.fn();
-    const decisionDraft: RoadDraft = {
-      ...draft,
-      laneMovementDecisions: [
-        {
-          id: 'movement-1',
-          status: 'proposed',
-          source: {
-            roadId: 'road-1',
-            sectionId: 'section-1',
-            endpoint: 'end',
-            bandId: 'car-1',
-          },
-          target: {
-            roadId: 'road-2',
-            sectionId: 'section-2',
-            endpoint: 'start',
-            bandId: 'car-2',
-          },
-          mode: 'car',
-          provenance: {
-            source: 'osm2streets',
-            sourceId: 'junction-7',
-          },
-        },
-      ],
-    };
-    renderPanel(onDraftChange, { draft: decisionDraft });
-
-    const decision = screen.getByTestId('road-movement-decision-movement-1');
-    expect(decision).toHaveTextContent('road-1 end · car lane');
-    expect(decision).toHaveTextContent('road-2 start · car-2');
-    expect(decision).toHaveTextContent('osm2streets · junction-7');
-    expect(
-      screen.getByRole('button', {
-        name: 'Set car movement movement-1 to proposed',
-      })
-    ).toHaveAttribute('aria-pressed', 'true');
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Set car movement movement-1 to confirmed',
-      })
-    );
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Set car movement movement-1 to rejected',
-      })
-    );
-
-    const [confirmedDraft, confirmedLabel] = onDraftChange.mock.calls[0] as [
-      RoadDraft,
-      string,
-    ];
-    expect(confirmedDraft.laneMovementDecisions?.[0].status).toBe('confirmed');
-    expect(confirmedLabel).toBe('Confirm lane movement');
-
-    const [nextDraft, label, historyGroup] = onDraftChange.mock.calls[1] as [
-      RoadDraft,
-      string,
-      string,
-    ];
-    expect(nextDraft.laneMovementDecisions?.[0]).toMatchObject({
-      id: 'movement-1',
-      status: 'rejected',
-      provenance: {
-        source: 'user',
-        sourceId: 'junction-7',
-      },
-    });
-    expect(label).toBe('Reject lane movement');
-    expect(historyGroup).toBe('lane-movement-movement-1');
-  });
-
   it('does not expose the inactive trusted-corridor workflow', () => {
     renderPanel();
 
     expect(screen.queryByText('Trusted road corridor')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Load trusted corridor GeoJSON')).not.toBeInTheDocument();
+  });
+
+  it('does not expose lane-movement review states', () => {
+    renderPanel();
+
+    expect(screen.queryByText('Lane movements')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /movement .* (proposed|confirmed|rejected)/i })
+    ).not.toBeInTheDocument();
   });
 
   it('reorders band indices when a band box is dropped onto another', () => {

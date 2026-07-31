@@ -19,13 +19,11 @@ import {
   parseOsmRoadsFromOverpass,
   planStaleReciprocalRoadPropagation,
   readEditableRoadDraftFromCityObject,
-  removeRoadBandFromDraft,
   normalizeRoadAllowedTurns,
   roadAllowedTurnsPermitMovement,
   roadDraftPreservesExactGeometry,
   splitRoadSectionAtFraction,
   synchronizeRoadConnectionMetadata,
-  synchronizeRoadLaneMovementMetadata,
   updateExactRoadAttributesInCityJson,
   type RoadArea,
 } from '../../src/lib/transportation';
@@ -289,174 +287,6 @@ describe('transportation roads', () => {
       },
     });
     expect(areas.some((area) => area.attributes.sourceType === 'Bus')).toBe(true);
-  });
-
-  it('round-trips lane-movement decisions and prunes a removed-band reference', () => {
-    const doc = buildSampleCube();
-    const draft = createManualRoadDraft(delftRoad, {
-      name: 'Decision road',
-      maxspeedKmh: 30,
-    });
-    draft.id = 'road-test';
-    const section = draft.sections[0];
-    const statuses = ['proposed', 'confirmed', 'rejected'] as const;
-    draft.laneMovementDecisions = statuses.map((status, index) => ({
-      id: `movement-${status}`,
-      status,
-      source: {
-        roadId: draft.id!,
-        sectionId: section.id,
-        endpoint: 'end' as const,
-        bandId: section.bands[index].id!,
-      },
-      target: {
-        roadId: 'road-peer',
-        sectionId: 'peer-section',
-        endpoint: 'start' as const,
-        bandId: `peer-band-${index + 1}`,
-      },
-      mode: index === 1 ? 'bicycle' : 'car',
-      provenance: {
-        source: index === 2 ? ('user' as const) : ('osm2streets' as const),
-        sourceId: 'hamburg-short-intersection',
-      },
-    }));
-    insertRoadIntoCityJson(doc, draft, { id: draft.id });
-
-    const prepared = prepareValidatedCityJsonExport(doc);
-    expect(prepared.ok).toBe(true);
-    if (!prepared.ok) return;
-    const parsed = parseCityJson(prepared.text);
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-
-    const reopened = readEditableRoadDraftFromCityObject(
-      parsed.doc.CityObjects[draft.id]
-    );
-    expect(reopened?.laneMovementDecisions).toEqual(
-      draft.laneMovementDecisions
-    );
-
-    const reordered = {
-      ...reopened!,
-      sections: reopened!.sections.map((candidate) => ({
-        ...candidate,
-        bands: [...candidate.bands].reverse(),
-      })),
-    };
-    expect(reordered.laneMovementDecisions).toEqual(
-      draft.laneMovementDecisions
-    );
-
-    const removed = removeRoadBandFromDraft(
-      reopened!,
-      section.id,
-      1
-    );
-    expect(removed.sections[0].bands).toHaveLength(section.bands.length - 1);
-    expect(removed.laneMovementDecisions?.map((decision) => decision.status)).toEqual([
-      'proposed',
-      'rejected',
-    ]);
-  });
-
-  it('mirrors lane-movement decisions to the peer and removes stale copies', () => {
-    const doc = buildSampleCube();
-    const source = createManualRoadDraft(delftRoad, { name: 'Source road' });
-    source.id = 'road-source';
-    const peer = createManualRoadDraft(
-      [...delftRoad].reverse() as [number, number][],
-      { name: 'Peer road' }
-    );
-    peer.id = 'road-peer';
-    insertRoadIntoCityJson(doc, source, { id: source.id });
-    insertRoadIntoCityJson(doc, peer, { id: peer.id });
-
-    const previousSource = readEditableRoadDraftFromCityObject(
-      doc.CityObjects[source.id]
-    )!;
-    const decision = {
-      id: 'movement-source-to-peer',
-      status: 'confirmed' as const,
-      source: {
-        roadId: source.id,
-        sectionId: source.sections[0].id,
-        endpoint: 'end' as const,
-        bandId: source.sections[0].bands[0].id!,
-      },
-      target: {
-        roadId: peer.id,
-        sectionId: peer.sections[0].id,
-        endpoint: 'start' as const,
-        bandId: peer.sections[0].bands[0].id!,
-      },
-      mode: 'car',
-      provenance: { source: 'user' as const },
-    };
-    source.laneMovementDecisions = [decision];
-    insertRoadIntoCityJson(doc, source, { id: source.id });
-
-    expect(
-      synchronizeRoadLaneMovementMetadata(
-        doc,
-        source.id,
-        source,
-        previousSource
-      )
-    ).toMatchObject({
-      updatedRoadIds: [peer.id],
-      mirroredDecisionCount: 1,
-      removedDecisionCount: 0,
-    });
-    expect(
-      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
-        ?.laneMovementDecisions
-    ).toEqual([
-      {
-        ...decision,
-        source: decision.target,
-        target: decision.source,
-      },
-    ]);
-
-    const beforeStatusChange = readEditableRoadDraftFromCityObject(
-      doc.CityObjects[source.id]
-    )!;
-    source.laneMovementDecisions![0].status = 'rejected';
-    insertRoadIntoCityJson(doc, source, { id: source.id });
-    synchronizeRoadLaneMovementMetadata(
-      doc,
-      source.id,
-      source,
-      beforeStatusChange
-    );
-    expect(
-      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
-        ?.laneMovementDecisions?.[0].status
-    ).toBe('rejected');
-
-    const beforeRemoval = readEditableRoadDraftFromCityObject(
-      doc.CityObjects[source.id]
-    )!;
-    source.laneMovementDecisions = undefined;
-    insertRoadIntoCityJson(doc, source, { id: source.id });
-    expect(
-      synchronizeRoadLaneMovementMetadata(
-        doc,
-        source.id,
-        source,
-        beforeRemoval
-      )
-    ).toMatchObject({
-      updatedRoadIds: [peer.id],
-      mirroredDecisionCount: 0,
-      removedDecisionCount: 1,
-    });
-    expect(
-      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
-        ?.laneMovementDecisions
-    ).toBeUndefined();
-    expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
   });
 
   it('derives an editable draft from precomputed CityJSON road surfaces alone', () => {

@@ -299,11 +299,8 @@ Required behavior:
    left, right, U-turn, bicycle, sidewalk/crossing, and ambiguous movements as subdued editable
    guide curves. These display bands must not rewrite exact osm2streets polygons or pretend that
    exportable intersection geometry has been synthesized.
-4. Preserve proposed, confirmed, and rejected lane-movement decisions in CityJSON metadata, including
-   reciprocal references and provenance. A rejected imported proposal must remain hidden after
-   reload/export, and removing or reordering a lane must remap or remove stale movement references.
-5. Add focused tests for both three-lane endpoint orientations, compatible-mode/direction filtering,
-   `through` classification, reciprocal persistence, and the committed short Hamburg intersection
+4. Add focused tests for both three-lane endpoint orientations, compatible-mode/direction filtering,
+   `through` classification, and the committed short Hamburg intersection
    fixture. In the browser, verify that straight lanes no longer cross, the grey gap is visually
    filled, real turns remain understandable, TopPlus stays sharp, and interaction performance does
    not drop after the map settles.
@@ -311,30 +308,13 @@ Required behavior:
 Implemented first slice (2026-07-26): confirmed reciprocal editable-road joins now satisfy the
 endpoint-order normalization and mode/direction filtering in item 2. Their geometrically aligned
 `through` pairs use temporary width-aware continuation surfaces, while non-through pairs remain
-subdued guides. Imported-junction proposal derivation, proposed/confirmed/rejected lane-movement
-decisions, reciprocal decision persistence, lane-removal remapping, and the Hamburg fixture/browser
-acceptance pass remain part of this guided patch.
+subdued guides. The Hamburg browser acceptance pass remains pending.
 
-Implemented metadata slice (2026-07-27): `_roadLayout` now round-trips stable, reciprocal
-lane-movement references with `proposed`, `confirmed`, or `rejected` status and provenance. Rejected
-movements are filtered from derived junction guides after reload/export, surviving decisions remain
-stable when bands are reordered, and removing a band prunes decisions that reference its stable id.
-
-Implemented decision-UI slice (2026-07-28): an edited road with persisted lane-movement decisions
-now lists each source/target lane and provenance in the Roads workspace. Touch-sized proposed,
-confirmed, and rejected controls update the draft through normal road undo/redo history; rejected
-guides disappear immediately and remain hidden after the edited CityJSON Road is saved and reloaded.
-Implemented reciprocal-write slice (2026-07-29): saving a lane-movement decision now mirrors the
-same stable decision onto the referenced editable Road with peer-local source/target orientation.
-Status changes stay synchronized, lane removal clears the mirrored peer record, road deletion prunes
-references to the deleted Road, and the guarded save marks both Road objects dirty without rebuilding
-peer geometry.
-
-Implemented imported-proposal slice (2026-07-31): opening an exact osm2streets Road now turns its
-authoritative imported junction continuations into stable `proposed` lane-movement decisions in the
-existing review UI. Existing proposed, confirmed, or rejected decisions remain authoritative and are
-not duplicated or reset when the Road is reopened. This metadata-only review path preserves exact
-source polygons. The Hamburg browser acceptance pass remains pending.
+Removed review-state experiment (2026-07-31): lane continuations are derived directly from
+authoritative CityJSON/osm2streets topology and `allowed_turns`. The proposed/confirmed/rejected
+review controls, status metadata, reciprocal status synchronization, and status-based guide hiding
+were removed as unnecessary. Confirmed road endpoint connections remain part of `_roadLayout`;
+exact imported polygons remain protected.
 
 ## Remaining roadmap
 

@@ -1766,93 +1766,6 @@ select:focus {
   line-height: 1.45;
 }
 
-.road-movement-decisions {
-  display: grid;
-  gap: 9px;
-  border: 1px solid rgba(34, 211, 238, 0.24);
-  border-radius: 12px;
-  background: rgba(8, 145, 178, 0.055);
-  padding: 11px;
-}
-
-.road-movement-decisions__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.road-movement-decisions__header > div,
-.road-movement-decision__summary {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.road-movement-decisions__header span,
-.road-movement-decision__summary span,
-.road-movement-decision__summary small {
-  color: var(--text-faint);
-  font-size: 10px;
-  line-height: 1.4;
-}
-
-.road-movement-decisions__header > span {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgba(34, 211, 238, 0.11);
-  padding: 4px 8px;
-  color: #a5f3fc;
-  font-weight: 750;
-}
-
-.road-movement-decisions__list {
-  display: grid;
-  gap: 7px;
-}
-
-.road-movement-decision {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 9px;
-  align-items: center;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.18);
-  padding: 9px;
-}
-
-.road-movement-decision__summary span {
-  overflow-wrap: anywhere;
-}
-
-.road-movement-decision__status {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 3px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.045);
-  padding: 3px;
-}
-
-.road-movement-decision__status button {
-  min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-faint);
-  font: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: capitalize;
-  cursor: pointer;
-}
-
-.road-movement-decision__status button.is-active {
-  border-color: rgba(34, 211, 238, 0.45);
-  background: rgba(8, 145, 178, 0.2);
-  color: #cffafe;
-}
-
 .road-handle-explainer {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1994,12 +1907,6 @@ select:focus {
   gap: 10px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   padding-top: 14px;
-}
-
-@media (max-width: 680px) {
-  .road-movement-decision {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (min-width: 1201px) and (pointer: fine) {

@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { buildSampleCube, parseCityJsonAuto } from '../../src/lib/cityjson';
+import { buildSampleCube } from '../../src/lib/cityjson';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import {
   createManualRoadDraft,
@@ -18,39 +17,6 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
-  it('opens imported Hamburg lane movements as reviewable proposals', () => {
-    const parsed = parseCityJsonAuto(
-      readFileSync(
-        'public/data/transportation/osm2streets-hamburg-short-intersection.city.jsonl',
-        'utf8'
-      )
-    );
-    if (!parsed.ok) throw new Error(parsed.error);
-    const area = extractTransportationAreas(parsed.doc).find(
-      (candidate) => candidate.roadId === 'osm2streets-road-0'
-    );
-    expect(area).toBeDefined();
-    if (!area) return;
-    const { result } = renderHook(() =>
-      useRoadEditor(
-        coreStateFor(parsed.doc) as never,
-        { pushUndo: vi.fn() } as never
-      )
-    );
-
-    act(() => result.current.handleEditSelectedRoadArea(area));
-
-    expect(result.current.roadDraft?.laneMovementDecisions?.length).toBeGreaterThan(0);
-    expect(
-      result.current.roadDraft?.laneMovementDecisions?.every(
-        (decision) =>
-          decision.status === 'proposed' &&
-          decision.provenance.source === 'osm2streets'
-      )
-    ).toBe(true);
-    expect(result.current.roadDraftDirty).toBe(false);
-  });
-
   it('keeps the selected map lane valid as the road layout changes', async () => {
     const doc = buildSampleCube();
     const { result } = renderHook(() =>
@@ -262,73 +228,6 @@ describe('useRoadEditor road-edit lifecycle', () => {
     expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
   });
 
-  it('saves a lane-movement decision onto the connected peer Road', () => {
-    const doc = buildSampleCube();
-    const source = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
-    source.id = 'road-source';
-    const peer = createManualRoadDraft(
-      [...roadLine].reverse() as [number, number][],
-      { maxspeedKmh: 30 }
-    );
-    peer.id = 'road-peer';
-    source.laneMovementDecisions = [
-      {
-        id: 'movement-review',
-        status: 'proposed',
-        source: {
-          roadId: source.id,
-          sectionId: source.sections[0].id,
-          endpoint: 'end',
-          bandId: source.sections[0].bands[0].id!,
-        },
-        target: {
-          roadId: peer.id,
-          sectionId: peer.sections[0].id,
-          endpoint: 'start',
-          bandId: peer.sections[0].bands[0].id!,
-        },
-        mode: 'car',
-        provenance: { source: 'user' },
-      },
-    ];
-    insertRoadIntoCityJson(doc, source, { id: source.id });
-    insertRoadIntoCityJson(doc, peer, { id: peer.id });
-    const coreState = coreStateFor(doc);
-    const { result } = renderHook(() =>
-      useRoadEditor(coreState as never, { pushUndo: vi.fn() } as never)
-    );
-    const sourceArea = extractTransportationAreas(doc).find(
-      (candidate) => candidate.roadId === source.id
-    )!;
-
-    act(() => result.current.handleEditSelectedRoadArea(sourceArea));
-    const reviewed = JSON.parse(
-      JSON.stringify(result.current.roadDraft)
-    ) as RoadDraft;
-    reviewed.laneMovementDecisions![0].status = 'rejected';
-    act(() =>
-      result.current.handleRoadDraftChange(
-        reviewed,
-        'Reject lane movement'
-      )
-    );
-    act(() => result.current.handleInsertRoad());
-
-    expect(
-      readEditableRoadDraftFromCityObject(doc.CityObjects[peer.id])
-        ?.laneMovementDecisions?.[0]
-    ).toMatchObject({
-      id: 'movement-review',
-      status: 'rejected',
-      source: { roadId: peer.id },
-      target: { roadId: source.id },
-    });
-    expect(result.current.roadStatus).toContain(
-      'synchronized lane movements with 1 connected road'
-    );
-    expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
-  });
-
   it('deletes a selected road and disconnects surviving editable roads', () => {
     const doc = buildSampleCube();
     const target = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
@@ -347,26 +246,6 @@ describe('useRoadEditor road-edit lifecycle', () => {
         confirmed: true,
       },
     };
-    source.laneMovementDecisions = [
-      {
-        id: 'movement-to-deleted-road',
-        status: 'rejected',
-        source: {
-          roadId: 'road-source',
-          sectionId: source.sections[0].id,
-          endpoint: 'end',
-          bandId: source.sections[0].bands[0].id!,
-        },
-        target: {
-          roadId: 'road-target',
-          sectionId: target.sections[0].id,
-          endpoint: 'start',
-          bandId: target.sections[0].bands[0].id!,
-        },
-        mode: 'car',
-        provenance: { source: 'user' },
-      },
-    ];
     insertRoadIntoCityJson(doc, source, { id: 'road-source' });
     const targetArea = extractTransportationAreas(doc).find(
       (candidate) => candidate.roadId === 'road-target'
@@ -392,7 +271,6 @@ describe('useRoadEditor road-edit lifecycle', () => {
       doc.CityObjects['road-source']
     );
     expect(survivingSource?.sections[0].connections).toBeUndefined();
-    expect(survivingSource?.laneMovementDecisions).toBeUndefined();
     expect(result.current.roadStatus).toBe(
       'Deleted road-target and cleared 1 reciprocal road connection.'
     );
