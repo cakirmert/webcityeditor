@@ -106,7 +106,6 @@ import {
   smoothZoomStep,
 } from '../lib/lod-transition';
 import {
-  parseHamburgCityTrees,
   TREE_CROWN_FORMS,
   TREE_CROWN_MESHES,
   TREE_TRUNK_MESH,
@@ -118,6 +117,7 @@ import {
   treeTrunkScale,
   type HamburgCityTree,
 } from '../lib/hamburg-trees';
+import { loadHamburgTreesForBbox } from '../lib/hamburg-tree-tiles';
 import type { BasemapMode } from '../lib/basemap';
 import {
   groundHamburgLod3Tile,
@@ -191,7 +191,6 @@ const HAMBURG_FOOTPRINT_CACHE_TILES = 48;
 const HAMBURG_FOOTPRINT_CACHE_BYTES = 16 * 1024 * 1024;
 const HAMBURG_FOOTPRINT_HANDOFF_MIN_ZOOM = 15.4;
 const HAMBURG_FOOTPRINT_HANDOFF_FULL_ZOOM = 16.2;
-const HAMBURG_CITY_CENTER_TREES_URL = 'data/hamburg/hamburg-city-center-trees.json';
 const CITYJSON_MAP_MESH_VERTEX_BUDGET = 280_000;
 const HAMBURG_STARTUP_SEED_ATTRIBUTE = '_webcityeditorHamburgSeed';
 const HAMBURG_BUILDING_FOOTPRINT_WMS_URL =
@@ -738,7 +737,7 @@ export default function MapView({
   const [warning, setWarning] = useState<string | null>(null);
   const [drawWarning, setDrawWarning] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(initialView?.zoom ?? DEFAULT_INITIAL_ZOOM);
-  const treeLoadStartedRef = useRef(false);
+  const treeLoadGenerationRef = useRef(0);
   const [hamburgTrees, setHamburgTrees] = useState<HamburgCityTree[] | null>(null);
   const [treeDataError, setTreeDataError] = useState<string | null>(null);
   const [officialLod3Status, setOfficialLod3Status] = useState<
@@ -858,25 +857,6 @@ export default function MapView({
   useEffect(() => {
     onRoadDraftChangeRef.current = onRoadDraftChange;
   }, [onRoadDraftChange]);
-
-  useEffect(() => {
-    if ((zoom < HAMBURG_TREE_MIN_ZOOM && !roadWorkspaceOpen) || treeLoadStartedRef.current) {
-      return;
-    }
-    treeLoadStartedRef.current = true;
-    void fetch(HAMBURG_CITY_CENTER_TREES_URL)
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-        return response.json();
-      })
-      .then((value) => {
-        setHamburgTrees(parseHamburgCityTrees(value));
-        setTreeDataError(null);
-      })
-      .catch((error) => {
-        setTreeDataError(error instanceof Error ? error.message : String(error));
-      });
-  }, [roadWorkspaceOpen, zoom]);
 
   useEffect(() => {
     if (hamburgTrees) onHamburgTreesLoaded?.(hamburgTrees);
@@ -1070,6 +1050,25 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editFocusKey]
   );
+
+  useEffect(() => {
+    const scope = editFocusBbox ?? viewportBbox;
+    if (!scope || (zoom < HAMBURG_TREE_MIN_ZOOM && !roadWorkspaceOpen)) return;
+
+    const generation = ++treeLoadGenerationRef.current;
+    const padding = Math.max(scope[2] - scope[0], scope[3] - scope[1]) * 0.12;
+    const requestBbox = expandLngLatBbox(scope, Math.max(0.0004, padding)) ?? scope;
+    void loadHamburgTreesForBbox(requestBbox)
+      .then((result) => {
+        if (generation !== treeLoadGenerationRef.current) return;
+        setHamburgTrees(result.trees);
+        setTreeDataError(null);
+      })
+      .catch((error) => {
+        if (generation !== treeLoadGenerationRef.current) return;
+        setTreeDataError(error instanceof Error ? error.message : String(error));
+      });
+  }, [editFocusBbox, roadWorkspaceOpen, viewportBbox, zoom]);
 
   const renderedFootprints = useMemo(
     () =>
