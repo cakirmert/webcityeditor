@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { buildSampleCube } from '../../src/lib/cityjson';
+import { buildSampleCube, parseCityJsonAuto } from '../../src/lib/cityjson';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import {
   createManualRoadDraft,
@@ -17,6 +18,39 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('opens imported Hamburg lane movements as reviewable proposals', () => {
+    const parsed = parseCityJsonAuto(
+      readFileSync(
+        'public/data/transportation/osm2streets-hamburg-short-intersection.city.jsonl',
+        'utf8'
+      )
+    );
+    if (!parsed.ok) throw new Error(parsed.error);
+    const area = extractTransportationAreas(parsed.doc).find(
+      (candidate) => candidate.roadId === 'osm2streets-road-0'
+    );
+    expect(area).toBeDefined();
+    if (!area) return;
+    const { result } = renderHook(() =>
+      useRoadEditor(
+        coreStateFor(parsed.doc) as never,
+        { pushUndo: vi.fn() } as never
+      )
+    );
+
+    act(() => result.current.handleEditSelectedRoadArea(area));
+
+    expect(result.current.roadDraft?.laneMovementDecisions?.length).toBeGreaterThan(0);
+    expect(
+      result.current.roadDraft?.laneMovementDecisions?.every(
+        (decision) =>
+          decision.status === 'proposed' &&
+          decision.provenance.source === 'osm2streets'
+      )
+    ).toBe(true);
+    expect(result.current.roadDraftDirty).toBe(false);
+  });
+
   it('keeps the selected map lane valid as the road layout changes', async () => {
     const doc = buildSampleCube();
     const { result } = renderHook(() =>

@@ -328,8 +328,13 @@ Implemented reciprocal-write slice (2026-07-29): saving a lane-movement decision
 same stable decision onto the referenced editable Road with peer-local source/target orientation.
 Status changes stay synchronized, lane removal clears the mirrored peer record, road deletion prunes
 references to the deleted Road, and the guarded save marks both Road objects dirty without rebuilding
-peer geometry. Imported-junction proposal derivation and the Hamburg fixture/browser acceptance pass
-remain pending.
+peer geometry.
+
+Implemented imported-proposal slice (2026-07-31): opening an exact osm2streets Road now turns its
+authoritative imported junction continuations into stable `proposed` lane-movement decisions in the
+existing review UI. Existing proposed, confirmed, or rejected decisions remain authoritative and are
+not duplicated or reset when the Road is reopened. This metadata-only review path preserves exact
+source polygons. The Hamburg browser acceptance pass remains pending.
 
 ## Remaining roadmap
 

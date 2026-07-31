@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { parseCityJsonAuto } from '../../src/lib/cityjson';
 import type {
   RoadArea,
   RoadBand,
@@ -6,6 +8,11 @@ import type {
   RoadSectionDraft,
 } from '../../src/lib/transportation';
 import {
+  deriveEditableRoadDraftFromAreas,
+  extractTransportationAreas,
+} from '../../src/lib/transportation';
+import {
+  addImportedRoadLaneMovementProposals,
   buildConfirmedRoadLaneContinuations,
   buildRoadConnectionIndex,
   buildSelectedRoadConnections,
@@ -174,6 +181,61 @@ function connect(
 }
 
 describe('confirmed road lane continuations', () => {
+  it('creates stable review proposals from the committed Hamburg intersection', () => {
+    const parsed = parseCityJsonAuto(
+      readFileSync(
+        'public/data/transportation/osm2streets-hamburg-short-intersection.city.jsonl',
+        'utf8'
+      )
+    );
+    if (!parsed.ok) throw new Error(parsed.error);
+    const areas = extractTransportationAreas(parsed.doc);
+    const roadId = 'osm2streets-road-0';
+    const draft = deriveEditableRoadDraftFromAreas(areas, roadId);
+
+    const proposed = addImportedRoadLaneMovementProposals(
+      areas,
+      roadId,
+      draft
+    );
+    const reviewed = {
+      ...proposed,
+      laneMovementDecisions: proposed.laneMovementDecisions?.map(
+        (decision, index) =>
+          index === 0 ? { ...decision, status: 'rejected' as const } : decision
+      ),
+    };
+    const reopened = addImportedRoadLaneMovementProposals(
+      areas,
+      roadId,
+      reviewed
+    );
+
+    expect(proposed.laneMovementDecisions?.length).toBeGreaterThan(0);
+    expect(proposed.laneMovementDecisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'proposed',
+          source: expect.objectContaining({ roadId }),
+          target: expect.objectContaining({
+            roadId: expect.stringMatching(/^osm2streets-road-/),
+          }),
+          provenance: { source: 'osm2streets' },
+        }),
+      ])
+    );
+    expect(
+      proposed.laneMovementDecisions?.every(
+        (decision) =>
+          decision.source.bandId.length > 0 &&
+          decision.target.bandId.length > 0
+      )
+    ).toBe(true);
+    expect(reopened.laneMovementDecisions).toEqual(
+      reviewed.laneMovementDecisions
+    );
+  });
+
   it('preserves target order for an end-to-start three-lane continuation', () => {
     const source: RoadDraft = {
       id: 'source',

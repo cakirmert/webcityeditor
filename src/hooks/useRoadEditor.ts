@@ -35,6 +35,7 @@ import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import { insertOsm2StreetsRoadIntoCityJson } from '../lib/osm2streets-cityjson';
 import { buildRoadDraftFromOsm2StreetsSelection } from '../lib/osm2streets-draft';
 import { connectedRoadIdsForSelection } from '../lib/osm2streets-selection';
+import { addImportedRoadLaneMovementProposals } from '../lib/road-lane-continuations';
 import { activeMetricCrsForCityJson } from '../lib/projection';
 import { limitRoadQueryBbox, type Wgs84Bbox } from '../lib/road-query';
 import { extractFootprints } from '../lib/footprints';
@@ -628,12 +629,17 @@ export function useRoadEditor(
     const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
     let draft: RoadDraft;
     try {
-      draft =
+      const transportationAreas = cityjson
+        ? extractTransportationAreas(cityjson)
+        : [area];
+      const baseDraft =
         savedDraft ??
-        deriveEditableRoadDraftFromAreas(
-          cityjson ? extractTransportationAreas(cityjson) : [area],
-          area.roadId
-        );
+        deriveEditableRoadDraftFromAreas(transportationAreas, area.roadId);
+      draft = addImportedRoadLaneMovementProposals(
+        transportationAreas,
+        area.roadId,
+        baseDraft
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRoadStatus(message);

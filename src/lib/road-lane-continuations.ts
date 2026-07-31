@@ -236,6 +236,62 @@ export function applyRoadLaneMovementDecisions(
   );
 }
 
+/**
+ * Add reviewable metadata for imported junction movements when an exact road
+ * is first opened in the editor. Existing user decisions remain authoritative;
+ * re-opening the road does not duplicate or reset them.
+ */
+export function addImportedRoadLaneMovementProposals(
+  areas: RoadArea[],
+  roadId: string,
+  draft: RoadDraft
+): RoadDraft {
+  const index = buildRoadConnectionIndex(areas);
+  const proposals = buildSelectedRoadConnections(index, null, draft).continuations
+    .filter(
+      (continuation) =>
+        continuation.sourceRoadId === roadId &&
+        continuation.id.startsWith('junction-continuation:') &&
+        !!continuation.sourceBandId &&
+        !!continuation.targetBandId
+    )
+    .map(
+      (continuation): RoadLaneMovementDecision => ({
+        id: `imported:${continuation.id}`,
+        status: 'proposed',
+        source: {
+          roadId: continuation.sourceRoadId,
+          sectionId: continuation.sourceSectionId,
+          endpoint: continuation.sourceEndpoint,
+          bandId: continuation.sourceBandId!,
+        },
+        target: {
+          roadId: continuation.targetRoadId,
+          sectionId: continuation.targetSectionId,
+          endpoint: continuation.targetEndpoint,
+          bandId: continuation.targetBandId!,
+        },
+        mode: continuation.mode,
+        provenance: { source: 'osm2streets' },
+      })
+    );
+  if (proposals.length === 0) return draft;
+
+  const existing = draft.laneMovementDecisions ?? [];
+  const additions = proposals.filter(
+    (proposal) =>
+      !existing.some((decision) =>
+        laneMovementDecisionsMatch(decision, proposal)
+      )
+  );
+  if (additions.length === 0) return draft;
+
+  return {
+    ...draft,
+    laneMovementDecisions: [...existing, ...additions],
+  };
+}
+
 export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex {
   const areaById = new Map<string, RoadArea>();
   const areasByRoadId = new Map<string, RoadArea[]>();
@@ -1021,6 +1077,31 @@ function roadLaneMovementDecisionMatchesContinuation(
       'source'
     );
   return direct || reciprocal;
+}
+
+function laneMovementDecisionsMatch(
+  left: RoadLaneMovementDecision,
+  right: RoadLaneMovementDecision
+): boolean {
+  if (left.mode !== right.mode) return false;
+  return (
+    (laneMovementReferencesMatch(left.source, right.source) &&
+      laneMovementReferencesMatch(left.target, right.target)) ||
+    (laneMovementReferencesMatch(left.source, right.target) &&
+      laneMovementReferencesMatch(left.target, right.source))
+  );
+}
+
+function laneMovementReferencesMatch(
+  left: RoadLaneMovementReference,
+  right: RoadLaneMovementReference
+): boolean {
+  return (
+    left.roadId === right.roadId &&
+    left.sectionId === right.sectionId &&
+    left.endpoint === right.endpoint &&
+    left.bandId === right.bandId
+  );
 }
 
 function roadLaneMovementReferenceMatchesContinuation(
