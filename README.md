@@ -52,9 +52,7 @@ Basic attributes and position can be edited directly. **Make editable** is only 
 
 ### Edit an existing road
 
-[![Watch the road connections and editing guide](assets/readme/road-connections-and-editing.jpg)](assets/readme/road-connections-and-editing.mp4)
-
-**[Watch the 32-second road connections and editing guide (MP4, 1.3 MB)](assets/readme/road-connections-and-editing.mp4)**
+![Animated road connections and editing guide](assets/readme/road-connections-and-editing.gif)
 
 The cyan guides show lane connections through intersections. They can overlap at busy junctions, but the connections are present and can be inspected while editing the road.
 
