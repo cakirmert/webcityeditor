@@ -26,6 +26,8 @@ flowchart LR
   B --> V["Map and highest-LoD preview"]
   B --> E["Editable CityJSON export"]
   B --> W["Optional catalog write-back"]
+  B -->|"HTTPS + revision checks"| SVC["Optional projects API"]
+  SVC --> DB[("SQLite / Docker volume")]
 ```
 
 ## Repository layout
@@ -34,6 +36,7 @@ flowchart LR
 webcityeditor/
 ├── src/                   React editor, hooks, map layers, and geometry logic
 ├── tests/                 Component, hook, CLI, and geometry tests
+├── backend/               Optional Node 24 / SQLite project service and Docker setup
 ├── scripts/               Hamburg, CityJSON, osm2streets, and OpenDRIVE tools
 ├── public/data/           Small committed browser-safe Hamburg demo
 ├── test-fixtures/         Small deterministic regression inputs
@@ -48,6 +51,14 @@ webcityeditor/
 The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must not be placed back under them.
 
 ## Editing model
+
+### Shared projects
+
+`src/lib/project-storage.ts` defines the replaceable HTTP client and versioned contract. `useSharedProjects` links one loaded CityJSON document to one server project, debounces applied changes, serializes writes, retains retry mutation IDs and stops on revision conflicts. Drafts remain local until applied. Opening a project resets document editing state; creating one disconnects viewport catalog streaming so panning cannot evict the working area. Late catalog responses are discarded after that switch.
+
+`backend/server.mjs` provides named workspaces, project snapshots, optimistic revisions and bounded history using Node 24's built-in SQLite driver. It has no application npm dependencies. Docker runs it as a non-root user with a persistent volume. GitHub Pages serves only the frontend; users configure a later HTTPS API through Projects without rebuilding the site. A single team key covers all workspaces in an instance. Individual accounts, permissions and automatic multi-user merging are future backend work.
+
+Run `npm run backend:setup`, then `npm run backend:up` on a machine with Docker. `npm run backend:down` stops it while retaining saved data. `npm run test:backend` verifies the API and persistence; the regular Vitest suite covers the client, autosave and document isolation. See [backend/README.md](backend/README.md) for hosting, recovery, backup and API details.
 
 ### Buildings and LoD
 

@@ -98,6 +98,29 @@ The Hamburg overview streams city data as you move. Drag to pan; use the wheel, 
 
 Road and intersection save operations are guarded against structural damage. Resolve blocking geometry/fit errors before export. A **Structure** pass and a **Check 3D** pass answer different questions; neither certifies traffic engineering or municipal design compliance.
 
+## Shared projects and the optional backend
+
+The editor is live on [GitHub Pages](https://cakirmert.github.io/webcityeditor/). Shared server storage is **prepared for later hosting**; the public site does not currently include a hosted database.
+
+Open **Projects**, or **More → Shared projects** on a phone. Once you have a storage server, enter its HTTPS address and access key, create a workspace and choose **Save as new project**. Applied road and building changes then save automatically. Wait for **Saved to server** before closing; reconnect and open the same project to continue on another device.
+
+![Shared workspace with saved design alternatives and revision status](assets/readme/shared-projects.png)
+
+<img src="assets/readme/shared-projects-phone.png" width="270" alt="Shared projects on a phone, with workspace selection and saved design alternatives" />
+
+*Screenshots show a local test server. The public demo is ready to connect when you host the Docker service.*
+
+Different workspaces organize your team's projects. Revision checks stop collaborators from overwriting one another silently. If someone saves first, open their latest version or keep your work as a new project. A newer version is announced every 20 seconds; changes are not automatically merged.
+
+The optional service starts with two commands on a computer with Docker running:
+
+```powershell
+npm run backend:setup
+npm run backend:up
+```
+
+It uses a persistent SQLite volume and retains the last 20 revisions. Local browser saves and CityJSON export continue to work without it. See the [backend setup and API guide](backend/README.md) for the access key, local connection, later HTTPS hosting, backups and replacing the storage implementation.
+
 ## Run locally
 
 Use Node.js 20.19+ or 22.12+ and a browser with WebGL2:
@@ -124,6 +147,7 @@ npm run build
 | [UX and width-policy research](docs/road-ux-research.md) | PTV Vissim, SUMO NetEdit and Godot patterns; geometry alternatives; Hamburg ReStra sources and project assumptions. |
 | [Transportation provenance](docs/transportation-provenance.md) | OSM → osm2streets → CityJSON, upstream rule audit and CityJSON Transportation semantics. |
 | [Handoff and verification](docs/road-editor-handoff.md) | Delivered behavior, regression checks and implementation limits. |
+| [Backend setup and API](backend/README.md) | Docker, persistent workspaces, revision conflicts, backups and the replaceable storage contract. |
 | [PROJECT.md](PROJECT.md) | Architecture, datasets, converter commands and contributor notes. |
 
 The map retains attribution for OpenStreetMap, Hamburg's building/tree/planning data, Esri World Imagery and BKG TopPlusOpen. Screenshots of the road workspace and the comparison GIF were captured from the running editor on 7 September 2026.

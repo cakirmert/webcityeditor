@@ -127,6 +127,8 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
         bbox,
         new Set(source.loadedTiles.keys())
       );
+      // Loading or sharing another document invalidates this in-flight viewport.
+      if (catalogConnectionRef.current !== source || cityjsonRef.current !== doc) return;
       // Drop clean off-screen source geometry before merging the next
       // viewport. Merging first briefly retained the old working set, the new
       // parsed tiles, and a cloned merged copy at the same time.
@@ -167,6 +169,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
             : ''),
       });
     } catch (error) {
+      if (catalogConnectionRef.current !== source || cityjsonRef.current !== doc) return;
       if (error instanceof CatalogWritebackError && error.result.persistedTileIds.length > 0) {
         const next = { ...source, loadedTiles: error.result.tiles };
         catalogConnectionRef.current = next;
@@ -216,6 +219,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
         source.loadedTiles,
         dirtyIdsRef.current
       );
+      if (catalogConnectionRef.current !== source || cityjsonRef.current !== doc) return;
       const next = { ...source, loadedTiles: result.tiles };
       catalogConnectionRef.current = next;
       setCatalogConnection(next);
@@ -234,6 +238,7 @@ export function useCatalog(coreState: CoreState, undoRedo: UndoRedoState) {
       });
       saved = true;
     } catch (error) {
+      if (catalogConnectionRef.current !== source || cityjsonRef.current !== doc) return;
       if (error instanceof CatalogWritebackError && error.result.persistedTileIds.length > 0) {
         const next = { ...source, loadedTiles: error.result.tiles };
         catalogConnectionRef.current = next;

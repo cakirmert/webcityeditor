@@ -78,3 +78,8 @@ tools/
 public/*.ifc
 public/*.city.json
 public/*.city.jsonl
+
+# Private shared-project data and local server credentials
+.projects-data/
+backend/.env
+backend-backup/

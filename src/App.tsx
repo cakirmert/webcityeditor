@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import FileLoader from './components/FileLoader';
+import SharedProjectsDialog from './components/SharedProjectsDialog';
+import { useSharedProjects } from './hooks/useSharedProjects';
 import MapView from './components/MapView';
 import BuildingDetailPreview from './components/BuildingDetailPreview';
 import AttributePanel from './components/AttributePanel';
@@ -76,6 +78,9 @@ export default function App() {
   const catalog = useCatalog(coreState, undoRedo);
   const importExport = useImportExport(coreState, undoRedo, catalog);
 
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const sharedDetachRef = useRef<(() => void) | null>(null);
+  const documentLoadVersion = useRef(0);
   const [sidePanelWide, setSidePanelWide] = useState(false);
   const [buildingTexturesEnabled, setBuildingTexturesEnabled] = useState(true);
   const [showBuildingStart, setShowBuildingStart] = useState(false);
@@ -337,6 +342,8 @@ export default function App() {
 
   const handleLoadedForApp = useCallback(
     (doc: CityJsonDocument, fileName: string, rawText: string | null) => {
+      documentLoadVersion.current++;
+      sharedDetachRef.current?.();
       setAutoHamburgStatus(null);
       roadEditor.clearOsmRoadData();
       importExport.handleLoaded(doc, fileName, rawText);
@@ -350,6 +357,8 @@ export default function App() {
       catalogUrl: string,
       options: { loadMode?: 'viewport' | 'all' } = {}
     ) => {
+      documentLoadVersion.current++;
+      sharedDetachRef.current?.();
       setAutoHamburgStatus(null);
       roadEditor.clearOsmRoadData();
       importExport.handleCatalogLoaded(loaded, catalogUrl, options);
@@ -366,9 +375,28 @@ export default function App() {
     ]
   );
 
+  const hasMapDraft = roadEditor.roadDraftDirty || roadEditor.junctionDirty || !!buildingEditor.pendingTransform || !!buildingEditor.footprintEdit || coreState.drawMode !== 'none';
+  const sharedProjects = useSharedProjects(coreState, (doc, name) => {
+    documentLoadVersion.current++;
+    setAutoHamburgStatus(null);
+    roadEditor.clearOsmRoadData();
+    roadEditor.handleCloseRoadWorkspace();
+    coreState.setDrawMode('none');
+    importExport.handleLoaded(doc, name);
+    setProjectsOpen(false);
+  }, hasMapDraft, () => {
+    // A shared document is a stable working area, not an evicting viewport cache.
+    documentLoadVersion.current++;
+    setAutoHamburgStatus(null);
+    catalog.setCatalogConnection(null);
+    catalog.setCatalogStatus({ kind: 'idle' });
+  });
+  sharedDetachRef.current = sharedProjects.detach;
+
   useEffect(() => {
     if (autoHamburgLoadStartedRef.current || coreState.cityjson) return;
     autoHamburgLoadStartedRef.current = true;
+    const loadVersion = documentLoadVersion.current;
     setAutoHamburgStatus({
       kind: 'loading',
       message: 'Connecting Hamburg citywide buildings and streamed roads...',
@@ -452,6 +480,7 @@ export default function App() {
         doc.metadata.sourceDescription =
           `Official Hamburg remote LoD1/LoD2/LoD3 context with viewport-streamed osm2streets CityJSON Transportation roads; ${lod3RootIds.length} bundled LoD3 buildings are retained only as hidden offline seeds.`;
 
+        if (documentLoadVersion.current !== loadVersion) return;
         handleCatalogLoadedForApp(roadsLoaded, roadCatalogUrl, {
           loadMode: 'viewport',
         });
@@ -473,6 +502,7 @@ export default function App() {
           `Streamed ${roadsLoaded.features.toLocaleString()} CityJSON road features for the initial view. Tap Roads, then a road, to edit it in memory.`
         );
       } catch (error) {
+        if (documentLoadVersion.current !== loadVersion) return;
         const message = error instanceof Error ? error.message : String(error);
         catalog.setCatalogStatus({
           kind: 'error',
@@ -854,9 +884,9 @@ export default function App() {
   return (
     <div className={`app ${roadEditor.showRoadEditor ? 'has-road-workspace' : ''}`}>
       <Toolbar
-        fileName={coreState.fileName}
+        fileName={sharedProjects.active?.name ?? coreState.fileName}
         stats={stats}
-        dirtyCount={coreState.dirtyIds.size}
+        dirtyCount={sharedProjects.active ? 0 : coreState.dirtyIds.size}
         hasData={!!coreState.cityjson}
         onExport={importExport.handleExport}
         onExportGltf={importExport.handleExportGltf}
@@ -897,6 +927,7 @@ export default function App() {
           setFiltersOpen(false);
           importExport.setLoadModalOpen(true);
         }}
+        onOpenProjects={() => setProjectsOpen(true)}
         onSaveLocal={importExport.handleSaveLocal}
         saveStatus={coreState.saveStatus}
         drawMode={coreState.drawMode}
@@ -1240,6 +1271,10 @@ export default function App() {
           {autoHamburgLoading && !coreState.cityjson && (
             <AutoHamburgLoading message={autoHamburgStatus.message} />
           )}
+          <SharedProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} state={sharedProjects} hasDocument={!!coreState.cityjson} draftActive={hasMapDraft} fileName={coreState.fileName} />
+          {sharedProjects.active && <button className={`app-project-status is-${sharedProjects.status}`} onClick={() => setProjectsOpen(true)} aria-label={`Shared project save status: ${hasMapDraft ? 'Apply draft to sync' : sharedProjects.message}`}>
+            {hasMapDraft ? 'Draft edits · apply to sync' : sharedProjects.remoteRevision ? 'Newer shared version available' : sharedProjects.status === 'saved' ? `Saved · ${sharedProjects.active.name}` : sharedProjects.status === 'saving' ? 'Saving shared project…' : sharedProjects.status === 'pending' ? 'Waiting to sync…' : 'Shared project needs attention'}
+          </button>}
           {showFileLoader && (
             <FileLoader
               onLoaded={handleLoadedForApp}

@@ -1,0 +1,7 @@
+**
+!backend/
+!backend/server.mjs
+!backend/Dockerfile
+!src/
+!src/lib/
+!src/lib/integrity.ts

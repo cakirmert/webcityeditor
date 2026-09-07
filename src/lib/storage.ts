@@ -1,21 +1,6 @@
 import type { CityJsonDocument } from '../types';
 
-/**
- * Client-side persistence mock.
- *
- * The approval doc specifies a Fastify + 3DCityDB + pg2b3dm backend that owns
- * persistence. Until that tier exists, we mock it with IndexedDB so the
- * save/reopen end-to-end loop works for real from the user's perspective:
- *
- *   Edit → Save → close browser → reopen → Continue → edits are back.
- *
- * This is **NOT** a substitute for the real backend — there is no multi-user
- * write, no server-side validation, no tile regeneration trigger. It is a
- * faithful UX path for the single-user browser editor only.
- *
- * Data model: one object store "documents" keyed by file name, storing a JSON
- * blob and a timestamp.
- */
+/** Browser-local saves and recovery copies. Shared persistence uses project-storage.ts. */
 
 const DB_NAME = 'city-editor';
 const DB_VERSION = 1;

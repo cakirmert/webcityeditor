@@ -3,6 +3,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import {
   Building2,
   Database,
+  FolderOpen,
   Download,
   List,
   MapPinned,
@@ -65,6 +66,7 @@ interface Props {
   ifcParsing?: boolean;
   onReloadView: () => void;
   onOpenLoader: () => void;
+  onOpenProjects?: () => void;
   onSaveLocal?: () => void;
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
   drawMode?: 'none' | 'polygon' | 'road-line';
@@ -119,6 +121,7 @@ export default function Toolbar({
   ifcParsing = false,
   onReloadView,
   onOpenLoader,
+  onOpenProjects,
   onSaveLocal,
   saveStatus = 'idle',
   drawMode = 'none',
@@ -183,6 +186,7 @@ export default function Toolbar({
         <Database aria-hidden="true" /> Data
       </Button>
 
+      {onOpenProjects && <Button className="app-toolbar__action app-toolbar__mobile-hide" variant="ghost" onClick={onOpenProjects}><FolderOpen aria-hidden="true" /> Projects</Button>}
       <div className="flex-1" />
 
       {stats && (
@@ -352,6 +356,7 @@ export default function Toolbar({
                 <MoreHorizontal aria-hidden="true" /> More
               </summary>
               <div className="absolute right-0 top-full z-40 mt-2 flex min-w-[230px] flex-col gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 shadow-2xl">
+                {onOpenProjects && <MenuAction onClick={onOpenProjects}>Shared projects</MenuAction>}
                 <div className="app-toolbar__mobile-menu-actions">
                   {onToggleList && (
                     <MenuAction onClick={onToggleList}>

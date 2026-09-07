@@ -27,7 +27,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -36,6 +36,9 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Test shared storage
+        run: npm run test:backend
 
       - name: Build for GitHub Pages
         run: npm run build:pages

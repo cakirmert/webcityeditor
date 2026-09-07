@@ -2589,3 +2589,51 @@ select:focus {
 .road-handle-guide { width: max-content; }
 .road-handle-guide__title { color: #526984; }
 .road-handle-guide__title span { background: #e7eef8; color: #527198; }
+/* Shared storage is a single, phone-friendly dialog, separate from map editing. */
+.shared-projects-dialog { width: min(560px, calc(100vw - 24px)); max-width: 560px !important; max-height: calc(100dvh - 24px); overflow-y: auto; padding: 24px; color: #25364e; background: #f7f9fc; border-color: #d7e1ef; border-radius: 18px; gap: 16px; }
+.shared-projects-heading { display: flex; gap: 12px; align-items: center; padding-right: 28px; color: #356dd0; }
+.shared-projects-heading h2 { font-size: 19px; color: #25364e; line-height: 1.3; }
+.shared-projects-heading p { color: #738097; margin-top: 5px; }
+.shared-projects-dialog p { font-size: 12px; line-height: 1.6; }
+.shared-projects-intro { color: #67788e; }
+.shared-projects-form, .shared-save-new { display: grid; gap: 12px; }
+.shared-projects-dialog label { display: grid; gap: 6px; font-size: 11px; color: #586f8b; min-width: 0; }
+.shared-projects-dialog input, .shared-projects-dialog select { min-width: 0; width: 100%; height: 44px; padding: 9px 11px; color: #273d58; background: white; border: 1px solid #cdd9e9; border-radius: 8px; font-size: 14px; }
+.shared-projects-dialog button { cursor: pointer; min-height: 40px; padding: 8px 12px; border: 1px solid #cdd9e9; border-radius: 8px; color: #385c8b; background: white; font-size: 12px; }
+.shared-projects-dialog button:disabled { opacity: .45; cursor: default; }
+.shared-projects-dialog button.shared-primary { background: #2965df; border-color: #2965df; color: white; min-height: 44px; }
+.shared-projects-dialog :focus-visible { outline: 2px solid #3972dc; outline-offset: 2px; }
+.shared-server-help, .shared-new-workspace { font-size: 12px; color: #657b97; }
+.shared-server-help summary, .shared-new-workspace summary { cursor: pointer; }
+.shared-server-help p { margin: 10px 0 5px; }
+.shared-server-help a { color: #2965df; }
+.shared-connection { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: 10px; color: #6e839d; }
+.shared-connection span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-connection button { min-height: 32px; padding: 5px 8px; font-size: 10px; }
+.shared-workspace-select { display: flex; align-items: end; gap: 8px; }
+.shared-workspace-select label { flex: 1; }
+.shared-workspace-select > button { display: grid; place-items: center; height: 44px; }
+.shared-new-workspace summary { display: flex; align-items: center; gap: 6px; }
+.shared-inline-form { display: flex; gap: 8px; padding-top: 10px; }
+.shared-inline-form input { flex: 1; }
+.shared-project-list { display: grid; gap: 7px; max-height: 220px; overflow-y: auto; }
+.shared-project-list > p { color: #7b8da4; margin: 10px 0; }
+.shared-project-list > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; }
+.shared-project-list b, .shared-project-list small { display: block; }
+.shared-project-list small { color: #7d8fa4; font-size: 10px; margin-top: 4px; }
+.shared-active { display: grid; gap: 5px; padding: 14px; background: #eaf5f0; border: 1px solid #c3e2d4; border-radius: 11px; }
+.shared-active > b { font-size: 14px; }
+.shared-active > span { font-size: 11px; color: #287d60; }
+.shared-active > p { color: #658277; margin: 2px 0; font-size: 11px; }
+.shared-conflict { margin-top: 8px; padding: 10px; background: #fff2d8; border-radius: 8px; color: #795723; font-size: 12px; }
+.shared-conflict p { margin: 5px 0 8px; }
+.shared-save-new { border-top: 1px solid #dbe4ef; padding-top: 14px; }
+.shared-save-new p { color: #9a6a25; }
+.shared-status { margin: 0; padding: 9px 11px; border-radius: 8px; background: #e9eff8; color: #587198; overflow-wrap: anywhere; }
+.shared-status.is-error, .shared-status.is-conflict { background: #fff0d8; color: #8e5e22; }
+.app-project-status { position: absolute; left: 12px; bottom: 38px; z-index: 30; max-width: calc(100% - 24px); display: flex; gap: 9px; align-items: center; border: 1px solid #c9deed; border-radius: 9px; padding: 8px 11px; background: #fffffff0; color: #285875; font-size: 11px; box-shadow: 0 3px 16px #12253320; cursor: pointer; }
+.app-project-status.is-error, .app-project-status.is-conflict { color: #8c5c20; background: #fff1d8; }
+@media (max-width: 600px) { .shared-projects-dialog { padding: 20px 16px; } .shared-projects-dialog input, .shared-projects-dialog select { font-size: 16px; } .has-road-workspace .app-project-status { bottom: auto; top: 128px; left: 12px; max-width: 280px; } }
+
+.shared-projects-dialog { overflow: hidden; grid-template-rows: auto minmax(0, 1fr); }
+.shared-projects-body { display: grid; gap: 16px; max-height: calc(100dvh - 150px); overflow-y: auto; padding: 2px; scrollbar-color: #c5d2e4 transparent; }

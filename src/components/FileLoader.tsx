@@ -442,7 +442,7 @@ export default function FileLoader({
             </div>
             <div className="mb-2 text-[10px] text-[var(--text-faint)]">
               For more than the hosted city-center demo, use the local strict
-              CityJSONSeq catalog. <code className="rounded bg-[var(--surface)] px-1">npm run dev</code>{' '}
+              CityJSONSeq catalog. <code className="rounded bg-[var(--surface)] px-1">npm run dev:hamburg-buildings</code>{' '}
               starts it automatically; to run only the catalog use{' '}
               <code className="rounded bg-[var(--surface)] px-1">
                 npm run data:hamburg-lod2:serve

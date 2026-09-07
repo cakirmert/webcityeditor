@@ -33,7 +33,13 @@
     "opendrive:rtron": "node scripts/opendrive-rtron.mjs",
     "osm2streets:cityjson": "node scripts/osm2streets-lanes-to-cityjson.mjs",
     "osm2streets:compare": "node scripts/compare-osm2streets-fixtures.mjs",
-    "osm2streets:minimize": "node scripts/minimize-osm2streets-failures.mjs"
+    "osm2streets:minimize": "node scripts/minimize-osm2streets-failures.mjs",
+    "backend:start": "node --env-file=backend/.env backend/server.mjs",
+    "backend:key": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('hex'))\"",
+    "test:backend": "node --test backend/server.test.mjs",
+    "backend:up": "docker compose --env-file backend/.env -f backend/compose.yml up -d --build",
+    "backend:down": "docker compose --env-file backend/.env -f backend/compose.yml down",
+    "backend:setup": "node backend/setup.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.4",
