@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { buildSampleCube } from '../../src/lib/cityjson';
 import { prepareValidatedCityJsonExport } from '../../src/lib/export-validation';
 import {
@@ -17,6 +18,32 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('undoes a whole kerb drag and refuses to save an unfinished trace', () => {
+    const doc = JSON.parse(readFileSync('public/examples/hamburg-mattentwiete.json', 'utf8'));
+    const before = JSON.stringify(doc);
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    const area = extractTransportationAreas(doc).find(area => area.roadId.includes('intersection'))!;
+    act(() => result.current.handleEditSelectedRoadArea(area));
+    const original = result.current.junctionDraft!;
+    for (const delta of [.000001, .000002]) {
+      const next = structuredClone(original);
+      next.surfaceMode = 'rebuild'; next.footprint!.polygon[0][0] += delta;
+      act(() => result.current.handleJunctionChange(next, 'one-pointer-drag'));
+    }
+    act(() => result.current.handleUndoJunction());
+    expect(result.current.junctionDraft).toEqual(original);
+    expect(result.current.canUndoJunction).toBe(false);
+    act(() => result.current.handleRedoJunction());
+    expect(result.current.junctionDraft!.footprint!.polygon[0][0]).toBeCloseTo(original.footprint!.polygon[0][0] + .000002, 10);
+    act(() => result.current.setJunctionEditTool('trace-boundary'));
+    act(() => result.current.handleSaveJunction());
+    expect(result.current.roadStatus).toMatch(/Finish or cancel/);
+    expect(JSON.stringify(doc)).toBe(before);
+    act(() => result.current.setJunctionEditTool('none'));
+    act(() => result.current.handleSaveJunction());
+    expect(result.current.junctionDirty).toBe(false);
+    expect(doc.CityObjects[area.roadId].attributes._junctionFootprint.polygon[0][0]).toBeCloseTo(original.footprint!.polygon[0][0] + .000002, 10);
+  });
   it('keeps the selected map lane valid as the road layout changes', async () => {
     const doc = buildSampleCube();
     const { result } = renderHook(() =>
@@ -106,7 +133,7 @@ describe('useRoadEditor road-edit lifecycle', () => {
     expect(result.current.roadDraft).toEqual(draft);
   });
 
-  it('reports mapped street-tree overlaps as non-blocking road-fit warnings', async () => {
+  it('blocks traffic surfaces overlapping mapped street-tree trunks', async () => {
     const doc = buildSampleCube();
     const midpoint: [number, number] = [
       (roadLine[0][0] + roadLine[1][0]) / 2,
@@ -137,7 +164,7 @@ describe('useRoadEditor road-edit lifecycle', () => {
           (conflict) => conflict.kind === 'tree_overlap'
         )
       ).toMatchObject({
-        severity: 'warning',
+        severity: 'error',
         affectedId: 'tree-on-draft',
       });
     });

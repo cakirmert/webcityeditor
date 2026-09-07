@@ -186,7 +186,7 @@ export default function Toolbar({
       <div className="flex-1" />
 
       {stats && (
-        <span className="hidden text-[11px] text-[var(--text-dim)] tabular-nums lg:inline">
+        <span className="app-toolbar__document-stats hidden text-[11px] text-[var(--text-dim)] tabular-nums lg:inline">
           CityJSON <b className="text-[var(--text)]">{stats.version}</b>{' '}
            / <b className="text-[var(--text)]">{stats.rootBuildings}</b> buildings{' '}
            / <b className="text-[var(--text)]">{stats.roads ?? 0}</b> roads{' '}

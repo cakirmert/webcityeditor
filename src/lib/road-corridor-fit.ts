@@ -2,13 +2,14 @@ import type { CityJsonDocument } from '../types';
 import { activeMetricCrsForCityJson } from './projection';
 import type { RoadAllowedCorridor } from './road-corridor';
 import { validateRoadFit } from './road-fit';
+import { roadWidthRule } from './road-rules';
 import {
-  insertRoadIntoCityJson,
+  buildRoadPreviewAreas,
   type RoadDraft,
   type RoadSectionDraft,
 } from './transportation';
 
-export const MIN_CORRIDOR_FIT_BAND_WIDTH_M = 0.4;
+export const MIN_CORRIDOR_FIT_BAND_WIDTH_M = 0.1;
 
 export interface RoadCorridorSectionFit {
   sectionId: string;
@@ -32,7 +33,7 @@ interface CorridorFitOptions {
 
 /**
  * Fit each editable road section to the union of trusted corridor polygons by
- * scaling all of that section's band widths by one common factor. The action
+ * scaling surplus above each band-specific project minimum. The action
  * deliberately never moves a centerline, changes band order, or clips away a
  * semantic surface: if proportional width reduction cannot fit, it refuses the
  * draft and lets the user redraw the centerline or edit bands manually.
@@ -105,10 +106,11 @@ function fitSection(
   if (section.bands.some((band) => !finitePositive(band.widthM))) {
     return { ok: false, reason: `Section ${section.id} contains an invalid road-band width.` };
   }
-  if (section.bands.some((band) => band.widthM < options.minBandWidthM)) {
+  const minimumWidths = section.bands.map((band) => Math.max(options.minBandWidthM, roadWidthRule(band, draft.ruleProfile).minimumM));
+  if (section.bands.some((band, index) => band.widthM < minimumWidths[index])) {
     return {
       ok: false,
-      reason: `Section ${section.id} already contains a band narrower than the ${options.minBandWidthM.toFixed(2)} m fitting minimum.`,
+      reason: `Section ${section.id} already contains a band below its project minimum width.`,
     };
   }
 
@@ -125,14 +127,12 @@ function fitSection(
     };
   }
 
-  const minimumScale = Math.max(
-    ...section.bands.map((band) => options.minBandWidthM / band.widthM)
-  );
-  const minimumSection = scaleSection(section, minimumScale, options.minBandWidthM);
+  const minimumScale = 0;
+  const minimumSection = scaleSection(section, minimumScale, minimumWidths);
   if (!sectionFits(doc, draft, minimumSection, corridors, options.metricCrs)) {
     return {
       ok: false,
-      reason: `Section ${section.id} cannot fit without moving its centerline or shrinking a band below ${options.minBandWidthM.toFixed(2)} m.`,
+      reason: `Section ${section.id} cannot fit without moving its centerline or shrinking a band below its project minimum (${minimumWidths.map((width) => width.toFixed(2)).join(', ')} m).`,
     };
   }
 
@@ -140,7 +140,7 @@ function fitSection(
   let high = 1;
   for (let iteration = 0; iteration < options.iterations; iteration++) {
     const candidate = (low + high) / 2;
-    const candidateSection = scaleSection(section, candidate, options.minBandWidthM);
+    const candidateSection = scaleSection(section, candidate, minimumWidths);
     if (sectionFits(doc, draft, candidateSection, corridors, options.metricCrs)) {
       low = candidate;
     } else {
@@ -150,7 +150,7 @@ function fitSection(
 
   // Round down to centimetres so the displayed result remains at or inside the
   // validated scale instead of rounding back over the corridor boundary.
-  const fittedSection = scaleSection(section, low, options.minBandWidthM, true);
+  const fittedSection = scaleSection(section, low, minimumWidths, true);
   if (!sectionFits(doc, draft, fittedSection, corridors, options.metricCrs)) {
     return {
       ok: false,
@@ -178,14 +178,13 @@ function sectionFits(
   metricCrs: string
 ): boolean {
   try {
-    const previewDoc = clone(doc);
     const previewDraft: RoadDraft = {
       ...cloneDraft(draft),
       sections: [cloneSection(section)],
     };
-    const roadAreas = insertRoadIntoCityJson(previewDoc, previewDraft, {
+    const roadAreas = buildRoadPreviewAreas(doc, previewDraft, {
       id: '__road_corridor_fit_preview__',
-    }).areas;
+    });
     return !validateRoadFit({
       roadAreas,
       allowedCorridors: corridors,
@@ -200,14 +199,15 @@ function sectionFits(
 function scaleSection(
   section: RoadSectionDraft,
   scale: number,
-  minBandWidthM: number,
+  minimumWidths: number[],
   roundDownToCentimetres = false
 ): RoadSectionDraft {
   return {
     ...section,
     centerlineWgs84: section.centerlineWgs84.map((point) => [...point]),
-    bands: section.bands.map((band) => {
-      const scaled = band.widthM * scale;
+    bands: section.bands.map((band, index) => {
+      const minBandWidthM = minimumWidths[index];
+      const scaled = minBandWidthM + (band.widthM - minBandWidthM) * scale;
       const widthM = roundDownToCentimetres
         ? Math.max(minBandWidthM, Math.floor((scaled + 1e-9) * 100) / 100)
         : Math.max(minBandWidthM, scaled);
@@ -242,10 +242,6 @@ function cloneDraft(draft: RoadDraft): RoadDraft {
     vertical: draft.vertical ? { ...draft.vertical } : undefined,
     sections: draft.sections.map(cloneSection),
   };
-}
-
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function finitePositive(value: number | undefined): value is number {

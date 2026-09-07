@@ -1,4 +1,4 @@
-import { buildLaneConnectorSurface } from './road-connection-surfaces';
+import { buildLaneConnectorSurface, curveJunctionMovement } from './road-connection-surfaces';
 import {
   deriveEditableRoadDraftFromAreas,
   roadAllowedTurnsPermitMovement,
@@ -55,7 +55,7 @@ export interface RoadConnectionNode {
   kind: 'junction' | 'confirmed';
 }
 
-interface RoadConnectionJunction {
+export interface RoadConnectionJunction {
   id: string;
   roadId: string;
   areaIds: string[];
@@ -65,6 +65,8 @@ interface RoadConnectionJunction {
   /** Authoritative directed CityJSON road pairs; undefined is legacy/unknown. */
   allowedRoadMovements?: Set<string>;
   roadEndpoints?: Record<string, 'start' | 'end'>;
+  disabledMovements?: Set<string>;
+  curveFactor?: number;
 }
 
 interface JunctionApproach {
@@ -262,6 +264,11 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       ),
     ];
     const connectedCityRoadIds = new Set<string>();
+    for (const area of junctionAreas) {
+      for (const id of normalizeExternalIds(area.attributes.connectedCityRoadIds)) {
+        if (areasByRoadId.has(id)) connectedCityRoadIds.add(id);
+      }
+    }
     const sourceNamespace = generatedOsm2StreetsNamespace(roadId, 'intersection');
     const resolveExternalRoadIds = (externalRoadId: string): Set<string> =>
       sourceNamespace === null
@@ -269,7 +276,8 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
         : generatedCityRoadIdsByScopedExternalId.get(
             scopedExternalRoadId(sourceNamespace, externalRoadId)
           ) ?? new Set();
-    for (const externalRoadId of externalRoadIds) {
+    const hasAuthoredApproaches = junctionAreas.some((area) => Array.isArray(area.attributes.connectedCityRoadIds));
+    for (const externalRoadId of hasAuthoredApproaches ? [] : externalRoadIds) {
       for (const cityRoadId of resolveExternalRoadIds(externalRoadId)) {
         connectedCityRoadIds.add(cityRoadId);
       }
@@ -291,11 +299,19 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
           );
     const externalEndpoints = firstExplicitRoadEndpoints(junctionAreas);
     const roadEndpoints: Record<string, 'start' | 'end'> = {};
+    for (const area of junctionAreas) {
+      const endpoints = area.attributes.cityRoadEndpoints;
+      if (endpoints && typeof endpoints === 'object' && !Array.isArray(endpoints)) {
+        for (const [id, endpoint] of Object.entries(endpoints)) {
+          if (endpoint === 'start' || endpoint === 'end') roadEndpoints[id] = endpoint;
+        }
+      }
+    }
     for (const [externalRoadId, endpoint] of Object.entries(
       externalEndpoints ?? {}
     )) {
       for (const cityRoadId of resolveExternalRoadIds(externalRoadId)) {
-        roadEndpoints[cityRoadId] = endpoint;
+        roadEndpoints[cityRoadId] ??= endpoint;
       }
     }
     junctions.push({
@@ -305,6 +321,8 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       position: polygonGroupCenter(junctionAreas),
       externalRoadIds,
       roadIds: [...connectedCityRoadIds].sort(),
+      disabledMovements: new Set(junctionAreas.flatMap((area) => normalizeExternalIds(area.attributes.disabledMovements))),
+      curveFactor: typeof junctionAreas[0]?.attributes.junctionCurveFactor === 'number' ? junctionAreas[0].attributes.junctionCurveFactor : undefined,
       ...(allowedRoadMovements ? { allowedRoadMovements } : {}),
       ...(Object.keys(roadEndpoints).length > 0 ? { roadEndpoints } : {}),
     });
@@ -454,7 +472,20 @@ function buildJunctionRoadLaneContinuations(
     }
   }
 
-  return continuations.sort((a, b) => a.id.localeCompare(b.id));
+  return continuations.filter((movement) => !junctions.some((junction) =>
+    movement.id.startsWith(`junction-continuation:${junction.id}:`) && junction.disabledMovements?.has(roadMovementKey(movement))
+  )).map((movement) => {
+    const junction = junctions.find((item) => movement.id.startsWith(`junction-continuation:${item.id}:`));
+    const factor = junction?.curveFactor;
+    return typeof factor === 'number' && factor >= 0.15 && factor <= 0.65 ? curveJunctionMovement(movement, factor) : movement;
+  }).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Stable across band reordering when the source carries persistent lane IDs. */
+export function roadMovementKey(movement: RoadLaneContinuation): string {
+  return JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceEndpoint,
+    movement.sourceBandId ?? movement.sourceBandIndex, movement.targetRoadId, movement.targetSectionId,
+    movement.targetEndpoint, movement.targetBandId ?? movement.targetBandIndex, movement.mode]);
 }
 
 function classifyJunctionTargetTurns(
@@ -1791,7 +1822,7 @@ function lanePoint(
   const precedingWidth = section.bands
     .slice(0, bandIndex)
     .reduce((sum, candidate) => sum + candidate.widthM, 0);
-  const leftOffset = totalWidth / 2 - precedingWidth - band.widthM / 2;
+  const leftOffset = totalWidth / 2 + (section.offsetM ?? 0) - precedingWidth - band.widthM / 2;
   const normal: [number, number] = [-sample.tangent[1], sample.tangent[0]];
   return {
     position: offsetMeters(sample.position, normal, leftOffset),

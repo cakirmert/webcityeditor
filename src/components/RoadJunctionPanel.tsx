@@ -1,0 +1,117 @@
+import { ArrowUpRight, AlertTriangle, Copy, GitBranch, Layers2, MousePointer2, PencilLine, Pentagon, Plus, Route, Trash2, WandSparkles } from 'lucide-react';
+import { openJunctionRing, type JunctionEditTool, type JunctionFootprint } from '../lib/junction-footprint';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { roadMovementKey, type RoadLaneContinuation } from '../lib/road-lane-continuations';
+import type { RoadJunctionDraft, RoadJunctionPlan } from '../lib/road-junctions';
+import { deriveEditableRoadDraftFromAreas, type RoadArea } from '../lib/transportation';
+
+export const junctionSourceKey = (movement: RoadLaneContinuation) => JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceBandIndex]);
+
+export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChange, onCompare, onChange, onFocusSource }: {
+  draft: RoadJunctionDraft; plan: RoadJunctionPlan; areas: RoadArea[]; tool: JunctionEditTool;
+  onToolChange: (tool: JunctionEditTool) => void; onCompare: () => void;
+  onChange: (draft: RoadJunctionDraft) => void; onFocusSource?: (source: string | null) => void;
+}) {
+  const [tab, setTab] = useState('shape');
+  const [source, setSource] = useState('');
+  const [approach, setApproach] = useState('');
+  const [copyStatus, setCopyStatus] = useState('');
+  const name = (id: string) => String(areas.find((area) => area.roadId === id)?.attributes.roadName ?? id);
+  const layouts = useMemo(() => new Map(draft.roadIds.flatMap((id) => {
+    try { return [[id, areas.find((area) => area.roadId === id && area.editableDraft)?.editableDraft ?? deriveEditableRoadDraftFromAreas(areas, id)] as const]; }
+    catch { return []; }
+  })), [areas, draft.roadIds]);
+  const laneLabel = (movement: RoadLaneContinuation, side: 'source' | 'target') => {
+    const section = layouts.get(movement[`${side}RoadId`])?.sections.find((section) => section.id === movement[`${side}SectionId`]);
+    const kind = movement.mode === 'pedestrian' ? 'sidewalk' : movement.mode === 'bicycle' ? 'bike_lane' : 'car_lane';
+    const number = section?.bands.slice(0, movement[`${side}BandIndex`] + 1).filter((band) => band.kind === kind).length || 1;
+    return `${kind === 'sidewalk' ? 'Sidewalk' : kind === 'bike_lane' ? 'Cycle lane' : 'Driving lane'} ${number}`;
+  };
+  const modeRank = (mode: string) => mode === 'pedestrian' ? 2 : mode === 'bicycle' ? 1 : 0;
+  const sources = [...new Map(plan.movements.map((movement) => [junctionSourceKey(movement), movement])).values()].sort((a, b) => modeRank(a.mode) - modeRank(b.mode));
+  const activeSource = sources.some((movement) => junctionSourceKey(movement) === source) ? source : sources[0] ? junctionSourceKey(sources[0]) : '';
+  useEffect(() => { onFocusSource?.(tab === 'turns' ? activeSource || null : '__shape__'); }, [activeSource, tab, onFocusSource]);
+  const visible = plan.movements.filter((movement) => junctionSourceKey(movement) === activeSource);
+  const toggle = (movement: RoadLaneContinuation) => {
+    const key = roadMovementKey(movement);
+    onChange({ ...draft, disabledMovements: draft.disabledMovements.includes(key) ? draft.disabledMovements.filter((item) => item !== key) : [...draft.disabledMovements, key] });
+  };
+  const nearApproaches = useMemo(() => {
+    const center = plan.movements[0]?.path[0]; if (!center) return [];
+    const ids = [...new Set(areas.filter((area) => !draft.roadIds.includes(area.roadId) && area.function !== 'intersection' && area.attributes.transportationUsage !== 'intersection' && area.polygon.some((p) => Math.abs(p[0] - center[0]) < .0008 && Math.abs(p[1] - center[1]) < .0005)).map((area) => area.roadId))];
+    return ids.flatMap((id) => {
+      try {
+        const road = areas.find((area) => area.roadId === id && area.editableDraft)?.editableDraft ?? deriveEditableRoadDraftFromAreas(areas, id);
+        return (['start', 'end'] as const).flatMap((endpoint) => {
+          const section = endpoint === 'start' ? road.sections[0] : road.sections.at(-1);
+          const point = endpoint === 'start' ? section?.centerlineWgs84[0] : section?.centerlineWgs84.at(-1); if (!point) return [];
+          const distance = Math.hypot((point[0] - center[0]) * 66000, (point[1] - center[1]) * 110540);
+          return distance <= 35 ? [{ id, endpoint, distance }] : [];
+        });
+      } catch { return []; }
+    }).sort((a, b) => a.distance - b.distance).slice(0, 20);
+  }, [areas, draft.roadIds, plan.movements]);
+  const footprint = draft.footprint ?? plan.footprint;
+  const beginEditing = () => {
+    if (!footprint) return;
+    onChange({ ...draft, surfaceMode: 'rebuild', footprint: { ...footprint, polygon: openJunctionRing(footprint.polygon), holes: footprint.holes.map(openJunctionRing) } });
+    onCompare(); onToolChange('vertices');
+  };
+  const tabs = [{ id: 'shape', label: 'Shape', icon: <Pentagon size={15} /> }, { id: 'turns', label: 'Turns', icon: <Route size={15} /> }, { id: 'approaches', label: 'Roads', icon: <GitBranch size={15} /> }];
+  return <div className="junction-editor">
+    {plan.error && <div className="studio-feedback is-error" role="alert"><AlertTriangle size={17} /><p>{plan.error}</p></div>}
+    <div className="junction-workflow-tabs" role="tablist" aria-label="Intersection tools">{tabs.map((item, i) => <button key={item.id} id={`junction-tab-${item.id}`} role="tab" aria-selected={tab === item.id} aria-controls={`junction-view-${item.id}`} tabIndex={tab === item.id ? 0 : -1} onClick={() => { setTab(item.id); if (item.id !== 'shape') onToolChange('none'); }} onKeyDown={(event) => {
+      const next = event.key === 'ArrowRight' ? (i + 1) % tabs.length : event.key === 'ArrowLeft' ? (i + tabs.length - 1) % tabs.length : -1;
+      if (next >= 0) { event.preventDefault(); setTab(tabs[next].id); document.getElementById(`junction-tab-${tabs[next].id}`)?.focus(); }
+    }}>{item.icon}{item.label}</button>)}</div>
+    <div id="junction-view-shape" role="tabpanel" aria-labelledby="junction-tab-shape" hidden={tab !== 'shape'} className="junction-tab-body">
+      <div className="junction-intro"><span className="studio-eyebrow">PAVEMENT & KERBS</span><h3>Match the real intersection</h3><p>Follow the visible kerb line. Keep islands as openings in the pavement.</p></div>
+      <div className="junction-shape-modes" role="group" aria-label="Junction surface">
+        <button aria-pressed={draft.surfaceMode === 'preserve'} disabled={!areas.some((area) => area.roadId === draft.id)} onClick={() => { const saved = areas.find((area) => area.roadId === draft.id)?.attributes.junctionFootprint as unknown as JunctionFootprint | undefined; onChange({ ...draft, surfaceMode: 'preserve', footprint: saved || undefined }); onToolChange('none'); }}><Layers2 size={19} /><b>Keep current</b><span>Retain its exact surface</span></button>
+        <button aria-pressed={draft.surfaceMode === 'rebuild' && !draft.footprint} onClick={() => { onChange({ ...draft, surfaceMode: 'rebuild', footprint: undefined }); onToolChange('none'); }}><WandSparkles size={19} /><b>Generate</b><span>Connect the road kerbs</span></button>
+      </div>
+      <button className="junction-trace-action" onClick={() => { onCompare(); onToolChange('trace-boundary'); }}><PencilLine size={19} /><span><b>{draft.footprint ? 'Retrace boundary' : 'Trace from satellite'}</b><small>Click around the actual road edge</small></span><ArrowUpRight size={18} /></button>
+      <div className="junction-outline-summary"><span><i className={draft.footprint ? 'is-traced' : ''} />{draft.footprint ? 'Custom boundary' : draft.surfaceMode === 'preserve' ? 'Imported surface' : 'Generated kerb outline'}</span>{footprint && <small>{openJunctionRing(footprint.polygon).length} points</small>}</div>
+      <button className="road-wide-action junction-edit-boundary" disabled={!footprint} onClick={beginEditing}><MousePointer2 size={16} />{tool === 'vertices' ? 'Boundary handles are active' : 'Adjust boundary on map'}</button>
+      {!draft.footprint && draft.surfaceMode === 'rebuild' && <label className="road-field junction-curvature"><span>Corner shape <output>{Math.round(draft.curveFactor * 100)}%</output></span><input aria-label="Corner shape" type="range" min=".15" max=".65" step=".025" value={draft.curveFactor} onChange={(event) => onChange({ ...draft, curveFactor: Number(event.target.value) })} /><small>Gentle ↔ tighter curves. Trace irregular kerbs directly.</small></label>}
+      <section className="junction-islands"><div><h4>Traffic islands</h4><span>{draft.footprint?.holes.length ?? 0}</span></div><p>Cut out raised islands, medians and tree beds.</p>
+        {draft.footprint?.holes.map((hole, i) => <div className="junction-island-row" key={i}><span>Island {i + 1}<small>{openJunctionRing(hole).length} corners</small></span><button aria-label={`Remove island ${i + 1}`} onClick={() => onChange({ ...draft, surfaceMode: 'rebuild', footprint: { ...draft.footprint!, holes: draft.footprint!.holes.filter((_, j) => j !== i) } })}><Trash2 size={15} /></button></div>)}
+        <button className="road-wide-action" disabled={!footprint} onClick={() => { if (!footprint) return; onChange({ ...draft, surfaceMode: 'rebuild', footprint }); onCompare(); onToolChange('trace-island'); }}><Plus size={16} />Trace an island</button>
+      </section>
+      {draft.footprint?.reference && <p className="junction-reference-note">{draft.footprint.reference}</p>}
+      {draft.footprint && <details className="junction-coordinates"><summary>Outline coordinates</summary><textarea aria-label="Intersection outline JSON" readOnly rows={4} value={JSON.stringify(draft.footprint, null, 2)} /><button className="road-wide-action" onClick={() => { void navigator.clipboard.writeText(JSON.stringify(draft.footprint, null, 2)).then(() => setCopyStatus('Outline coordinates copied.')).catch(() => setCopyStatus('Clipboard unavailable. Export CityJSON to retain the outline.')); }}><Copy size={15} />Copy outline JSON</button><span role="status">{copyStatus}</span></details>}
+    </div>
+    <div id="junction-view-turns" role="tabpanel" aria-labelledby="junction-tab-turns" hidden={tab !== 'turns'} className="junction-tab-body">
+      <div className="junction-intro"><span className="studio-eyebrow">LANE CONNECTIONS</span><h3>Where can this lane go?</h3><p>Choose an incoming lane, then its destinations.</p></div>
+      <label className="road-field"><span>Incoming lane</span><select value={activeSource} onChange={(event) => setSource(event.target.value)}>{!sources.length && <option value="">No compatible lanes loaded</option>}{sources.map((movement) => <option key={junctionSourceKey(movement)} value={junctionSourceKey(movement)}>{name(movement.sourceRoadId)} · {laneLabel(movement, 'source')}</option>)}</select></label>
+      <div className="junction-movements">{visible.map((movement) => <label key={movement.id}><input type="checkbox" checked={!draft.disabledMovements.includes(roadMovementKey(movement))} onChange={() => toggle(movement)} /><span><b>{movement.turn.replaceAll('_', ' ')} → {laneLabel(movement, 'target')}</b><small>{name(movement.targetRoadId)}</small></span></label>)}</div>
+      {visible.length === 0 && <p>No outgoing movements are known. Check the connected roads and their directions.</p>}
+      <details className="junction-minimap"><summary>Connection overview</summary><JunctionPreview areas={plan.areas.length && draft.surfaceMode === 'rebuild' ? plan.areas : [...areas.filter((area) => draft.roadIds.includes(area.roadId)), ...plan.areas.filter((area) => area.roadId === draft.id)]} bounds={plan.movements.flatMap((movement) => movement.path)} movements={visible} disabled={draft.disabledMovements} onToggle={toggle} targetLabel={(movement) => `${laneLabel(movement, 'target')} on ${name(movement.targetRoadId)}`} /></details>
+      <p>Turn permissions leave the pavement intact. Curves show lane connections; check their clearance around islands.</p>
+    </div>
+    <div id="junction-view-approaches" role="tabpanel" aria-labelledby="junction-tab-approaches" hidden={tab !== 'approaches'} className="junction-tab-body">
+      <div className="junction-intro"><span className="studio-eyebrow">CONNECTED ROADS</span><h3>{draft.roadIds.length} approaches</h3><p>The intersection and its road ends are saved together.</p></div>
+      <label className="road-field"><span>Intersection name</span><input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
+      <div className="junction-approach-list">{draft.roadIds.map((id, i) => <div key={id}><span>{String(i + 1).padStart(2, '0')}</span><div><b>{name(id)}</b><small>{draft.endpoints[id] ?? 'Source'} end</small></div></div>)}</div>
+      {nearApproaches.length > 0 && <><label className="road-field"><span>Add nearby road</span><select value={approach} onChange={(event) => setApproach(event.target.value)}><option value="">Choose a road end</option>{nearApproaches.map((item) => <option key={`${item.id}-${item.endpoint}`} value={JSON.stringify([item.id, item.endpoint])}>{name(item.id)} · {Math.round(item.distance)} m away</option>)}</select></label><button className="road-wide-action" disabled={!approach} onClick={() => { const [id, endpoint] = JSON.parse(approach); onChange({ ...draft, roadIds: [...draft.roadIds, id], endpoints: { ...draft.endpoints, [id]: endpoint }, surfaceMode: 'rebuild' }); setApproach(''); }}>Add approach</button></>}
+    </div>
+    {plan.warnings?.map((warning) => <div className="studio-feedback" key={warning}><AlertTriangle size={17} /><p>{warning}</p></div>)}
+  </div>;
+}
+
+function JunctionPreview({ areas, bounds, movements, disabled, onToggle, targetLabel }: { areas: RoadArea[]; bounds: [number, number][]; movements: RoadLaneContinuation[]; disabled: string[]; onToggle: (movement: RoadLaneContinuation) => void; targetLabel: (movement: RoadLaneContinuation) => string }) {
+  const arrowId = useId().replaceAll(':', '');
+  const points = bounds;
+  if (!points.length) return null;
+  const origin = points[0]; const scaleX = 111320 * Math.cos(origin[1] * Math.PI / 180);
+  const project = (point: [number, number]) => [(point[0] - origin[0]) * scaleX, -(point[1] - origin[1]) * 110540];
+  const projected = points.map(project);
+  const x = Math.min(...projected.map((p) => p[0])) - 7, y = Math.min(...projected.map((p) => p[1])) - 7;
+  const width = Math.max(...projected.map((p) => p[0])) - x + 7, height = Math.max(...projected.map((p) => p[1])) - y + 7;
+  const path = (ring: [number, number][]) => ring.map((p, i) => `${i === 0 ? 'M' : 'L'}${project(p).join(',')}`).join(' ');
+  return <svg className="junction-live-preview" viewBox={`${x} ${y} ${width} ${height}`} role="group" aria-label="Live intersection plan">
+    <defs><marker id={arrowId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#a5e7f5" /></marker></defs>
+    {areas.map((area) => <path key={area.id} d={[area.polygon, ...(area.holes ?? [])].map((ring) => path(ring) + 'Z').join(' ')} fillRule="evenodd" fill={/sidewalk|footway/i.test(String(area.attributes.sourceType ?? area.function)) ? '#939b9e' : '#363b40'} stroke="#bec3c4" strokeWidth=".12" />)}
+    {movements.map((movement) => <path key={movement.id} d={path(movement.path)} fill="none" markerEnd={`url(#${arrowId})`} stroke={disabled.includes(roadMovementKey(movement)) ? '#e48b83' : '#68d8ef'} strokeWidth=".6" strokeDasharray={disabled.includes(roadMovementKey(movement)) ? '1 1' : undefined} role="button" tabIndex={0} aria-label={`Toggle ${movement.turn.replaceAll('_', ' ')} to ${targetLabel(movement)}`} aria-pressed={!disabled.includes(roadMovementKey(movement))} onClick={() => onToggle(movement)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(movement); } }} />)}
+  </svg>;
+}

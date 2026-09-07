@@ -84,6 +84,15 @@ function expectPolygonBounds(
 }
 
 describe('road-fit validation', () => {
+  it('allows a building inside a traffic island but still checks clearance to its kerb', () => {
+    const road = metricRoadArea('junction', [[565000, 5935000], [565010, 5935000], [565010, 5935010], [565000, 5935010]]);
+    road.holes = [metricRoadArea('island', [[565002, 5935002], [565008, 5935002], [565008, 5935008], [565002, 5935008]]).polygon];
+    const building = metricFootprint('kiosk', [[565003, 5935003], [565007, 5935003], [565007, 5935007], [565003, 5935007]]);
+    expect(validateRoadFit({ roadAreas: [road], buildingFootprints: [building] })).toEqual([]);
+    expect(validateRoadFit({ roadAreas: [road], buildingFootprints: [building], buildingClearanceWarningM: 1.5, metricCrs: 'EPSG:25832' })).toEqual([expect.objectContaining({ kind: 'building_clearance', severity: 'warning', clearanceM: expect.closeTo(1, 3) })]);
+    const crossing = metricFootprint('kiosk-crossing-kerb', [[565001, 5935003], [565003, 5935003], [565003, 5935007], [565001, 5935007]]);
+    expect(validateRoadFit({ roadAreas: [road], buildingFootprints: [crossing] })).toEqual([expect.objectContaining({ kind: 'building_overlap', severity: 'error' })]);
+  });
   it('flags road surfaces that overlap loaded building footprints', () => {
     const conflicts = validateRoadFit({
       roadAreas: [roadArea],
@@ -134,7 +143,7 @@ describe('road-fit validation', () => {
     expectPolygonBounds(conflicts[0].polygon, [3, 0.25, 4, 1]);
   });
 
-  it('warns when a road overlaps a mapped street-tree trunk/root zone', () => {
+  it('blocks a road overlapping a mapped street-tree trunk', () => {
     const conflicts = validateRoadFit({
       metricCrs: 'EPSG:25832',
       treeClearanceM: 0.5,
@@ -153,7 +162,7 @@ describe('road-fit validation', () => {
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]).toMatchObject({
       kind: 'tree_overlap',
-      severity: 'warning',
+      severity: 'error',
       affectedId: 'tree-42',
     });
     expect(conflicts[0].label).toContain('Acer campestre');
@@ -177,6 +186,20 @@ describe('road-fit validation', () => {
     });
 
     expect(conflicts).toEqual([]);
+  });
+  it('allows a pavement tree, then blocks converting that same surface to a driving lane', () => {
+    const area = metricRoadArea('pavement', [[565000, 5935000], [565004, 5935000], [565004, 5935004], [565000, 5935004], [565000, 5935000]]);
+    const trees = [metricTree('existing-tree', [565002, 5935002])];
+    const pavement = { ...area, function: 'sidewalk', attributes: { sourceType: 'Sidewalk', transportationUsage: 'sidewalk' } };
+    expect(validateRoadFit({ metricCrs: 'EPSG:25832', roadAreas: [pavement], trees })).toEqual([]);
+    const driving = { ...pavement, function: 'driving_lane', attributes: { sourceType: 'Driving', transportationUsage: 'car_lane' } };
+    expect(validateRoadFit({ metricCrs: 'EPSG:25832', roadAreas: [driving], trees })).toMatchObject([{ kind: 'tree_overlap', severity: 'error', affectedId: 'existing-tree' }]);
+  });
+  it('respects a tree pit hole and uses the actual trunk radius without an extra buffer', () => {
+    const area = metricRoadArea('road-with-pit', [[565000, 5935000], [565004, 5935000], [565004, 5935004], [565000, 5935004], [565000, 5935000]]);
+    area.holes = [metricRoadArea('pit', [[565001, 5935001], [565003, 5935001], [565003, 5935003], [565001, 5935003], [565001, 5935001]]).polygon];
+    const trees = [metricTree('in-pit', [565002, 5935002]), metricTree('beside-road', [565004.18, 5935002], .1)];
+    expect(validateRoadFit({ metricCrs: 'EPSG:25832', roadAreas: [area], trees })).toEqual([]);
   });
 
   it('flags road polygons outside an allowed corridor', () => {

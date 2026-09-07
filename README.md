@@ -1,106 +1,129 @@
 # City Editor
 
-City Editor is a touch-friendly browser editor for Hamburg buildings, roads, and planning data. Explore the whole city, compare the map with satellite imagery, inspect detailed buildings, edit roads, and export the result as CityJSON.
+Design streets, edit intersections and buildings, and keep the result in **CityJSON**. City Editor combines Hamburg's city data, satellite imagery, direct map handles and a single responsive inspector.
 
-**[Open City Editor](https://cakirmert.github.io/webcityeditor/)**
+**[Open the live demo](https://cakirmert.github.io/webcityeditor/)** · [Run locally](#run-locally) · [Research and technical notes](#research-and-technical-notes)
 
-![Hamburg-wide City Editor overview](assets/readme/city-overview.jpg)
+![The intersection editor: a traced Hamburg kerb outline over satellite imagery, with one compact inspector](assets/readme/intersection-editor.png)
 
-## First minute
+## Try the intersection in one minute
 
-1. Drag the map to move. Use the wheel, a pinch gesture, or the `+` and `−` buttons to zoom.
-2. Open **Map layers** to switch between TopPlus and satellite imagery or to change the layer opacity.
-3. Zoom in and tap a building, or choose **Roads** and tap a road.
-4. Choose **Planning** to compare the city with Hamburg's planning areas.
-5. Choose **Export CityJSON** when you want a portable copy of your work.
+1. Open **Data → Try the Hamburg intersection**.
+2. Choose **Roads**, then click the central junction. This is **Mattentwiete / Katharinenstraße**, with Holzbrücke and Cremon as the other approaches.
+3. In **Shape**, choose **Adjust boundary on map**. Drag a boundary point; drag a smaller dot to add a corner. The pavement updates immediately.
+4. Switch between **Map** and **Satellite** above the map. Adjust **Road overlay**, or hold the eye button to compare the road with the imagery.
+5. Open **Turns**, choose an incoming lane and enable or disable its destinations.
+6. Use **Undo** to review a change. Choose **Save intersection** to update the junction and its approach surfaces together.
 
-## Change the map view
+The example includes a 28-point visual kerb trace and estimated approach widths. Parking allocations are illustrative; the source lane counts and directions are retained. The [original import](public/examples/hamburg-mattentwiete-source.json), [edited example](public/examples/hamburg-mattentwiete.json) and [comparison notes](docs/intersection-reference-study.md) make the changes inspectable.
 
-Open **Map layers** in the upper-left corner.
+![Animated comparison of the same traced intersection and the existing satellite basemap](assets/readme/intersection-comparison.gif)
 
-- **TopPlus** is the default map.
-- **Satellite** helps compare buildings and roads with aerial imagery.
-- **Building usage** explains the footprint colours.
-- **Photo textures** becomes available when detailed LoD3 buildings are visible.
-- The two opacity controls let you balance the background image and road surfaces.
+*The GIF changes the real editor's road opacity. The imagery date is unknown; obscured kerbs, parking and lane details need field or survey verification.*
 
-![Map layers with satellite imagery, building usage, textures, and opacity controls](assets/readme/map-layers.jpg)
+## Edit a road
 
-## Inspect and edit a building
+Choose **Roads** and select a street. The same inspector holds its preview, properties and save controls. If another edit is already active, finish it or use the selected road's **Edit road** action.
 
-1. Zoom in until the 3D buildings are visible, then tap a building.
-2. Use **LoD2** and **LoD3** to compare the available detail levels. **Textures** appears when the selected building includes them.
-3. Change the available building attributes.
-4. Choose **Start editing position** to move the building.
-5. Choose **Make editable** when you need to change its footprint, roof, openings, overhangs, or internal parts.
-6. Use **Revert this building** to restore the selected building's loaded attributes.
+| Tab | What you can do |
+| --- | --- |
+| **Lanes** | Select a band in the proportional street preview. Change width, type, surface, direction and order; add driving, cycling, sidewalk, parking or planting space. |
+| **Shape** | Move centreline anchors, add bends with the white `+` handles, choose **Smooth** or **Straight**, adjust elevation or split a section. |
+| **Connections** | Inspect joins at either end, disconnect an endpoint, open an existing intersection, or build one from a saved join. |
+| **Rules** | Review minimum widths, set left/right extent limits, fit widths into available space, and import or export a city policy. |
 
-![LoD3 building selection with textures and editing controls](assets/readme/building-editor.jpg)
+![Road design with a live street preview and the lane controls in the same inspector](assets/readme/road-design.png)
 
-Basic attributes and position can be edited directly. **Make editable** is only needed for larger shape changes.
+Changes stay in a draft until **Save road changes** or **Save exact attributes**. Attribute-only edits can retain imported polygons. Moving a road, changing widths or reorganising its bands generates new geometry and previews connected junctions. **Discard** leaves the saved road as it was.
 
-## Add a new building
+### Draw and connect a new road
 
-1. Choose **New Building** in the top bar.
-2. Pick one of the four detailed building examples, or choose **Draw a custom building**.
-3. For a ready-made building, tap the map to place it and adjust its position before confirming.
-4. For a custom building, tap the footprint corners and then choose its height, roof, windows, entrance, and editable parts.
+1. Choose **Roads → Draw new road**.
+2. Click along the centreline, including its bends. Press **Enter** or choose **Finish road**.
+3. Set the cross-section in **Lanes** and review **Rules**. New bands start with the active policy's recommended widths.
+4. Drag an endpoint onto a nearby teal connection target. Review the join in **Connections**, then save the road.
+5. Choose **Build intersection** at the joined endpoint to construct a junction. Add nearby approaches in the intersection's **Roads** tab.
 
-![New Building menu with ready-made and custom-building choices](assets/readme/new-building.jpg)
+A failed fit explains the conflict and preserves the draft. Width fitting respects each band's minimum and the available space on each side. Existing trees on sidewalks, planted strips and traffic-island openings are allowed. Driving, cycling or parking pavement covering a mapped tree trunk blocks saving.
 
-## Roads
+## Shape an intersection
 
-### Edit an existing road
+The intersection inspector separates its physical outline from its permitted movements:
 
-![Animated road connections and editing guide](assets/readme/road-connections-and-editing.gif)
+- **Shape → Keep current** retains the saved surface.
+- **Shape → Generate** connects the approach kerbs with curved returns. It is a starting point for a local, flat junction.
+- **Trace from satellite** lets you click around the visible carriageway boundary. Extend the outline slightly into each approach, then choose **Finish**. A crossing or detached boundary cannot be saved.
+- **Adjust boundary on map** provides draggable corners and midpoint insertion. With a point focused, arrow keys nudge it; **Shift + arrow** moves farther and **Delete** removes it. A whole drag is one undo step.
+- **Trace an island** creates an opening for a raised island, median or tree bed. Islands must remain inside the boundary and separate from each other.
+- **Turns** selects one incoming driving lane, cycle lane or sidewalk and shows its destinations. Disabling a movement leaves the pavement intact. **Connection overview** opens a compact diagram.
+- **Roads** names the junction and lists its connected approaches.
 
-The cyan guides show lane connections through intersections. They can overlap at busy junctions, but the connections are present and can be inspected while editing the road.
+![Turn editing with clear incoming-lane selection and outgoing destinations](assets/readme/intersection-turns.png)
 
-1. Choose **Roads** in the top bar.
-2. Tap a road surface, then choose **Edit road**.
-3. Select a lane, cycle lane, sidewalk, buffer, parking strip, or green strip in **Road on the map**.
-4. Change its type, surface, width, direction, or position. Lane dividers, arrows, and connection guides update with the road.
-5. Drag a yellow anchor to move a bend. Use a white `+` to add a bend, or drag a road end onto a teal target to connect it.
-6. Choose **Smooth** or **Straight** for the road shape.
-7. Use **Undo** and **Redo** while editing.
-8. Choose **Save exact attributes** or **Save road changes**. **Discard** leaves the saved road unchanged.
+Automatic junctions follow connected road geometry changes. A manually traced outline remains fixed until you edit it; check its joins again after changing an approach. Islands are retained through save and reload, and the editor warns when a permitted connection crosses one.
 
-![Road editor with map comparison and editing controls](assets/readme/road-editor.jpg)
+Imagery makes a close visual reconstruction practical. It does not supply surveyed kerbs, current legal turn restrictions, vehicle turning envelopes or elevations. This editor handles flat local junction surfaces; complex grade-separated junctions, signals, stop lines and swept-path engineering need additional data and tools. See the [reference study](docs/intersection-reference-study.md).
 
-## Use the planning overlay
+## Work on a small screen
 
-1. Choose **Planning** in the top bar.
-2. Use the legend to understand the visible planning categories.
-3. Zoom and pan to compare different parts of Hamburg.
-4. Tap a coloured area to inspect its planning category.
-5. Choose **Hide Planning** when you are finished.
+On a phone the inspector becomes a bottom sheet and the map frames the active edit above it. **Expand** gives the controls more height; **Hide** exposes the map while retaining the draft. **Show** brings the controls back. Starting a trace hides the sheet automatically; finishing or cancelling restores it. In landscape, the inspector moves to the right. Validation, export and other secondary actions are under **More** on narrow screens.
 
-![Hamburg planning overlay with its category legend](assets/readme/planning.jpg)
+<p>
+  <img src="assets/readme/road-editor-phone.png" width="270" alt="Compact phone inspector with the junction visible above the controls" />
+  <img src="assets/readme/road-editor-phone-expanded.png" width="270" alt="Expanded phone inspector with all three turn destinations visible" />
+</p>
 
-## Load, validate, undo, and export
+## Buildings, imagery and planning
 
-- **Data** loads a CityJSON or CityJSONSeq file.
-- **Structure** checks the document structure.
-- **Check 3D** validates edited geometry.
-- **Undo** and **Redo** are available under **More**.
-- **Save local** stores the current work in the browser.
-- **Export CityJSON** downloads the buildings, roads, junctions, attributes, and edits as one file.
+The Hamburg overview streams city data as you move. Drag to pan; use the wheel, pinch or map `+`/`−` controls to zoom.
 
-![Validation status and CityJSON export controls](assets/readme/export.jpg)
+- Open **Map layers** outside road mode to change the basemap, opacity, building usage colours and available photo textures.
+- Select a building to inspect its attributes and available **LoD2 / LoD3** detail. Use **Start editing position** to move it or **Make editable** for footprint, roof, opening and part edits.
+- Choose **New Building** for a ready-made example or **Draw a custom building**, then place its footprint on the map.
+- Choose **Planning** to inspect Hamburg's planning areas and their legend. Select a coloured area for its category.
+
+![Building selection and editing in City Editor](assets/readme/building-editor.jpg)
+
+## Save, check and export
+
+| Action | Result |
+| --- | --- |
+| **Save road / Save intersection** | Applies the draft to the loaded CityJSON document. |
+| **More → Undo / Redo** | Reverses or reapplies document changes. Drafts also have their own Undo / Redo controls. |
+| **More → Save local** | Keeps a copy in this browser's local storage. |
+| **Data** | Loads CityJSON, CityJSONSeq, bundled examples or a local save. |
+| **Structure** | Checks document references and structure in the browser. |
+| **Check 3D** | Runs primitive geometry validation through the configured local val3dity service. |
+| **Export CityJSON** | Downloads the loaded buildings, roads, junctions, attributes and edits together. |
+
+Road and intersection save operations are guarded against structural damage. Resolve blocking geometry/fit errors before export. A **Structure** pass and a **Check 3D** pass answer different questions; neither certifies traffic engineering or municipal design compliance.
 
 ## Run locally
 
-Install [Node.js](https://nodejs.org/) 20 or newer, then run:
+Use Node.js 20.19+ or 22.12+ and a browser with WebGL2:
 
 ```powershell
 npm ci
-npm run dev
+npm run dev:frontend
 ```
 
-Open the local address printed in the terminal.
+Open the address printed by Vite. The bundled intersection study works with this frontend command; live imagery and remote Hamburg layers require a network connection.
 
-## Data sources
+For a prepared local building catalog and validation service, use `npm run dev:hamburg-buildings`; for a prepared road catalog, use `npm run dev:hamburg-roads`. See [PROJECT.md](PROJECT.md) for data preparation and val3dity configuration. A validator executable is an optional local dependency and is not bundled in the website.
 
-The city overview uses Hamburg's [official ALKIS 2D building data](https://suche.transparenz.hamburg.de/dataset/inspire-hh-gebaeude-alkis12). Detailed buildings use Hamburg's [official LoD3.0 dataset](https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod3-0-hh-hamburg17). Trees, planning data, satellite imagery, and TopPlusOpen retain their source attribution in the editor.
+```powershell
+npm test
+npm run build
+```
 
-Architecture, data preparation, contributor commands, and the project roadmap are documented in [PROJECT.md](PROJECT.md).
+## Research and technical notes
+
+| Document | Contents |
+| --- | --- |
+| [Intersection reference study](docs/intersection-reference-study.md) | Selected real junction, original/edited data, satellite comparison, width estimates and remaining uncertainty. |
+| [UX and width-policy research](docs/road-ux-research.md) | PTV Vissim, SUMO NetEdit and Godot patterns; geometry alternatives; Hamburg ReStra sources and project assumptions. |
+| [Transportation provenance](docs/transportation-provenance.md) | OSM → osm2streets → CityJSON, upstream rule audit and CityJSON Transportation semantics. |
+| [Handoff and verification](docs/road-editor-handoff.md) | Delivered behavior, regression checks and implementation limits. |
+| [PROJECT.md](PROJECT.md) | Architecture, datasets, converter commands and contributor notes. |
+
+The map retains attribution for OpenStreetMap, Hamburg's building/tree/planning data, Esri World Imagery and BKG TopPlusOpen. Screenshots of the road workspace and the comparison GIF were captured from the running editor on 7 September 2026.

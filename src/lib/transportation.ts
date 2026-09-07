@@ -1,7 +1,9 @@
 import proj4 from 'proj4';
+import { HAMBURG_ROAD_RULES, parseRoadRuleProfile, roadWidthRule } from './road-rules';
 import type { CityJsonDocument, CityObject, JsonValue } from '../types';
 import {
   applyVertexTransform,
+  activeMetricCrsForCityJson,
   computeBbox,
   detectCrs,
   projectToWgs84,
@@ -165,6 +167,10 @@ export interface RoadSectionDraft {
   /** User-facing anchors. Rendered and exported ribbons are sampled between them. */
   centerlineWgs84: [number, number][];
   bands: RoadBand[];
+  /** Signed lateral offset from the directed centreline; positive is left. */
+  offsetM?: number;
+  /** User-defined corridor distances from that centreline, in metres. */
+  extentLimits?: { left?: number; right?: number };
   maxspeedKmh?: number | null;
   curve?: RoadCurveSettings;
   connections?: {
@@ -181,6 +187,7 @@ export interface RoadDraft {
   osmTags?: Record<string, string>;
   vertical?: RoadVerticalProfile;
   userVerified?: boolean;
+  ruleProfile?: import('./road-rules').RoadRuleProfile;
   sections: RoadSectionDraft[];
 }
 
@@ -216,6 +223,7 @@ export interface RoadArea {
   surfaceType: 'TrafficArea' | 'AuxiliaryTrafficArea';
   function: string;
   polygon: [number, number][];
+  holes?: [number, number][][];
   vertical?: RoadVerticalProfile;
   /** Exact polygons are preserved for attribute-only edits. */
   geometryMode?: RoadGeometryMode;
@@ -332,6 +340,7 @@ export function createManualRoadDraft(
     id: makeStableId('road-draft'),
     name: options.name ?? 'Manual road edit',
     source: 'manual',
+    ruleProfile: structuredClone(HAMBURG_ROAD_RULES),
     vertical: {
       placement: 'surface',
       source: 'manual',
@@ -343,7 +352,9 @@ export function createManualRoadDraft(
         centerlineWgs84: normaliseWgs84Line(centerlineWgs84),
         maxspeedKmh: options.maxspeedKmh ?? 50,
         curve: { ...DEFAULT_ROAD_CURVE },
-        bands: cloneBands(options.bands ?? defaultRoadBands(options.maxspeedKmh ?? 50)),
+        bands: cloneBands(options.bands ?? defaultRoadBands(options.maxspeedKmh ?? 50).map((band) => ({
+          ...band, widthM: roadWidthRule(band).recommendedM, surface: band.kind === 'sidewalk' ? 'paving_stones' : defaultSurfaceForBand(band.kind),
+        }))),
       },
     ],
   };
@@ -863,6 +874,11 @@ export function insertRoadIntoCityJson(
       type: area.surfaceType,
       function: area.function,
       usage: area.attributes.transportationUsage,
+      transportationUsage: area.attributes.transportationUsage,
+      sectionId: area.sectionId,
+      bandId: area.bandId,
+      widthMeters: area.attributes.widthMeters,
+      allowedTurns: area.attributes.allowedTurns ?? null,
       sourceType: area.attributes.sourceType ?? null,
       trafficDirection: area.attributes.trafficDirection,
       allowedModes: area.attributes.allowedModes ?? null,
@@ -875,6 +891,7 @@ export function insertRoadIntoCityJson(
   }
 
   const cityObject: CityObject = {
+    ...existingRoad,
     type: 'Road',
     attributes: {
       ...existingAttributes,
@@ -893,7 +910,8 @@ export function insertRoadIntoCityJson(
       _roadGeometryMode: 'generated',
       _sourceCenterlineWgs84:
         projectedAreas[0]?.attributes.sourceCenterlineWgs84 ?? null,
-      _roadLayout: roadDraftToJson(draft),
+      _roadLayout: roadDraftToJson({ ...draft, id }),
+      _junctionBaseSurfaces: null,
     },
     geometry: [
       {
@@ -925,6 +943,20 @@ export function insertRoadIntoCityJson(
   };
 }
 
+/** Show asymmetric design limits using the road's metric projection. */
+export function buildRoadExtentGuides(doc: CityJsonDocument, draft: RoadDraft): Array<{ id: string; path: [number, number][] }> {
+  const crs = activeMetricCrsForCityJson(doc);
+  return draft.sections.flatMap((section) => {
+    const line = normaliseProjectedLine(sampleRoadSectionCenterlineWgs84(section).map((point) => { const [x, y] = proj4('EPSG:4326', crs, point); return { x, y }; }));
+    if (line.length < 2) return [];
+    return (['left', 'right'] as const).flatMap((side) => {
+      const limit = section.extentLimits?.[side];
+      if (limit === undefined || !Number.isFinite(limit) || limit < 0) return [];
+      return [{ id: `${section.id}-extent-${side}`, path: offsetPolyline(line, side === 'left' ? limit : -limit).map((point) => proj4(crs, 'EPSG:4326', [point.x, point.y]) as [number, number]) }];
+    });
+  });
+}
+
 /**
  * Generate the same semantic polygons used by insertion without cloning or
  * mutating the CityJSON document. This is the edit-time hot path.
@@ -950,6 +982,7 @@ export function buildRoadPreviewAreas(
   return buildProjectedRoadAreas(doc, draft, crs.code).map((area) => ({
     ...area,
     roadId: options.id ?? draft.id ?? '__road_preview__',
+    editableDraft: draft,
     vertical,
     polygon: area.polygon.map((point) =>
       projectToWgs84(crs.code, { x: point.x, y: point.y, z: baseElevation })
@@ -973,6 +1006,7 @@ export function roadDraftPreservesExactGeometry(
     const before = baseline.sections[sectionIndex];
     const after = next.sections[sectionIndex];
     if (before.id !== after.id) return false;
+    if (!sameFiniteNumber(before.offsetM ?? 0, after.offsetM ?? 0)) return false;
     if (before.centerlineWgs84.length !== after.centerlineWgs84.length) return false;
     for (let pointIndex = 0; pointIndex < before.centerlineWgs84.length; pointIndex++) {
       const beforePoint = before.centerlineWgs84[pointIndex];
@@ -1104,7 +1138,8 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
   for (const [roadId, object] of Object.entries(doc.CityObjects)) {
     if (object.type !== 'Road') continue;
     const objectVertical = roadVerticalProfileFromCityObject(object);
-    const editableDraft = readEditableRoadDraftFromCityObject(object);
+    const storedDraft = readEditableRoadDraftFromCityObject(object);
+    const editableDraft = storedDraft ? { ...storedDraft, id: roadId } : null;
     const geometryMode = roadGeometryModeFromCityObject(object, editableDraft);
     for (const geometry of object.geometry ?? []) {
       const geom = geometry as {
@@ -1150,6 +1185,10 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
           surfaceType,
           function: String(surface.function ?? 'road_surface'),
           polygon,
+          ...(face.length > 1 ? { holes: face.slice(1).map((hole) => hole.flatMap((index) => {
+            const vertex = doc.vertices[index];
+            return vertex ? [projectToWgs84(crs.code, applyVertexTransform(vertex, doc))] : [];
+          })) } : {}),
           vertical: objectVertical
             ? resolveRoadVerticalProfile(
                 objectVertical,
@@ -1173,7 +1212,8 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
           geometryMode,
           attributes: {
             function: String(surface.function ?? 'road_surface'),
-            transportationUsage: (surface.transportationUsage ?? null) as JsonValue,
+            transportationUsage: (surface.transportationUsage ?? surface.usage ?? null) as JsonValue,
+            widthMeters: (surface.widthMeters ?? null) as JsonValue,
             trafficDirection: (surface.trafficDirection ?? null) as JsonValue,
             allowedModes: (surface.allowedModes ?? null) as JsonValue,
             allowedTurns: (
@@ -1198,6 +1238,14 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             osm2streetsLaneIndex: (surface.osm2streetsLaneIndex ?? null) as JsonValue,
             osm2streetsIntersectionId: (surface.osm2streetsIntersectionId ?? null) as JsonValue,
             connectedRoadIds: (surface.connectedRoadIds ?? null) as JsonValue,
+            connectedCityRoadIds: (object.attributes?._connectedCityRoadIds ?? null) as JsonValue,
+            cityRoadEndpoints: (object.attributes?._cityRoadEndpoints ?? null) as JsonValue,
+            disabledMovements: (object.attributes?._disabledMovements ?? null) as JsonValue,
+            junctionCurveFactor: (object.attributes?._junctionCurveFactor ?? null) as JsonValue,
+            junctionSurfaceMode: (object.attributes?._junctionSurfaceMode ?? null) as JsonValue,
+            junctionBaseSurfaces: (object.attributes?._junctionBaseSurfaces ?? null) as JsonValue,
+            junctionFootprint: (object.attributes?._junctionFootprint ?? null) as JsonValue,
+            elevationRangeM: Number.isFinite(minElevation) && Number.isFinite(maxElevation) ? maxElevation - minElevation : null,
             allowedRoadMovements: (
               surface.allowedRoadMovements ??
               object.attributes?._allowedOsm2streetsRoadMovements ??
@@ -1602,7 +1650,7 @@ function buildProjectedRoadAreas(
       })
     );
     const totalWidth = section.bands.reduce((sum, band) => sum + band.widthM, 0);
-    let offset = totalWidth / 2;
+    let offset = totalWidth / 2 + (section.offsetM ?? 0);
     for (let i = 0; i < section.bands.length; i++) {
       const band = section.bands[i];
       const leftOffset = offset;
@@ -1625,6 +1673,8 @@ function buildProjectedRoadAreas(
         polygon,
         attributes: {
           transportationUsage: band.kind,
+          widthMeters: band.widthM,
+          allowedTurns: band.allowedTurns ?? null,
           sourceType: band.sourceType ?? null,
           trafficDirection: band.direction ?? defaultDirectionForBand(band.kind),
           surfaceMaterial: band.surface ?? defaultSurfaceForBand(band.kind),
@@ -1644,6 +1694,7 @@ function buildProjectedRoadAreas(
 }
 
 function validateSection(section: RoadSectionDraft): void {
+  if (!Number.isFinite(section.offsetM ?? 0)) throw new Error('Road offset must be finite.');
   if (normaliseWgs84Line(section.centerlineWgs84).length < 2) {
     throw new Error(`Road section "${section.id}" needs at least two centerline points.`);
   }
@@ -2605,6 +2656,10 @@ function readRoadDraft(value: unknown): RoadDraft | null {
   }
   if (osmTags) draft.osmTags = osmTags;
   if (vertical) draft.vertical = vertical;
+  if (record.ruleProfile !== undefined) {
+    try { draft.ruleProfile = parseRoadRuleProfile(record.ruleProfile); }
+    catch { return null; }
+  }
   if (typeof record.userVerified === 'boolean') draft.userVerified = record.userVerified;
   return draft;
 }
@@ -2630,6 +2685,20 @@ function readRoadSectionDraft(value: unknown): RoadSectionDraft | null {
   };
   const curve = readRoadCurve(record.curve);
   if (curve) section.curve = curve;
+  if (record.offsetM !== undefined) {
+    if (typeof record.offsetM !== 'number' || !Number.isFinite(record.offsetM)) return null;
+    section.offsetM = record.offsetM;
+  }
+  if (record.extentLimits !== undefined) {
+    const limits = unknownRecord(record.extentLimits);
+    if (!limits) return null;
+    section.extentLimits = {};
+    for (const side of ['left', 'right'] as const) {
+      if (limits[side] === undefined) continue;
+      if (typeof limits[side] !== 'number' || !Number.isFinite(limits[side]) || limits[side] < 0) return null;
+      section.extentLimits[side] = limits[side];
+    }
+  }
   const connections = readRoadConnections(record.connections);
   if (connections) section.connections = connections;
   if (typeof record.maxspeedKmh === 'number' && Number.isFinite(record.maxspeedKmh)) {

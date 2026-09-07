@@ -9,6 +9,14 @@
       "source": "https://suche.transparenz.hamburg.de/dataset/3d-gebaeudemodell-lod2-de-hamburg2"
     },
     {
+      "label": "Hamburg — intersection design study",
+      "description": "Mattentwiete / Katharinenstraße: a kerb outline traced against the editor's satellite view, with estimated approach widths. Load it, choose Roads, then select the junction to edit its Shape or Turns.",
+      "url": "examples/hamburg-mattentwiete.json",
+      "enabled": true,
+      "checkAvailability": true,
+      "source": "OpenStreetMap contributors; visual review against Esri World Imagery, 7 September 2026"
+    },
+    {
       "label": "Hamburg city center - editable CityJSON roads",
       "description": "Compact precomputed center sample retained for manual loading. The default app now viewport-streams the complete static gzip CityJSONSeq catalog.",
       "url": "data/hamburg/hamburg-city-center-roads.city.json",
@@ -17,8 +25,8 @@
       "source": "public/data/hamburg/hamburg-city-center-roads.osm"
     },
     {
-      "label": "Hamburg osm2streets roads - real fixture",
-      "description": "Real native osm2streets lane-polygons output from the Hamburg short-intersection OSM fixture, converted to CityJSON Transportation Road surfaces.",
+      "label": "Hamburg osm2streets — converter fixture",
+      "description": "Native osm2streets output from a synthetic short-intersection regression network in Hamburg coordinates, converted to CityJSON Road surfaces. Use the Mattentwiete design study for a real-place imagery comparison.",
       "url": "data/transportation/osm2streets-hamburg-short-intersection.city.json",
       "enabled": true,
       "checkAvailability": true,

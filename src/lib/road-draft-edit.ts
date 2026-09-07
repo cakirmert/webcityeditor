@@ -93,6 +93,16 @@ export function updateRoadDraftPoint(
         ? 'end'
         : null;
   let sections = draft.sections.map((section) => {
+    // Replacing/removing an internal join must clear its old reverse edge.
+    const previousConnection = sourceEndpoint ? sourceSection?.connections?.[sourceEndpoint] : undefined;
+    if (sourceEndpoint && previousConnection?.target === 'draft' && previousConnection.targetSectionId === section.id && previousConnection.targetEndpoint && previousConnection.targetEndpoint !== 'node') {
+      const peerEndpoint = previousConnection.targetEndpoint;
+      const reverse = section.connections?.[peerEndpoint];
+      if (reverse?.target === 'draft' && reverse.targetSectionId === sectionId && reverse.targetEndpoint === sourceEndpoint) {
+        const connections = { ...section.connections }; delete connections[peerEndpoint];
+        section = { ...section, connections: connections.start || connections.end ? connections : undefined };
+      }
+    }
     if (section.id !== sectionId) return section;
     const centerlineWgs84 = section.centerlineWgs84.map(
       (point) => [point[0], point[1]] as [number, number]
@@ -187,8 +197,10 @@ export function buildRoadSnapCandidates(
     for (const section of layout.sections) {
       const first = section.centerlineWgs84[0];
       const last = section.centerlineWgs84.at(-1);
-      if (first) addSavedCandidate(area.roadId, section.id, 'start', first, add);
-      if (last) addSavedCandidate(area.roadId, section.id, 'end', last, add);
+      // Occupied ends belong to their existing join; add branches through the
+      // intersection editor instead of overwriting another road's reverse edge.
+      if (first && (!section.connections?.start || section.connections.start.targetId === draft?.id)) addSavedCandidate(area.roadId, section.id, 'start', first, add);
+      if (last && (!section.connections?.end || section.connections.end.targetId === draft?.id)) addSavedCandidate(area.roadId, section.id, 'end', last, add);
     }
   }
 

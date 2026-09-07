@@ -29,6 +29,9 @@ import {
   updateExactRoadAttributesInCityJson,
 } from '../lib/transportation';
 import { processOsmXml } from '../lib/osm2streets';
+import { validateRoadRules } from '../lib/road-rules';
+import type { JunctionEditTool } from '../lib/junction-footprint';
+import { buildConnectedJunctionPreview, buildRoadJunctionPlan, createRoadJunctionAtEndpoint, readRoadJunction, saveRoadJunction, type RoadJunctionDraft } from '../lib/road-junctions';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import { insertOsm2StreetsRoadIntoCityJson } from '../lib/osm2streets-cityjson';
 import { buildRoadDraftFromOsm2StreetsSelection } from '../lib/osm2streets-draft';
@@ -73,7 +76,7 @@ const ROAD_QUERY_MAX_HEIGHT_METERS = 1_600;
 const ROAD_QUERY_TIMEOUT_MS = 25_000;
 const ROAD_BUILDING_CLEARANCE_BLOCK_METERS = 0.5;
 const ROAD_BUILDING_CLEARANCE_WARNING_METERS = 1;
-const ROAD_TREE_CLEARANCE_METERS = 0.5;
+const ROAD_TREE_CLEARANCE_METERS = 0;
 const EMPTY_PARCEL_ZONES: ParcelZone[] = [];
 const EMPTY_ROAD_FIT_TREES: RoadFitTree[] = [];
 
@@ -195,6 +198,30 @@ export function useRoadEditor(
   const [osmPointFeatures, setOsmPointFeatures] = useState<OsmPointFeature[]>([]);
   const [selectedOsmRoadId, setSelectedOsmRoadId] = useState<string | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
+  const [junctionDraft, setJunctionDraft] = useState<RoadJunctionDraft | null>(null);
+  const [junctionSource, setJunctionSource] = useState<string | null>(null);
+  const [junctionHistory, setJunctionHistory] = useState<RoadJunctionDraft[]>([]);
+  const [junctionFuture, setJunctionFuture] = useState<RoadJunctionDraft[]>([]);
+  const [junctionBaseline, setJunctionBaseline] = useState('');
+  const [junctionEditTool, setJunctionEditTool] = useState<JunctionEditTool>('none');
+  const junctionHistoryGroup = useRef<string | undefined>(undefined);
+  useEffect(() => { setJunctionEditTool('none'); junctionHistoryGroup.current = undefined; }, [junctionDraft?.id]);
+  const junctionDirty = !!junctionDraft && JSON.stringify(junctionDraft) !== junctionBaseline;
+  const handleJunctionChange = useCallback((next: RoadJunctionDraft, group?: string) => {
+    if (junctionDraft && (!group || junctionHistoryGroup.current !== group)) setJunctionHistory((history) => [...history.slice(-49), junctionDraft]);
+    junctionHistoryGroup.current = group;
+    setJunctionFuture([]); setJunctionDraft(next);
+  }, [junctionDraft]);
+  const handleUndoJunction = useCallback(() => {
+    junctionHistoryGroup.current = undefined;
+    const previous = junctionHistory.at(-1); if (!previous || !junctionDraft) return;
+    setJunctionFuture((future) => [...future, junctionDraft]); setJunctionHistory((history) => history.slice(0, -1)); setJunctionDraft(previous);
+  }, [junctionDraft, junctionHistory]);
+  const handleRedoJunction = useCallback(() => {
+    junctionHistoryGroup.current = undefined;
+    const next = junctionFuture.at(-1); if (!next || !junctionDraft) return;
+    setJunctionHistory((history) => [...history, junctionDraft]); setJunctionFuture((future) => future.slice(0, -1)); setJunctionDraft(next);
+  }, [junctionDraft, junctionFuture]);
   const [selectedRoadBand, setSelectedRoadBand] = useState<{
     sectionId: string;
     bandIndex: number;
@@ -335,6 +362,7 @@ export function useRoadEditor(
   }, [editingRoadId, roadDraft, roadEditBaseline]);
 
   const clearOsmRoadData = useCallback(() => {
+    setJunctionDraft(null); setJunctionSource(null); setJunctionHistory([]); setJunctionFuture([]);
     clearRoadDraftHistory();
     setRoadEditBaseline(null);
     setRoadDraft(null);
@@ -472,6 +500,7 @@ export function useRoadEditor(
   }, [cityjson, coreState.mapBboxRef, loadOsmRoadXml]);
 
   const handleOsmRoadSelect = useCallback((road: OsmRoadFeature) => {
+    setJunctionDraft(null);
     clearRoadDraftHistory();
     setShowRoadEditor(true);
     setOsm2streetsSelection(null);
@@ -536,6 +565,7 @@ export function useRoadEditor(
         osmRoads
       );
       clearRoadDraftHistory();
+      setJunctionDraft(null);
       setRoadDraft(draft);
       setRoadEditBaseline(null);
       setRoadDraftDirty(false);
@@ -556,6 +586,7 @@ export function useRoadEditor(
   }, [clearRoadDraftHistory, osm2streetsResult, osm2streetsSelection, osmRoads]);
 
   const handleStartRoadDraw = useCallback(() => {
+    setJunctionDraft(null);
     setShowRoadEditor(true);
     setSelection(null);
     setDrawMode('road-line');
@@ -614,15 +645,19 @@ export function useRoadEditor(
   );
 
   const handleEditSelectedRoadArea = useCallback((area: RoadArea) => {
+    if (roadDraftDirty && !window.confirm('Discard the unsaved road draft and edit this selection?')) return;
+    if (junctionDirty && !window.confirm('Discard the unsaved intersection draft and edit this selection?')) return;
     if (String(area.attributes.transportationUsage ?? area.function).toLowerCase() === 'intersection') {
-      const connected = Array.isArray(area.attributes.connectedRoadIds)
-        ? area.attributes.connectedRoadIds.length
-        : 0;
-      setRoadStatus(
-        `This is an exact osm2streets junction surface connected to ${connected} road${connected === 1 ? '' : 's'}. Its shape stays protected; tap a lane entering it, edit that road, then drag its yellow end onto a teal join target to confirm the connection.`
-      );
+      if (!cityjson) return;
+      try {
+        const draft = readRoadJunction(extractTransportationAreas(cityjson), area.roadId);
+        setJunctionDraft(draft); setJunctionBaseline(JSON.stringify(draft)); setJunctionHistory([]); setJunctionFuture([]);
+        setRoadDraft(null); setRoadDraftDirty(false); setEditingRoadId(null); setSelectedRoadArea(area);
+        setRoadStatus('Select an incoming lane to review its movements. Surface changes are previewed before Save.');
+      } catch (error) { setRoadStatus(String(error)); }
       return;
     }
+    setJunctionDraft(null);
     const savedDraft = area.editableDraft ? cloneRoadDraft(area.editableDraft) : null;
     let draft: RoadDraft;
     try {
@@ -640,7 +675,7 @@ export function useRoadEditor(
     }
     const editingDraft = {
       ...draft,
-      id: draft.id ?? area.roadId,
+      id: area.roadId,
     };
     clearRoadDraftHistory();
     setRoadDraft(editingDraft);
@@ -666,7 +701,7 @@ export function useRoadEditor(
         ? `Loaded editable layout from ${area.roadId}. Changes stay in the draft until you save them.`
         : `Editing ${area.roadId} on its exact CityJSON polygons. Type, direction, material, access and speed edits preserve them; moving handles, changing widths or restructuring bands rebuilds editable ribbons.`
     );
-  }, [cityjson, clearRoadDraftHistory]);
+  }, [cityjson, clearRoadDraftHistory, roadDraftDirty, junctionDirty]);
 
   const handleCancelRoadEdit = useCallback((force = false) => {
     if (!force && roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;
@@ -706,9 +741,50 @@ export function useRoadEditor(
     if (!cityjson) return [];
     return extractTransportationAreas(cityjson);
   }, [cityjson, reloadToken]);
+  const junctionPlan = useMemo(() => junctionDraft ? buildRoadJunctionPlan(junctionDraft, roadAreas) : null, [junctionDraft, roadAreas]);
+  const junctionConflicts = useMemo(() => junctionDraft?.surfaceMode === 'rebuild' && junctionPlan && cityjson ? validateRoadFit({
+    roadAreas: junctionPlan.areas.filter((area) => area.roadId === junctionDraft.id), buildingFootprints,
+    trees: roadFitTrees, metricCrs: activeMetricCrsForCityJson(cityjson), treeClearanceM: 0,
+  }) : [], [junctionDraft, junctionPlan, cityjson, buildingFootprints, roadFitTrees]);
+  const handleCreateJunction = useCallback((sectionId: string, endpoint: 'start' | 'end') => {
+    if (!editingRoadId || roadDraftDirty) { setRoadStatus('Save the connected road before constructing its intersection.'); return; }
+    try {
+      const draft = createRoadJunctionAtEndpoint(roadAreas, editingRoadId, sectionId, endpoint);
+      setJunctionDraft(draft); setJunctionBaseline(''); setJunctionHistory([]); setJunctionFuture([]);
+      setRoadDraft(null); setEditingRoadId(null);
+      setRoadStatus('Review the junction surface and lane movements, then Save intersection.');
+    } catch (error) { setRoadStatus(error instanceof Error ? error.message : String(error)); }
+  }, [editingRoadId, roadDraftDirty, roadAreas]);
+  const handleSaveJunction = useCallback(() => {
+    if (!cityjson || !junctionDraft) return;
+    if (junctionEditTool.startsWith('trace-')) { setRoadStatus('Finish or cancel the traced outline before saving.'); return; }
+    const plan = buildRoadJunctionPlan(junctionDraft, extractTransportationAreas(cityjson));
+    const conflicts = junctionDraft.surfaceMode === 'rebuild' ? validateRoadFit({ roadAreas: plan.areas.filter((area) => area.roadId === junctionDraft.id),
+      buildingFootprints, trees: roadFitTrees, metricCrs: activeMetricCrsForCityJson(cityjson), treeClearanceM: 0 }) : [];
+    if (plan.error || conflicts.some((item) => item.severity === 'error')) { setRoadStatus(plan.error ?? conflicts.map((item) => item.label).join(' ')); return; }
+    try {
+      pushUndo('Edit intersection');
+      runStructurallyGuardedMutation(cityjson, 'Save intersection', () => {
+        saveRoadJunction(cityjson, junctionDraft, plan);
+        if (junctionDraft.surfaceMode === 'rebuild') compactVertices(cityjson);
+      });
+      setDirtyIds((ids) => new Set([...ids, ...plan.replacedRoadIds])); setReloadToken((value) => value + 1);
+      if (junctionDraft.surfaceMode === 'rebuild') markGeometryChanged('Intersection surface changed; run Check 3D before export.');
+      const saved = readRoadJunction(extractTransportationAreas(cityjson), junctionDraft.id);
+      setJunctionDraft(saved); setJunctionBaseline(JSON.stringify(saved)); setJunctionHistory([]); setJunctionFuture([]);
+      setRoadStatus(`Saved ${junctionDraft.name}, including its lane movements${junctionDraft.surfaceMode === 'rebuild' ? ' and trimmed approaches' : ''}.`);
+    } catch (error) { setRoadStatus(error instanceof Error ? error.message : String(error)); }
+  }, [cityjson, junctionDraft, junctionEditTool, buildingFootprints, roadFitTrees, pushUndo, setDirtyIds, setReloadToken, markGeometryChanged]);
   const [roadPreviewAreas, setRoadPreviewAreas] = useState<RoadArea[]>([]);
+  const [roadPreviewError, setRoadPreviewError] = useState<string | null>(null);
   const [roadFitConflicts, setRoadFitConflicts] = useState<RoadFitConflict[]>([]);
   const [roadFitPending, setRoadFitPending] = useState(false);
+  const ruleBaseline = useMemo(() => {
+    if (!editingRoadId) return null;
+    try { return roadAreas.find((area) => area.roadId === editingRoadId && area.editableDraft)?.editableDraft ?? deriveEditableRoadDraftFromAreas(roadAreas, editingRoadId); }
+    catch { return null; }
+  }, [roadAreas, editingRoadId]);
+  const roadRuleIssues = useMemo(() => roadDraft ? [...validateRoadRules(roadDraft, ruleBaseline), ...(roadPreviewError ? [{ sectionId: '', code: 'configuration' as const, severity: 'error' as const, message: roadPreviewError }] : [])] : [], [roadDraft, ruleBaseline, roadPreviewError]);
   const lastPreviewAtRef = useRef(0);
 
   // Geometry preview is capped at roughly 20 fps during a drag. The previous
@@ -717,6 +793,7 @@ export function useRoadEditor(
   useEffect(() => {
     if (!cityjson || !roadDraft) {
       setRoadPreviewAreas([]);
+      setRoadPreviewError(null);
       setRoadFitConflicts([]);
       setRoadFitPending(false);
       return;
@@ -725,19 +802,22 @@ export function useRoadEditor(
       !roadDraftDirty && !!(osm2streetsResult || selectedRoadArea || lastInsertedRoadId);
     if (shouldHidePreview) {
       setRoadPreviewAreas([]);
+      setRoadPreviewError(null);
       return;
     }
     const elapsed = performance.now() - lastPreviewAtRef.current;
     const delay = Math.max(0, 50 - elapsed);
     const timer = window.setTimeout(() => {
       try {
-        setRoadPreviewAreas(
-          exactGeometryStatus === 'preserved' && editingRoadId
+        const preview = exactGeometryStatus === 'preserved' && editingRoadId
             ? buildExactRoadAttributePreviewAreas(roadAreas, editingRoadId, roadDraft!)
-            : buildRoadPreviewAreas(cityjson!, roadDraft!, { id: '__road_preview__' })
-        );
-      } catch {
+            : buildRoadPreviewAreas(cityjson!, roadDraft!, { id: editingRoadId ?? '__road_preview__' });
+        const connected = exactGeometryStatus === 'preserved' ? { areas: preview } : buildConnectedJunctionPreview(roadAreas, preview);
+        setRoadPreviewAreas(connected.areas);
+        setRoadPreviewError('error' in connected && connected.error ? String(connected.error) : null);
+      } catch (error) {
         setRoadPreviewAreas([]);
+        setRoadPreviewError(error instanceof Error ? error.message : String(error));
       }
       lastPreviewAtRef.current = performance.now();
     }, delay);
@@ -800,25 +880,34 @@ export function useRoadEditor(
 
   const handleInsertRoad = useCallback(() => {
     if (!cityjson || !roadDraft) return;
+    const ruleErrors = validateRoadRules(roadDraft, ruleBaseline).filter((issue) => issue.severity === 'error');
+    if (ruleErrors.length) {
+      setRoadStatus(ruleErrors.map((issue) => issue.message).join(' '));
+      return;
+    }
     const targetRoadId = editingRoadId;
     const preserveExactGeometry =
       exactGeometryStatus === 'preserved' && targetRoadId !== null;
     // Recheck synchronously at commit so the edit-time debounce can never
     // allow a stale clear result to bypass the insertion gate.
-    const commitPreview = preserveExactGeometry
+    let connectedPreview: ReturnType<typeof buildConnectedJunctionPreview>;
+    try {
+    const roadOnlyPreview = preserveExactGeometry
       ? buildExactRoadAttributePreviewAreas(roadAreas, targetRoadId!, roadDraft)
       : buildRoadPreviewAreas(cityjson, roadDraft, {
           id: targetRoadId ?? '__road_preview__',
         });
+    connectedPreview = preserveExactGeometry ? { areas: roadOnlyPreview, plans: [] } : buildConnectedJunctionPreview(roadAreas, roadOnlyPreview);
+    } catch (error) { setRoadStatus(error instanceof Error ? error.message : String(error)); return; }
+    if ('error' in connectedPreview && connectedPreview.error) { setRoadStatus(String(connectedPreview.error)); return; }
+    const commitPreview = connectedPreview.areas;
     // Existing exact polygons are not moved by an attribute-only edit, so a
     // pre-existing fit issue must not suddenly block changing their semantics.
-    const commitConflicts = preserveExactGeometry
-      ? []
-      : validateRoadFit({
+    const commitConflicts = validateRoadFit({
           roadAreas: commitPreview,
-          buildingFootprints,
+          buildingFootprints: preserveExactGeometry ? [] : buildingFootprints,
           trees: roadFitTrees,
-          affectedLand: affectedZones,
+          affectedLand: preserveExactGeometry ? [] : affectedZones,
           metricCrs: activeMetricCrsForCityJson(cityjson),
           buildingClearanceBlockM: ROAD_BUILDING_CLEARANCE_BLOCK_METERS,
           buildingClearanceWarningM: ROAD_BUILDING_CLEARANCE_WARNING_METERS,
@@ -935,6 +1024,16 @@ export function useRoadEditor(
             inserted.id,
             savedRoadDraft
           );
+          if (!preserveExactGeometry) {
+            const currentAreas = extractTransportationAreas(cityjson);
+            const changedIds = new Set([inserted.id, ...propagatedRoadIds]);
+            const connected = buildConnectedJunctionPreview(currentAreas, currentAreas.filter((area) => changedIds.has(area.roadId)));
+            if (connected.error) throw new Error(connected.error);
+            const conflicts = validateRoadFit({ roadAreas: connected.areas, buildingFootprints, trees: roadFitTrees, metricCrs: activeMetricCrsForCityJson(cityjson), treeClearanceM: 0 });
+            if (conflicts.some((conflict) => conflict.severity === 'error')) throw new Error(conflicts.filter((conflict) => conflict.severity === 'error').map((conflict) => conflict.label).join(' '));
+            for (const { draft, plan } of connected.plans) saveRoadJunction(cityjson, draft, plan);
+            connectedRoadIds.push(...connected.plans.flatMap(({ plan }) => plan.replacedRoadIds));
+          }
           if (targetRoadId && !preserveExactGeometry) compactVertices(cityjson);
           return {
             ...inserted,
@@ -957,7 +1056,7 @@ export function useRoadEditor(
       setSelectedRoadArea(null);
       setLastInsertedRoadId(result.id);
       setEditingRoadId(result.id);
-      setRoadDraft(cloneRoadDraft(savedRoadDraft));
+      setRoadDraft(cloneRoadDraft({ ...savedRoadDraft, id: result.id }));
       setRoadDraftDirty(false);
       clearRoadDraftHistory();
       setRoadEditBaseline(
@@ -1009,6 +1108,7 @@ export function useRoadEditor(
   }, [
     cityjson,
     roadDraft,
+    ruleBaseline,
     editingRoadId,
     exactGeometryStatus,
     roadAreas,
@@ -1113,6 +1213,7 @@ export function useRoadEditor(
       clearRoadDraftHistory();
       setSelectedRoadArea(null);
       setRoadDraft(null);
+      setJunctionDraft(null);
       setRoadEditBaseline(null);
       setRoadDraftDirty(false);
       setEditingRoadId(null);
@@ -1238,6 +1339,13 @@ export function useRoadEditor(
     roadPreviewAreas,
     roadFitConflicts,
     roadFitPending,
+    roadRuleIssues,
+    junctionDraft, junctionPlan, junctionConflicts, junctionDirty,
+    junctionSource, setJunctionSource,
+    junctionEditTool, setJunctionEditTool,
+    handleJunctionChange, handleUndoJunction, handleRedoJunction, handleCreateJunction, handleSaveJunction,
+    canUndoJunction: junctionHistory.length > 0, canRedoJunction: junctionFuture.length > 0,
+    handleCancelJunction: () => { setJunctionDraft(null); setSelectedRoadArea(null); },
   };
 }
 export type RoadEditorState = ReturnType<typeof useRoadEditor>;

@@ -3,7 +3,6 @@ import type { CityJsonDocument } from '../../src/types';
 import { projectToWgs84 } from '../../src/lib/projection';
 import {
   fitRoadDraftWidthsToCorridors,
-  MIN_CORRIDOR_FIT_BAND_WIDTH_M,
 } from '../../src/lib/road-corridor-fit';
 import type { RoadAllowedCorridor } from '../../src/lib/road-corridor';
 import type { RoadDraft } from '../../src/lib/transportation';
@@ -63,7 +62,7 @@ function corridor(widthM: number, y = ORIGIN_Y + 5): RoadAllowedCorridor {
 }
 
 describe('fitRoadDraftWidthsToCorridors', () => {
-  it('proportionally shrinks band widths to the largest corridor-safe width', () => {
+  it('shrinks surplus widths to fit while retaining per-mode minimums', () => {
     const result = fitRoadDraftWidthsToCorridors(document(), draft(), [corridor(6)]);
 
     expect(result.status).toBe('fitted');
@@ -71,10 +70,8 @@ describe('fitRoadDraftWidthsToCorridors', () => {
     expect(result.sections[0].originalWidthM).toBe(8);
     expect(result.sections[0].fittedWidthM).toBeGreaterThanOrEqual(5.9);
     expect(result.sections[0].fittedWidthM).toBeLessThanOrEqual(6.01);
-    expect(result.draft.sections[0].bands.map((band) => band.widthM)).toEqual([
-      result.draft.sections[0].bands[0].widthM,
-      result.draft.sections[0].bands[0].widthM,
-    ]);
+    expect(result.draft.sections[0].bands[0].widthM).toBeGreaterThanOrEqual(1.8);
+    expect(result.draft.sections[0].bands[1].widthM).toBeGreaterThanOrEqual(2.75);
   });
 
   it('leaves a draft unchanged when every section already fits', () => {
@@ -102,6 +99,6 @@ describe('fitRoadDraftWidthsToCorridors', () => {
     const result = fitRoadDraftWidthsToCorridors(document(), draft(), [corridor(0.5)]);
 
     expect(result.status).toBe('unfit');
-    expect(result.reason).toContain(`${MIN_CORRIDOR_FIT_BAND_WIDTH_M.toFixed(2)} m`);
+    expect(result.reason).toContain('project minimum');
   });
 });

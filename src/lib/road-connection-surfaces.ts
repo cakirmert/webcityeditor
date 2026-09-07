@@ -1,3 +1,4 @@
+import type { RoadLaneContinuation } from './road-lane-continuations';
 export interface LaneConnectorSurfaceInput {
   path: [number, number][];
   sourceWidthM: number;
@@ -120,4 +121,25 @@ function signedArea(ring: [number, number][]): number {
       ring[index + 1][0] * ring[index][1];
   }
   return area / 2;
+}
+
+/** Shape controls modify tangent-constrained connectors, not their endpoints. */
+export function curveJunctionMovement(movement: RoadLaneContinuation, factor: number): RoadLaneContinuation {
+  if (Math.abs(factor - 1 / 3) < 1e-6 || movement.path.length < 4) return movement;
+  const first = movement.path[0], last = movement.path.at(-1)!;
+  const scaleX = Math.cos(first[1] * Math.PI / 180);
+  const tangent = (a: [number, number], b: [number, number]) => {
+    const dx = (b[0] - a[0]) * scaleX, dy = b[1] - a[1]; const length = Math.hypot(dx, dy) || 1;
+    return [dx / length / scaleX, dy / length];
+  };
+  const start = tangent(first, movement.path[1]);
+  const end = tangent(movement.path.at(-2)!, last);
+  const reach = Math.hypot((last[0] - first[0]) * scaleX, last[1] - first[1]) * factor;
+  const a = [first[0] + start[0] * reach, first[1] + start[1] * reach];
+  const b = [last[0] - end[0] * reach, last[1] - end[1] * reach];
+  const path = Array.from({ length: 25 }, (_, i): [number, number] => {
+    const t = i / 24, u = 1 - t;
+    return [0, 1].map((axis) => u ** 3 * first[axis] + 3 * u ** 2 * t * a[axis] + 3 * u * t ** 2 * b[axis] + t ** 3 * last[axis]) as [number, number];
+  });
+  return { ...movement, path, polygon: buildLaneConnectorSurface({ path, sourceWidthM: movement.sourceWidthM, targetWidthM: movement.targetWidthM }) };
 }

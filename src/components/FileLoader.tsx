@@ -468,6 +468,9 @@ export default function FileLoader({
             </div>
           </div>
         )}
+        <button className="intersection-sample-card" onClick={() => handleQuickSample({ label: 'Hamburg intersection study', description: 'Mattentwiete / Katharinenstraße', url: publicAssetUrl('examples/hamburg-mattentwiete.json') })}>
+          <span>INTERSECTION DESIGN STUDY</span><b>Try the Hamburg intersection</b><small>A traced kerb outline, editable roads and lane connections. Visual estimates, ready to explore.</small>
+        </button>
         <div className="flex items-center justify-between gap-2">
           {primaryHostedSample ? (
             <Button onClick={() => handleQuickSample(primaryHostedSample)}>

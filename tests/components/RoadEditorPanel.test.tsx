@@ -141,8 +141,12 @@ describe('<RoadEditorPanel />', () => {
     expect(onDeleteSelectedRoadArea).toHaveBeenCalledWith(area);
   });
 
-  it('shows road bands as draggable side-by-side boxes', () => {
+  it('offers draggable band ordering in a compact disclosure', () => {
     renderPanel();
+    const disclosure = screen.getByText('Reorder bands').closest('details');
+    expect(disclosure).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('Reorder bands'));
+    expect(disclosure).toHaveAttribute('open');
 
     expect(screen.getByTestId('road-centerline-drag-hint')).toHaveTextContent(
       'The point stays attached until release'
@@ -159,6 +163,7 @@ describe('<RoadEditorPanel />', () => {
     renderPanel(onDraftChange);
 
     expect(screen.queryByLabelText('Road curve strength')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Shape' }));
     fireEvent.click(screen.getByRole('button', { name: 'Straight' }));
 
     const [nextDraft] = onDraftChange.mock.calls[0] as [RoadDraft];
@@ -170,7 +175,7 @@ describe('<RoadEditorPanel />', () => {
     const onDraftChange = vi.fn();
     renderPanel(onDraftChange);
 
-    fireEvent.click(screen.getByTestId('road-band-box-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview band 2, car lane' }));
     fireEvent.change(screen.getByLabelText('car lane width'), {
       target: { value: '3.8' },
     });
@@ -180,20 +185,20 @@ describe('<RoadEditorPanel />', () => {
     expect(nextDraft.sections[0].bands[0].widthM).toBe(1.75);
   });
 
-  it('publishes bottom-menu band changes for the synchronized map highlight', () => {
+  it('publishes selected-band changes for the synchronized map highlight', () => {
     const onRoadBandSelect = vi.fn();
     renderPanel(vi.fn(), {
       selectedRoadBand: { sectionId: 'section-1', bandIndex: 0 },
       onRoadBandSelect,
     });
 
-    fireEvent.click(screen.getByTestId('road-band-box-1'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Selected road band' }), { target: { value: '1' } });
 
     expect(onRoadBandSelect).toHaveBeenLastCalledWith({
       sectionId: 'section-1',
       bandIndex: 1,
     });
-    expect(screen.getByTestId('road-band-box-1')).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Preview band 2, car lane' })).toHaveAttribute(
       'aria-pressed',
       'true'
     );
@@ -282,6 +287,7 @@ describe('<RoadEditorPanel />', () => {
     const onDraftChange = vi.fn();
     renderPanel(onDraftChange);
     const dataTransfer = createDataTransfer();
+    fireEvent.click(screen.getByText('Reorder bands'));
 
     fireEvent.dragStart(screen.getByTestId('road-band-box-0'), { dataTransfer });
     fireEvent.dragOver(screen.getByTestId('road-band-box-2'), { dataTransfer });

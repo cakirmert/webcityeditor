@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Bike,
@@ -7,14 +7,12 @@ import {
   Download,
   Footprints,
   GripVertical,
-  Map,
   Maximize2,
   Minimize2,
   PencilLine,
   Road,
   Route,
   Redo2,
-  Satellite,
   Scissors,
   Send,
   Trash2,
@@ -38,10 +36,19 @@ import type { RoadFitConflict } from '../lib/road-fit';
 import type { BasemapMode } from '../lib/basemap';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import Osm2StreetsInspector from './Osm2StreetsInspector';
+import RoadRulesPanel from './RoadRulesPanel';
+import RoadSectionPreview from './RoadSectionPreview';
+import RoadConnectionsPanel from './RoadConnectionsPanel';
+import RoadJunctionPanel from './RoadJunctionPanel';
+import { roadWidthRule, type RoadRuleIssue } from '../lib/road-rules';
+import type { RoadEditorState } from '../hooks/useRoadEditor';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
 interface Props {
+  roadAreas?: RoadArea[];
+  roadRuleIssues?: RoadRuleIssue[];
+  junction?: Pick<RoadEditorState, 'junctionDraft' | 'junctionPlan' | 'junctionDirty' | 'junctionConflicts' | 'handleJunctionChange' | 'handleSaveJunction' | 'handleCancelJunction' | 'handleCreateJunction' | 'handleUndoJunction' | 'handleRedoJunction' | 'canUndoJunction' | 'canRedoJunction' | 'setJunctionSource' | 'junctionEditTool' | 'setJunctionEditTool'>;
   osmRoads: OsmRoadFeature[];
   selectedOsmRoadId: string | null;
   draft: RoadDraft | null;
@@ -112,16 +119,15 @@ const DEFAULT_WIDTH: Record<RoadBandKind, number> = {
 };
 
 export default function RoadEditorPanel({
+  roadAreas = [],
+  roadRuleIssues = [],
+  junction,
   osmRoads,
-  selectedOsmRoadId,
   draft,
   draftDirty,
   exactGeometryStatus = null,
   editingRoadId = null,
   status,
-  basemap,
-  satelliteOpacity,
-  roadOverlayOpacity,
   cityJsonRoadCount,
   cityJsonJunctionCount = 0,
   drawMode,
@@ -165,6 +171,19 @@ export default function RoadEditorPanel({
   const [dropBandIndex, setDropBandIndex] = useState<number | null>(null);
   const [activeBandIndex, setActiveBandIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const traceCollapsed = useRef(false);
+  useEffect(() => {
+    const tracing = junction?.junctionEditTool?.startsWith('trace-');
+    if (tracing && (window.innerWidth <= 900 || window.matchMedia?.('(any-pointer: coarse)').matches)) {
+      traceCollapsed.current = true; setCollapsed(true);
+    } else if (!tracing && traceCollapsed.current) {
+      traceCollapsed.current = false; setCollapsed(false);
+    }
+  }, [junction?.junctionEditTool]);
+  const [activeTab, setActiveTab] = useState('lanes');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (scrollRef.current) { scrollRef.current.scrollTop = 0; scrollRef.current.scrollLeft = 0; } }, [activeTab, draft?.id, junction?.junctionDraft?.id]);
   const [newBandKind, setNewBandKind] = useState<RoadBandKind>('car_lane');
   const activeSection = useMemo(() => {
     if (!draft) return null;
@@ -203,29 +222,19 @@ export default function RoadEditorPanel({
     setActiveBandIndex(selectedRoadBand.bandIndex);
   }, [draft, selectedRoadBand]);
 
-  const selectedOsm = osmRoads.find((road) => road.id === selectedOsmRoadId);
   const payloadPreview = draft
     ? JSON.stringify(buildRoadEditPayload(draft, insertedRoadId ?? undefined), null, 2)
     : '';
   const blockingFitConflicts = roadFitConflicts.filter(
     (conflict) => conflict.severity === 'error'
   );
+  const blockingRuleCount = roadRuleIssues.filter((issue) => issue.severity === 'error').length;
+  const tabs = ['lanes', 'shape', 'connections', 'rules'];
   const warningFitConflicts = roadFitConflicts.length - blockingFitConflicts.length;
   const activeTotalWidth = activeSection
     ? activeSection.bands.reduce((sum, band) => sum + band.widthM, 0)
     : 0;
   const draftBandCount = activeSection?.bands.length ?? 0;
-  const sourceLabel = selectedRoadArea
-    ? 'CityJSON'
-    : selectedOsm
-    ? selectedOsm.tags.name ?? selectedOsm.id
-    : osm2streetsSelection
-      ? 'osm2streets selection'
-      : draft
-        ? draft.source
-        : cityJsonRoadCount > 0
-          ? 'CityJSON'
-          : 'none';
   const verticalProfile = draft ? roadVerticalProfileForDraft(draft) : null;
   const activeBand = activeSection?.bands[activeBandIndex] ?? null;
   const connectionCount = draft?.sections.reduce(
@@ -353,9 +362,9 @@ export default function RoadEditorPanel({
       bands: [
         ...section.bands,
         {
-          id: `${kind}-${section.bands.length + 1}`,
+          id: `${kind}-${crypto.randomUUID()}`,
           kind,
-          widthM: DEFAULT_WIDTH[kind],
+          widthM: roadWidthRule({ kind, direction, widthM: 0 }, draft?.ruleProfile).recommendedM,
           direction,
           allowedModes: defaultModes(kind),
           maxspeedKmh:
@@ -372,27 +381,13 @@ export default function RoadEditorPanel({
 
   return (
     <aside
-      className={`road-editor-panel ${expanded ? 'is-expanded' : ''} ${drawMode === 'road-line' ? 'is-drawing' : ''} ${!draft ? 'is-browse' : ''}`}
+      className={`road-editor-panel ${expanded ? 'is-expanded' : ''} ${collapsed ? 'is-collapsed' : ''} ${drawMode === 'road-line' ? 'is-drawing' : ''} ${!draft && !junction?.junctionDraft ? 'is-browse' : 'is-editing'} ${junction?.junctionDraft ? 'is-junction' : ''}`}
       data-testid="road-editor-panel"
     >
       <header className="road-editor-panel__header">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[rgba(255,255,255,0.12)] bg-[rgba(76,126,255,0.16)] text-[var(--accent-hover)]">
-            <Road className="h-4 w-4" aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="m-0 text-sm font-semibold leading-tight">Road editor</h2>
-              <span className="rounded bg-[rgba(76,126,255,0.14)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--accent-hover)]">
-                Transportation
-              </span>
-            </div>
-            <div className="mt-1 truncate text-[10px] text-[var(--text-faint)]">
-              Source: {sourceLabel}
-            </div>
-          </div>
-        </div>
+        <div className="studio-heading"><span className="studio-eyebrow">{junction?.junctionDraft ? 'INTERSECTION' : draft ? 'ROAD DESIGN' : 'STREET WORKSPACE'}</span><h2>{junction?.junctionDraft?.name ?? draft?.name ?? 'Roads & intersections'}</h2></div>
         <div className="flex items-center gap-1">
+          <button type="button" className="road-panel-collapse" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? 'Show road controls' : 'Minimize road controls'} aria-expanded={!collapsed}>{collapsed ? 'Show' : 'Hide'}</button>
           <Button
             type="button"
             size="icon"
@@ -444,8 +439,8 @@ export default function RoadEditorPanel({
         {draft && <span><b>{draftBandCount}</b> bands · {activeTotalWidth.toFixed(1)} m</span>}
         {roadFitPending ? (
           <span>Checking fit…</span>
-        ) : blockingFitConflicts.length > 0 ? (
-          <span className="is-error"><b>{blockingFitConflicts.length}</b> conflicts</span>
+        ) : blockingFitConflicts.length + blockingRuleCount > 0 ? (
+          <span className="is-error"><b>{blockingFitConflicts.length + blockingRuleCount}</b> conflicts</span>
         ) : warningFitConflicts > 0 ? (
           <span className="is-warning"><b>{warningFitConflicts}</b> warnings</span>
         ) : draft ? (
@@ -462,15 +457,15 @@ export default function RoadEditorPanel({
           type="button"
           variant="outline"
           className="h-12"
-          onClick={onUndoDraft}
-          disabled={!canUndoDraft}
+          onClick={junction?.junctionDraft ? junction.handleUndoJunction : onUndoDraft}
+          disabled={junction?.junctionDraft ? !junction.canUndoJunction : !canUndoDraft}
           aria-label={
-            canUndoDraft && undoDraftLabel
+            junction?.junctionDraft ? 'Undo intersection edit' : canUndoDraft && undoDraftLabel
               ? `Undo road edit: ${undoDraftLabel}`
               : 'Undo road edit'
           }
           title={
-            canUndoDraft ? `Undo ${undoDraftLabel ?? 'last road edit'} (Ctrl+Z)` : 'Nothing to undo'
+            junction?.junctionDraft ? junction.canUndoJunction ? 'Undo intersection edit (Ctrl+Z)' : 'Nothing to undo' : canUndoDraft ? `Undo ${undoDraftLabel ?? 'last road edit'} (Ctrl+Z)` : 'Nothing to undo'
           }
         >
           <Undo2 className="h-5 w-5" aria-hidden="true" /> Undo
@@ -479,15 +474,15 @@ export default function RoadEditorPanel({
           type="button"
           variant="outline"
           className="h-12"
-          onClick={onRedoDraft}
-          disabled={!canRedoDraft}
+          onClick={junction?.junctionDraft ? junction.handleRedoJunction : onRedoDraft}
+          disabled={junction?.junctionDraft ? !junction.canRedoJunction : !canRedoDraft}
           aria-label={
-            canRedoDraft && redoDraftLabel
+            junction?.junctionDraft ? 'Redo intersection edit' : canRedoDraft && redoDraftLabel
               ? `Redo road edit: ${redoDraftLabel}`
               : 'Redo road edit'
           }
           title={
-            canRedoDraft
+            junction?.junctionDraft ? junction.canRedoJunction ? 'Redo intersection edit (Ctrl+Shift+Z)' : 'Nothing to redo' : canRedoDraft
               ? `Redo ${redoDraftLabel ?? 'last road edit'} (Ctrl+Shift+Z)`
               : 'Nothing to redo'
           }
@@ -496,15 +491,22 @@ export default function RoadEditorPanel({
         </Button>
       </div>
 
-      <div className="road-editor-panel__scroll">
-        <section className="road-editor-card">
+      {draft && <div className="road-inspector-tabs" role="tablist" aria-label="Road editing tools">
+        {tabs.map((tab, index) => <button key={tab} id={`road-tab-${tab}`} type="button" role="tab" aria-selected={activeTab === tab} aria-controls={`road-view-${tab}`} tabIndex={activeTab === tab ? 0 : -1} onClick={() => setActiveTab(tab)} onKeyDown={(e) => {
+          const next = e.key === 'ArrowRight' ? (index + 1) % tabs.length : e.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+          if (next >= 0) { e.preventDefault(); setActiveTab(tabs[next]); document.getElementById(`road-tab-${tabs[next]}`)?.focus(); }
+        }}>{tab[0].toUpperCase() + tab.slice(1)}{tab === 'rules' && blockingRuleCount > 0 ? ` (${blockingRuleCount})` : ''}</button>)}
+      </div>}
+      <div className="road-editor-panel__scroll" ref={scrollRef}>
+        {status && <details className="road-inspector-notice" open={/blocked|unable|cannot|failed|invalid|needs|before.*saving/i.test(status)}><summary>Status</summary><div role="status">{status}</div></details>}
+        <section className="road-editor-card" id="road-view-map" role={draft ? 'tabpanel' : undefined} aria-labelledby={draft ? 'road-tab-map' : undefined} hidden={!!junction?.junctionDraft || (!!draft && activeTab !== 'map')}>
           <PanelSectionHeader
             icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
             title="Roads"
             meta={`${cityJsonRoadCount.toLocaleString()} roads + ${cityJsonJunctionCount.toLocaleString()} junctions in CityJSON`}
           />
           <p className="road-editor-card__help">
-            <b>Tap any road on the map to edit it.</b> Buildings remain selectable; tapping one
+            <b>Select a street or junction on the map.</b> Buildings remain selectable; tapping one
             leaves road mode and opens its attributes.
           </p>
           <div className="road-source-actions">
@@ -515,45 +517,6 @@ export default function RoadEditorPanel({
               </Button>
             )}
           </div>
-          <div className="road-map-compare" aria-label="Road and imagery comparison">
-            <div className="road-map-compare__modes" role="group" aria-label="Basemap">
-              <button
-                type="button"
-                className={basemap === 'topplus' ? 'is-active' : ''}
-                onClick={() => onBasemapChange('topplus')}
-              ><Map aria-hidden="true" /> TopPlus</button>
-              <button
-                type="button"
-                className={basemap === 'satellite' ? 'is-active' : ''}
-                onClick={() => onBasemapChange('satellite')}
-              ><Satellite aria-hidden="true" /> Satellite</button>
-            </div>
-            <label className={basemap !== 'satellite' ? 'is-disabled' : ''}>
-              <span>Satellite</span><output>{Math.round(satelliteOpacity * 100)}%</output>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.02}
-                value={satelliteOpacity}
-                disabled={basemap !== 'satellite'}
-                aria-label="Satellite opacity"
-                onChange={(event) => onSatelliteOpacityChange(Number(event.target.value))}
-              />
-            </label>
-            <label>
-              <span>Roads</span><output>{Math.round(roadOverlayOpacity * 100)}%</output>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.02}
-                value={roadOverlayOpacity}
-                aria-label="Road opacity"
-                onChange={(event) => onRoadOverlayOpacityChange(Number(event.target.value))}
-              />
-            </label>
-          </div>
           <details className="road-osm-update">
             <summary>Update from OSM (optional)</summary>
             <p>Use this only to compare newer OSM data. Saved and exported roads remain CityJSON.</p>
@@ -562,10 +525,9 @@ export default function RoadEditorPanel({
               {osmRoads.length > 0 ? 'Refresh OSM comparison' : 'Load OSM comparison'}
             </Button>
           </details>
-          {status && <StatusCard>{status}</StatusCard>}
         </section>
 
-        {roadFitConflicts.length > 0 && (
+        {roadFitConflicts.length > 0 && (!draft || activeTab === 'rules') && (
           <FitConflictCard
             conflicts={roadFitConflicts}
             blockingCount={blockingFitConflicts.length}
@@ -577,7 +539,7 @@ export default function RoadEditorPanel({
           onEditRoad={onEditOsm2StreetsSelection}
           onClear={onClearOsm2StreetsSelection}
         />
-        {selectedRoadArea && !draft && (
+        {selectedRoadArea && !draft && !junction?.junctionDraft && (
           <SelectedRoadAreaCard
             area={selectedRoadArea}
             onEdit={onEditSelectedRoadArea}
@@ -585,8 +547,11 @@ export default function RoadEditorPanel({
           />
         )}
 
+        {junction?.junctionDraft && junction.junctionPlan && <RoadJunctionPanel draft={junction.junctionDraft} plan={junction.junctionPlan} areas={roadAreas} tool={junction.junctionEditTool} onToolChange={junction.setJunctionEditTool} onCompare={() => { onBasemapChange('satellite'); onSatelliteOpacityChange(1); onRoadOverlayOpacityChange(.35); }} onChange={junction.handleJunctionChange} onFocusSource={junction.setJunctionSource} />}
+        {junction?.junctionConflicts && junction.junctionConflicts.length > 0 && <FitConflictCard conflicts={junction.junctionConflicts} blockingCount={junction.junctionConflicts.filter((item) => item.severity === 'error').length} />}
         {draft && activeSection ? (
           <section className="road-editor-card space-y-4">
+            <div id="road-view-shape" role="tabpanel" aria-labelledby="road-tab-shape" hidden={activeTab !== 'shape'}>
             <PanelSectionHeader
               icon={<Road className="h-3.5 w-3.5" aria-hidden="true" />}
               title="Shape and connect"
@@ -803,16 +768,159 @@ export default function RoadEditorPanel({
               </Button>
             </div>
 
-            <div className="road-lane-editor road-lane-editor--mobile">
-              <PanelSectionHeader
-                icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
-              title="Lanes and roadside"
-                meta="left to right on the map"
-              />
-              <p className="road-editor-card__help">
-                This cross-section uses the same semantic colours as the road on the map. Tap a
-                band to edit one clear set of controls.
-              </p>
+            </div>
+            <div id="road-view-lanes" role="tabpanel" aria-labelledby="road-tab-lanes" className="road-lane-editor" hidden={activeTab !== 'lanes'}>
+              <RoadSectionPreview section={activeSection} selected={activeBandIndex} onSelect={(index) => { setActiveBandIndex(index); onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: index }); }} />
+
+
+              {activeBand && (
+                <div className="road-band-detail">
+                  <div className="road-band-detail__heading">
+                    <span
+                      style={{
+                        background: bandBoxBackground(activeBand.kind, activeBand.sourceType),
+                        color: bandBoxTextColor(activeBand.kind, activeBand.sourceType),
+                      }}
+                    >{activeBandIndex + 1}</span>
+                    <select
+                      aria-label="Selected road band"
+                      value={activeBandIndex}
+                      onChange={(event) => {
+                        const index = Number(event.target.value);
+                        setActiveBandIndex(index);
+                        onRoadBandSelect?.({ sectionId: activeSection.id, bandIndex: index });
+                      }}
+                    >
+                      {activeSection.bands.map((band, index) => (
+                        <option key={band.id ?? index} value={index}>
+                          {index + 1}. {labelBand(band.kind, band.sourceType)} · {band.widthM} m
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <label className="road-width-control">
+                    <span>Width</span>
+                    <output>{activeBand.widthM.toFixed(2)} m</output>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={12}
+                      step={0.05}
+                      value={activeBand.widthM}
+                      aria-label={`${labelBand(activeBand.kind, activeBand.sourceType)} width`}
+                      onChange={(event) =>
+                        updateBand(activeBandIndex, { widthM: Number(event.target.value) })
+                      }
+                    />
+                    <Input
+                      className="h-12"
+                      type="number"
+                      aria-label="Band width in metres"
+                      min={0.1}
+                      max={12}
+                      step={0.05}
+                      value={activeBand.widthM}
+                      onChange={(event) =>
+                        updateBand(activeBandIndex, {
+                          widthM: Math.max(
+                            0.1,
+                            Number(event.target.value) || DEFAULT_WIDTH[activeBand.kind]
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label className="road-field">
+                    <span>Band type</span>
+                    <select
+                      value={activeBand.sourceType ? '__source__' : activeBand.kind}
+                      onChange={(event) => {
+                        const kind = event.target.value as RoadBandKind;
+                        updateBand(activeBandIndex, {
+                          kind,
+                          sourceType: undefined,
+                          direction:
+                            kind === 'car_lane' || kind === 'bike_lane'
+                              ? activeBand.direction ?? 'forward'
+                              : 'none',
+                          allowedModes: defaultModes(kind),
+                        });
+                      }}
+                      className="h-12 w-full"
+                    >
+                      {activeBand.sourceType && (
+                        <option value="__source__" disabled>
+                          {labelBand(activeBand.kind, activeBand.sourceType)} (source)
+                        </option>
+                      )}
+                      {BAND_KINDS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {labelBand(kind)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="road-field">
+                    <span>Surface material</span>
+                    <select
+                      className="h-12 w-full"
+                      value={activeBand.surface ?? defaultSurface(activeBand.kind)}
+                      onChange={(event) =>
+                        updateBand(activeBandIndex, { surface: event.target.value })
+                      }
+                    >
+                      <option value="asphalt">Asphalt</option>
+                      <option value="concrete">Concrete</option>
+                      <option value="paving_stones">Paving stones</option>
+                      <option value="compacted">Compacted</option>
+                      <option value="gravel">Gravel</option>
+                      <option value="grass">Grass</option>
+                    </select>
+                  </label>
+
+
+
+                  <fieldset className="road-direction-control">
+                    <legend>Direction</legend>
+                    <div>
+                      {DIRECTIONS.map((direction) => (
+                        <button
+                          key={direction}
+                          type="button"
+                          className={(activeBand.direction ?? 'none') === direction ? 'is-active' : ''}
+                          onClick={() => updateBand(activeBandIndex, { direction })}
+                        >{directionArrow(direction)} <span>{direction}</span></button>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  <div className="road-band-actions">
+                    <button
+                      type="button"
+                      disabled={activeBandIndex === 0}
+                      onClick={() => reorderBand(activeBandIndex, activeBandIndex - 1)}
+                    >Move left</button>
+                    <button
+                      type="button"
+                      disabled={activeBandIndex === activeSection.bands.length - 1}
+                      onClick={() => reorderBand(activeBandIndex, activeBandIndex + 1)}
+                    >Move right</button>
+                    <button
+                      type="button"
+                      className="is-destructive"
+                      onClick={() => removeBand(activeBandIndex)}
+                      disabled={activeSection.bands.length <= 1}
+                      aria-label={`Remove ${labelBand(activeBand.kind, activeBand.sourceType)} band`}
+                    ><Trash2 className="h-4 w-4" aria-hidden="true" /> Remove</button>
+                  </div>
+                </div>
+              )}
+
+              <details className="road-band-reorder">
+                <summary>Reorder bands <span>Drag left or right</span></summary>
               <div
                 data-testid="road-band-order-strip"
                 className="road-cross-section"
@@ -870,135 +978,7 @@ export default function RoadEditorPanel({
                   </button>
                 ))}
               </div>
-
-              {activeBand && (
-                <div className="road-band-detail">
-                  <div className="road-band-detail__heading">
-                    <span
-                      style={{
-                        background: bandBoxBackground(activeBand.kind, activeBand.sourceType),
-                        color: bandBoxTextColor(activeBand.kind, activeBand.sourceType),
-                      }}
-                    >{activeBandIndex + 1}</span>
-                    <div><b>{labelBand(activeBand.kind, activeBand.sourceType)}</b><small>Edit this map band</small></div>
-                  </div>
-
-                  <label className="road-field">
-                    <span>Band type</span>
-                    <select
-                      value={activeBand.sourceType ? '__source__' : activeBand.kind}
-                      onChange={(event) => {
-                        const kind = event.target.value as RoadBandKind;
-                        updateBand(activeBandIndex, {
-                          kind,
-                          sourceType: undefined,
-                          direction:
-                            kind === 'car_lane' || kind === 'bike_lane'
-                              ? activeBand.direction ?? 'forward'
-                              : 'none',
-                          allowedModes: defaultModes(kind),
-                        });
-                      }}
-                      className="h-12 w-full"
-                    >
-                      {activeBand.sourceType && (
-                        <option value="__source__" disabled>
-                          {labelBand(activeBand.kind, activeBand.sourceType)} (source)
-                        </option>
-                      )}
-                      {BAND_KINDS.map((kind) => (
-                        <option key={kind} value={kind}>
-                          {labelBand(kind)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="road-field">
-                    <span>Surface material</span>
-                    <select
-                      className="h-12 w-full"
-                      value={activeBand.surface ?? defaultSurface(activeBand.kind)}
-                      onChange={(event) =>
-                        updateBand(activeBandIndex, { surface: event.target.value })
-                      }
-                    >
-                      <option value="asphalt">Asphalt</option>
-                      <option value="concrete">Concrete</option>
-                      <option value="paving_stones">Paving stones</option>
-                      <option value="compacted">Compacted</option>
-                      <option value="gravel">Gravel</option>
-                      <option value="grass">Grass</option>
-                    </select>
-                  </label>
-
-                  <label className="road-width-control">
-                    <span>Width</span>
-                    <output>{activeBand.widthM.toFixed(2)} m</output>
-                    <input
-                      type="range"
-                      min={0.4}
-                      max={12}
-                      step={0.05}
-                      value={activeBand.widthM}
-                      aria-label={`${labelBand(activeBand.kind, activeBand.sourceType)} width`}
-                      onChange={(event) =>
-                        updateBand(activeBandIndex, { widthM: Number(event.target.value) })
-                      }
-                    />
-                    <Input
-                      className="h-12"
-                      type="number"
-                      min={0.4}
-                      max={12}
-                      step={0.05}
-                      value={activeBand.widthM}
-                      onChange={(event) =>
-                        updateBand(activeBandIndex, {
-                          widthM: Math.max(
-                            0.4,
-                            Number(event.target.value) || DEFAULT_WIDTH[activeBand.kind]
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-
-                  <fieldset className="road-direction-control">
-                    <legend>Direction</legend>
-                    <div>
-                      {DIRECTIONS.map((direction) => (
-                        <button
-                          key={direction}
-                          type="button"
-                          className={(activeBand.direction ?? 'none') === direction ? 'is-active' : ''}
-                          onClick={() => updateBand(activeBandIndex, { direction })}
-                        >{directionArrow(direction)} <span>{direction}</span></button>
-                      ))}
-                    </div>
-                  </fieldset>
-
-                  <div className="road-band-actions">
-                    <button
-                      type="button"
-                      disabled={activeBandIndex === 0}
-                      onClick={() => reorderBand(activeBandIndex, activeBandIndex - 1)}
-                    >Move left</button>
-                    <button
-                      type="button"
-                      disabled={activeBandIndex === activeSection.bands.length - 1}
-                      onClick={() => reorderBand(activeBandIndex, activeBandIndex + 1)}
-                    >Move right</button>
-                    <button
-                      type="button"
-                      className="is-destructive"
-                      onClick={() => removeBand(activeBandIndex)}
-                      disabled={activeSection.bands.length <= 1}
-                      aria-label={`Remove ${labelBand(activeBand.kind, activeBand.sourceType)} band`}
-                    ><Trash2 className="h-4 w-4" aria-hidden="true" /> Remove</button>
-                  </div>
-                </div>
-              )}
+              </details>
 
               <div className="road-add-band">
                 <label>
@@ -1021,9 +1001,17 @@ export default function RoadEditorPanel({
               </div>
             </div>
 
+            <div id="road-view-connections" role="tabpanel" aria-labelledby="road-tab-connections" hidden={activeTab !== 'connections'}>
+              <RoadConnectionsPanel draft={draft} section={activeSection} areas={roadAreas} dirty={draftDirty} onChange={onDraftChange} onEdit={onEditSelectedRoadArea} onCreate={junction?.handleCreateJunction} />
+            </div>
+            <div id="road-view-rules" role="tabpanel" aria-labelledby="road-tab-rules" hidden={activeTab !== 'rules'}>
+              <RoadRulesPanel draft={draft} section={activeSection} issues={roadRuleIssues} onChange={onDraftChange} />
+            </div>
+
             <details
               data-testid="cityjson-export-backend"
               className="road-advanced-disclosure"
+              hidden={activeTab !== 'map'}
             >
               <summary>
                 Advanced · <span>CityJSON Export &amp; Backend</span>
@@ -1053,11 +1041,11 @@ export default function RoadEditorPanel({
               </div>
             </details>
           </section>
-        ) : (
+        ) : !junction?.junctionDraft && !selectedRoadArea ? (
           <section className="rounded-md border border-dashed border-[rgba(148,163,184,0.24)] bg-[rgba(255,255,255,0.025)] p-3 text-[11px] text-[var(--text-dim)]">
-            Waiting for OSM road, osm2streets lane, or manual centerline.
+            Select an existing street to start. Your changes stay in a draft until you save.
           </section>
-        )}
+        ) : null}
       </div>
       {draft && (
         <footer className="road-editor-footer">
@@ -1065,8 +1053,8 @@ export default function RoadEditorPanel({
             <b>
               {editingRoadId
                 ? draftDirty
-                  ? `Unsaved changes to ${editingRoadId}`
-                  : `Editing ${editingRoadId}`
+                  ? `Unsaved changes to ${draft.name ?? editingRoadId}`
+                  : `Editing ${draft.name ?? editingRoadId}`
                 : 'New road draft'}
             </b>
             <span>
@@ -1097,12 +1085,12 @@ export default function RoadEditorPanel({
               onClick={onInsertRoad}
               disabled={
                 roadFitPending ||
-                blockingFitConflicts.length > 0 ||
+                blockingFitConflicts.length > 0 || blockingRuleCount > 0 ||
                 (!!editingRoadId && !draftDirty)
               }
               title={
                 blockingFitConflicts.length > 0
-                  ? 'Resolve road-fit building overlaps before saving.'
+                  ? 'Resolve road-fit conflicts before saving.'
                   : editingRoadId && !draftDirty
                     ? 'Change the road layout before saving.'
                     : undefined
@@ -1118,6 +1106,10 @@ export default function RoadEditorPanel({
           </div>
         </footer>
       )}
+      {junction?.junctionDraft && <footer className="road-editor-footer"><div className="road-editor-footer__status"><b>{junction.junctionDirty ? 'Unsaved intersection' : 'Intersection saved'}</b><span>{junction.junctionDraft.surfaceMode === 'preserve' ? 'Current surface retained' : 'Rebuild junction and approaches'}</span></div><div className="road-editor-footer__actions">
+        <Button variant="outline" onClick={junction.handleCancelJunction}>Discard</Button>
+        <Button variant="primary" disabled={!junction.junctionDirty || junction.junctionEditTool.startsWith('trace-') || !!junction.junctionPlan?.error || junction.junctionConflicts.some((item) => item.severity === 'error')} onClick={junction.handleSaveJunction}>Save intersection</Button>
+      </div></footer>}
     </aside>
   );
 }
@@ -1140,14 +1132,6 @@ function PanelSectionHeader({
         </h3>
       </div>
       {meta && <span className="truncate text-[10px] text-[var(--text-faint)]">{meta}</span>}
-    </div>
-  );
-}
-
-function StatusCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-md border border-[rgba(148,163,184,0.16)] bg-[rgba(0,0,0,0.18)] px-2.5 py-2 text-[11px] leading-snug text-[var(--text-dim)]">
-      {children}
     </div>
   );
 }
@@ -1225,11 +1209,9 @@ function SelectedRoadAreaCard({
         </div>
         <span>{modes}</span>
       </div>
-      {!isIntersection && (
         <Button className="h-14 w-full text-sm" variant="primary" onClick={() => onEdit(area)}>
-          <PencilLine className="h-5 w-5" aria-hidden="true" /> Edit road
+          <PencilLine className="h-5 w-5" aria-hidden="true" /> {isIntersection ? 'Edit intersection' : 'Edit road'}
         </Button>
-      )}
       <Button
         className="h-12 w-full text-sm"
         variant="warn"

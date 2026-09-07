@@ -532,7 +532,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      if (target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button'].includes((target as HTMLInputElement).type)) || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -544,6 +544,10 @@ export default function App() {
       if (!meta) return;
       if (e.key === 'z' || e.key === 'Z') {
         e.preventDefault();
+        if (roadEditor.showRoadEditor && roadEditor.junctionDraft && (roadEditor.junctionDirty || roadEditor.canUndoJunction || roadEditor.canRedoJunction)) {
+          if (e.shiftKey) roadEditor.handleRedoJunction(); else roadEditor.handleUndoJunction();
+          return;
+        }
         const useRoadDraftHistory =
           roadEditor.showRoadEditor &&
           (roadEditor.roadDraftDirty ||
@@ -556,6 +560,7 @@ export default function App() {
         else undoRedo.handleUndo();
       } else if (e.key === 'y') {
         e.preventDefault();
+        if (roadEditor.showRoadEditor && roadEditor.junctionDraft && roadEditor.canRedoJunction) { roadEditor.handleRedoJunction(); return; }
         if (roadEditor.showRoadEditor && roadEditor.roadDraftHistoryState.canRedo) {
           roadEditor.handleRedoRoadDraft();
         } else {
@@ -847,7 +852,7 @@ export default function App() {
     importExport.loadModalOpen || (!coreState.cityjson && !autoHamburgLoading);
 
   return (
-    <div className="app">
+    <div className={`app ${roadEditor.showRoadEditor ? 'has-road-workspace' : ''}`}>
       <Toolbar
         fileName={coreState.fileName}
         stats={stats}
@@ -1034,6 +1039,9 @@ export default function App() {
           )}
           {roadEditor.showRoadEditor && (
             <RoadEditorPanel
+              roadAreas={roadEditor.roadAreas}
+              roadRuleIssues={roadEditor.roadRuleIssues}
+              junction={roadEditor}
               osmRoads={roadEditor.osmRoads}
               selectedOsmRoadId={roadEditor.selectedOsmRoadId}
               draft={roadEditor.roadDraft}
@@ -1149,9 +1157,16 @@ export default function App() {
               roadWorkspaceOpen={roadEditor.showRoadEditor}
               roadAreas={roadEditor.roadAreas}
               roadPreviewAreas={roadEditor.roadPreviewAreas}
-              roadFitConflicts={roadEditor.roadFitConflicts}
+              junctionDraft={roadEditor.junctionDraft}
+              junctionPlan={roadEditor.junctionPlan}
+              junctionSource={roadEditor.junctionSource}
+              junctionEditTool={roadEditor.junctionEditTool}
+              onJunctionEditToolChange={roadEditor.setJunctionEditTool}
+              onJunctionDraftChange={roadEditor.handleJunctionChange}
+              roadFitConflicts={roadEditor.junctionDraft ? roadEditor.junctionConflicts : roadEditor.roadFitConflicts}
               selectedRoadAreaId={roadEditor.selectedRoadArea?.id ?? null}
               onRoadAreaSelect={(area) => {
+                if (roadEditor.showRoadEditor && !roadEditor.roadDraft && !roadEditor.junctionDraft) roadEditor.handleEditSelectedRoadArea(area);
                 roadEditor.setSelectedRoadArea(area);
                 // Road surfaces are edited in the dedicated transportation
                 // workspace. Opening the building inspector here exposed roof

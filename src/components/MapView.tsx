@@ -46,10 +46,14 @@ import type {
   OsmPointFeature,
   OsmRoadFeature,
   RoadArea,
-  RoadBandKind,
   RoadDraft,
 } from '../lib/transportation';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
+import { buildRoadExtentGuides } from '../lib/transportation';
+import { roadJunctionCandidateAreas, type RoadJunctionDraft, type RoadJunctionPlan } from '../lib/road-junctions';
+import type { JunctionEditTool } from '../lib/junction-footprint';
+import JunctionCanvasEditor from './JunctionCanvasEditor';
+import RoadMapCompare from './RoadMapCompare';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import {
   osm2streetsIntersectionFillColor,
@@ -425,7 +429,7 @@ function roadAreaFillColor(
   preview = false,
   opacity = 1
 ): Rgba {
-  if (roadAreaKind(area).toLowerCase() === 'intersection') {
+  if (roadAreaKind(area).toLowerCase() === 'intersection' && area.attributes.junctionSurfaceMode !== 'generated') {
     return roadOverlayColor(
       osm2streetsIntersectionFillColor(roadAreaSourceType(area) ?? 'intersection'),
       {
@@ -607,6 +611,12 @@ interface Props {
   roadWorkspaceOpen?: boolean;
   roadAreas?: RoadArea[];
   roadPreviewAreas?: RoadArea[];
+  junctionDraft?: RoadJunctionDraft | null;
+  junctionPlan?: RoadJunctionPlan | null;
+  junctionSource?: string | null;
+  junctionEditTool?: JunctionEditTool;
+  onJunctionEditToolChange?: (tool: JunctionEditTool) => void;
+  onJunctionDraftChange?: (draft: RoadJunctionDraft, group?: string) => void;
   roadFitConflicts?: RoadFitConflict[];
   selectedRoadAreaId?: string | null;
   onRoadAreaSelect?: (area: RoadArea) => void;
@@ -692,7 +702,13 @@ export default function MapView({
   onRoadOverlayOpacityChange,
   roadWorkspaceOpen = false,
   roadAreas = [],
-  roadPreviewAreas = [],
+  roadPreviewAreas: suppliedRoadPreviewAreas = [],
+  junctionDraft = null,
+  junctionPlan = null,
+  junctionSource = null,
+  junctionEditTool = 'none',
+  onJunctionEditToolChange,
+  onJunctionDraftChange,
   roadFitConflicts = [],
   selectedRoadAreaId = null,
   onRoadAreaSelect,
@@ -715,11 +731,14 @@ export default function MapView({
   hamburgBuildingTilesEnabled = false,
   onHamburgBuildingHandoff,
 }: Props) {
+  const roadPreviewAreas = useMemo(() => roadWorkspaceOpen && junctionDraft && junctionPlan && !junctionPlan.error ? junctionPlan.areas : suppliedRoadPreviewAreas, [roadWorkspaceOpen, junctionDraft, junctionPlan, suppliedRoadPreviewAreas]);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const drawRef = useRef<TerraDraw | null>(null);
   const roadDraftRef = useRef<RoadDraft | null>(roadDraft);
+  const roadEditorFocusRef = useRef({ roadDraft, junctionDraft, junctionPlan, roadAreas });
+  roadEditorFocusRef.current = { roadDraft, junctionDraft, junctionPlan, roadAreas };
   const pendingRoadDraftChangeRef = useRef<RoadDraft | null>(null);
   const roadDraftFrameRef = useRef<number | null>(null);
   const roadDraftDragRef = useRef<{
@@ -1084,11 +1103,11 @@ export default function MapView({
   );
 
   const renderedRoadAreas = useMemo(
-    () =>
-      editFocusBbox
-        ? roadAreas.filter((area) => polygonIntersectsBbox(area.polygon, editFocusBbox))
-        : roadAreas,
-    [roadAreas, editFocusBbox]
+    () => {
+      const replaced = new Set(roadWorkspaceOpen && junctionPlan && !junctionPlan.error ? junctionPlan.replacedRoadIds : roadPreviewAreas.map((area) => area.roadId));
+      return roadAreas.filter((area) => !replaced.has(area.roadId) && (!editFocusBbox || polygonIntersectsBbox(area.polygon, editFocusBbox)));
+    },
+    [roadAreas, editFocusBbox, roadPreviewAreas, junctionPlan, roadWorkspaceOpen]
   );
 
   const roadMarkingsVisible =
@@ -1128,21 +1147,25 @@ export default function MapView({
     [savedRoadVisuals, previewRoadVisuals]
   );
   const roadConnectionsNeeded =
-    roadWorkspaceOpen && (!!selectedRoadAreaId || !!roadDraft);
+    roadWorkspaceOpen && (!!selectedRoadAreaId || !!roadDraft || !!junctionDraft);
   const roadConnectionIndex = useMemo(
-    () => buildRoadConnectionIndex(roadConnectionsNeeded ? roadAreas : []),
-    [roadAreas, roadConnectionsNeeded]
+    () => buildRoadConnectionIndex(roadConnectionsNeeded ? junctionDraft ? roadJunctionCandidateAreas(junctionDraft, roadAreas).map((area) => area.roadId === junctionDraft.id ? { ...area, attributes: { ...area.attributes, disabledMovements: junctionDraft.disabledMovements } } : area) : roadAreas : []),
+    [roadAreas, roadConnectionsNeeded, junctionDraft]
   );
   const selectedRoadConnections = useMemo(
     () =>
       buildSelectedRoadConnections(
         roadConnectionIndex,
-        roadWorkspaceOpen ? selectedRoadAreaId : null,
+        roadWorkspaceOpen ? junctionDraft ? roadConnectionIndex.areasByRoadId.get(junctionDraft.id)?.[0]?.id ?? null : selectedRoadAreaId : null,
         roadWorkspaceOpen ? roadDraft : null
       ),
-    [roadConnectionIndex, roadDraft, roadWorkspaceOpen, selectedRoadAreaId]
+    [roadConnectionIndex, roadDraft, roadWorkspaceOpen, selectedRoadAreaId, junctionDraft]
   );
-  const roadLaneContinuations = selectedRoadConnections.continuations;
+  const roadLaneContinuations = useMemo(() => selectedRoadConnections.continuations.filter((movement) => {
+    if (roadDraft && selectedDraftBand) return roadLaneContinuationMatchesDraftBand(movement, roadDraft, selectedDraftBand);
+    if (junctionDraft && junctionSource) return JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceBandIndex]) === junctionSource;
+    return true;
+  }), [selectedRoadConnections, roadDraft, selectedDraftBand, junctionDraft, junctionSource]);
   const connectionRoadAreas = useMemo(
     () =>
       renderedRoadAreas.filter(
@@ -3298,11 +3321,12 @@ export default function MapView({
         new PolygonLayer<RoadArea>({
           id: 'cityjson-road-areas',
           data: renderedRoadAreas,
-          getPolygon: (d) => d.polygon,
+          getPolygon: (d) => d.holes?.length ? [d.polygon, ...d.holes] : d.polygon,
           getFillColor: (d) => roadAreaFillColor(d, basemap, false, roadOverlayOpacity),
           getLineColor: (d) =>
             roadAreaLineColor(d, basemap, false, false, roadOverlayOpacity),
           getLineWidth: 1,
+          lineWidthUnits: 'pixels',
           lineWidthMinPixels: 1,
           stroked: true,
           filled: true,
@@ -3325,13 +3349,14 @@ export default function MapView({
         new PolygonLayer<RoadArea>({
           id: 'road-draft-preview',
           data: roadPreviewAreas,
-          getPolygon: (d) => d.polygon,
+          getPolygon: (d) => d.holes?.length ? [d.polygon, ...d.holes] : d.polygon,
           getFillColor: (d) => roadAreaFillColor(d, basemap, true, roadOverlayOpacity),
           getLineColor: (d) =>
             roadAreaLineColor(d, basemap, false, true, roadOverlayOpacity),
           getLineWidth: 1,
+          lineWidthUnits: 'pixels',
           lineWidthMinPixels: 1,
-          stroked: true,
+          stroked: !junctionDraft,
           filled: true,
           pickable: false,
           extruded: false,
@@ -3344,7 +3369,14 @@ export default function MapView({
       );
     }
 
-    if (connectionRoadAreas.length > 0) {
+    if (roadWorkspaceOpen && roadDraft) {
+      try {
+        const extentGuides = buildRoadExtentGuides(cityjson, roadDraft);
+        if (extentGuides.length) layers.push(new PathLayer({ id: 'road-extent-limits', data: extentGuides, getPath: (line) => line.path, getColor: [248, 194, 86, 245], getWidth: 2, widthUnits: 'pixels', getDashArray: [4, 3], extensions: [new PathStyleExtension({ dash: true })], pickable: false, parameters: { depthTest: false } as unknown as never }));
+      } catch { /* Invalid draft geometry is reported by the editor's save checks. */ }
+    }
+
+    if (connectionRoadAreas.length > 0 && (!junctionDraft || junctionSource !== '__shape__')) {
       layers.push(
         new PolygonLayer<RoadArea>({
           id: 'road-connection-network-halo',
@@ -3353,9 +3385,9 @@ export default function MapView({
           getFillColor: [0, 0, 0, 0],
           getLineColor: ROAD_CONNECTION_HALO,
           getLineWidth: (area) =>
-            area.roadId === selectedRoadConnections.focusRoadId ? 7 : 6,
+            area.roadId === selectedRoadConnections.focusRoadId ? 2.5 : 1.5,
           lineWidthUnits: 'pixels',
-          lineWidthMinPixels: 6,
+          lineWidthMinPixels: 1.5,
           stroked: true,
           filled: false,
           pickable: false,
@@ -3372,8 +3404,8 @@ export default function MapView({
           getFillColor: (area) =>
             roadOverlayColor(
               area.roadId === selectedRoadConnections.focusRoadId
-                ? withAlpha(ROAD_CONNECTION_CYAN, 82)
-                : withAlpha(ROAD_CONNECTION_CYAN, 44),
+                ? withAlpha(ROAD_CONNECTION_CYAN, 16)
+                : withAlpha(ROAD_CONNECTION_CYAN, 0),
               { basemap, opacity: roadOverlayOpacity }
             ),
           getLineColor: (area) =>
@@ -3384,9 +3416,9 @@ export default function MapView({
               { basemap, opacity: roadOverlayOpacity }
             ),
           getLineWidth: (area) =>
-            area.roadId === selectedRoadConnections.focusRoadId ? 4 : 3,
+            area.roadId === selectedRoadConnections.focusRoadId ? 1.5 : 0.7,
           lineWidthUnits: 'pixels',
-          lineWidthMinPixels: 3,
+          lineWidthMinPixels: 0.7,
           stroked: true,
           filled: true,
           pickable: false,
@@ -3409,7 +3441,7 @@ export default function MapView({
       );
     }
 
-    if (connectionJunctionAreas.length > 0) {
+    if (connectionJunctionAreas.length > 0 && (!junctionDraft || junctionSource !== '__shape__')) {
       layers.push(
         new PolygonLayer<RoadArea>({
           id: 'road-connection-junctions-halo',
@@ -3417,9 +3449,9 @@ export default function MapView({
           getPolygon: (area) => area.polygon,
           getFillColor: [0, 0, 0, 0],
           getLineColor: ROAD_CONNECTION_HALO,
-          getLineWidth: 7,
+          getLineWidth: 2.5,
           lineWidthUnits: 'pixels',
-          lineWidthMinPixels: 7,
+          lineWidthMinPixels: 2.5,
           stroked: true,
           filled: false,
           pickable: false,
@@ -3430,7 +3462,7 @@ export default function MapView({
           id: 'road-connection-junctions',
           data: connectionJunctionAreas,
           getPolygon: (area) => area.polygon,
-          getFillColor: roadOverlayColor(withAlpha(ROAD_CONNECTION_CYAN, 102), {
+          getFillColor: roadOverlayColor(withAlpha(ROAD_CONNECTION_CYAN, 8), {
             basemap,
             opacity: roadOverlayOpacity,
           }),
@@ -3438,9 +3470,9 @@ export default function MapView({
             basemap,
             opacity: roadOverlayOpacity,
           }),
-          getLineWidth: 3.5,
+          getLineWidth: 1,
           lineWidthUnits: 'pixels',
-          lineWidthMinPixels: 3.5,
+          lineWidthMinPixels: 1,
           stroked: true,
           filled: true,
           pickable: false,
@@ -3646,7 +3678,7 @@ export default function MapView({
       );
     }
 
-    if (selectedRoadConnections.nodes.length > 0) {
+    if (selectedRoadConnections.nodes.length > 0 && (!junctionDraft || junctionSource !== '__shape__')) {
       layers.push(
         new ScatterplotLayer<RoadConnectionNode>({
           id: 'road-connection-nodes',
@@ -3658,6 +3690,7 @@ export default function MapView({
               : withAlpha(ROAD_CONNECTION_ACTIVE, 235),
           getLineColor: ROAD_CONNECTION_HALO,
           getLineWidth: 3,
+          lineWidthUnits: 'pixels',
           getRadius: (node) => (node.kind === 'junction' ? 9 : 7),
           radiusUnits: 'pixels',
           radiusMinPixels: 7,
@@ -3707,6 +3740,7 @@ export default function MapView({
                 ? [72, 46, 14, 255]
                 : [255, 178, 64, 255],
           getLineWidth: 2.5,
+          lineWidthUnits: 'pixels',
           getRadius: (d) => (d.kind === 'vertex' ? 10 : 8),
           radiusUnits: 'pixels',
           radiusMinPixels: 8,
@@ -3748,6 +3782,7 @@ export default function MapView({
           getFillColor: [20, 184, 166, 30],
           getLineColor: [45, 212, 191, 220],
           getLineWidth: 2,
+          lineWidthUnits: 'pixels',
           getRadius: 7,
           radiusUnits: 'pixels',
           radiusMinPixels: 7,
@@ -3771,6 +3806,7 @@ export default function MapView({
           getLineColor: (d) =>
             d.severity === 'error' ? [255, 235, 235, 255] : [255, 210, 160, 255],
           getLineWidth: 2,
+          lineWidthUnits: 'pixels',
           lineWidthMinPixels: 2,
           stroked: true,
           filled: true,
@@ -4013,7 +4049,7 @@ export default function MapView({
       );
     }
 
-    overlay.setProps({ layers });
+    overlay.setProps({ layers: roadOverlayOpacity === 0 ? layers.filter((layer) => !/road|osm2streets/i.test(layer.id)) : layers });
   }, [
     footprints,
     renderedFootprints,
@@ -4039,6 +4075,8 @@ export default function MapView({
     selectedRoadBandAreas,
     connectionRoadAreas,
     connectionJunctionAreas,
+    junctionDraft,
+    junctionSource,
     selectedRoadConnections,
     roadLaneContinuations,
     roadSelectionHighlightKey,
@@ -4093,6 +4131,37 @@ export default function MapView({
     handleBuildingFootprintClick,
     streamedBuildingSelectionEnabled,
   ]);
+
+  // Keep the selected edit in the visible map when the inspector opens,
+  // expands or changes device layout. Width/handle edits do not move the camera.
+  useEffect(() => {
+    const map = mapRef.current;
+    const container = containerRef.current;
+    const panel = document.querySelector('.road-editor-panel');
+    if (!map || !container || !panel || !roadWorkspaceOpen || (!roadDraft?.id && !junctionDraft?.id)) return;
+    let frame = 0;
+    const fit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const current = roadEditorFocusRef.current;
+        const points = current.roadDraft
+          ? current.roadDraft.sections.flatMap((section) => section.centerlineWgs84)
+          : (current.junctionPlan?.areas.length ? current.junctionPlan.areas : current.roadAreas).filter((area) => area.roadId === current.junctionDraft?.id).flatMap((area) => area.polygon);
+        const bounds = expandLngLatBbox(pointsBbox(points), 0.00012);
+        if (!bounds) return;
+        const view = container.getBoundingClientRect(), inspector = panel.getBoundingClientRect();
+        const bottomSheet = inspector.width > view.width * 0.8;
+        const padding = { top: 52, left: 30, right: bottomSheet ? 30 : Math.ceil(inspector.width) + 35, bottom: bottomSheet ? Math.ceil(view.bottom - inspector.top) + 18 : 35 };
+        if (view.height - padding.top - padding.bottom < 75 || view.width - padding.left - padding.right < 75) return;
+        map.fitBounds(bounds, { padding, maxZoom: 20, pitch: 0, duration: 180 });
+      });
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(panel); observer.observe(container);
+    fit();
+    if (!map.isStyleLoaded()) map.once('load', fit);
+    return () => { observer.disconnect(); map.off('load', fit); cancelAnimationFrame(frame); };
+  }, [roadWorkspaceOpen, roadDraft?.id, junctionDraft?.id]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
   useEffect(() => {
@@ -4455,6 +4524,8 @@ export default function MapView({
   return (
     <>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      {roadWorkspaceOpen && onBasemapChange && onRoadOverlayOpacityChange && <RoadMapCompare basemap={basemap} onBasemapChange={onBasemapChange} opacity={roadOverlayOpacity} onOpacityChange={onRoadOverlayOpacityChange} onSatelliteOpacityChange={onSatelliteOpacityChange} />}
+      {roadWorkspaceOpen && junctionDraft && onJunctionDraftChange && onJunctionEditToolChange && <JunctionCanvasEditor map={mapRef.current} draft={junctionDraft} tool={junctionEditTool} onToolChange={onJunctionEditToolChange} onChange={onJunctionDraftChange} />}
       {drawMode === 'polygon' && (
         <div className="building-draw-guide" role="status">
           <div>
@@ -4494,14 +4565,7 @@ export default function MapView({
       {roadDraft && drawMode !== 'road-line' && (
         <>
           <RoadHandleGuide draft={roadDraft} />
-          {onRoadDraftChange && (
-            <MapRoadCrossSection
-              draft={roadDraft}
-              onChange={onRoadDraftChange}
-              selection={selectedDraftBand}
-              onSelectionChange={setSelectedDraftBand}
-            />
-          )}
+
         </>
       )}
       {(drawWarning ?? buildingRoadConflictMessage ?? warning) && (
@@ -4569,11 +4633,10 @@ function RoadHandleGuide({ draft }: { draft: RoadDraft }) {
       count + Number(!!section.connections?.start) + Number(!!section.connections?.end),
     0
   );
-  const smooth = draft.sections.some((section) => section.curve?.mode !== 'straight');
   return (
     <div className="road-handle-guide" data-testid="road-handle-guide">
       <div className="road-handle-guide__title">
-        Shape this {smooth ? 'curved' : 'straight'} road
+        Drag yellow points to shape · tap + to add
         {connections > 0 && <span>{connections} connected</span>}
       </div>
       <div className="road-handle-guide__items">
@@ -4583,234 +4646,6 @@ function RoadHandleGuide({ draft }: { draft: RoadDraft }) {
       </div>
     </div>
   );
-}
-
-function MapRoadCrossSection({
-  draft,
-  onChange,
-  selection,
-  onSelectionChange,
-}: {
-  draft: RoadDraft;
-  onChange: (draft: RoadDraft) => void;
-  selection: { sectionId: string; bandIndex: number } | null;
-  onSelectionChange: (
-    selection: { sectionId: string; bandIndex: number }
-  ) => void;
-}) {
-  const [newBandKind, setNewBandKind] = useState<RoadBandKind>('car_lane');
-  const section =
-    draft.sections.find((candidate) => candidate.id === selection?.sectionId) ??
-    draft.sections[0];
-  const effectiveBandIndex = Math.min(
-    selection?.sectionId === section?.id ? selection.bandIndex : 0,
-    Math.max(0, (section?.bands.length ?? 1) - 1)
-  );
-  const activeBand = section?.bands[effectiveBandIndex];
-  if (!section || !activeBand) return null;
-
-  const patchActiveBand = (patch: Partial<typeof activeBand>) => {
-    onChange({
-      ...draft,
-      sections: draft.sections.map((candidate) =>
-        candidate.id === section.id
-          ? {
-              ...candidate,
-              bands: candidate.bands.map((band, bandIndex) =>
-                bandIndex === effectiveBandIndex ? { ...band, ...patch } : band
-              ),
-            }
-          : candidate
-      ),
-    });
-  };
-
-  const replaceBands = (bands: typeof section.bands) => {
-    onChange({
-      ...draft,
-      sections: draft.sections.map((candidate) =>
-        candidate.id === section.id ? { ...candidate, bands } : candidate
-      ),
-    });
-  };
-
-  const directions = ['forward', 'backward', 'both', 'none'] as const;
-
-  return (
-    <section className="map-road-cross-section" aria-label="Road cross-section quick editor">
-      <header>
-        <div><b>Road on the map</b><span>Tap a band, then adjust it with large controls.</span></div>
-        {draft.sections.length > 1 && (
-          <label className="map-road-cross-section__section">
-            <span>Section</span>
-            <select
-              value={section.id}
-              aria-label="Active road section"
-              onChange={(event) =>
-                onSelectionChange({
-                  sectionId: event.target.value,
-                  bandIndex: 0,
-                })
-              }
-            >
-              {draft.sections.map((candidate, index) => (
-                <option key={candidate.id} value={candidate.id}>
-                  Part {index + 1}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <span>{section.bands.reduce((sum, band) => sum + band.widthM, 0).toFixed(1)} m total</span>
-      </header>
-      <div className="map-road-cross-section__bands">
-        {section.bands.map((band, index) => {
-          const color = roadBandFillColor(band.kind, band.sourceType);
-          const lightBand = color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114 > 155;
-          return (
-            <button
-              type="button"
-              key={`${band.id ?? band.kind}-${index}`}
-              className={index === effectiveBandIndex ? 'is-active' : ''}
-              style={{
-                flexGrow: Math.max(0.75, band.widthM),
-                background: `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`,
-                color: lightBand ? '#17202a' : '#ffffff',
-                textShadow: lightBand ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.75)',
-              }}
-              onClick={() =>
-                onSelectionChange({ sectionId: section.id, bandIndex: index })
-              }
-              aria-pressed={index === effectiveBandIndex}
-              aria-label={`Band ${index + 1}: ${mapRoadBandLabel(band.kind, band.sourceType)}, ${band.widthM.toFixed(2)} metres`}
-            >
-              <b>{mapRoadBandLabel(band.kind, band.sourceType)}</b>
-              <span>{band.widthM.toFixed(1)} m · {roadDirectionGlyph(band.direction)}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="map-road-cross-section__actions">
-        <div><b>{mapRoadBandLabel(activeBand.kind, activeBand.sourceType)}</b><span>band {effectiveBandIndex + 1}</span></div>
-        <label className="map-road-cross-section__field">
-          <span>Type</span>
-          <select
-            value={activeBand.sourceType ? '__source__' : activeBand.kind}
-            onChange={(event) => {
-              const kind = event.target.value as RoadBandKind;
-              patchActiveBand({ kind, sourceType: undefined, direction: kind === 'car_lane' || kind === 'bike_lane' ? 'forward' : 'none' });
-            }}
-          >
-            {activeBand.sourceType && <option value="__source__" disabled>{mapRoadBandLabel(activeBand.kind, activeBand.sourceType)} (source)</option>}
-            {MAP_ROAD_BAND_KINDS.map((kind) => <option key={kind} value={kind}>{mapRoadBandLabel(kind)}</option>)}
-          </select>
-        </label>
-        <label className="map-road-cross-section__field">
-          <span>Surface</span>
-          <select value={activeBand.surface ?? 'asphalt'} onChange={(event) => patchActiveBand({ surface: event.target.value })}>
-            <option value="asphalt">Asphalt</option>
-            <option value="concrete">Concrete</option>
-            <option value="paving_stones">Paving stones</option>
-            <option value="compacted">Compacted</option>
-            <option value="gravel">Gravel</option>
-            <option value="grass">Grass</option>
-          </select>
-        </label>
-        <div className="map-road-cross-section__width">
-        <button
-          type="button"
-          onClick={() => patchActiveBand({ widthM: Math.max(0.4, activeBand.widthM - 0.25) })}
-          aria-label="Make selected road band narrower"
-        >−</button>
-        <output>{activeBand.widthM.toFixed(2)} m</output>
-        <button
-          type="button"
-          onClick={() => patchActiveBand({ widthM: Math.min(12, activeBand.widthM + 0.25) })}
-          aria-label="Make selected road band wider"
-        >+</button>
-        </div>
-        <div className="map-road-cross-section__directions" role="group" aria-label="Selected band direction">
-          {directions.map((direction) => (
-            <button key={direction} type="button" className={(activeBand.direction ?? 'none') === direction ? 'is-active' : ''} onClick={() => patchActiveBand({ direction })}>
-              {roadDirectionGlyph(direction)} {direction}
-            </button>
-          ))}
-        </div>
-        <div className="map-road-cross-section__order">
-        <button type="button" disabled={effectiveBandIndex === 0} onClick={() => {
-          const bands = section.bands.slice();
-          [bands[effectiveBandIndex - 1], bands[effectiveBandIndex]] = [bands[effectiveBandIndex], bands[effectiveBandIndex - 1]];
-          onSelectionChange({
-            sectionId: section.id,
-            bandIndex: effectiveBandIndex - 1,
-          });
-          replaceBands(bands);
-        }}>Move left</button>
-        <button type="button" disabled={effectiveBandIndex === section.bands.length - 1} onClick={() => {
-          const bands = section.bands.slice();
-          [bands[effectiveBandIndex], bands[effectiveBandIndex + 1]] = [bands[effectiveBandIndex + 1], bands[effectiveBandIndex]];
-          onSelectionChange({
-            sectionId: section.id,
-            bandIndex: effectiveBandIndex + 1,
-          });
-          replaceBands(bands);
-        }}>Move right</button>
-        <button type="button" className="is-destructive" disabled={section.bands.length <= 1} onClick={() => {
-          replaceBands(section.bands.filter((_, index) => index !== effectiveBandIndex));
-          onSelectionChange({
-            sectionId: section.id,
-            bandIndex: Math.max(0, effectiveBandIndex - 1),
-          });
-        }}>Remove</button>
-        </div>
-      </div>
-      <div className="map-road-cross-section__add">
-        <label><span>Add a band</span><select value={newBandKind} onChange={(event) => setNewBandKind(event.target.value as RoadBandKind)}>{MAP_ROAD_BAND_KINDS.map((kind) => <option key={kind} value={kind}>{mapRoadBandLabel(kind)}</option>)}</select></label>
-        <button type="button" onClick={() => {
-          replaceBands([...section.bands, { kind: newBandKind, widthM: MAP_ROAD_DEFAULT_WIDTH[newBandKind], direction: newBandKind === 'car_lane' || newBandKind === 'bike_lane' ? 'forward' : 'none', surface: newBandKind === 'green' ? 'grass' : 'asphalt' }]);
-          onSelectionChange({
-            sectionId: section.id,
-            bandIndex: section.bands.length,
-          });
-        }}>Add band</button>
-      </div>
-    </section>
-  );
-}
-
-const MAP_ROAD_BAND_KINDS: RoadBandKind[] = ['car_lane', 'bike_lane', 'sidewalk', 'parking', 'median', 'green'];
-const MAP_ROAD_DEFAULT_WIDTH: Record<RoadBandKind, number> = {
-  car_lane: 3,
-  bike_lane: 1.8,
-  sidewalk: 1.8,
-  parking: 2.3,
-  median: 0.6,
-  green: 1.5,
-};
-
-function mapRoadBandLabel(kind: string, sourceType?: string): string {
-  const key = (sourceType ?? kind).toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (key.includes('sidewalk')) return 'Sidewalk';
-  if (key.includes('footway')) return 'Footway';
-  if (key.includes('bike') || key.includes('bicy') || key.includes('cycle')) return 'Bike';
-  if (key.includes('parking')) return 'Parking';
-  if (key.includes('bus')) return 'Bus';
-  if (key.includes('rail') || key.includes('tram')) return 'Rail';
-  if (key.includes('buffer') || key.includes('median')) return 'Buffer';
-  if (key.includes('green') || key.includes('verge')) return 'Green';
-  if (kind === 'bike_lane') return 'Bike';
-  if (kind === 'sidewalk') return 'Sidewalk';
-  if (kind === 'parking') return 'Parking';
-  if (kind === 'median') return 'Buffer';
-  if (kind === 'green') return 'Green';
-  return 'Car lane';
-}
-
-function roadDirectionGlyph(direction?: string): string {
-  if (direction === 'forward') return '→';
-  if (direction === 'backward') return '←';
-  if (direction === 'both') return '↔';
-  return '—';
 }
 
 function MapUsageLegend({ floating = false }: { floating?: boolean }) {

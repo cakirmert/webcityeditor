@@ -61,7 +61,7 @@ The legacy `_createdBy: "city-editor-prototype"` value remains a deliberate on-d
 
 ### Roads: exact surfaces versus editable ribbons
 
-Roads are stored as CityJSON `Transportation` objects. Each lane, shoulder, sidewalk, cycleway, parking strip, or median is a semantic `TrafficArea` or `AuxiliaryTrafficArea` polygon.
+Roads are stored as CityJSON `Road` objects in the transportation module, not a top-level `Transportation` class. Each lane, shoulder, sidewalk, cycleway, parking strip, or median is a semantic `TrafficArea` or `AuxiliaryTrafficArea` polygon. Intersections are classified `Road` objects. See [the provenance report](docs/transportation-provenance.md) for the CityGML/CityJSON distinction.
 
 There are two geometry modes:
 
@@ -99,15 +99,17 @@ directed source-road-to-target-road movement list and each road's endpoint at th
 Only those authoritative road pairs are considered. Within an allowed pair, explicit
 `allowed_turns` select the compatible source lanes before left-to-right rank pairing chooses target
 lanes, so a right-turn lane cannot fan out into a left branch. Missing metadata remains unknown and
-does not invent a restriction. The editor does not permanently regenerate exact imported junction
-geometry.
+does not invent a restriction. An intersection's movement editor preserves exact geometry until
+the user chooses **Generate** or authors a boundary trace. That action constructs disjoint semantic surfaces,
+trims approaches atomically and retains their untrimmed bases for subsequent rebuilds. Constructed
+junctions then follow connected road geometry edits. See [the implementation handoff](docs/road-editor-handoff.md).
 
 ## UX and performance decisions
 
-- **Roads** starts as a compact chooser with one existing-road action: tap a CityJSON road, then choose **Edit road**. The sheet expands only after a road is being edited.
-- On desktop, the active road's complete cross-section editor sits over the map along the bottom: matching visual bands plus large type, material, width, direction, order, remove, and add controls. The redundant lane editor in the right sheet is hidden. Touch layouts keep the same complete controls in the bottom sheet.
+- **Roads** starts as a compact chooser. Selecting a road or junction opens it directly when no draft is active; existing-draft switching retains its explicit edit/discard path.
+- One compact inspector contains **Lanes**, **Shape**, **Connections** and **Rules**; intersections use **Shape**, **Turns** and **Roads**. Touch layouts use a collapsible bottom sheet; camera framing leaves the active edit visible around it.
 - Road curvature is changed by dragging or adding visible map anchors. The UI exposes only the meaningful **Smooth** and **Straight** choice, not an abstract curve-strength percentage.
-- Map/satellite mode, satellite opacity, and road-overlay opacity are directly inside the road sheet. The generic **Map layers** control starts collapsed and closes when another map tool opens.
+- A comparison bar above the map provides Map/Satellite, road opacity and hold-to-compare controls. The generic **Map layers** control starts collapsed and closes when another map tool opens.
 - Road-network connection highlights exist only while the Roads workspace is open. Closing it or selecting unrelated map content clears every saved-road, OSM, lane, and junction highlight. Connections use a bright cyan/ice stroke over a dark navy halo so they remain distinct over dark, grey, blue, and red road surfaces as well as pale basemap areas.
 - Phone layouts retain only Data, Roads, New Building, and More in the primary toolbar. Planning, list, export, validation, and secondary tools use the touch-sized More menu.
 - Planning can be enabled at overview zoom. A single official FNP OGC API request supplies 2,842 interactive polygons across Hamburg and is cached in session; bounded XPlan detail queries run only when the viewport is within the safe 4.5 km range and refresh after the camera leaves the padded query coverage. The scrollable legend stays at the lower left and Map layers stays at the upper left.
@@ -273,54 +275,38 @@ npm run dev:hamburg-roads -- --dry-run
 
 Focused regression coverage exists for smooth road preview/export parity, touch handle editing, endpoint snapping, reciprocal CityJSON connections, exact-polygon attribute saves, highest-LoD mesh selection, catalog preparation, and the Hamburg committed fixtures.
 
-## Next guided patch: lane-order-aware intersection continuations
+## Intersection and road-policy implementation (2026-09-07)
 
-Implement this patch from the current `main` state. Keep the existing endpoint snapping,
-reciprocal CityJSON road metadata, exact imported polygons, and current map-performance behavior.
-Do not bring back a terrain mesh or change TopPlus/satellite rendering as part of this work.
+The lane-order continuations are now integrated with an intersection movement editor and an
+explicit surface-construction workflow. Physical kerbs use ordered approach mouths and curved
+returns, independently of lane connection guides. A custom satellite trace can override the
+carriageway outline and retain island rings. Invalid, detached and non-flat cases are guarded;
+semantic surfaces and approaches are clipped together. Geometry edits update automatic junctions
+in preview and at save; a custom footprint remains fixed for deliberate review. Source junctions
+remain exact until explicitly rebuilt. See `src/lib/junction-footprint.ts` and `road-junctions.ts`.
 
-The problem is lane ordering, not missing road geometry. Bands are stored left-to-right relative
-to each road section's directed centreline. Pairing two connected sections by raw array index can
-therefore draw crossing movements: a physical straight continuation from lanes 1, 2, 3 is sometimes
-shown as 1→3, 2→2, 3→1. The crossed guides also leave the junction looking like an unresolved grey
-area.
+The bundled `public/examples/hamburg-mattentwiete.json` design study can be opened directly from
+**Data**. Its original OSM-derived crop is retained separately. It records visual width estimates
+and a 28-point kerb trace rather than claiming surveyed accuracy. See the
+[reference study](docs/intersection-reference-study.md).
 
-Required behavior:
+`src/lib/road-rules.ts` provides a versioned Hamburg concept-design policy with current ReStra
+sources and separately identified project assumptions. New widths and asymmetric left/right
+limits are checked before save; fitting preserves individual band minimums. Profiles, offsets and
+limits persist in `_roadLayout`. Road fitting ignores trees on pavement/green/separator surfaces
+and blocks traffic surfaces covering mapped trunks.
 
-1. Derive lane-level movements from CityJSON road layouts, band semantics, directed centrelines,
-   endpoint connections, and imported intersection membership. Use original OSM/osm2streets output
-   only as a fallback when the committed CityJSON lacks information; CityJSON remains authoritative.
-2. Pair only direction- and mode-compatible bands. Normalize the target order using the connected
-   endpoint kinds: preserve target order for opposite endpoints (`start`↔`end`) and reverse it for
-   equal endpoints (`start`↔`start` or `end`↔`end`). Thus a three-lane `end`→`start` connection is
-   1→1, 2→2, 3→3, while `end`→`end` is 1→3, 2→2, 3→1.
-3. Classify physically aligned movements as `through`. Render those as temporary, metre-width,
-   road-coloured continuation bands over the junction so the road reads as continuous. Keep actual
-   left, right, U-turn, bicycle, sidewalk/crossing, and ambiguous movements as subdued editable
-   guide curves. These display bands must not rewrite exact osm2streets polygons or pretend that
-   exportable intersection geometry has been synthesized.
-4. Add focused tests for both three-lane endpoint orientations, compatible-mode/direction filtering,
-   `through` classification, and the committed short Hamburg intersection
-   fixture. In the browser, verify that straight lanes no longer cross, the grey gap is visually
-   filled, real turns remain understandable, TopPlus stays sharp, and interaction performance does
-   not drop after the map settles.
+Research and acceptance details:
 
-Implemented first slice (2026-07-26): confirmed reciprocal editable-road joins now satisfy the
-endpoint-order normalization and mode/direction filtering in item 2. Their geometrically aligned
-`through` pairs use temporary width-aware continuation surfaces, while non-through pairs remain
-subdued guides. The Hamburg browser acceptance pass remains pending.
-
-Removed review-state experiment (2026-07-31): lane continuations are derived directly from
-authoritative CityJSON/osm2streets topology and `allowed_turns`. The proposed/confirmed/rejected
-review controls, status metadata, reciprocal status synchronization, and status-based guide hiding
-were removed as unnecessary. Confirmed road endpoint connections remain part of `_roadLayout`;
-exact imported polygons remain protected.
+- [Transportation provenance and upstream rule audit](docs/transportation-provenance.md)
+- [UX comparison, geometry choices and Hamburg width research](docs/road-ux-research.md)
+- [Delivered behavior, verification and limitations](docs/road-editor-handoff.md)
 
 ## Remaining roadmap
 
 The following work is intentionally not claimed as complete:
 
-1. Generate true intersection surfaces from confirmed connected roads, including lane-to-lane connectors, turns, crossings, and regenerated markings. Exact lane polygons already match osm2streets styling; dynamic junction synthesis is not claimed as complete.
+1. Extend the implemented flat-junction builder with engineered crossings, stop lines, signals, priority, swept-path checks and surveyed non-flat geometry. The current builder synthesizes exportable pavement and lane connections, not these traffic-engineering details.
 2. Add a real, redistributable OpenDRIVE fixture and verify r:trån import against CityJSON Transportation semantics.
 3. Complete topology-aware coordinate propagation for every road source. The editor now detects a
    moved-away confirmed endpoint and can, after explicit confirmation, move a generated peer road's

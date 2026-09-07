@@ -221,4 +221,13 @@ describe('road draft edit helpers', () => {
       ])
     );
   });
+  it('disconnects both sides when an internal draft join is removed', () => {
+    const value = structuredClone(draft);
+    value.sections.push({ ...structuredClone(value.sections[0]), id: 'section-2' });
+    const joined = updateRoadDraftPoint(value, 'section-1', 1, [10.002, 53.004], { target: 'draft', targetId: 'section-2', targetSectionId: 'section-2', targetEndpoint: 'start', positionWgs84: [10.002, 53.004], confirmed: true });
+    expect(joined.sections[1].connections?.start).toBeDefined();
+    const disconnected = updateRoadDraftPoint(joined, 'section-1', 1, [10.002, 53.004], null);
+    expect(disconnected.sections[0].connections?.end).toBeUndefined();
+    expect(disconnected.sections[1].connections?.start).toBeUndefined();
+  });
 });

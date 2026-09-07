@@ -74,7 +74,7 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
   const treeClearanceM =
     Number.isFinite(context.treeClearanceM) && (context.treeClearanceM ?? 0) >= 0
       ? context.treeClearanceM ?? 0
-      : 0.5;
+      : 0;
   const buildingClearanceWarningM =
     Number.isFinite(context.buildingClearanceWarningM) &&
     (context.buildingClearanceWarningM ?? 0) > 0
@@ -138,7 +138,9 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
         verticalClearanceM
       );
       if (verticalRelation === 'separated') continue;
+      const enclosingHole = roadArea.holes?.find((hole) => ringInsideHole(buildingPolygon, hole, context.metricCrs));
       const overlapsInPlan =
+        !enclosingHole &&
         (!roadBbox || !buildingBbox || bboxesOverlap(roadBbox, buildingBbox)) &&
         polygonsIntersect(roadPolygon, buildingPolygon);
       if (overlapsInPlan) {
@@ -182,7 +184,7 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
       }
 
       if (buildingClearanceCheckM > 0) {
-        const metric = projectRingPairToMeters(roadPolygon, buildingPolygon, context.metricCrs);
+        const metric = projectRingPairToMeters(enclosingHole ?? roadPolygon, buildingPolygon, context.metricCrs);
         if (!metric) continue;
         const clearanceM = polygonDistanceMeters(metric.a, metric.b);
         if (clearanceM < buildingClearanceCheckM) {
@@ -214,18 +216,24 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
     }
 
     for (const tree of trees) {
+      // Trees in pavements, planted verges and separators are valid existing
+      // street features. Only a traffic/parking surface covering a trunk is a
+      // road-fit conflict; a canopy or arbitrary root buffer is not one.
+      if (!roadAreaRequiresTreeClearance(roadArea)) continue;
+      if (roadArea.vertical?.placement === 'underground') continue;
       const position: [number, number] = [tree.position[0], tree.position[1]];
       if (!position.every(Number.isFinite)) continue;
       const trunkRadiusM = Number.isFinite(tree.trunkRadius)
         ? Math.max(0, Number(tree.trunkRadius))
         : 0;
-      const protectionRadiusM = Math.max(0.25, trunkRadiusM) + treeClearanceM;
+      const protectionRadiusM = (trunkRadiusM > 0 ? trunkRadiusM : 0.25) + treeClearanceM;
       const treeBbox = expandBboxByMeters(
         [position[0], position[1], position[0], position[1]],
         protectionRadiusM
       );
       if (roadBbox && !bboxesOverlap(roadBbox, treeBbox)) continue;
       const protectionPolygon = circleAroundLngLat(position, protectionRadiusM);
+      if (roadArea.holes?.some((hole) => ringInsideHole(protectionPolygon, hole, context.metricCrs))) continue;
       if (
         !pointInOrOnPolygon(position, roadPolygon) &&
         !polygonsIntersect(roadPolygon, protectionPolygon)
@@ -242,12 +250,12 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
       addConflict(conflicts, seen, {
         id: `road-fit-tree-${roadArea.id}-${tree.id}`,
         kind: 'tree_overlap',
-        severity: 'warning',
+        severity: roadArea.vertical?.placement === 'elevated' ? 'warning' : 'error',
         roadAreaId: roadArea.id,
         affectedId: tree.id,
-        label: `Road area ${roadArea.id} overlaps street tree ${tree.id}${
+        label: `Traffic surface ${roadArea.id} overlaps the trunk of street tree ${tree.id}${
           species ? ` (${species})` : ''
-        }${street ? ` on ${street}` : ''}; keep its trunk/root zone clear.`,
+        }${street ? ` on ${street}` : ''}; move the traffic surface clear of the trunk.`,
         polygon: overlapPolygon ?? protectionPolygon,
       });
     }
@@ -272,6 +280,15 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
   }
 
   return conflicts;
+}
+
+export function roadAreaRequiresTreeClearance(area: RoadArea): boolean {
+  const normalize = (value: unknown) => String(value ?? '').toLowerCase().replace(/[^a-z]/g, '');
+  const usage = normalize(area.attributes.transportationUsage);
+  const kind = normalize(area.attributes.sourceType) || usage || normalize(area.function);
+  if (/sidewalk|footway|pedestrian|green|verge|median|buffer|shoulder|plant/.test(kind)) return false;
+  if (/driving|car|bus|bike|biking|cycle|rail|tram|parking|intersection|shareduse/.test(kind)) return true;
+  return area.surfaceType === 'TrafficArea' && /road|traffic/.test(kind);
 }
 
 function ringBbox(ring: [number, number][]): RingBbox | null {
@@ -457,6 +474,14 @@ function polygonIntersection(
   } catch {
     return null;
   }
+}
+
+function ringInsideHole(subject: [number, number][], hole: [number, number][], metricCrs?: string): boolean {
+  if (!subject.every((point) => pointInOrOnPolygon(point, hole))) return false;
+  const projected = projectRingsForBoolean([subject, hole], metricCrs);
+  if (!projected) return false;
+  try { return difference([projected.rings[0]], [projected.rings[1]]).length === 0; }
+  catch { return false; }
 }
 
 function polygonDifference(
