@@ -2552,6 +2552,7 @@ select:focus {
 @media (max-width: 1100px) { .road-compare-opacity > span, .road-compare-peek > span { display: none; } .road-compare-bar { gap: 5px; } }
 @media (max-width: 900px), (any-pointer: coarse) {
   .road-editor-panel, .road-editor-panel.is-expanded { width: 100%; max-width: none; top: auto; left: 0; right: 0; bottom: 0; height: 52dvh; border-radius: 18px 18px 0 0; }
+  .road-editor-panel.is-browse { top: auto; bottom: 0; }
   .road-editor-panel.is-expanded { height: 76dvh; }
   .road-editor-panel__header { min-height: 61px; padding: 10px 12px 9px 16px; }
   .studio-heading h2 { font-size: 14px; max-width: 190px; }
