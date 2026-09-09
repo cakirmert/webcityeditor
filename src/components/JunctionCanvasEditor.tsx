@@ -7,12 +7,13 @@ import type { RoadJunctionDraft } from '../lib/road-junctions';
 interface Props {
   map: MapLibreMap | null;
   draft: RoadJunctionDraft;
+  footprint?: JunctionFootprint;
   tool: JunctionEditTool;
   onToolChange: (tool: JunctionEditTool) => void;
   onChange: (draft: RoadJunctionDraft, group?: string) => void;
 }
 
-export default function JunctionCanvasEditor({ map, draft, tool, onToolChange, onChange }: Props) {
+export default function JunctionCanvasEditor({ map, draft, footprint, tool, onToolChange, onChange }: Props) {
   const [, redraw] = useState(0);
   const [sketch, setSketch] = useState<JunctionPoint[]>([]);
   const [error, setError] = useState('');
@@ -28,7 +29,7 @@ export default function JunctionCanvasEditor({ map, draft, tool, onToolChange, o
     return () => { map.off('move', update); map.off('resize', update); cancelAnimationFrame(frame); };
   }, [map]);
   if (!map || tool === 'none') return null;
-  const shape = draft.footprint;
+  const shape = draft.footprint ?? footprint;
   const rings = shape ? [shape.polygon, ...shape.holes].map(openJunctionRing) : [];
   const screen = (point: JunctionPoint) => map.project(point);
   const coordinates = (event: { clientX: number; clientY: number }): JunctionPoint => {

@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Hamburg intersection geometry review</title>
+<style>body{margin:0;background:#192127;color:#eee;font:14px system-ui}header{height:100px;padding:14px 22px;box-sizing:border-box}button,select{padding:9px;margin:3px;color:#111;background:white;border:0;border-radius:5px}label{margin:8px}.maps{display:flex;height:calc(100vh - 100px)}.map{width:33.333%;height:100%}.caption{position:absolute;top:112px;z-index:2;background:#192127ed;padding:10px;border-radius:6px;border:1px solid #62727d}.caption small{display:block;color:#adccd0;margin-top:3px}#info{color:#cce3e6;margin-top:8px}.legend{color:#aae9f4;margin-left:14px;font-size:12px}</style></head><body>
+<header><b>Hamburg intersection review</b><select id="sample" aria-label="Intersection sample"></select><label>Overlay <input id="opacity" aria-label="Surface opacity" type="range" min="0" max="1" step=".05" value=".55"></label><span class="legend">Cyan: carriageway · Sand: sidewalk · White: approach</span><div id="info"></div></header>
+<div class="maps"><div id="reference" class="map"></div><div id="left" class="map"></div><div id="right" class="map"></div></div>
+<div class="caption" style="left:12px">1 · Satellite reference<small>Capture date unknown · visual reference</small></div>
+<div class="caption" style="left:calc(33.333% + 12px)">2 · Imported OSM geometry<small>Original source junction and approaches</small></div>
+<div class="caption" style="left:calc(66.667% + 12px)">3 · Automatic reconstruction<small>Candidate geometry · inspect before saving</small></div>
+<script type="module">
+import maplibregl from 'maplibre-gl';import 'maplibre-gl/dist/maplibre-gl.css';
+const cases=await(await fetch('./junction-cases.json')).json();
+const select=document.querySelector('#sample');cases.forEach((c,i)=>select.add(new Option(`${i+1}. ${c.name}`,String(i))));
+const style=()=>({version:8,sources:{imagery:{type:'raster',tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'Esri World Imagery'}},layers:[{id:'imagery',type:'raster',source:'imagery'}]});
+const maps=['reference','left','right'].map(container=>new maplibregl.Map({container,style:style(),center:cases[0].center,zoom:19,maxZoom:22,attributionControl:true}));
+let syncing=false;
+maps.forEach(m=>{m.addControl(new maplibregl.NavigationControl(),'bottom-right');m.on('move',()=>{if(syncing)return;syncing=true;maps.filter(peer=>peer!==m).forEach(peer=>peer.jumpTo({center:m.getCenter(),zoom:m.getZoom(),bearing:m.getBearing()}));syncing=false})});
+await Promise.all(maps.map(m=>new Promise(resolve=>m.once('load',resolve))));
+maps.slice(1).forEach(m=>{m.addSource('roads',{type:'geojson',data:{type:'FeatureCollection',features:[]}});m.addLayer({id:'fill',type:'fill',source:'roads',paint:{'fill-opacity':.55,'fill-color':['case',['in','Sidewalk',['get','kind']],'#e2cfaa',['get','junction'],'#00a9cf','#465773']}});m.addLayer({id:'edge',type:'line',source:'roads',paint:{'line-width':['case',['get','junction'],2,1],'line-color':['case',['in','Sidewalk',['get','kind']],'#edcc8f',['get','junction'],'#36deff','#eef1e5'],'line-opacity':.95}})});
+function show(){const c=cases[+select.value];document.querySelector('#info').textContent=`${c.id} · ${c.error||'Connected surface generated'} · Same center and zoom in all three views · Reviewed ${c.checkedAt}`;maps[1].getSource('roads').setData(c.source);maps[2].getSource('roads').setData(c.generated);maps[0].jumpTo({center:c.center,zoom:+select.value===6?18.8:19.3});}
+select.onchange=show;document.querySelector('#opacity').oninput=e=>maps.slice(1).forEach(m=>{m.setPaintProperty('fill','fill-opacity',+e.target.value);m.setPaintProperty('edge','line-opacity',+e.target.value===0?0:.95)});show();
+</script></body></html>

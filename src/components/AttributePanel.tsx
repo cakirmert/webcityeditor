@@ -224,12 +224,18 @@ export default function AttributePanel({
       </Section>
 
       {childCount > 0 && (
-        <Section label="Parts (BuildingParts)">
-          <div className="space-y-1">
+        <Section label="Building parts">
+          <details className="building-parts-browser">
+            <summary>Browse {childCount} parts</summary>
+            <div className="space-y-1">
             {obj.children?.map((childId, idx) => {
               const childObj = cityjson.CityObjects[childId];
               if (!childObj) return null;
-              const childFunction = String(childObj.attributes?.function ?? 'unknown');
+              const partAttrs = childObj.attributes ?? {};
+              const childFunction = String(partAttrs.function ?? '');
+              const floor = typeof partAttrs._floorIndex === 'number' ? partAttrs._floorIndex + 1 : null;
+              const label = String(partAttrs.name ?? (floor !== null ? `Floor ${floor}` : `Part ${idx + 1}`));
+              const height = Number(partAttrs.measuredHeight);
               return (
                 <button
                   key={childId}
@@ -237,12 +243,13 @@ export default function AttributePanel({
                   onClick={() => onSelectBuilding?.(childId)}
                   className="w-full text-left flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
-                  <span className="font-medium">Floor {idx + 1}</span>
-                  <span className="text-[var(--text-dim)] uppercase text-[10px]">{childFunction}</span>
+                  <span className="font-medium">{label}<small className="block text-[var(--text-dim)]">{childId}</small></span>
+                  <span className="text-[var(--text-dim)] text-[10px]">{childFunction && childFunction.toLowerCase() !== 'unknown' ? childFunction : Number.isFinite(height) && height > 0 ? `${height.toFixed(1)} m` : ''}</span>
                 </button>
               );
             })}
-          </div>
+            </div>
+          </details>
         </Section>
       )}
 

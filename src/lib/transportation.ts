@@ -1223,6 +1223,7 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             maxspeed: (surface.maxspeed ?? null) as JsonValue,
             source: (surface.source ?? object.attributes?._source ?? null) as JsonValue,
             roadName: (object.attributes?.name ?? null) as JsonValue,
+            highwayType: (object.attributes?._highwayType ?? null) as JsonValue,
             sourceType: (surface.sourceType ?? osm2streetsProperties?.type ?? null) as JsonValue,
             osm2streetsRoadId: (
               surface.osm2streetsRoadId ?? object.attributes?._osm2streetsRoadId ?? null

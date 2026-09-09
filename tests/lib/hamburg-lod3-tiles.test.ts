@@ -15,13 +15,13 @@ import {
 describe('official Hamburg LoD3 tile sources', () => {
   it('exposes the official Hamburg citywide LoD1 overview tileset', () => {
     expect(HAMBURG_LOD1_TILESET_URL).toBe(
-      'https://daten-hamburg.de/gdi3d/datasource-data/LoD1/tileset.json'
+      'https://www.daten-hamburg.de/gdi3d/datasource-data/LoD1/tileset.json'
     );
   });
 
   it('exposes the official Hamburg citywide LoD2 tileset', () => {
     expect(HAMBURG_LOD2_TILESET_URL).toBe(
-      'https://daten-hamburg.de/gdi3d/datasource-data/LoD2/tileset.json'
+      'https://www.daten-hamburg.de/gdi3d/datasource-data/LoD2/tileset.json'
     );
   });
 

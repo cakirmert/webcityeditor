@@ -49,7 +49,7 @@ import type {
   RoadDraft,
 } from '../lib/transportation';
 import { validateRoadFit, type RoadFitConflict } from '../lib/road-fit';
-import { buildRoadExtentGuides } from '../lib/transportation';
+import { buildRoadExtentGuides, deriveEditableRoadDraftFromAreas } from '../lib/transportation';
 import { roadJunctionCandidateAreas, type RoadJunctionDraft, type RoadJunctionPlan } from '../lib/road-junctions';
 import type { JunctionEditTool } from '../lib/junction-footprint';
 import JunctionCanvasEditor from './JunctionCanvasEditor';
@@ -85,6 +85,7 @@ import { buildRoadVisuals } from '../lib/road-visuals';
 import {
   buildRoadConnectionIndex,
   buildSelectedRoadConnections,
+  roadMovementKey,
   type RoadConnectionNode,
   type RoadLaneContinuation,
 } from '../lib/road-lane-continuations';
@@ -1161,11 +1162,29 @@ export default function MapView({
       ),
     [roadConnectionIndex, roadDraft, roadWorkspaceOpen, selectedRoadAreaId, junctionDraft]
   );
-  const roadLaneContinuations = useMemo(() => selectedRoadConnections.continuations.filter((movement) => {
+  const roadLaneContinuations = useMemo(() => (junctionDraft && junctionPlan ? junctionPlan.movements : selectedRoadConnections.continuations).filter((movement) => {
     if (roadDraft && selectedDraftBand) return roadLaneContinuationMatchesDraftBand(movement, roadDraft, selectedDraftBand);
     if (junctionDraft && junctionSource) return JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceBandIndex]) === junctionSource;
     return true;
-  }), [selectedRoadConnections, roadDraft, selectedDraftBand, junctionDraft, junctionSource]);
+  }), [selectedRoadConnections, roadDraft, selectedDraftBand, junctionDraft, junctionPlan, junctionSource]);
+  const junctionApproachFocus = useMemo(() => {
+    if (!junctionDraft || !junctionSource?.startsWith('road:')) return null;
+    try {
+      const [id, endpoint] = JSON.parse(junctionSource.slice(5)) as [string, 'start' | 'end'];
+      const areas = junctionPlan?.areas.some(area => area.roadId === id) ? junctionPlan.areas : roadAreas;
+      const road = areas.find(area => area.roadId === id)?.editableDraft ?? deriveEditableRoadDraftFromAreas(areas, id);
+      const point = endpoint === 'start' ? road.sections[0]?.centerlineWgs84[0] : road.sections.at(-1)?.centerlineWgs84.at(-1);
+      return point ? { id, point, label: endpoint === 'start' ? 'Start' : 'End' } : null;
+    } catch { return null; }
+  }, [junctionDraft, junctionSource, junctionPlan, roadAreas]);
+  const junctionHighlightedAreas = useMemo(() => {
+    if (!junctionDraft || !junctionSource || junctionSource === '__shape__') return [];
+    const ids = new Set(junctionPlan?.areas.map(area => area.roadId));
+    const areas = [...roadAreas.filter(area => !ids.has(area.roadId)), ...(junctionPlan?.areas ?? [])];
+    if (junctionApproachFocus) return areas.filter(area => area.roadId === junctionApproachFocus.id);
+    const source = junctionPlan?.movements.find(movement => JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceBandIndex]) === junctionSource);
+    return source ? areas.filter(area => area.roadId === source.sourceRoadId && (area.bandId === source.sourceBandId || area.attributes.osm2streetsLaneIndex === source.sourceBandIndex || (!source.sourceBandId && area.surfaceIndex === source.sourceBandIndex))) : [];
+  }, [junctionDraft, junctionSource, junctionPlan, roadAreas, junctionApproachFocus]);
   const connectionRoadAreas = useMemo(
     () =>
       renderedRoadAreas.filter(
@@ -3606,7 +3625,31 @@ export default function MapView({
       );
     }
 
+    if (junctionHighlightedAreas.length) layers.push(new PolygonLayer<RoadArea>({
+      id: 'junction-active-road-or-lane', data: junctionHighlightedAreas,
+      getPolygon: area => area.holes?.length ? [area.polygon, ...area.holes] : area.polygon,
+      getFillColor: [36, 113, 239, 110], getLineColor: [24, 84, 204, 255], getLineWidth: 3, lineWidthUnits: 'pixels',
+      filled: true, stroked: true, pickable: false, parameters: { depthTest: false } as unknown as never,
+    }));
+    if (junctionApproachFocus) layers.push(
+      new ScatterplotLayer({ id: 'junction-focused-endpoint', data: [junctionApproachFocus], getPosition: d => d.point,
+        getFillColor: [255, 255, 255], getLineColor: [24, 84, 204], stroked: true, getLineWidth: 3, lineWidthUnits: 'pixels', getRadius: 12, radiusUnits: 'pixels', parameters: { depthTest: false } as unknown as never }),
+      new TextLayer({ id: 'junction-focused-endpoint-label', data: [junctionApproachFocus], getPosition: d => d.point, getText: d => d.label,
+        getColor: [12, 49, 120], getSize: 13, getPixelOffset: [0, -25], fontWeight: 'bold', background: true, getBackgroundColor: [255, 255, 255, 245], backgroundPadding: [6, 3], parameters: { depthTest: false } as unknown as never }),
+    );
     if (roadLaneContinuations.length > 0) {
+      const disabled = new Set(junctionDraft?.disabledMovements ?? []);
+      const guideColor = (movement: RoadLaneContinuation): [number, number, number, number] => disabled.has(roadMovementKey(movement)) ? [218, 49, 49, 255] : [0, 174, 224, 255];
+      const destinations = roadLaneContinuations.map((movement, i) => ({ movement, number: String(i + 1), point: movement.path.at(-1)! }));
+      const arrows = roadLaneContinuations.flatMap(movement => {
+        const i = Math.max(1, Math.floor((movement.path.length - 1) * .7));
+        const tip = movement.path[i], previous = movement.path[i - 1];
+        const sx = 111320 * Math.cos(tip[1] * Math.PI / 180), sy = 110540;
+        const dx = (tip[0] - previous[0]) * sx, dy = (tip[1] - previous[1]) * sy, length = Math.hypot(dx, dy);
+        if (!length) return [];
+        const x = dx / length, y = dy / length;
+        return [{ movement, path: [[tip[0] - (1.5 * x - .85 * y) / sx, tip[1] - (1.5 * y + .85 * x) / sy], tip, [tip[0] - (1.5 * x + .85 * y) / sx, tip[1] - (1.5 * y - .85 * x) / sy]] as [number, number][] }];
+      });
       layers.push(
         new PathLayer<RoadLaneContinuation>({
           id: 'cityjson-road-lane-connection-guide-halos',
@@ -3635,46 +3678,44 @@ export default function MapView({
           id: 'cityjson-road-lane-connection-guides',
           data: roadLaneContinuations,
           getPath: (continuation: RoadLaneContinuation) => continuation.path,
-          getColor: (continuation: RoadLaneContinuation) =>
-            roadLaneContinuationMatchesDraftBand(
-              continuation,
-              roadDraft,
-              selectedDraftBand
-            )
-              ? roadOverlayColor(ROAD_CONNECTION_ACTIVE, {
-                  basemap,
-                  opacity: roadOverlayOpacity,
-                })
-              : roadOverlayColor(ROAD_CONNECTION_CYAN, {
-                  basemap,
-                  opacity: roadOverlayOpacity,
-                }),
+          getColor: guideColor,
           getWidth: (continuation: RoadLaneContinuation) =>
             roadLaneContinuationMatchesDraftBand(
               continuation,
               roadDraft,
               selectedDraftBand
             )
-              ? 3.8
-              : 2.8,
+              ? 4.5
+              : 3.5,
           widthUnits: 'pixels',
-          widthMinPixels: 2.8,
-          getDashArray: [1, 1.35],
+          widthMinPixels: 3.5,
+          getDashArray: (movement: RoadLaneContinuation) => disabled.has(roadMovementKey(movement)) ? [2, 2] : [1000, 0],
           dashJustified: true,
           extensions: [new PathStyleExtension({ dash: true })],
           jointRounded: true,
           capRounded: true,
-          pickable: false,
+          pickable: !!junctionDraft,
+          onClick: (info: PickingInfo<RoadLaneContinuation>) => {
+            if (!junctionDraft || !info.object) return;
+            const key = roadMovementKey(info.object);
+            onJunctionDraftChange?.({ ...junctionDraft, disabledMovements: disabled.has(key) ? junctionDraft.disabledMovements.filter(item => item !== key) : [...junctionDraft.disabledMovements, key] });
+          },
           parameters: { depthTest: false } as unknown as never,
           updateTriggers: {
             getColor: [
               basemap,
-              roadOverlayOpacity,
+              junctionDraft?.disabledMovements,
               roadSelectionHighlightKey,
             ],
             getWidth: [roadSelectionHighlightKey],
+            getDashArray: [junctionDraft?.disabledMovements],
           },
         } as any)
+      );
+      layers.push(new PathLayer({ id: 'junction-connection-arrowheads', data: arrows, getPath: item => item.path, getColor: item => guideColor(item.movement), getWidth: 4, widthUnits: 'pixels', jointRounded: true, capRounded: true, pickable: false, parameters: { depthTest: false } as unknown as never }));
+      if (junctionDraft) layers.push(
+        new ScatterplotLayer({ id: 'junction-turn-destinations', data: destinations, getPosition: item => item.point, getRadius: 11, radiusUnits: 'pixels', getFillColor: [255, 255, 255, 255], getLineColor: item => guideColor(item.movement), stroked: true, getLineWidth: 2, lineWidthUnits: 'pixels', pickable: false, parameters: { depthTest: false } as unknown as never }),
+        new TextLayer({ id: 'junction-turn-numbers', data: destinations, getPosition: item => item.point, getText: item => item.number, getColor: item => guideColor(item.movement), getSize: 13, fontWeight: 700, fontFamily: 'Arial, sans-serif', getTextAnchor: 'middle', getAlignmentBaseline: 'center', pickable: false, parameters: { depthTest: false } as unknown as never }),
       );
     }
 
@@ -4079,6 +4120,8 @@ export default function MapView({
     junctionSource,
     selectedRoadConnections,
     roadLaneContinuations,
+    junctionHighlightedAreas,
+    junctionApproachFocus,
     roadSelectionHighlightKey,
     roadDraft,
     onRoadDraftChange,
@@ -4523,9 +4566,9 @@ export default function MapView({
 
   return (
     <>
-      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      <div ref={containerRef} className={roadWorkspaceOpen ? 'city-map has-road-workspace' : 'city-map'} style={{ position: 'absolute', inset: 0 }} />
       {roadWorkspaceOpen && onBasemapChange && onRoadOverlayOpacityChange && <RoadMapCompare basemap={basemap} onBasemapChange={onBasemapChange} opacity={roadOverlayOpacity} onOpacityChange={onRoadOverlayOpacityChange} onSatelliteOpacityChange={onSatelliteOpacityChange} />}
-      {roadWorkspaceOpen && junctionDraft && onJunctionDraftChange && onJunctionEditToolChange && <JunctionCanvasEditor map={mapRef.current} draft={junctionDraft} tool={junctionEditTool} onToolChange={onJunctionEditToolChange} onChange={onJunctionDraftChange} />}
+      {roadWorkspaceOpen && junctionDraft && onJunctionDraftChange && onJunctionEditToolChange && <JunctionCanvasEditor map={mapRef.current} draft={junctionDraft} footprint={junctionPlan?.footprint} tool={junctionEditTool} onToolChange={onJunctionEditToolChange} onChange={onJunctionDraftChange} />}
       {drawMode === 'polygon' && (
         <div className="building-draw-guide" role="status">
           <div>

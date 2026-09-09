@@ -14,6 +14,25 @@ function draft(): RoadDraft {
 }
 
 describe('city road design policy', () => {
+  it('applies width guardrails to older saved profiles and honors explicit overrides', () => {
+    const value = draft();
+    for (const rule of Object.values(value.ruleProfile!.widths)) { delete rule.maximumM; delete rule.twoWayMaximumM; }
+    value.sections[0].bands[1].widthM = 100;
+    expect(validateRoadRules(value).some(issue => issue.bandIndex === 1 && issue.severity === 'error')).toBe(true);
+    value.ruleProfile!.widths.car_lane.maximumM = 7;
+    value.sections[0].bands[1].widthM = 6;
+    expect(validateRoadRules(value).some(issue => issue.bandIndex === 1 && issue.severity === 'error')).toBe(false);
+  });
+  it('blocks absurd widths, retains existing source widths, and fits to explicit project limits', () => {
+    const value = draft(); value.sections[0].bands[1].widthM = 100;
+    expect(validateRoadRules(value).find((issue) => issue.bandIndex === 1)?.severity).toBe('error');
+    expect(validateRoadRules(value, value).find((issue) => issue.bandIndex === 1)?.severity).toBe('warning');
+    expect(fitRoadDraftToRules(value).draft.sections[0].bands[1].widthM).toBe(5);
+    value.sections[0].bands[1].direction = 'both'; value.sections[0].bands[1].widthM = 6.5;
+    expect(validateRoadRules(value).filter((issue) => issue.severity === 'error')).toEqual([]);
+    const profile = structuredClone(HAMBURG_ROAD_RULES); profile.widths.car_lane.maximumM = 1;
+    expect(() => parseRoadRuleProfile(profile)).toThrow(/maximum/);
+  });
   it('creates new roads at the current profile targets and persists the policy on export', () => {
     const value = createManualRoadDraft([[4.357, 52.01], [4.358, 52.01]]);
     expect(validateRoadRules(value)).toEqual([]);

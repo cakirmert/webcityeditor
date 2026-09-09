@@ -4,19 +4,22 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { roadMovementKey, type RoadLaneContinuation } from '../lib/road-lane-continuations';
 import type { RoadJunctionDraft, RoadJunctionPlan } from '../lib/road-junctions';
 import { deriveEditableRoadDraftFromAreas, type RoadArea } from '../lib/transportation';
+import { roadDisplayName, roadEndpointBearing } from '../lib/road-labels';
 
 export const junctionSourceKey = (movement: RoadLaneContinuation) => JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceBandIndex]);
 
-export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChange, onCompare, onChange, onFocusSource }: {
+export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChange, onCompare, onChange, onFocusSource, onEditRoad }: {
   draft: RoadJunctionDraft; plan: RoadJunctionPlan; areas: RoadArea[]; tool: JunctionEditTool;
   onToolChange: (tool: JunctionEditTool) => void; onCompare: () => void;
   onChange: (draft: RoadJunctionDraft) => void; onFocusSource?: (source: string | null) => void;
+  onEditRoad?: (area: RoadArea) => void;
 }) {
   const [tab, setTab] = useState('shape');
   const [source, setSource] = useState('');
   const [approach, setApproach] = useState('');
+  const [focusedRoad, setFocusedRoad] = useState(draft.roadIds[0] ?? '');
   const [copyStatus, setCopyStatus] = useState('');
-  const name = (id: string) => String(areas.find((area) => area.roadId === id)?.attributes.roadName ?? id);
+  const name = (id: string) => roadDisplayName(areas, id);
   const layouts = useMemo(() => new Map(draft.roadIds.flatMap((id) => {
     try { return [[id, areas.find((area) => area.roadId === id && area.editableDraft)?.editableDraft ?? deriveEditableRoadDraftFromAreas(areas, id)] as const]; }
     catch { return []; }
@@ -30,14 +33,19 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
   const modeRank = (mode: string) => mode === 'pedestrian' ? 2 : mode === 'bicycle' ? 1 : 0;
   const sources = [...new Map(plan.movements.map((movement) => [junctionSourceKey(movement), movement])).values()].sort((a, b) => modeRank(a.mode) - modeRank(b.mode));
   const activeSource = sources.some((movement) => junctionSourceKey(movement) === source) ? source : sources[0] ? junctionSourceKey(sources[0]) : '';
-  useEffect(() => { onFocusSource?.(tab === 'turns' ? activeSource || null : '__shape__'); }, [activeSource, tab, onFocusSource]);
+  useEffect(() => {
+    const candidate = approach ? JSON.parse(approach) as [string, 'start' | 'end'] : null;
+    const endpoint = candidate?.[0] === focusedRoad ? candidate[1] : draft.endpoints[focusedRoad];
+    onFocusSource?.(tab === 'turns' ? activeSource || null : tab === 'approaches' ? `road:${JSON.stringify([focusedRoad, endpoint])}` : '__shape__');
+  }, [activeSource, focusedRoad, approach, draft.endpoints, tab, onFocusSource]);
   const visible = plan.movements.filter((movement) => junctionSourceKey(movement) === activeSource);
   const toggle = (movement: RoadLaneContinuation) => {
     const key = roadMovementKey(movement);
     onChange({ ...draft, disabledMovements: draft.disabledMovements.includes(key) ? draft.disabledMovements.filter((item) => item !== key) : [...draft.disabledMovements, key] });
   };
   const nearApproaches = useMemo(() => {
-    const center = plan.movements[0]?.path[0]; if (!center) return [];
+    const boundary = draft.footprint?.polygon ?? plan.footprint?.polygon ?? areas.find(area => area.roadId === draft.id)?.polygon;
+    const center = boundary?.length ? boundary.reduce<[number, number]>((sum, point) => [sum[0] + point[0] / boundary.length, sum[1] + point[1] / boundary.length], [0, 0]) : plan.movements[0]?.path[0]; if (!center) return [];
     const ids = [...new Set(areas.filter((area) => !draft.roadIds.includes(area.roadId) && area.function !== 'intersection' && area.attributes.transportationUsage !== 'intersection' && area.polygon.some((p) => Math.abs(p[0] - center[0]) < .0008 && Math.abs(p[1] - center[1]) < .0005)).map((area) => area.roadId))];
     return ids.flatMap((id) => {
       try {
@@ -46,11 +54,11 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
           const section = endpoint === 'start' ? road.sections[0] : road.sections.at(-1);
           const point = endpoint === 'start' ? section?.centerlineWgs84[0] : section?.centerlineWgs84.at(-1); if (!point) return [];
           const distance = Math.hypot((point[0] - center[0]) * 66000, (point[1] - center[1]) * 110540);
-          return distance <= 35 ? [{ id, endpoint, distance }] : [];
+          return distance <= 35 ? [{ id, endpoint, distance, bearing: roadEndpointBearing(road, endpoint) }] : [];
         });
       } catch { return []; }
     }).sort((a, b) => a.distance - b.distance).slice(0, 20);
-  }, [areas, draft.roadIds, plan.movements]);
+  }, [areas, draft.id, draft.roadIds, draft.footprint, plan.footprint, plan.movements]);
   const footprint = draft.footprint ?? plan.footprint;
   const beginEditing = () => {
     if (!footprint) return;
@@ -65,7 +73,7 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
       if (next >= 0) { event.preventDefault(); setTab(tabs[next].id); document.getElementById(`junction-tab-${tabs[next].id}`)?.focus(); }
     }}>{item.icon}{item.label}</button>)}</div>
     <div id="junction-view-shape" role="tabpanel" aria-labelledby="junction-tab-shape" hidden={tab !== 'shape'} className="junction-tab-body">
-      <div className="junction-intro"><span className="studio-eyebrow">PAVEMENT & KERBS</span><h3>Match the real intersection</h3><p>Follow the visible kerb line. Keep islands as openings in the pavement.</p></div>
+      <div className="junction-intro"><h3>{footprint ? 'Drag a boundary point on the map' : 'Create a continuous boundary'}</h3><p>{footprint ? 'Changes appear immediately. Small dots add a corner; Undo restores the previous shape.' : 'The imported surface has separate or invalid fragments. Generate a connected outline, or trace the visible kerb from satellite.'}</p></div>
       <div className="junction-shape-modes" role="group" aria-label="Junction surface">
         <button aria-pressed={draft.surfaceMode === 'preserve'} disabled={!areas.some((area) => area.roadId === draft.id)} onClick={() => { const saved = areas.find((area) => area.roadId === draft.id)?.attributes.junctionFootprint as unknown as JunctionFootprint | undefined; onChange({ ...draft, surfaceMode: 'preserve', footprint: saved || undefined }); onToolChange('none'); }}><Layers2 size={19} /><b>Keep current</b><span>Retain its exact surface</span></button>
         <button aria-pressed={draft.surfaceMode === 'rebuild' && !draft.footprint} onClick={() => { onChange({ ...draft, surfaceMode: 'rebuild', footprint: undefined }); onToolChange('none'); }}><WandSparkles size={19} /><b>Generate</b><span>Connect the road kerbs</span></button>
@@ -83,17 +91,20 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
     </div>
     <div id="junction-view-turns" role="tabpanel" aria-labelledby="junction-tab-turns" hidden={tab !== 'turns'} className="junction-tab-body">
       <div className="junction-intro"><span className="studio-eyebrow">LANE CONNECTIONS</span><h3>Where can this lane go?</h3><p>Choose an incoming lane, then its destinations.</p></div>
-      <label className="road-field"><span>Incoming lane</span><select value={activeSource} onChange={(event) => setSource(event.target.value)}>{!sources.length && <option value="">No compatible lanes loaded</option>}{sources.map((movement) => <option key={junctionSourceKey(movement)} value={junctionSourceKey(movement)}>{name(movement.sourceRoadId)} · {laneLabel(movement, 'source')}</option>)}</select></label>
-      <div className="junction-movements">{visible.map((movement) => <label key={movement.id}><input type="checkbox" checked={!draft.disabledMovements.includes(roadMovementKey(movement))} onChange={() => toggle(movement)} /><span><b>{movement.turn.replaceAll('_', ' ')} → {laneLabel(movement, 'target')}</b><small>{name(movement.targetRoadId)}</small></span></label>)}</div>
+      <label className="road-field"><span>Incoming lane · highlighted blue on the map</span><select value={activeSource} onChange={(event) => setSource(event.target.value)}>{!sources.length && <option value="">No compatible lanes loaded</option>}{sources.map((movement) => <option key={junctionSourceKey(movement)} value={junctionSourceKey(movement)}>{layouts.get(movement.sourceRoadId) ? roadEndpointBearing(layouts.get(movement.sourceRoadId)!, movement.sourceEndpoint) + ' · ' : ''}{name(movement.sourceRoadId)} · {laneLabel(movement, 'source')}</option>)}</select></label>
+      <div className="junction-movements">{visible.map((movement, i) => <label key={movement.id} className={draft.disabledMovements.includes(roadMovementKey(movement)) ? 'is-disabled' : ''}><input type="checkbox" checked={!draft.disabledMovements.includes(roadMovementKey(movement))} onChange={() => toggle(movement)} /><span className="junction-turn-number">{i + 1}</span><span><b>{movement.turn.replaceAll('_', ' ')} → {laneLabel(movement, 'target')}</b><small>{name(movement.targetRoadId)}</small></span></label>)}</div>
       {visible.length === 0 && <p>No outgoing movements are known. Check the connected roads and their directions.</p>}
-      <details className="junction-minimap"><summary>Connection overview</summary><JunctionPreview areas={plan.areas.length && draft.surfaceMode === 'rebuild' ? plan.areas : [...areas.filter((area) => draft.roadIds.includes(area.roadId)), ...plan.areas.filter((area) => area.roadId === draft.id)]} bounds={plan.movements.flatMap((movement) => movement.path)} movements={visible} disabled={draft.disabledMovements} onToggle={toggle} targetLabel={(movement) => `${laneLabel(movement, 'target')} on ${name(movement.targetRoadId)}`} /></details>
+      <div className="junction-minimap"><JunctionPreview areas={plan.areas.length && draft.surfaceMode === 'rebuild' ? plan.areas : [...areas.filter((area) => draft.roadIds.includes(area.roadId)), ...plan.areas.filter((area) => area.roadId === draft.id)]} bounds={plan.movements.flatMap((movement) => movement.path)} movements={visible} disabled={draft.disabledMovements} onToggle={toggle} targetLabel={(movement) => `${laneLabel(movement, 'target')} on ${name(movement.targetRoadId)}`} /></div>
       <p>Turn permissions leave the pavement intact. Curves show lane connections; check their clearance around islands.</p>
     </div>
     <div id="junction-view-approaches" role="tabpanel" aria-labelledby="junction-tab-approaches" hidden={tab !== 'approaches'} className="junction-tab-body">
       <div className="junction-intro"><span className="studio-eyebrow">CONNECTED ROADS</span><h3>{draft.roadIds.length} approaches</h3><p>The intersection and its road ends are saved together.</p></div>
       <label className="road-field"><span>Intersection name</span><input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
-      <div className="junction-approach-list">{draft.roadIds.map((id, i) => <div key={id}><span>{String(i + 1).padStart(2, '0')}</span><div><b>{name(id)}</b><small>{draft.endpoints[id] ?? 'Source'} end</small></div></div>)}</div>
-      {nearApproaches.length > 0 && <><label className="road-field"><span>Add nearby road</span><select value={approach} onChange={(event) => setApproach(event.target.value)}><option value="">Choose a road end</option>{nearApproaches.map((item) => <option key={`${item.id}-${item.endpoint}`} value={JSON.stringify([item.id, item.endpoint])}>{name(item.id)} · {Math.round(item.distance)} m away</option>)}</select></label><button className="road-wide-action" disabled={!approach} onClick={() => { const [id, endpoint] = JSON.parse(approach); onChange({ ...draft, roadIds: [...draft.roadIds, id], endpoints: { ...draft.endpoints, [id]: endpoint }, surfaceMode: 'rebuild' }); setApproach(''); }}>Add approach</button></>}
+      <div className="junction-road-cards">{draft.roadIds.map(id => <div key={id} className={focusedRoad === id ? 'is-focused' : ''}>
+        <button className="junction-road-focus" aria-pressed={focusedRoad === id} onClick={() => { setFocusedRoad(id); setApproach(''); }}><b>{name(id)}</b><small>{layouts.get(id) && roadEndpointBearing(layouts.get(id)!, draft.endpoints[id])} approach · {draft.endpoints[id] === 'start' ? 'start of road' : 'end of road'}</small></button>
+        <div className="junction-road-actions"><button onClick={() => { const area = areas.find(a => a.roadId === id); if (area) onEditRoad?.(area); }}>Edit road</button><button disabled={draft.roadIds.length <= 2} onClick={() => { const endpoints = { ...draft.endpoints }; delete endpoints[id]; onChange({ ...draft, roadIds: draft.roadIds.filter(roadId => roadId !== id), endpoints, surfaceMode: 'rebuild' }); }}>Disconnect</button></div>
+      </div>)}</div>
+      {nearApproaches.length > 0 && <details className="junction-nearby"><summary>Add another approach</summary><div className="junction-candidate-list" role="group" aria-label="Nearby road ends">{nearApproaches.map(item => { const value = JSON.stringify([item.id, item.endpoint]); return <button key={value} aria-pressed={approach === value} onClick={() => { setApproach(value); setFocusedRoad(item.id); }}><b>{name(item.id)}</b><small>{item.bearing} · {item.endpoint === 'start' ? 'Start' : 'End'} · {Math.round(item.distance)} m from junction</small></button>; })}</div><button className="road-wide-action" disabled={!approach} onClick={() => { const [id, endpoint] = JSON.parse(approach); onChange({ ...draft, roadIds: [...draft.roadIds, id], endpoints: { ...draft.endpoints, [id]: endpoint }, surfaceMode: 'rebuild' }); setApproach(''); }}>Connect selected road end</button></details>}
     </div>
     {plan.warnings?.map((warning) => <div className="studio-feedback" key={warning}><AlertTriangle size={17} /><p>{warning}</p></div>)}
   </div>;

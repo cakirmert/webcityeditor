@@ -1,5 +1,6 @@
-import { difference, intersection, union, type MultiPolygon } from 'polygon-clipping';
+import type { MultiPolygon } from 'polygon-clipping';
 import { deriveEditableRoadDraftFromAreas, sampleRoadSectionCenterlineWgs84, type RoadArea, type RoadBandKind } from './transportation';
+import { difference, intersection, union } from './polygon-boolean';
 
 export type JunctionPoint = [number, number];
 export interface JunctionFootprint {
@@ -124,16 +125,44 @@ export function buildAutomaticJunctionFootprint(roadIds: string[], endpoints: Re
       }
       if (!Number.isFinite(left)) return [];
       if (endpoint === 'end') [left, right] = [-right, -left];
+      // Imported lane polygons can be asymmetric or tapered. Read their real
+      // kerb at this cross-section instead of assuming centred, uniform bands.
+      const edges = areas.filter((area) => area.roadId === id && (area.geometryMode === 'exact' || area.attributes.source === 'osm2streets') && kinds.includes(areaBandKind(area))).flatMap((area) => {
+        const ring = openJunctionRing(area.polygon).map(project);
+        return ring.flatMap((a, i) => {
+          const b = ring[(i + 1) % ring.length];
+          const da = (a[0] - point[0]) * tangent[0] + (a[1] - point[1]) * tangent[1];
+          const db = (b[0] - point[0]) * tangent[0] + (b[1] - point[1]) * tangent[1];
+          if (da * db > 0 || Math.abs(da - db) < 1e-8) return [];
+          const t = da / (da - db);
+          const lateral = (a[0] + t * (b[0] - a[0]) - point[0]) * normal[0] + (a[1] + t * (b[1] - a[1]) - point[1]) * normal[1];
+          return Math.abs(lateral) <= total * 2 ? [lateral] : [];
+        });
+      });
+      if (edges.length >= 2) { left = Math.max(...edges); right = Math.min(...edges); }
       const offset = (value: number): JunctionPoint => [point[0] + normal[0] * value, point[1] + normal[1] * value];
-      return [{ left: offset(left), right: offset(right), tangent, angle: Math.atan2(tangent[1], tangent[0]) }];
+      return [{ left: offset(left), right: offset(right), tangent, tip: line[0], point, angle: Math.atan2(tangent[1], tangent[0]) }];
     } catch { return []; }
   }).sort((a, b) => a.angle - b.angle);
   if (mouths.length < 2) return undefined;
+  const hub: JunctionPoint = [0, 1].map((axis) => mouths.reduce((sum, mouth) => sum + mouth.tip[axis], 0) / mouths.length) as JunctionPoint;
+  // A curved approach's tangent may point past its neighbour. Order mouths by
+  // their actual position around the hub, rather than the road's heading.
+  mouths.sort((a, b) => Math.atan2(a.point[1] - hub[1], a.point[0] - hub[0]) - Math.atan2(b.point[1] - hub[1], b.point[0] - hub[0]));
   const polygon: JunctionPoint[] = [];
   mouths.forEach((mouth, i) => {
     const next = mouths[(i + 1) % mouths.length];
     polygon.push(mouth.right, mouth.left);
-    const reach = Math.hypot(next.right[0] - mouth.left[0], next.right[1] - mouth.left[1]) * curveFactor;
+    let reach = Math.hypot(next.right[0] - mouth.left[0], next.right[1] - mouth.left[1]) * curveFactor;
+    const delta: JunctionPoint = [next.right[0] - mouth.left[0], next.right[1] - mouth.left[1]];
+    const det = mouth.tangent[0] * next.tangent[1] - mouth.tangent[1] * next.tangent[0];
+    if (Math.abs(det) > .01) {
+      const s = -(delta[0] * next.tangent[1] - delta[1] * next.tangent[0]) / det;
+      const t = -(delta[0] * mouth.tangent[1] - delta[1] * mouth.tangent[0]) / det;
+      // A control point beyond the kerb-line intersection creates a cusp at
+      // skew or short approaches. Keep the corner inside its tangent wedge.
+      if (s > 0 && t > 0) reach = Math.min(reach, .95 * s, .95 * t);
+    }
     const a = mouth.left.map((value, axis) => value - mouth.tangent[axis] * reach);
     const b = next.right.map((value, axis) => value - next.tangent[axis] * reach);
     for (let j = 1; j < 12; j++) {
@@ -143,12 +172,24 @@ export function buildAutomaticJunctionFootprint(roadIds: string[], endpoints: Re
   });
   const footprint: JunctionFootprint = { polygon: polygon.map(unproject), holes: [], source: 'generated' };
   if (!validateJunctionFootprint(footprint)) return footprint;
-  // Wide mouths can overlap at short junctions. Resolve their generated loops
-  // before exposing editable handles; never perform this repair on a traced kerb.
+  // Overlapping mouths can make a single perimeter wind back on itself. Unite
+  // its local fans around the hub so short, skewed arms cannot leave bow-ties.
+  // Only generated geometry is repaired; a user's traced kerb stays authoritative.
   try {
-    const joined = union([polygon]);
+    const fans = polygon.map((point, i) => [[hub, point, polygon[(i + 1) % polygon.length]]]);
+    const joined = union(fans[0], ...fans.slice(1));
     if (joined.length !== 1) return undefined;
     const resolved: JunctionFootprint = { polygon: openJunctionRing(joined[0][0].map(unproject)), holes: [], source: 'generated' };
     return validateJunctionFootprint(resolved) ? undefined : resolved;
   } catch { return undefined; }
+}
+
+function areaBandKind(area: RoadArea): RoadBandKind {
+  const kind = String(area.attributes.transportationUsage ?? area.function).toLowerCase();
+  if (/sidewalk|footway|pedestrian/.test(kind)) return 'sidewalk';
+  if (/bik|cycl/.test(kind)) return 'bike_lane';
+  if (/park/.test(kind)) return 'parking';
+  if (/green|plant|verge/.test(kind)) return 'green';
+  if (/median|buffer|shoulder/.test(kind)) return 'median';
+  return 'car_lane';
 }

@@ -1,16 +1,18 @@
 import { usageRgb } from './footprint-tint';
 
+// Use the serving hostname directly. The bare hostname redirects without CORS
+// headers, so browsers reject it before reaching the otherwise public tiles.
 export const HAMBURG_LOD1_TILESET_URL =
-  'https://daten-hamburg.de/gdi3d/datasource-data/LoD1/tileset.json';
+  'https://www.daten-hamburg.de/gdi3d/datasource-data/LoD1/tileset.json';
 
 export const HAMBURG_LOD2_TILESET_URL =
-  'https://daten-hamburg.de/gdi3d/datasource-data/LoD2/tileset.json';
+  'https://www.daten-hamburg.de/gdi3d/datasource-data/LoD2/tileset.json';
 
 export const HAMBURG_LOD3_UNTEXTURED_TILESET_URL =
-  'https://daten-hamburg.de/gdi3d/datasource-data/LoD3_untexturiert/tileset.json';
+  'https://www.daten-hamburg.de/gdi3d/datasource-data/LoD3_untexturiert/tileset.json';
 
 export const HAMBURG_LOD3_TEXTURED_TILESET_URL =
-  'https://daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json';
+  'https://www.daten-hamburg.de/gdi3d/datasource-data/LoD3_tex20cm/tileset.json';
 
 export function hamburgLod3TilesetUrl(texturesEnabled: boolean): string {
   return texturesEnabled

@@ -3,8 +3,11 @@ import type { RoadBand, RoadBandKind, RoadDraft, RoadSectionDraft } from './tran
 export interface RoadWidthRule {
   minimumM: number;
   recommendedM: number;
+  /** Editable project guardrail, not a statutory maximum. */
+  maximumM?: number;
   twoWayMinimumM?: number;
   twoWayRecommendedM?: number;
+  twoWayMaximumM?: number;
   source: string;
   note: string;
 }
@@ -23,28 +26,32 @@ const CURRENT_RESTRA = 'https://dokumente.hamburg.de/resource/blob/193072/341783
 export const HAMBURG_ROAD_RULES: RoadRuleProfile = {
   id: 'hamburg-concept',
   name: 'Hamburg · concept design',
-  version: '2026-09-06',
+  version: '2026-09-09',
   widths: {
-    car_lane: { minimumM: 2.75, recommendedM: 3.25, twoWayMinimumM: 5.5, twoWayRecommendedM: 6.5,
+    car_lane: { minimumM: 2.75, recommendedM: 3.25, maximumM: 5, twoWayMinimumM: 5.5, twoWayRecommendedM: 6.5, twoWayMaximumM: 10,
       source: 'Project design policy', note: 'Per motor lane; a band carrying both directions needs two lanes of space. Review bus, freight and speed requirements.' },
-    bike_lane: { minimumM: 2, recommendedM: 2.5, twoWayMinimumM: 3, twoWayRecommendedM: 3.5,
+    bike_lane: { minimumM: 2, recommendedM: 2.5, maximumM: 5, twoWayMinimumM: 3, twoWayRecommendedM: 3.5, twoWayMaximumM: 8,
       source: CURRENT_RESTRA, note: 'ReStra 23.03.2026, pp. 94–96: one-way clear cycling space 2.00/2.50 m; add markings or protection separately (marked lane total 2.25/2.75 m). Two-way defaults assume provision on one side only: 3.00/3.50 m; provision on both sides can use 2.50/3.00 m.' },
-    sidewalk: { minimumM: 1.8, recommendedM: 2.65,
+    sidewalk: { minimumM: 1.8, recommendedM: 2.65, maximumM: 30,
       source: RESTRA, note: '1.80 m clear pedestrian space; 2.65 m is the total side-space reference at 50 km/h, including safety space. Tree pits and furniture do not count as clear walking width.' },
-    parking: { minimumM: 2, recommendedM: 2.1,
+    parking: { minimumM: 2, recommendedM: 2.1, maximumM: 3.5,
       source: RESTRA, note: 'Parallel parking: 2.10 m standard materials; 2.00 m with other surfaces. 2.30 m recommended beside heavily used main roads. Add a separate door buffer; accessible spaces need separate dimensions.' },
-    median: { minimumM: 0.1, recommendedM: 0.5,
+    median: { minimumM: 0.1, recommendedM: 0.5, maximumM: 20,
       source: 'Project design policy', note: 'Kerb or separator only; this is not a pedestrian refuge minimum.' },
-    green: { minimumM: 0.5, recommendedM: 1.5,
+    green: { minimumM: 0.5, recommendedM: 1.5, maximumM: 50,
       source: 'Project design policy', note: 'Landscape strip only; tree rooting volume requires its own design.' },
   },
 };
 
 export function roadWidthRule(band: RoadBand, profile = HAMBURG_ROAD_RULES): RoadWidthRule {
   const rule = profile.widths[band.kind];
-  if (band.direction !== 'both') return rule;
+  const fallback = HAMBURG_ROAD_RULES.widths[band.kind];
+  // Earlier saved profiles predate maximums. Keep their minimum/target values,
+  // but do not accidentally restore an unbounded width control on reload.
+  if (band.direction !== 'both') return { ...rule, maximumM: rule.maximumM ?? Math.max(fallback.maximumM!, rule.recommendedM) };
   return { ...rule, minimumM: rule.twoWayMinimumM ?? rule.minimumM,
-    recommendedM: rule.twoWayRecommendedM ?? rule.recommendedM };
+    recommendedM: rule.twoWayRecommendedM ?? rule.recommendedM,
+    maximumM: rule.twoWayMaximumM ?? Math.max(rule.maximumM ?? fallback.twoWayMaximumM ?? fallback.maximumM!, rule.twoWayRecommendedM ?? rule.recommendedM) };
 }
 
 export interface RoadRuleIssue {
@@ -76,6 +83,9 @@ export function validateRoadRules(draft: RoadDraft, baseline?: RoadDraft | null)
       if (!valid || band.widthM < rule.minimumM - 1e-6) {
         issues.push({ sectionId: section.id, bandIndex, code: 'width', severity: valid && unchanged ? 'warning' : 'error',
           message: `Band ${bandIndex + 1}: ${band.kind.replaceAll('_', ' ')} is ${band.widthM.toFixed(2)} m; the project minimum is ${rule.minimumM.toFixed(2)} m.${valid && unchanged ? ' Existing width retained.' : ''}` });
+      } else if (rule.maximumM !== undefined && band.widthM > rule.maximumM + 1e-6) {
+        issues.push({ sectionId: section.id, bandIndex, code: 'width', severity: unchanged ? 'warning' : 'error',
+          message: `Band ${bandIndex + 1}: ${band.widthM.toFixed(2)} m exceeds the ${rule.maximumM.toFixed(2)} m project limit. Add separate lanes or adjust the project rules for an exceptional width.${unchanged ? ' Existing width retained.' : ''}` });
       } else if (band.widthM < rule.recommendedM - 1e-6) {
         issues.push({ sectionId: section.id, bandIndex, code: 'recommendation', severity: 'warning',
           message: `Band ${bandIndex + 1}: ${rule.recommendedM.toFixed(2)} m recommended; review this constrained width.` });
@@ -110,7 +120,7 @@ export function fitRoadDraftToRules(draft: RoadDraft): { draft: RoadDraft; error
     const right = section.extentLimits?.right ?? Infinity;
     if (left < 0 || right < 0 || Number.isNaN(left) || Number.isNaN(right)) return { draft, error: 'Enter valid left and right extents.' };
     const floors = section.bands.map((band) => roadWidthRule(band, profile).minimumM);
-    const desired = section.bands.map((band, i) => Math.max(floors[i], band.widthM));
+    const desired = section.bands.map((band, i) => Math.min(roadWidthRule(band, profile).maximumM ?? Infinity, Math.max(floors[i], band.widthM)));
     const minimum = floors.reduce((sum, value) => sum + value, 0);
     const total = desired.reduce((sum, value) => sum + value, 0);
     const available = Math.min(total, left + right);
@@ -132,6 +142,8 @@ export function parseRoadRuleProfile(value: unknown): RoadRuleProfile {
     const rule = profile.widths[kind];
     if (!rule || typeof rule.source !== 'string' || typeof rule.note !== 'string' || !Number.isFinite(rule.minimumM) || rule.minimumM <= 0 || !Number.isFinite(rule.recommendedM) || rule.recommendedM < rule.minimumM) throw new Error(`Invalid width rule for ${kind}.`);
     if ((rule.twoWayMinimumM !== undefined || rule.twoWayRecommendedM !== undefined) && (!Number.isFinite(rule.twoWayMinimumM) || (rule.twoWayMinimumM ?? 0) <= 0 || !Number.isFinite(rule.twoWayRecommendedM) || (rule.twoWayRecommendedM ?? 0) < (rule.twoWayMinimumM ?? 0))) throw new Error(`Invalid two-way width rule for ${kind}.`);
+    if (rule.maximumM !== undefined && (!Number.isFinite(rule.maximumM) || rule.maximumM < rule.recommendedM)) throw new Error(`Invalid maximum width for ${kind}.`);
+    if (rule.twoWayMaximumM !== undefined && (!Number.isFinite(rule.twoWayMaximumM) || rule.twoWayMaximumM < (rule.twoWayRecommendedM ?? rule.recommendedM))) throw new Error(`Invalid two-way maximum width for ${kind}.`);
   }
   return structuredClone(profile);
 }

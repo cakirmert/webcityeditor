@@ -18,12 +18,49 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('blocks a widened road overlapping its neighbour before the preview debounce runs', () => {
+    const doc = buildSampleCube();
+    const bands = [{ kind: 'car_lane' as const, widthM: 3.25, direction: 'forward' as const }];
+    insertRoadIntoCityJson(doc, createManualRoadDraft([[4.4, 52.05], [4.401, 52.05]], { bands }), { id: 'edited' });
+    insertRoadIntoCityJson(doc, createManualRoadDraft([[4.4, 52.050032], [4.401, 52.050032]], { bands }), { id: 'neighbour' });
+    const before = JSON.stringify(doc), alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    act(() => result.current.handleEditSelectedRoadArea(extractTransportationAreas(doc).find(area => area.roadId === 'edited')!));
+    act(() => result.current.handleRoadDraftChange(withFirstBandWidth(result.current.roadDraft!, 4.8), 'Widen road'));
+    act(() => result.current.handleInsertRoad());
+    expect(JSON.stringify(doc)).toBe(before);
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining('overlaps'));
+    alert.mockRestore();
+  });
+  it('constructs an intersection from an unsaved road join and saves both atomically', () => {
+    const doc = buildSampleCube(), join: [number, number] = [4.4, 52.05];
+    const bands = [{ kind: 'car_lane' as const, widthM: 3.25, direction: 'forward' as const }, { kind: 'car_lane' as const, widthM: 3.25, direction: 'backward' as const }];
+    const peer = createManualRoadDraft([join, [4.401, 52.05]], { bands });
+    insertRoadIntoCityJson(doc, peer, { id: 'east' });
+    const incoming = createManualRoadDraft([[4.4, 52.0505], join], { bands });
+    incoming.sections[0].connections = { end: { target: 'cityjson', targetId: 'east', targetSectionId: peer.sections[0].id, targetEndpoint: 'start', positionWgs84: join, confirmed: true } };
+    const before = JSON.stringify(doc), { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    act(() => result.current.setRoadDraft(incoming));
+    act(() => result.current.handleRoadDraftChange({ ...incoming, name: 'New connected road' }, 'Name road'));
+    act(() => result.current.handleCreateJunction(incoming.sections[0].id, 'end'));
+    expect(result.current.junctionDraft).not.toBeNull();
+    expect(result.current.junctionPlan?.error).toBeUndefined();
+    expect(result.current.junctionConflicts.filter(issue => issue.severity === 'error')).toEqual([]);
+    expect(JSON.stringify(doc)).toBe(before);
+    act(() => result.current.handleSaveJunction());
+    expect(result.current.junctionDirty).toBe(false);
+    expect(doc.CityObjects['connected-road-1']?.attributes?.name).toBe('New connected road');
+    expect(doc.CityObjects[result.current.junctionDraft!.id]?.attributes?._connectedCityRoadIds).toContain('connected-road-1');
+  });
   it('undoes a whole kerb drag and refuses to save an unfinished trace', () => {
     const doc = JSON.parse(readFileSync('public/examples/hamburg-mattentwiete.json', 'utf8'));
     const before = JSON.stringify(doc);
     const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
     const area = extractTransportationAreas(doc).find(area => area.roadId.includes('intersection'))!;
     act(() => result.current.handleEditSelectedRoadArea(area));
+    expect(result.current.showRoadEditor).toBe(true);
+    expect(result.current.junctionEditTool).toBe('vertices');
+    expect(result.current.junctionPlan?.footprint?.polygon.length).toBeGreaterThan(3);
     const original = result.current.junctionDraft!;
     for (const delta of [.000001, .000002]) {
       const next = structuredClone(original);
@@ -347,7 +384,8 @@ describe('useRoadEditor road-edit lifecycle', () => {
     )!;
     act(() => result.current.handleEditSelectedRoadArea(sourceArea));
     const moved = JSON.parse(JSON.stringify(result.current.roadDraft)) as RoadDraft;
-    moved.sections[0].centerlineWgs84.at(-1)![0] += 0.0001;
+    // Move away from the peer; disconnecting must not authorize an overlap.
+    moved.sections[0].centerlineWgs84.at(-1)![0] -= 0.0001;
     delete moved.sections[0].connections;
     act(() => result.current.handleRoadDraftChange(moved));
 

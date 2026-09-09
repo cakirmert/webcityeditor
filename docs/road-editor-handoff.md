@@ -1,15 +1,27 @@
 # Road editor handoff
 
-7 September 2026
+Updated 9 September 2026
+
+## September correction
+
+- Opening an intersection activates boundary handles immediately. Selection also opens the workspace reliably; malformed imported fragments have an explicit generate/trace path.
+- Roads can be found by street name. Start/End connection cards open existing junctions; unsaved joins and their physical intersections can be committed atomically. The junction's Roads tab highlights a specific endpoint and uses readable named candidate cards.
+- Turns use a blue incoming lane, solid cyan permitted curves, red blocked curves, arrowheads and numbered destinations. The interactive diagram is visible below the controls.
+- New road overlap is checked during preview and synchronously at save, including propagated roads and junction trims. Retained source overlap is grandfathered without allowing it to grow or move. Existing approach pavement is excluded from new building/tree occupancy checks; sidewalk-to-traffic changes still check tree trunks.
+- Physical geometry works even with no compatible incoming movements. Imported kerbs are sampled at the actual mouth, curved/short approaches are handled more robustly, and source island openings survive automatic regeneration. A precise polygon-operation retry resolves coincident-edge failures without waiving validation.
+- Hamburg tile URLs use the canonical serving hostname, fixing the CORS redirect failure for the building and tree sources. LoD1 and both LoD3 variants were confirmed in the browser; LoD2 root/child endpoints were checked for successful CORS responses.
+- Tablet layouts keep the inspector on the right. The toolbar compacts at tablet widths and its More menu is no longer clipped by a scrolling header. The repetitive BuildingParts list is collapsed and no longer invents Floor/UNKNOWN labels.
+
+The [eight-location visual review](intersection-validation-2026-09.md) includes a reproducible **608-junction audit**: 539 candidates pass road-overlap checks, 46 are blocked for overlap, and 23 are blocked for construction/elevation constraints. These are geometry checks, not claims of exact satellite alignment. Keep current retains source geometry for cases needing further interpretation.
 
 ## Delivered behavior
 
 - **Lanes** combines the proportional street preview with band selection, type, material, width, direction, ordering and additions. The preview and selected width fit in the first desktop inspector screen. Band reordering is in a collapsed disclosure; small bands also have a selection dropdown. The duplicate bottom editor is removed.
 - **Shape** contains centreline/curve controls, height and section splitting. Yellow endpoints snap to explicit targets.
-- **Connections** shows endpoint joins and opens connected intersections. A saved endpoint join can seed a new intersection; additional nearby approaches can be added there.
+- **Connections** shows endpoint joins and opens connected intersections. An unsaved endpoint join can seed a new intersection; additional nearby approaches can be added there.
 - **Rules** contains versioned city profiles, per-band minimum/target checks, left/right extents, offset and constrained fitting. Profiles and limits survive CityJSON save/reload.
-- A **map comparison bar** holds Map/Satellite, road opacity and hold-to-compare. Narrow screens use a bottom sheet with Hide/Expand; the camera accounts for the inspector's occupied space.
-- **Intersection editing** has Shape/Turns/Roads tabs. Preserve, generate or visually trace kerbs; drag points, insert midpoints, nudge/delete with the keyboard, and trace island openings. Turn controls show one incoming lane and its destinations, with an optional diagram. Physical pavement comes from kerb outlines independently of permitted movements.
+- A **map comparison bar** holds Map/Satellite, road opacity and hold-to-compare. Tablet/desktop screens use a right inspector with Hide/Expand; the camera accounts for its occupied space. Phones are not an editing target.
+- **Intersection editing** has Shape/Turns/Roads tabs. Preserve, generate or visually trace kerbs; drag points, insert midpoints, nudge/delete with the keyboard, and trace island openings. Turn controls show one incoming lane and its destinations, with a visible interactive diagram. Physical pavement comes from kerb outlines independently of permitted movements.
 - Automatic junctions follow connected road width/shape edits. A custom trace remains fixed and is checked for attachment to the approaches. Original untrimmed approach geometry is retained to prevent progressive damage. Road/junction saves use guarded mutations and global undo; a boundary drag is one draft undo action.
 - **Data → Try the Hamburg intersection** loads a real Mattentwiete design study. Its original crop, estimated widths, outline metadata, screenshots and comparison GIF are included. See [the study](intersection-reference-study.md).
 - Trees on sidewalks, planted verges and separators are allowed. Surface driving/cycling/parking over a mapped trunk blocks saving. Known trunk radius is used, with a 0.25 m fallback when unavailable; the editor adds no canopy/root buffer. Underground roads are excluded; uncertain elevated overlap remains a warning.
@@ -22,19 +34,20 @@
 4. Open a connected intersection. Select an incoming lane, disable a movement, undo/redo and save. Reload and check the same restriction. Keeping the surface must leave its geometry and vertex array unchanged.
 5. Generate a flat junction. Check its kerbs and trimmed approaches, then widen an approach. The automatic junction must adapt. Trace a boundary and an island; check saved holes, drag undo and approach attachment. A custom outline must remain fixed. Repeat rebuilding and check that approach areas do not keep shrinking.
 6. Test a pavement tree, then change that band into a roadway. Only the roadway/trunk case should block saving.
-7. Check the phone bottom sheet, landscape inspector, keyboard tab navigation and save/discard controls. Run **Structure** and **Check 3D** before exporting a design.
+7. Check iPad landscape/portrait, the desktop inspector, keyboard navigation and save/discard controls. Run **Structure** and **Check 3D** before exporting a design.
 
 Automated coverage includes rule persistence, asymmetric fitting, infeasible limits, unchanged observed narrow bands, pavement/trunk behavior, tree-pit holes, reciprocal disconnection, repeated junction rebuilds, movement persistence, connected-width adaptation and separation of bridge/ground roads. Browser QA additionally exercises the responsive controls and rendered geometry.
 
 ## Verification results
 
-- `npm test`: **698 passed, 5 skipped** across 84 passing test files and two skipped files, including the shared-storage client and catalog isolation checks. The skipped checks require optional converter/IFC fixtures or the older val3dity executable at the repository's configured external path.
+- `npm test`: **722 passed, 5 skipped** across 86 passing test files and two skipped files, including ten real Hamburg junctions, physical overlap and atomic join regressions. The skipped checks require optional converter/IFC fixtures or the older val3dity executable at the repository's configured external path.
 - `npm run build:pages`: TypeScript and the production Vite build with the GitHub Pages base path passed.
+- Current browser verification: direct boundary dragging, whole-drag undo/redo, successful junction save, disabled-turn persistence through disconnect/reconnect, named endpoint highlighting and visible cyan/red movement arrows. Entering a 100 m driving lane shows its 5 m policy limit and physical road-overlap conflicts, with saving disabled. LoD3 streamed 23 textured tiles and three untextured tiles in the checked view without the former fetch errors. Current screenshots include desktop, 1024 × 768 and 768 × 1024 tablet viewports; the inspector and More menu remain usable in both tablet orientations.
 - `npm run test:backend`: **11 passed**, including authentication, CORS, revision conflicts, idempotent retries, retention and restart persistence. The Docker image was built and run with its persistent volume; an edited 1,276-vertex Mattentwiete document and revision 2 survived a container restart.
-- Shared-project browser checks covered connect, create workspace/project, applied intersection autosave, reopening in a fresh page, detecting another writer's revision and saving the retained local design as a separate project. The dialog was verified at **1280 × 720** and **390 × 844**; its header remains above the toolbar and available while scrolling.
+- Earlier shared-project browser checks covered connect, create workspace/project, applied intersection autosave, reopening in a fresh page, detecting another writer's revision and saving the retained local design as a separate project. That backend is unchanged by this correction.
 - Geometry regression coverage includes three-arm/four-arm junctions, the synthetic short-Hamburg fixture, the real Mattentwiete source and trace, missing endpoint inference, detached/crossing outlines, islands, repeated rebuilding, widened approaches and elevation steps. UI coverage includes whole-drag undo, unfinished-trace save blocking and opacity restoration on release/cancellation.
 - **val3dity 2.7.0**, using the application's `--ignore204` profile, accepted all five Road MultiSurfaces in the traced Mattentwiete study. This is geometry validation under that profile, not a full CityJSON schema or traffic-design certification.
-- Browser checks covered **1280 × 720**, **390 × 844** (compact and expanded) and **800 × 450**. Lane width changes updated the road and connected junction; movement disable/undo/redo/save worked; asymmetric fitting displayed its map limits; an infeasible envelope kept widths unchanged and disabled save. The saved, fitted road and junction passed both **Structure** and local **Check 3D**. The traced five-object Mattentwiete example also passed the app’s local **Check 3D** after save. Phone tracing was verified to hide the controls and restore them on cancellation.
+- Earlier geometry verification also covered asymmetric fitting, infeasible envelopes, the saved fitted road/junction and the five-object Mattentwiete study with the local **Check 3D** service. Those results do not certify newly edited geometries; run Check 3D again after modifying a design.
 
 The validation executable and synthetic QA documents are temporary local tools/fixtures, not application dependencies or replacement production data.
 

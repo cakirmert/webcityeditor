@@ -214,7 +214,7 @@ textarea,
   touch-action: manipulation;
 }
 
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   button,
   summary,
   input,
@@ -294,8 +294,7 @@ kbd {
   background: rgba(24, 28, 37, 0.98);
   padding: 7px 12px;
   font-size: 12px;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
   scrollbar-width: none;
 }
 
@@ -361,7 +360,25 @@ kbd {
   display: none;
 }
 
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 1400px) {
+  .app-toolbar__document-stats { display: none; }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+  .app-toolbar { gap: 5px; padding-inline: 10px; }
+  .app-toolbar__identity { min-width: 88px; max-width: 130px; }
+  .app-toolbar__identity > div { min-width: 0; }
+  .app-toolbar__action, .app-toolbar__more { padding-inline: 9px; }
+  .app-toolbar__validation { display: none; }
+  .app-toolbar__more-validation { display: grid; }
+}
+
+@media (min-width: 768px) and (max-width: 900px) {
+  .app-toolbar__mobile-hide { display: none; }
+  .app-toolbar__mobile-menu-actions { display: grid; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+}
+
+@media (max-width: 767px) {
   .app-toolbar {
     min-height: 64px;
     gap: 8px;
@@ -661,7 +678,7 @@ kbd {
   min-height: 40px;
 }
 
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   .building-inspector-content button,
   .building-inspector-content input,
   .building-inspector-content select {
@@ -1300,7 +1317,7 @@ select:focus {
   background: rgba(20, 184, 166, 0.18);
 }
 
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   .map-layer-control.is-obscured-by-inspector {
     display: none;
   }
@@ -2146,7 +2163,7 @@ select:focus {
   }
 }
 
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   .road-editor-panel,
   .road-editor-panel.is-expanded {
     top: auto;
@@ -2248,7 +2265,7 @@ select:focus {
 
 /* Last in the cascade so compact desktop component rules cannot shrink coarse
    pointer targets back below a comfortable finger-sized control. */
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   #root button,
   #root summary,
   #root input,
@@ -2352,6 +2369,8 @@ select:focus {
 .road-profile-actions button, .road-wide-action { min-height: 44px; padding: 7px 9px; border: 1px solid #4a6476; border-radius: 7px; background: #28435866; color: #dceefa; font: inherit; font-size: 11px; cursor: pointer; }
 .road-profile-actions button:disabled { opacity: .45; cursor: default; }
 .road-endpoint-card { display: grid; gap: 8px; padding: 10px; border: 1px solid #384959; border-radius: 8px; }
+.road-endpoint-card .road-wide-action { display: block; text-align: left; }
+.road-endpoint-card .road-wide-action small { display: block; margin-top: 4px; color: #53677f; font-weight: 400; }
 .road-endpoint-card > span { overflow-wrap: anywhere; color: #b3c7d4; font-size: 11px; }
 .junction-live-preview { width: 100%; height: 185px; overflow: hidden; border-radius: 10px; border: 1px solid #405364; background: #1b252a; }
 .junction-live-preview [role="button"] { cursor: pointer; }
@@ -2372,7 +2391,7 @@ select:focus {
 .road-editor-panel.is-collapsed .road-inspector-tabs,
 .road-editor-panel.is-collapsed .road-editor-footer,
 .road-editor-panel.is-collapsed .road-editor-panel__scroll { display: none; }
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   .road-editor-panel, .road-editor-panel.is-expanded { width: 100%; max-width: none; height: min(54dvh, 560px); left: 0; right: 0; top: auto; bottom: 0; }
   .road-editor-panel.is-expanded { height: 76dvh; }
   .road-editor-panel.is-browse { height: auto; max-height: 54dvh; }
@@ -2441,6 +2460,34 @@ select:focus {
 .road-editor-panel p, .road-editor-card__help, .road-rules-panel p, .road-connections-panel p, .junction-editor p { color: #6b7b8d; }
 .road-editor-panel small, .road-editor-panel .road-field > span, .road-rules-extents label > span { color: #64758a; }
 .road-editor-panel input:not([type='range']):not([type='checkbox']), .road-editor-panel select { background: #fff; border: 1px solid #d5deea; border-radius: 8px; color: #243348; font-size: 12px; }
+.road-editor-panel select, .road-editor-panel input { color-scheme: light; }
+.road-editor-panel select option { color: #243348; background: #fff; }
+.road-inline-error { grid-column: 1 / -1; color: #b42318 !important; background: #fff1f0; border-left: 3px solid #d92d20; padding: 9px; font-size: 12px; }
+.road-search-results { display: grid; gap: 6px; }
+.road-search-results button { text-align: left; padding: 10px; border: 1px solid #d5deea; border-radius: 8px; background: white; cursor: pointer; }
+.road-search-results b, .road-search-results small { display: block; }
+.city-map.has-road-workspace .maplibregl-ctrl-top-right { top: auto; bottom: 34px; right: auto; left: 0; }
+.building-parts-browser summary { cursor: pointer; padding: 8px 0; font-size: 12px; }
+.building-parts-browser > div { max-height: 220px; overflow-y: auto; }
+.building-parts-browser small { font-size: 10px; overflow-wrap: anywhere; }
+.junction-road-cards, .junction-candidate-list { display: grid; gap: 8px; }
+.junction-road-cards > div { border: 1px solid #d6deea; border-radius: 9px; background: white; overflow: hidden; }
+.junction-road-cards > .is-focused { border-color: #2471ef; box-shadow: 0 0 0 1px #2471ef; }
+.junction-road-focus, .junction-candidate-list button { display: block; width: 100%; padding: 10px; text-align: left; border: 0; background: white; color: #243348; cursor: pointer; }
+.junction-road-focus b, .junction-road-focus small, .junction-candidate-list b, .junction-candidate-list small { display: block; line-height: 1.5; }
+.junction-road-actions { display: flex; gap: 8px; padding: 0 10px 9px; }
+.junction-road-actions button { flex: 1; min-height: 32px; padding: 4px; border: 1px solid #d6deea; border-radius: 6px; background: #f7f9fc; color: #345575; cursor: pointer; font-size: 11px; }
+.junction-nearby summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
+.junction-candidate-list { max-height: 240px; overflow-y: auto; margin-bottom: 10px; }
+.junction-candidate-list button { border: 1px solid #d6deea; border-radius: 7px; }
+.junction-candidate-list button[aria-pressed='true'] { background: #e8f0ff; border-color: #2471ef; }
+.junction-movements label.is-disabled { border-style: dashed; background: #fff3f3; }
+.junction-turn-number { display: grid; place-items: center; flex: 0 0 23px; height: 23px; border-radius: 50%; background: #e3f6fc; color: #007aab; font-weight: 700; }
+.junction-movements .is-disabled .junction-turn-number { color: #b42318; background: #ffe4e1; }
+@media (min-width: 768px) and (max-width: 1100px) {
+  .road-editor-panel { width: 330px; max-width: 44vw; }
+  .road-editor-panel.is-expanded { width: 390px; max-width: 49vw; }
+}
 .road-editor-panel input:focus-visible, .road-editor-panel select:focus-visible, .road-editor-panel button:focus-visible { outline: 2px solid #3574e8; outline-offset: 2px; }
 .road-editor-panel input[type='range'] { accent-color: #3973e9; background: transparent; }
 .road-editor-panel button:disabled { opacity: .4; cursor: default; }
@@ -2550,7 +2597,7 @@ select:focus {
 .junction-map-guide button:disabled { opacity: .35; }
 .junction-map-guide p { flex-basis: 100%; margin: 0; font-size: 11px; color: #ffcea7; }
 @media (max-width: 1100px) { .road-compare-opacity > span, .road-compare-peek > span { display: none; } .road-compare-bar { gap: 5px; } }
-@media (max-width: 900px), (any-pointer: coarse) {
+@media (max-width: 767px) {
   .road-editor-panel, .road-editor-panel.is-expanded { width: 100%; max-width: none; top: auto; left: 0; right: 0; bottom: 0; height: 52dvh; border-radius: 18px 18px 0 0; }
   .road-editor-panel.is-browse { top: auto; bottom: 0; }
   .road-editor-panel.is-expanded { height: 76dvh; }

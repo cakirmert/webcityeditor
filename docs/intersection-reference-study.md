@@ -2,13 +2,15 @@
 
 7 September 2026 · Hamburg · representative local, flat four-arm junction
 
+**Updated review:** the [9 September correction](intersection-validation-2026-09.md) adds eight separate satellite comparisons, the 608-junction audit, robust overlap checks and the current editing workflow. This document retains the provenance and estimates of the original single-junction trace.
+
 ## Result
 
 The editor can reconstruct a useful visual intersection footprint from the imagery already available in its **Satellite** mode. The selected example is **Mattentwiete / Katharinenstraße**, with **Holzbrücke** to the north and **Cremon** to the west. It combines skewed approaches, one-way source streets, a curved western approach and visible parking. It is more informative than a symmetric invented crossroads while remaining small enough to inspect as one design.
 
 Open **Data → Try the Hamburg intersection → Roads** and select the central junction.
 
-![Traced kerb handles on the actual Hamburg reference](../assets/readme/intersection-editor.png)
+![Current draggable kerb handles on the Hamburg reference](../assets/readme/intersection-editor-current.jpg)
 
 ## Reproducible inputs
 
@@ -50,7 +52,7 @@ The resulting pavement follows the visible central opening and the wider approac
 - Custom outlines persist under `_junctionFootprint` and remain fixed during later approach edits. Generated outlines adapt to approach geometry. Both are saved as ordinary Road `MultiSurface` geometry with semantic surfaces.
 - Geometry checks reject malformed/crossing outlines, islands outside/touching the kerb, overlapping islands, detached approaches, incompatible levels and complete consumption of a short road. Islands are also removed from any underlying approach pavement.
 - The committed source and edited example are exercised by automated regressions. The edited five-object study passed **val3dity 2.7.0** using the application's `--ignore204` profile: **5/5 features and 5/5 MultiSurfaces valid**. This checks geometry, not traffic design.
-- Browser checks cover the desktop inspector, the compact/expanded phone sheet and the landscape layout. The screenshots and GIF show the actual UI.
+- Current browser checks focus on desktop and iPad-sized right inspectors. See the [handoff](road-editor-handoff.md) for current validation; phones are not a supported editing target.
 
 ## What is still uncertain
 

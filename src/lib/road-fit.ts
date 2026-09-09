@@ -1,18 +1,19 @@
 import { footprintPolygonToWgs84, type Footprint } from './footprints';
 import './projection';
 import proj4 from 'proj4';
-import {
-  difference,
-  intersection,
-  type MultiPolygon,
-  type Ring,
+import type {
+  MultiPolygon,
+  Ring,
 } from 'polygon-clipping';
 import type { RoadArea, RoadVerticalProfile } from './transportation';
 import type { ParcelZone } from './zoning';
 import type { RoadAllowedCorridor } from './road-corridor';
+import { difference, intersection, union } from './polygon-boolean';
+import { roadDisplayName } from './road-labels';
 
 export type RoadFitConflictKind =
   | 'outside_corridor'
+  | 'road_overlap'
   | 'building_overlap'
   | 'building_clearance'
   | 'tree_overlap'
@@ -26,12 +27,15 @@ export interface RoadFitConflict {
   roadAreaId: string;
   affectedId?: string;
   clearanceM?: number;
+  overlapAreaM2?: number;
   label: string;
   polygon: [number, number][];
 }
 
 export interface RoadFitValidationContext {
   roadAreas: RoadArea[];
+  /** Saved network before this edit. Preview roads replace matching road IDs. */
+  existingRoadAreas?: RoadArea[];
   buildingFootprints?: Footprint[];
   trees?: RoadFitTree[];
   affectedLand?: Array<Pick<ParcelZone, 'id' | 'label' | 'polygon'>>;
@@ -65,6 +69,19 @@ interface BooleanProjection {
 }
 
 export function validateRoadFit(context: RoadFitValidationContext): RoadFitConflict[] {
+  if (context.existingRoadAreas) {
+    // Rebuilding a junction transfers parts of its approaches to the junction.
+    // Validate new occupancy, not every unchanged metre of those long roads.
+    // Trees use a separate traffic mask: changing sidewalk to carriageway is a
+    // new conflict even when the outer paved footprint stays exactly the same.
+    const physical = changedRoadCoverage(context.roadAreas, context.existingRoadAreas, context.metricCrs);
+    const traffic = changedRoadCoverage(context.roadAreas.filter(roadAreaRequiresTreeClearance), context.existingRoadAreas.filter(roadAreaRequiresTreeClearance), context.metricCrs);
+    return [
+      ...validateRoadFit({ ...context, existingRoadAreas: undefined, roadAreas: physical, trees: [] }),
+      ...validateRoadFit({ ...context, existingRoadAreas: undefined, roadAreas: traffic, buildingFootprints: [], affectedLand: [], allowedCorridors: [] }),
+      ...validateRoadOverlaps(context.roadAreas, context.existingRoadAreas, context.metricCrs),
+    ];
+  }
   const conflicts: RoadFitConflict[] = [];
   const seen = new Set<string>();
   const buildings = context.buildingFootprints ?? [];
@@ -280,6 +297,94 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
   }
 
   return conflicts;
+}
+
+function changedRoadCoverage(preview: RoadArea[], saved: RoadArea[], metricCrs?: string): RoadArea[] {
+  const indexed = saved.map(area => ({ area, bbox: ringBbox(area.polygon) }));
+  return preview.flatMap(road => {
+    const bounds = ringBbox(road.polygon);
+    const previous = indexed.filter(({ area, bbox }) => bounds && bbox && bboxesOverlap(bounds, bbox) && roadVerticalRelation(road.vertical, area.vertical) === 'collision').map(item => item.area);
+    if (!previous.length) return [road];
+    const all = [road, ...previous];
+    const projection = projectRingsForBoolean(all.flatMap(area => [area.polygon, ...(area.holes ?? [])]), metricCrs);
+    if (!projection) return [road];
+    let cursor = 0;
+    const polygons = all.map(area => projection.rings.slice(cursor, cursor += 1 + (area.holes?.length ?? 0)).map(ring => ring.map(([x, y]): [number, number] => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000])));
+    try {
+      return difference(polygons[0], ...polygons.slice(1)).filter(polygon => polygon.reduce((sum, ring, i) => sum + (i ? -1 : 1) * Math.abs(signedArea(ring)), 0) > .01).map((polygon, i) => ({ ...road, id: `${road.id}-changed-${i}`, polygon: projection.unprojectRing(polygon[0]), holes: polygon.slice(1).map(projection.unprojectRing) }));
+    } catch { return [road]; }
+  });
+}
+
+/** Check the resulting network, including two roads changed in the same transaction.
+ * Shared edges are legal; a connection alone never grants permission to overlap.
+ * Existing source overlaps may be retained, but cannot grow or move with an edit.
+ */
+export function validateRoadOverlaps(preview: RoadArea[], saved: RoadArea[], metricCrs?: string): RoadFitConflict[] {
+  const replaced = new Set(preview.map((area) => area.roadId));
+  const peers = [...saved.filter((area) => !replaced.has(area.roadId)), ...preview];
+  const indexed = peers.map((area) => ({ area, bbox: ringBbox(area.polygon) }));
+  const savedByRoad = new Map<string, RoadArea[]>();
+  for (const area of saved) {
+    const group = savedByRoad.get(area.roadId) ?? [];
+    group.push(area); savedByRoad.set(area.roadId, group);
+  }
+  const conflicts: RoadFitConflict[] = [];
+  const seen = new Set<string>();
+  for (const road of preview) {
+    const bounds = ringBbox(road.polygon);
+    if (!bounds) continue;
+    for (const { area: peer, bbox } of indexed) {
+      if (road.roadId === peer.roadId || !bbox || !bboxesOverlap(bounds, bbox)) continue;
+      const key = [road.id, peer.id].sort().join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const relation = roadVerticalRelation(road.vertical, peer.vertical);
+      if (relation === 'separated') continue;
+      const oldRoad = (savedByRoad.get(road.roadId) ?? []).filter((area) => {
+        const b = ringBbox(area.polygon); return b && bboxesOverlap(bounds, b) && bboxesOverlap(bbox, b);
+      });
+      const oldPeer = (savedByRoad.get(peer.roadId) ?? []).filter((area) => {
+        const b = ringBbox(area.polygon); return b && bboxesOverlap(bounds, b) && bboxesOverlap(bbox, b);
+      });
+      const all = [road, peer, ...oldRoad, ...oldPeer];
+      const projection = projectRingsForBoolean(all.flatMap((area) => [area.polygon, ...(area.holes ?? [])]), metricCrs);
+      if (!projection) continue;
+      let cursor = 0;
+      const polygons = all.map((area) => projection.rings.slice(cursor, cursor += 1 + (area.holes?.length ?? 0)).map(ring => ring.map(([x, y]): [number, number] => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000])));
+      try {
+        let overlap = intersection(polygons[0], polygons[1]);
+        if (oldRoad.length && oldPeer.length && overlap.length) {
+          const beforeA = polygons.slice(2, 2 + oldRoad.length);
+          const beforeB = polygons.slice(2 + oldRoad.length);
+          const retained = intersection(union(beforeA[0], ...beforeA.slice(1)), union(beforeB[0], ...beforeB.slice(1)));
+          if (retained.length) overlap = difference(overlap, retained);
+        }
+        const areaM2 = overlap.reduce((sum, polygon) => sum + polygon.reduce((area, ring, i) => area + (i ? -1 : 1) * Math.abs(signedArea(ring)), 0), 0);
+        // Ignore millimetre tessellation slivers, not meaningful encroachment.
+        if (areaM2 <= .04) continue;
+        const polygon = largestExteriorRing(overlap, projection.unprojectRing);
+        if (!polygon) continue;
+        const name = roadDisplayName([peer], peer.roadId);
+        conflicts.push({ id: `road-fit-overlap-${road.id}-${peer.id}`, kind: relation === 'uncertain' ? 'vertical_uncertainty' : 'road_overlap',
+          severity: relation === 'uncertain' ? 'warning' : 'error', roadAreaId: road.id, affectedId: peer.roadId, overlapAreaM2: areaM2, polygon,
+          label: relation === 'uncertain' ? `Road crosses ${name}; set elevations to verify the bridge or tunnel clearance.` : `Road overlaps ${name} by ${areaM2.toFixed(2)} m². Narrow or move it, or construct an intersection that trims the connected roads.` });
+      } catch {
+        conflicts.push({ id: `road-fit-overlap-invalid-${road.id}-${peer.id}`, kind: 'road_overlap', severity: 'error', roadAreaId: road.id,
+          affectedId: peer.roadId, polygon: road.polygon, label: 'Could not check overlapping road surfaces. Repair their geometry before saving.' });
+      }
+    }
+  }
+  return conflicts;
+}
+
+function roadVerticalRelation(a?: RoadVerticalProfile, b?: RoadVerticalProfile): 'collision' | 'separated' | 'uncertain' {
+  if (Number.isFinite(a?.elevationM) && Number.isFinite(b?.elevationM)) return Math.abs(a!.elevationM! - b!.elevationM!) > .5 ? 'separated' : 'collision';
+  const gradeSeparated = [a?.placement, b?.placement].some((placement) => placement === 'elevated' || placement === 'underground');
+  if (!gradeSeparated) return 'collision';
+  // OSM layers express topology, not a surveyed clearance in metres.
+  if (a?.osmLayer !== undefined && b?.osmLayer !== undefined && a.osmLayer !== b.osmLayer) return 'separated';
+  return a?.placement === b?.placement ? 'collision' : 'uncertain';
 }
 
 export function roadAreaRequiresTreeClearance(area: RoadArea): boolean {
@@ -584,11 +689,13 @@ function largestExteriorRing(
 }
 
 function signedArea(ring: Ring): number {
+  if (ring.length < 3) return 0;
+  const [x, y] = ring[0];
   let area = 0;
   for (let i = 0; i < ring.length; i++) {
     const current = ring[i];
     const next = ring[(i + 1) % ring.length];
-    area += current[0] * next[1] - next[0] * current[1];
+    area += (current[0] - x) * (next[1] - y) - (next[0] - x) * (current[1] - y);
   }
   return area / 2;
 }

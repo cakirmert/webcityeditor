@@ -4,7 +4,7 @@ import { intersection } from 'polygon-clipping';
 import proj4 from 'proj4';
 import type { CityJsonDocument } from '../../src/types';
 import { checkIntegrity } from '../../src/lib/integrity';
-import { createManualRoadDraft, extractTransportationAreas, insertRoadIntoCityJson } from '../../src/lib/transportation';
+import { buildRoadPreviewAreas, createManualRoadDraft, extractTransportationAreas, insertRoadIntoCityJson } from '../../src/lib/transportation';
 import { buildRoadConnectionIndex, buildSelectedRoadConnections, roadMovementKey } from '../../src/lib/road-lane-continuations';
 import { buildConnectedJunctionPreview, buildRoadJunctionPlan, createRoadJunctionAtEndpoint, readRoadJunction, saveRoadJunction, type RoadJunctionDraft } from '../../src/lib/road-junctions';
 import { localJunctionProjection, junctionPolygonArea } from '../../src/lib/junction-footprint';
@@ -27,6 +27,53 @@ function fixture(fourWay = false) {
 }
 
 describe('intersection editing and construction', () => {
+  it('constructs physical pavement when every lane points away from the junction', () => {
+    const { doc, draft } = fixture();
+    const areas = extractTransportationAreas(doc);
+    for (const area of areas) for (const section of area.editableDraft!.sections) for (const band of section.bands) band.direction = draft.endpoints[area.roadId] === 'start' ? 'forward' : 'backward';
+    const plan = buildRoadJunctionPlan(draft, areas);
+    expect(plan.error).toBeUndefined();
+    expect(plan.movements).toHaveLength(0);
+    expect(plan.areas.filter(area => area.roadId === draft.id).length).toBeGreaterThan(0);
+    saveRoadJunction(doc, draft, plan);
+    expect(checkIntegrity(doc).ok).toBe(true);
+  });
+  it('retains source island openings when regenerating automatic kerbs', () => {
+    const { doc, draft } = fixture(true);
+    const p = (x: number, y: number) => proj4('EPSG:25832', 'EPSG:4326', [565000 + x, 5935000 + y]) as [number, number];
+    const island = [p(-1, -1), p(1, -1), p(1, 1), p(-1, 1)];
+    draft.footprint = { polygon: [p(-15,-15), p(15,-15), p(15,15), p(-15,15)], holes: [island], source: 'drawn' };
+    saveRoadJunction(doc, draft, buildRoadJunctionPlan(draft, extractTransportationAreas(doc)));
+    const plan = buildRoadJunctionPlan({ ...draft, footprint: undefined }, extractTransportationAreas(doc));
+    expect(plan.error).toBeUndefined();
+    expect(plan.footprint?.holes).toHaveLength(1);
+    const { project } = localJunctionProjection(island[0]);
+    for (const area of plan.areas) expect(junctionPolygonArea(intersection([area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))], [island.map(project)]))).toBeLessThan(.001);
+  });
+  it('builds both new endpoint junctions without restoring pavement under the other join', () => {
+    const { doc } = fixture();
+    const areas = extractTransportationAreas(doc);
+    const west = areas.find(area => area.roadId === 'west')!.editableDraft!, east = areas.find(area => area.roadId === 'east')!.editableDraft!;
+    const from = west.sections[0].centerlineWgs84.at(-1)!, to = east.sections[0].centerlineWgs84[0];
+    const road = createManualRoadDraft([from, to], { name: 'Link', bands: west.sections[0].bands });
+    road.sections[0].connections = {
+      start: { target: 'cityjson', targetId: 'west', targetEndpoint: 'end', targetSectionId: west.sections[0].id, positionWgs84: from, confirmed: true },
+      end: { target: 'cityjson', targetId: 'east', targetEndpoint: 'start', targetSectionId: east.sections[0].id, positionWgs84: to, confirmed: true },
+    };
+    const result = buildConnectedJunctionPreview(areas, buildRoadPreviewAreas(doc, road, { id: 'link' }));
+    expect(result.error).toBeUndefined();
+    expect(result.plans).toHaveLength(2);
+    const { project } = localJunctionProjection(from);
+    for (const patch of result.areas.filter(area => area.function === 'intersection')) for (const approach of result.areas.filter(area => area.roadId === 'link')) {
+      expect(junctionPolygonArea(intersection([patch.polygon.map(project), ...(patch.holes ?? []).map(ring => ring.map(project))], [approach.polygon.map(project), ...(approach.holes ?? []).map(ring => ring.map(project))]))).toBeLessThan(.02);
+    }
+    insertRoadIntoCityJson(doc, road, { id: 'link' });
+    result.plans.forEach(({ draft, plan }) => saveRoadJunction(doc, draft, plan));
+    expect(checkIntegrity(doc).ok).toBe(true);
+    const repeated = buildConnectedJunctionPreview(extractTransportationAreas(doc), buildRoadPreviewAreas(doc, road, { id: 'link' }));
+    expect(repeated.error).toBeUndefined();
+    expect(repeated.plans).toHaveLength(2);
+  });
   it('infers missing imported endpoints and builds the real Mattentwiete junction without invented islands', () => {
     const doc = JSON.parse(readFileSync('public/examples/hamburg-mattentwiete-source.json', 'utf8')) as CityJsonDocument;
     const areas = extractTransportationAreas(doc);

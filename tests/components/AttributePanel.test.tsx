@@ -240,7 +240,9 @@ describe('<AttributePanel />', () => {
     const onSelectBuilding = vi.fn();
     setup({ cityjson, onSelectBuilding });
 
-    await userEvent.click(screen.getByText('Floor 1'));
+    expect(screen.queryByText('Floor 1')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('Browse 2 parts'));
+    await userEvent.click(screen.getByText('Part 1'));
     expect(onSelectBuilding).toHaveBeenCalledWith('Building_A_part_1');
   });
 

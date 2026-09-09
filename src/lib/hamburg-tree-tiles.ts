@@ -1,7 +1,7 @@
 import type { HamburgCityTree } from './hamburg-trees';
 
 export const HAMBURG_TREE_TILESET_URL =
-  'https://daten-hamburg.de/gdi3d/datasource-data/Strassenbaumkataster_Sommerbaeume/tileset.json';
+  'https://www.daten-hamburg.de/gdi3d/datasource-data/Strassenbaumkataster_Sommerbaeume/tileset.json';
 
 const TREE_TILE_CACHE_LIMIT = 192;
 const TILE_DOWNLOAD_CONCURRENCY = 10;

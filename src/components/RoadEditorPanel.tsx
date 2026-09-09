@@ -41,6 +41,7 @@ import RoadSectionPreview from './RoadSectionPreview';
 import RoadConnectionsPanel from './RoadConnectionsPanel';
 import RoadJunctionPanel from './RoadJunctionPanel';
 import { roadWidthRule, type RoadRuleIssue } from '../lib/road-rules';
+import { roadDisplayName } from '../lib/road-labels';
 import type { RoadEditorState } from '../hooks/useRoadEditor';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -122,7 +123,6 @@ export default function RoadEditorPanel({
   roadAreas = [],
   roadRuleIssues = [],
   junction,
-  osmRoads,
   draft,
   draftDirty,
   exactGeometryStatus = null,
@@ -175,13 +175,20 @@ export default function RoadEditorPanel({
   const traceCollapsed = useRef(false);
   useEffect(() => {
     const tracing = junction?.junctionEditTool?.startsWith('trace-');
-    if (tracing && (window.innerWidth <= 900 || window.matchMedia?.('(any-pointer: coarse)').matches)) {
+    if (tracing && window.innerWidth < 768) {
       traceCollapsed.current = true; setCollapsed(true);
     } else if (!tracing && traceCollapsed.current) {
       traceCollapsed.current = false; setCollapsed(false);
     }
   }, [junction?.junctionEditTool]);
   const [activeTab, setActiveTab] = useState('lanes');
+  const [roadSearch, setRoadSearch] = useState('');
+  const searchResults = useMemo(() => {
+    const query = roadSearch.trim().toLocaleLowerCase();
+    if (!query) return [];
+    const firstAreas = [...new Map(roadAreas.map(area => [area.roadId, area])).values()];
+    return firstAreas.filter(area => `${area.attributes.roadName ?? ''} ${area.roadId}`.toLocaleLowerCase().includes(query)).slice(0, 10);
+  }, [roadAreas, roadSearch]);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (scrollRef.current) { scrollRef.current.scrollTop = 0; scrollRef.current.scrollLeft = 0; } }, [activeTab, draft?.id, junction?.junctionDraft?.id]);
   const [newBandKind, setNewBandKind] = useState<RoadBandKind>('car_lane');
@@ -506,8 +513,7 @@ export default function RoadEditorPanel({
             meta={`${cityJsonRoadCount.toLocaleString()} roads + ${cityJsonJunctionCount.toLocaleString()} junctions in CityJSON`}
           />
           <p className="road-editor-card__help">
-            <b>Select a street or junction on the map.</b> Buildings remain selectable; tapping one
-            leaves road mode and opens its attributes.
+            <b>Click an intersection to edit its boundary and turns.</b> Select a road to change its lanes or connect its ends.
           </p>
           <div className="road-source-actions">
             {drawMode !== 'road-line' && (
@@ -517,14 +523,8 @@ export default function RoadEditorPanel({
               </Button>
             )}
           </div>
-          <details className="road-osm-update">
-            <summary>Update from OSM (optional)</summary>
-            <p>Use this only to compare newer OSM data. Saved and exported roads remain CityJSON.</p>
-            <Button className="h-12 w-full" onClick={onFetchOsmRoads}>
-              <Route className="h-5 w-5" aria-hidden="true" />
-              {osmRoads.length > 0 ? 'Refresh OSM comparison' : 'Load OSM comparison'}
-            </Button>
-          </details>
+          <label className="road-field"><span>Find a loaded road</span><input type="search" placeholder="Street name or road ID" value={roadSearch} onChange={event => setRoadSearch(event.target.value)} /></label>
+          {roadSearch.trim() && <div className="road-search-results">{searchResults.map(area => <button key={area.roadId} onClick={() => { onEditSelectedRoadArea(area); setRoadSearch(''); }}><b>{roadDisplayName(roadAreas, area.roadId)}</b><small>{area.function === 'intersection' ? 'Intersection · edit boundary and turns' : `Road · ${area.roadId.split('-').at(-1)}`}</small></button>)}{!searchResults.length && <p>No matching road is loaded. Pan closer to that street to load it.</p>}</div>}
         </section>
 
         {roadFitConflicts.length > 0 && (!draft || activeTab === 'rules') && (
@@ -547,7 +547,7 @@ export default function RoadEditorPanel({
           />
         )}
 
-        {junction?.junctionDraft && junction.junctionPlan && <RoadJunctionPanel draft={junction.junctionDraft} plan={junction.junctionPlan} areas={roadAreas} tool={junction.junctionEditTool} onToolChange={junction.setJunctionEditTool} onCompare={() => { onBasemapChange('satellite'); onSatelliteOpacityChange(1); onRoadOverlayOpacityChange(.35); }} onChange={junction.handleJunctionChange} onFocusSource={junction.setJunctionSource} />}
+        {junction?.junctionDraft && junction.junctionPlan && <RoadJunctionPanel key={junction.junctionDraft.id} draft={junction.junctionDraft} plan={junction.junctionPlan} areas={roadAreas} tool={junction.junctionEditTool} onToolChange={junction.setJunctionEditTool} onCompare={() => { onBasemapChange('satellite'); onSatelliteOpacityChange(1); onRoadOverlayOpacityChange(.35); }} onChange={junction.handleJunctionChange} onFocusSource={junction.setJunctionSource} onEditRoad={onEditSelectedRoadArea} />}
         {junction?.junctionConflicts && junction.junctionConflicts.length > 0 && <FitConflictCard conflicts={junction.junctionConflicts} blockingCount={junction.junctionConflicts.filter((item) => item.severity === 'error').length} />}
         {draft && activeSection ? (
           <section className="road-editor-card space-y-4">
@@ -805,7 +805,7 @@ export default function RoadEditorPanel({
                     <input
                       type="range"
                       min={0.1}
-                      max={12}
+                      max={Math.max(activeBand.widthM, roadWidthRule(activeBand, draft.ruleProfile).maximumM ?? 12)}
                       step={0.05}
                       value={activeBand.widthM}
                       aria-label={`${labelBand(activeBand.kind, activeBand.sourceType)} width`}
@@ -818,7 +818,7 @@ export default function RoadEditorPanel({
                       type="number"
                       aria-label="Band width in metres"
                       min={0.1}
-                      max={12}
+                      max={roadWidthRule(activeBand, draft.ruleProfile).maximumM ?? 12}
                       step={0.05}
                       value={activeBand.widthM}
                       onChange={(event) =>
@@ -831,6 +831,8 @@ export default function RoadEditorPanel({
                       }
                     />
                   </label>
+
+                  {roadRuleIssues.filter(issue => issue.sectionId === activeSection.id && issue.bandIndex === activeBandIndex && issue.severity === 'error').map(issue => <p className="road-inline-error" role="alert" key={issue.message}>{issue.message}</p>)}
 
                   <label className="road-field">
                     <span>Band type</span>
@@ -1006,6 +1008,7 @@ export default function RoadEditorPanel({
             </div>
             <div id="road-view-rules" role="tabpanel" aria-labelledby="road-tab-rules" hidden={activeTab !== 'rules'}>
               <RoadRulesPanel draft={draft} section={activeSection} issues={roadRuleIssues} onChange={onDraftChange} />
+              <details className="road-osm-update"><summary>Advanced · refresh OSM reference</summary><p>Compare a fresh OSM download with the loaded CityJSON roads.</p><Button onClick={onFetchOsmRoads}>Load OSM comparison</Button></details>
             </div>
 
             <details

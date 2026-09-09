@@ -1,11 +1,12 @@
 import proj4 from 'proj4';
-import { union, difference, intersection, type MultiPolygon, type Polygon } from 'polygon-clipping';
+import type { MultiPolygon, Polygon } from 'polygon-clipping';
 import type { CityJsonDocument, JsonValue } from '../types';
 import { detectCrs } from './projection';
 import { buildRoadConnectionIndex, buildSelectedRoadConnections, roadMovementKey, type RoadLaneContinuation } from './road-lane-continuations';
 import { deriveEditableRoadDraftFromAreas } from './transportation';
 import type { RoadArea, RoadBandKind } from './transportation';
 import { buildAutomaticJunctionFootprint, junctionFootprintFromAreas, junctionPolygonArea, localJunctionProjection, validateJunctionFootprint, type JunctionFootprint } from './junction-footprint';
+import { union, difference, intersection } from './polygon-boolean';
 
 export interface RoadJunctionDraft {
   id: string;
@@ -91,8 +92,6 @@ export function createRoadJunctionAtEndpoint(areas: RoadArea[], roadId: string, 
 
 export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[]): RoadJunctionPlan {
   const empty = (error: string): RoadJunctionPlan => ({ areas: [], replacedRoadIds: [], movements: [], error });
-  if (draft.roadIds.length < 2) return empty('An intersection needs at least two loaded approach roads.');
-  if (draft.roadIds.some((id) => !areas.some((area) => area.roadId === id))) return empty('Load every connected approach before editing this intersection.');
   if (!Number.isFinite(draft.curveFactor) || draft.curveFactor < 0.15 || draft.curveFactor > 0.65) return empty('Curve reach must be between 0.15 and 0.65.');
   const candidateAreas = roadJunctionCandidateAreas(draft, areas);
   const index = buildRoadConnectionIndex(candidateAreas);
@@ -100,8 +99,12 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
   const movements = buildSelectedRoadConnections(index, selected?.id ?? null).continuations
     .filter((item) => item.id.startsWith(`junction-continuation:${draft.id}:`));
   const junctionAreas = areas.filter((area) => area.roadId === draft.id);
-  if (draft.surfaceMode === 'preserve') return junctionAreas.length ? { areas: junctionAreas, replacedRoadIds: [draft.id], movements, footprint: draft.footprint ?? junctionFootprintFromAreas(areas, draft.id) } : empty('Construct the new junction surface before saving.');
-  if (movements.length === 0) return empty('No compatible approach lanes. Check direction, mode and loaded road data before constructing a surface.');
+  if (draft.surfaceMode === 'preserve') return junctionAreas.length ? {
+    areas: junctionAreas, replacedRoadIds: [draft.id], movements,
+    footprint: draft.footprint ?? junctionFootprintFromAreas(areas, draft.id) ?? buildAutomaticJunctionFootprint(draft.roadIds, draft.endpoints, areas, draft.curveFactor),
+  } : empty('Construct the new junction surface before saving.');
+  if (draft.roadIds.length < (draft.footprint ? 1 : 2)) return empty('Connect at least two approach roads, or trace the boundary of an existing road end.');
+  if (draft.roadIds.some((id) => !areas.some((area) => area.roadId === id))) return empty('Load every connected approach before changing this intersection boundary.');
   let approaches: RoadArea[];
   try { approaches = restoreApproachSurfaces(areas, draft.roadIds); }
   catch (error) { return empty(String(error)); }
@@ -110,7 +113,8 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
   const elevations = approaches.map((area) => area.vertical?.elevationM).filter((value): value is number => Number.isFinite(value));
   if (levels.size > 1 || placements.size > 1 || (elevations.length > 0 && Math.max(...elevations) - Math.min(...elevations) > 0.01)) return empty('These approaches are at different levels. Surface rebuilding needs a shared, flat elevation; preserve the surface to edit movements.');
   if (approaches.some((area) => Number(area.attributes.elevationRangeM ?? 0) > 0.01 || (area.vertical?.placement === 'elevated' && !Number.isFinite(area.vertical.elevationM)))) return empty('Surface rebuilding currently needs flat approaches with known elevation. Preserve this junction surface to edit its movements.');
-  const origin = movements[0].path[0];
+  const origin = movements[0]?.path[0] ?? draft.footprint?.polygon[0] ?? selected?.polygon[0] ?? approaches[0]?.polygon[0];
+  if (!origin) return empty('Load the approach surfaces before constructing this intersection.');
   const { project, unproject } = localJunctionProjection(origin);
   const footprintError = draft.footprint && validateJunctionFootprint(draft.footprint);
   if (footprintError) return empty(footprintError);
@@ -119,10 +123,28 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     endpoints[movement.sourceRoadId] ??= movement.sourceEndpoint;
     endpoints[movement.targetRoadId] ??= movement.targetEndpoint;
   }
-  const footprint = draft.footprint ?? buildAutomaticJunctionFootprint(draft.roadIds, endpoints, approaches, draft.curveFactor);
+  let layouts;
+  try { layouts = draft.roadIds.map((id) => approaches.find((area) => area.roadId === id && area.editableDraft)?.editableDraft ?? deriveEditableRoadDraftFromAreas(approaches, id)); }
+  catch { return empty('An approach cannot be reconstructed from its imported surfaces. Keep the current intersection or edit that road layout first.'); }
+  const hasKind = (kinds: RoadBandKind[]) => layouts.some((road) => road.sections.some((section) => section.bands.some((band) => kinds.includes(band.kind))));
+  const primaryKinds: RoadBandKind[] = hasKind(['car_lane', 'parking']) ? ['car_lane', 'parking'] : hasKind(['bike_lane']) ? ['bike_lane'] : ['sidewalk'];
+  const automaticOutline = (kinds: RoadBandKind[]) => buildAutomaticJunctionFootprint(draft.roadIds, endpoints, approaches, draft.curveFactor, kinds);
+  let footprint = draft.footprint ?? automaticOutline(primaryKinds);
+  // Rebuilding must not pave over existing island openings. Include explicit
+  // planting/median surfaces and holes in imported junction/approach pavement.
+  const protectedIslands = junctionAreas.filter(area => /median|green|plant|island/i.test(String(area.attributes.sourceType ?? area.attributes.transportationUsage ?? area.function)));
+  const sourceOpenings: Polygon[] = draft.footprint ? [] : [
+    ...[...junctionAreas, ...approaches].flatMap(area => (area.holes ?? []).map(ring => [ring.map(project)])),
+    ...protectedIslands.map(area => [area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))]),
+  ];
   const warnings: string[] = [];
   if (movements.some((movement) => movement.path.some((point) => Math.hypot(...project(point)) > 120))) return empty('Approaches are too far apart for a local junction. Move their ends closer first.');
   try {
+    if (footprint && sourceOpenings.length) {
+      const kept = difference([footprint.polygon.map(project), ...footprint.holes.map(ring => ring.map(project))], ...sourceOpenings);
+      if (kept.length !== 1) return empty('The source islands divide this junction into separate carriageways. Keep the imported surface or trace each connected junction boundary.');
+      footprint = { ...footprint, polygon: kept[0][0].map(unproject), holes: kept[0].slice(1).map(ring => ring.map(unproject)) };
+    }
     if (draft.footprint) {
       const shape: Polygon = [draft.footprint.polygon.map(project), ...draft.footprint.holes.map((ring) => ring.map(project))];
       for (const id of draft.roadIds) {
@@ -142,13 +164,13 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     const groups = ['motor', 'cycle', 'walk'] as const;
     const kinds: RoadBandKind[] = ['car_lane', 'parking'];
     for (const group of groups) {
-      const selectedMovements = movements.filter((movement) => (movement.mode === 'pedestrian' ? 'walk' : movement.mode === 'bicycle' ? 'cycle' : 'motor') === group);
       if (group === 'cycle') kinds.push('bike_lane');
       if (group === 'walk') kinds.push('sidewalk');
-      if (!selectedMovements.length) continue;
-      const outline = group === 'motor' ? footprint : buildAutomaticJunctionFootprint(draft.roadIds, endpoints, approaches, draft.curveFactor, kinds);
+      if (!hasKind(group === 'motor' ? ['car_lane', 'parking'] : group === 'cycle' ? ['bike_lane'] : ['sidewalk'])) continue;
+      const outline = !generated.length ? footprint : automaticOutline(kinds);
       if (!outline) return empty('The approach kerbs do not form a simple outline. Trace the visible boundary or adjust the road ends before generating this junction.');
       let joined: MultiPolygon = [[outline.polygon.map(project), ...outline.holes.map((ring) => ring.map(project))]];
+      if (sourceOpenings.length) joined = difference(joined, ...sourceOpenings);
       if (footprint?.holes.length && group !== 'motor') joined = difference(joined, ...footprint.holes.map((ring): Polygon => [ring.map(project)]));
       const visible = occupied.length ? difference(joined, occupied) : joined;
       occupied = occupied.length ? union(occupied, joined) : joined;
@@ -177,7 +199,7 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
       return difference(polygon, trimFootprint).map((part, i) => ({ ...area, id: `${area.id}-trim-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map((ring) => ring.map(unproject)) }));
     });
     if (draft.roadIds.some((id) => !trimmed.some((area) => area.roadId === id))) return empty('The junction would consume an entire short approach. Extend that road before rebuilding.');
-    return { areas: [...generated, ...trimmed], replacedRoadIds: [draft.id, ...draft.roadIds], movements, baseApproaches: approaches, footprint, warnings };
+    return { areas: [...generated, ...(!draft.footprint ? protectedIslands : []), ...trimmed], replacedRoadIds: [draft.id, ...draft.roadIds], movements, baseApproaches: approaches, footprint, warnings };
   } catch (error) { return empty(`Unable to construct a valid junction: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
@@ -195,7 +217,7 @@ export function saveRoadJunction(doc: CityJsonDocument, draft: RoadJunctionDraft
   } else if (!existing) throw new Error('Construct the new junction surface before saving.');
   const object = doc.CityObjects[draft.id];
   object.attributes = { ...object.attributes, name: draft.name, class: 'intersection', _transportationKind: 'intersection', _connectedCityRoadIds: draft.roadIds,
-    _cityRoadEndpoints: draft.endpoints, _disabledMovements: draft.disabledMovements.filter((key) => plan.movements.some((movement) => roadMovementKey(movement) === key)),
+    _cityRoadEndpoints: draft.endpoints, _disabledMovements: draft.disabledMovements,
     _junctionCurveFactor: draft.curveFactor, _junctionSurfaceMode: draft.surfaceMode === 'rebuild' ? 'generated' : object.attributes?._junctionSurfaceMode ?? 'source',
     _junctionFootprint: draft.footprint ? JSON.parse(JSON.stringify(draft.footprint)) : null,
     _updatedAt: new Date().toISOString(),
@@ -230,6 +252,32 @@ export function buildConnectedJunctionPreview(areas: RoadArea[], replacements: R
     // Carry the untrimmed base through multiple junctions on the same road.
     const updated = plan.areas.map((area) => ({ ...area, attributes: { ...area.attributes, junctionBaseSurfaces: area.roadId === id ? null : JSON.parse(JSON.stringify(plan.baseApproaches?.filter((base) => base.roadId === area.roadId).map(({ editableDraft: _draft, ...base }) => base) ?? [])) as JsonValue } }));
     working = [...working.filter((area) => !plan.replacedRoadIds.includes(area.roadId)), ...updated];
+  }
+  // A confirmed end-to-end join needs physical pavement ownership as well as
+  // a topology link. Construct it in this same transaction, so users never
+  // have to save overlapping road ends before they can build the junction.
+  const joinedPairs = new Set(buildRoadConnectionIndex(working).junctions.flatMap(junction => junction.roadIds.flatMap(a => junction.roadIds.filter(b => a !== b).map(b => [a, b].sort().join('|')))));
+  for (const [roadId, road] of new Map(replacements.filter(area => area.editableDraft).map(area => [area.roadId, area.editableDraft!]))) {
+    for (const section of road.sections) for (const endpoint of ['start', 'end'] as const) {
+      const connection = section.connections?.[endpoint];
+      if (connection?.target !== 'cityjson' || connection.targetId === roadId || !connection.targetEndpoint || connection.targetEndpoint === 'node') continue;
+      const pair = [roadId, connection.targetId].sort().join('|');
+      if (joinedPairs.has(pair)) continue;
+      let target;
+      try { target = working.find(area => area.roadId === connection.targetId)?.editableDraft ?? deriveEditableRoadDraftFromAreas(working, connection.targetId); }
+      catch { continue; }
+      const peerSection = target?.sections.find(item => item.id === connection.targetSectionId) ?? target?.sections[connection.targetEndpoint === 'start' ? 0 : target.sections.length - 1];
+      const from = endpoint === 'start' ? section.centerlineWgs84[0] : section.centerlineWgs84.at(-1);
+      const to = connection.targetEndpoint === 'start' ? peerSection?.centerlineWgs84[0] : peerSection?.centerlineWgs84.at(-1);
+      if (!from || !to || Math.hypot(...localJunctionProjection(from).project(to)) > .05) continue;
+      const draft = createRoadJunctionAtEndpoint(working, roadId, section.id, endpoint);
+      const plan = buildRoadJunctionPlan(draft, working);
+      if (plan.error) return { areas: replacements, plans: [], error: `Connected road ends: ${plan.error}` };
+      joinedPairs.add(pair); plans.push({ draft, plan });
+      plan.replacedRoadIds.forEach(id => changed.add(id));
+      const updated = plan.areas.map(area => ({ ...area, attributes: { ...area.attributes, junctionBaseSurfaces: area.roadId === draft.id ? null : JSON.parse(JSON.stringify(plan.baseApproaches?.filter(base => base.roadId === area.roadId).map(({ editableDraft: _draft, ...base }) => base) ?? [])) as JsonValue } }));
+      working = [...working.filter(area => !plan.replacedRoadIds.includes(area.roadId)), ...updated];
+    }
   }
   return { areas: working.filter((area) => changed.has(area.roadId)), plans };
 }
