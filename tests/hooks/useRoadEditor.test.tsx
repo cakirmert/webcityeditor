@@ -18,11 +18,17 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
-  it('proposes a same-street widening on open and requires Save to write it', () => {
+  it('opens an intersection unchanged and generates only after an explicit edit', () => {
     const doc=JSON.parse(readFileSync('public/examples/hamburg-roedingsmarkt-source.json','utf8')),before=JSON.stringify(doc);
     const {result}=renderHook(()=>useRoadEditor(coreStateFor(doc) as never,{pushUndo:vi.fn()} as never));
     const area=extractTransportationAreas(doc).find(a=>a.roadId.endsWith('intersection-483'))!;
     act(()=>result.current.handleEditSelectedRoadArea(area));
+    expect(result.current.junctionDraft?.surfaceMode).toBe('preserve');
+    expect(result.current.junctionDirty).toBe(false);
+    expect(result.current.canUndoJunction).toBe(false);
+    expect(result.current.junctionPlan?.areas).toEqual(extractTransportationAreas(doc).filter(a=>a.roadId===area.roadId));
+    expect(JSON.stringify(doc)).toBe(before);
+    act(()=>result.current.handleJunctionChange({...result.current.junctionDraft!,surfaceMode:'rebuild',footprint:undefined}));
     expect(result.current.junctionDraft?.surfaceMode).toBe('rebuild');
     expect(result.current.junctionDirty).toBe(true);
     expect(JSON.stringify(doc)).toBe(before);

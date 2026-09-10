@@ -9,6 +9,7 @@ import { buildAutomaticJunctionFootprint, junctionFootprintFromAreas, junctionPo
 import { union, difference, intersection } from './polygon-boolean';
 import { isLaneTransition } from './junction-presentation';
 import { buildJunctionLaneGuides } from './junction-lane-guides';
+import { fitGeneratedJunctionEdges, junctionApproachEndMask, removeJunctionTipFragments } from './junction-ownership';
 
 export interface RoadJunctionDraft {
   id: string;
@@ -201,7 +202,7 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     if (cycleOpenings.length && cycleNetwork.length) cycleNetwork = difference(cycleNetwork, ...cycleOpenings);
     if (cycleOpenings.length && cycleEndOwnership.length) cycleEndOwnership = difference(cycleEndOwnership, ...cycleOpenings);
     let occupied: MultiPolygon = [];
-    const generated: RoadArea[] = [];
+    let generated: RoadArea[] = [];
     // Motor and walking kerbs remain independent of turn permissions. Cycling
     // is reserved first so neither a larger carriageway nor its sidewalk can
     // swallow an existing bicycle lane.
@@ -258,6 +259,16 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
           attributes: { transportationUsage: 'intersection', sourceType: island.sourceType, junctionSurfaceMode: 'generated', connectedCityRoadIds: draft.roadIds, cityRoadEndpoints: draft.endpoints } });
       }
     }
+    if (!draft.footprint || draft.footprint.source === 'generated') {
+      const replaced = new Set([draft.id, ...draft.roadIds, ...(draft.mergedFrom?.junctionIds ?? []), ...(draft.mergedFrom?.internalRoadIds ?? [])]);
+      const fitted = fitGeneratedJunctionEdges(generated, areas, replaced, project, unproject, approaches);
+      if (fitted.error) return empty(fitted.error);
+      generated = fitted.areas;
+      if (!generated.length) return empty('There is no space for this intersection between the neighbouring roads. Adjust the approaches or combine the connected pieces.');
+      if (fitted.fittedRoads) warnings.push(`Generated edges fit around ${fitted.fittedRoads} neighbouring road${fitted.fittedRoads === 1 ? '' : 's'}.`);
+      const surfaces = generated.map(area => [area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))]);
+      occupied = union(surfaces[0], ...surfaces.slice(1));
+    }
     if (isLaneTransition(draft,approaches)) {
       const guides = buildJunctionLaneGuides(movements,approaches);
       for (const area of generated) area.attributes.junctionLaneGuides = JSON.parse(JSON.stringify(guides));
@@ -269,11 +280,20 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     const islandPolygons: Polygon[] = [...(footprint?.holes ?? []).map((ring): Polygon => [ring.map(project)]), ...sourceOpenings];
     const otherPolygons: Polygon[] = otherJunctions.map((area) => [area.polygon.map(project), ...(area.holes ?? []).map((ring) => ring.map(project))]);
     const trimFootprint = islandPolygons.length || otherPolygons.length ? union(occupied, ...islandPolygons, ...otherPolygons) : occupied;
+    const endMasks = new Map(layouts.map((road, i) => {
+      const id = draft.roadIds[i], endpoint = endpoints[id];
+      return [id, { polygon: junctionApproachEndMask(road, endpoint, project),
+        sectionId: road.sections.length > 1 ? (endpoint === 'start' ? road.sections[0] : road.sections.at(-1))?.id : undefined }];
+    }));
     const trimmed = approaches.flatMap((area) => {
       const polygon: Polygon = [area.polygon.map(project), ...(area.holes ?? []).map((ring) => ring.map(project))];
       const cycleTrim = [...otherPolygons, ...cycleEndOwnership, ...islandPolygons];
-      const parts = isCycleway(area) ? (cycleTrim.length ? difference(polygon, ...cycleTrim) : [polygon]) : difference(polygon, trimFootprint);
-      return parts.map((part, i) => ({ ...area, id: `${area.id}-trim-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map((ring) => ring.map(unproject)) }));
+      let parts: MultiPolygon = isCycleway(area) ? (cycleTrim.length ? difference(polygon, ...cycleTrim) : [polygon]) : difference(polygon, trimFootprint);
+      if (!isCycleway(area)) {
+        const end = endMasks.get(area.roadId), mask = !end?.sectionId || end.sectionId === area.sectionId ? end?.polygon : undefined;
+        parts = !draft.footprint && mask ? difference(parts, mask) : removeJunctionTipFragments(parts, mask);
+      }
+      return parts.filter(part => junctionPolygonArea([part]) > .001).map((part, i) => ({ ...area, id: `${area.id}-trim-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map((ring) => ring.map(unproject)) }));
     });
     if (draft.roadIds.some((id) => !trimmed.some((area) => area.roadId === id))) return empty('The junction would consume an entire short approach. Extend that road before rebuilding.');
     const removedRoadIds = draft.mergedFrom ? [...draft.mergedFrom.junctionIds, ...draft.mergedFrom.internalRoadIds].filter(id => id !== draft.id && areas.some(a => a.roadId === id)) : [];

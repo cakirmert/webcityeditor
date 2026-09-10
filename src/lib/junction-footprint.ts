@@ -1,5 +1,5 @@
 import type { MultiPolygon } from 'polygon-clipping';
-import { deriveEditableRoadDraftFromAreas, sampleRoadSectionCenterlineWgs84, type RoadArea, type RoadBandKind } from './transportation';
+import { deriveEditableRoadDraftFromAreas, sampleRoadSectionCenterlineWgs84, type RoadArea, type RoadBandKind, type RoadDraft } from './transportation';
 import { difference, intersection, union } from './polygon-boolean';
 
 export type JunctionPoint = [number, number];
@@ -85,6 +85,31 @@ export function junctionFootprintFromAreas(areas: RoadArea[], id: string): Junct
   } catch { return undefined; }
 }
 
+/** Share one sampled cross-section between the generated kerb and road trim. */
+export function junctionApproachMouth(draft: RoadDraft, endpoint: 'start' | 'end', project: (point: JunctionPoint) => JunctionPoint) {
+  const section = endpoint === 'start' ? draft.sections[0] : draft.sections.at(-1);
+  if (!section) return undefined;
+  const line = sampleRoadSectionCenterlineWgs84(section).map(project);
+  if (endpoint === 'end') line.reverse();
+  const total = section.bands.reduce((sum, band) => sum + band.widthM, 0);
+  const lengths = line.slice(1).map((point, i) => Math.hypot(point[0] - line[i][0], point[1] - line[i][1]));
+  const roadLength = lengths.reduce((sum, length) => sum + length, 0);
+  const setback = Math.min(total * .65, 12, roadLength * .4);
+  const at = (distance: number): JunctionPoint => {
+    for (let i = 0; i < lengths.length; i++) {
+      if (distance <= lengths[i] && lengths[i] > 0) return [0, 1].map((axis) => line[i][axis] + (line[i + 1][axis] - line[i][axis]) * distance / lengths[i]) as JunctionPoint;
+      distance -= lengths[i];
+    }
+    return line.at(-1)!;
+  };
+  if (!roadLength) return undefined;
+  const point = at(setback), away = at(setback + .25);
+  const length = Math.hypot(away[0] - point[0], away[1] - point[1]);
+  if (!length) return undefined;
+  const tangent: JunctionPoint = [(away[0] - point[0]) / length, (away[1] - point[1]) / length];
+  return { section, line, point, tangent, total, setback };
+}
+
 /** Order the road mouths around the junction and connect their kerbs, independently of permitted turns. */
 export function buildAutomaticJunctionFootprint(roadIds: string[], endpoints: Record<string, 'start' | 'end'>, areas: RoadArea[], curveFactor: number, kinds: RoadBandKind[] = ['car_lane', 'parking']): JunctionFootprint | undefined {
   const anchor = areas.find((area) => roadIds.includes(area.roadId))?.polygon[0];
@@ -94,28 +119,9 @@ export function buildAutomaticJunctionFootprint(roadIds: string[], endpoints: Re
     try {
       const draft = areas.find((area) => area.roadId === id && area.editableDraft)?.editableDraft ?? deriveEditableRoadDraftFromAreas(areas, id);
       const endpoint = endpoints[id];
-      const section = endpoint === 'start' ? draft.sections[0] : draft.sections.at(-1);
-      if (!section || !endpoint) return [];
-      const line = sampleRoadSectionCenterlineWgs84(section).map(project);
-      if (endpoint === 'end') line.reverse();
-      const total = section.bands.reduce((sum, band) => sum + band.widthM, 0);
-      const lengths = line.slice(1).map((point, i) => Math.hypot(point[0] - line[i][0], point[1] - line[i][1]));
-      const roadLength = lengths.reduce((sum, length) => sum + length, 0);
-      // Set the mouth back into the approach so wide neighbouring kerbs have
-      // room to meet. Sample the actual curved centreline, not an extended ray.
-      const setback = Math.min(total * .65, 12, roadLength * .4);
-      const at = (distance: number): JunctionPoint => {
-        for (let i = 0; i < lengths.length; i++) {
-          if (distance <= lengths[i] && lengths[i] > 0) return [0, 1].map((axis) => line[i][axis] + (line[i + 1][axis] - line[i][axis]) * distance / lengths[i]) as JunctionPoint;
-          distance -= lengths[i];
-        }
-        return line.at(-1)!;
-      };
-      const point = at(setback);
-      const away = at(setback + .25);
-      const length = Math.hypot(away[0] - point[0], away[1] - point[1]);
-      if (!length) return [];
-      const tangent: JunctionPoint = [(away[0] - point[0]) / length, (away[1] - point[1]) / length];
+      const mouth = endpoint && junctionApproachMouth(draft, endpoint, project);
+      if (!mouth) return [];
+      const { section, line, total, point, tangent } = mouth;
       const normal: JunctionPoint = [-tangent[1], tangent[0]];
       let cursor = total / 2 + (section.offsetM ?? 0);
       let left = -Infinity, right = Infinity;

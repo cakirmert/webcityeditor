@@ -8,7 +8,6 @@ import { buildRoadPreviewAreas, createManualRoadDraft, extractTransportationArea
 import { buildRoadConnectionIndex, buildSelectedRoadConnections, roadMovementKey } from '../../src/lib/road-lane-continuations';
 import { buildConnectedJunctionPreview, buildRoadJunctionPlan, createRoadJunctionAtEndpoint, readRoadJunction, saveRoadJunction, type RoadJunctionDraft } from '../../src/lib/road-junctions';
 import { localJunctionProjection, junctionPolygonArea } from '../../src/lib/junction-footprint';
-import { automaticJunctionPreview } from '../../src/lib/junction-generation';
 
 function fixture(fourWay = false) {
   const doc: CityJsonDocument = { type: 'CityJSON', version: '2.0', transform: { scale: [.001, .001, .001], translate: [565000, 5935000, 0] }, metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832' }, vertices: [[0, 0, 0]], CityObjects: {} };
@@ -28,6 +27,21 @@ function fixture(fourWay = false) {
 }
 
 describe('intersection editing and construction', () => {
+  it('removes a rectangular imported tip beside the rounded kerb while keeping the outward road', () => {
+    const {doc,draft}=fixture(),areas=extractTransportationAreas(doc);
+    const p=(x:number,y:number)=>proj4('EPSG:25832','EPSG:4326',[565000+x,5935000+y]) as [number,number];
+    const west=areas.find(a=>a.roadId==='west')!;
+    west.polygon=[p(-60,3.25),p(-9,3.25),p(-9,8),p(-6,8),p(-6,0),p(-60,0)];
+    west.geometryMode='exact';
+    const before=JSON.stringify(areas),plan=buildRoadJunctionPlan(draft,areas);
+    expect(plan.error).toBeUndefined();expect(JSON.stringify(areas)).toBe(before);
+    const {project}=localJunctionProjection(p(0,0));
+    const polygons=plan.areas.filter(a=>a.roadId==='west').map(a=>[a.polygon.map(project),...(a.holes??[]).map(r=>r.map(project))]);
+    const oldSquare=[p(-8.9,3.5),p(-6.1,3.5),p(-6.1,7.9),p(-8.9,7.9)].map(project);
+    expect(junctionPolygonArea(intersection(polygons,[oldSquare]))).toBe(0);
+    const outward=[p(-50,.5),p(-30,.5),p(-30,2.5),p(-50,2.5)].map(project);
+    expect(junctionPolygonArea(intersection(polygons,[outward]))).toBeCloseTo(junctionPolygonArea([[outward]]),2);
+  });
   it('keeps a cycleway full width while still cutting out an explicitly added island', () => {
     const {doc,draft}=fixture();
     const west=extractTransportationAreas(doc).find(a=>a.roadId==='west')!.editableDraft!;
@@ -42,14 +56,6 @@ describe('intersection editing and construction', () => {
     for(const area of plan.areas) expect(junctionPolygonArea(intersection([area.polygon.map(project),...(area.holes??[]).map(r=>r.map(project))],[island.map(project)]))).toBeLessThan(.003);
     expect(plan.areas.some(a=>a.roadId==='west'&&a.bandId==='bike'&&a.holes?.length)).toBe(true);
   });
-  it('offers an ordinary rounded junction automatically, but refuses a building in its new pavement', () => {
-    const {doc,draft}=fixture(),areas=extractTransportationAreas(doc);
-    const original={...draft,surfaceMode:'preserve' as const};
-    expect(automaticJunctionPreview(original,areas).surfaceMode).toBe('rebuild');
-    const {unproject}=localJunctionProjection(proj4('EPSG:25832','EPSG:4326',[565000,5935000]) as [number,number]);
-    const polygon=([[-1,-1],[1,-1],[1,1],[-1,1],[-1,-1]] as [number,number][]).map(p=>[...unproject(p),0] as [number,number,number]);
-    expect(automaticJunctionPreview(original,areas,{buildingFootprints:[{id:'building-in-gap',type:'Building',polygon,height:12,baseElevation:0,attributes:{}}]})).toBe(original);
-  });
   it('preserves an underground junction on generation and save, and refuses mixed levels', () => {
     const {doc,draft}=fixture();
     for(const o of Object.values(doc.CityObjects)) o.attributes!._verticalProfile={placement:'underground',osmLayer:-1,source:'osm_tags',elevationM:null};
@@ -61,8 +67,6 @@ describe('intersection editing and construction', () => {
     expect(saved.every(a=>a.vertical?.placement==='underground'&&a.vertical?.osmLayer===-1)).toBe(true);
     const mixed=areas.map(a=>a.roadId==='north'?{...a,vertical:{placement:'elevated' as const,osmLayer:1,source:'osm_tags' as const}}:a);
     expect(buildRoadJunctionPlan(draft,mixed).error).toMatch(/different levels/);
-    const original={...draft,surfaceMode:'preserve' as const};
-    expect(automaticJunctionPreview(original,mixed)).toBe(original);
   });
   it('constructs physical pavement when every lane points away from the junction', () => {
     const { doc, draft } = fixture();

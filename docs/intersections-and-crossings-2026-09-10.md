@@ -2,7 +2,7 @@
 
 10 September 2026 — follow-up to the [Rödingsmarkt implementation](intersection-consolidation-2026-09-10.md).
 
-The editor now uses the same Generate and connection tools for loaded junctions throughout the network. It proposes ordinary rounded junctions on selection when checks pass; larger consolidations remain explicit previews followed by Save. The two Data study cards and the satellite boundary-tracing button are removed. Satellite comparison, Shape, Generate, islands and optional boundary handles remain.
+The editor uses the same Generate and connection tools for loaded junctions throughout the network. **Opening a junction always preserves its saved geometry.** Both ordinary generation and larger consolidations require an explicit click, followed by Save to apply the preview. The two Data study cards and the satellite boundary-tracing button are removed. Satellite comparison, Shape, Generate, islands and optional boundary handles remain.
 
 ## Road-over-rail crossings
 
@@ -26,11 +26,15 @@ Generation now reserves the original approach cycleways before constructing moto
 
 On the unchanged Rödingsmarkt crop, Nearby combines nine junction records and eleven internal roads, leaving thirteen outside approaches. Larger combines thirteen records and seventeen internal roads, leaving twelve outside approaches. Both pass the overlap and save/reopen checks. The camera reframes when the approach set changes. Saved generated boundaries are labelled accordingly.
 
-## Automatic previews and limits
+## Manual generation, road ownership and limits
 
-An unedited junction with up to four approaches can open with a rounded proposal if construction, overlap and available surroundings checks pass. A custom outline or previously generated junction stays as saved. Previewing does not mutate CityJSON. Turn permissions and Shape generation remain available when the original surface must be retained.
+The automatic-on-selection proposal was removed after user review. Selecting any junction opens all its incoming roads and turn connections without creating a geometry edit or an Undo entry. **Shape → Generate** prepares the rounded draft; **Keep current** or Undo restores the original. Previewing does not mutate CityJSON.
 
-The ten-location comparison was rerun: seven candidates pass the road-overlap check; Kajen / Hohe Brücke, Meßberg / Dovenfleet / Willy-Brandt-Straße, and Rathausmarkt / Große Johannisstraße / Rathausstraße remain blocked because their generated surfaces intersect neighbouring pavement. An additional check of 5,605 CityObjects in two streamed citywide tiles found three complex Rödingsmarkt source junctions that also require their original geometry or further boundary/approach work. These cases are not silently merged. The full citywide import contains more separate footways, stairs and junction pieces than the smaller study crop.
+Generated corners now fit to the boundaries of unchanged neighbouring roads at the same crossing level. The neighbouring objects are not edited. A generated component can be discarded as a redundant scrap only if the remaining component reaches every original driving approach; a road cutting through the carriageway still blocks generation. Drawn outlines retain their blocking fit checks. Grade-separated crossings are not clipped into holes.
+
+Ordinary generation trims each old road tip at the same cross-section used to construct the new kerb. Detached rectangular remnants no longer survive outside that rounded corner. Combined footprints also drop detached tip components; real outward approaches and full-width bicycle ends remain. Short **separate source roads** outside an ordinary junction are intentionally still separate: use **Generate combined intersection** to absorb eligible connected pieces together.
+
+All ten locations in the comparison now pass road-overlap checks, including the previously blocked Kajen / Hohe Brücke, Meßberg / Dovenfleet / Willy-Brandt-Straße, and Rathausmarkt / Große Johannisstraße / Rathausstraße. The three complex Rödingsmarkt checks in 5,605 CityObjects across two streamed tiles also pass road-overlap checks after fitting. This is not a claim that every preview passes every surroundings check: in the browser, a seven-piece Meßberg merge remains blocked at two tree trunks, while the ordinary generated junction saves successfully.
 
 ![Built-in imagery, original import and rounded candidate at Kurze Mühren](../assets/readme/junction-generation-review.jpg)
 
@@ -38,7 +42,9 @@ Checks cover **loaded** buildings, roads and trees. A roads-only crop contains n
 
 ## Verification and reproduction
 
-The automated suite passes **740 tests**, with five pre-existing skips. Regression coverage includes actual Altmannbrücke ordering, true tunnels versus open cuttings, translucent bridge occlusion and holes, full bicycle pavement coverage after save/reload, an island cut through a preserved cycle lane, both merge sizes, underground profile persistence, mixed-level rejection, and blocking new pavement through a building. The browser was used to generate, save and reopen the larger Rödingsmarkt junction, inspect its connections, and compare Altmannbrücke, Kurze Mühren and Große Bleichen against the built-in satellite imagery. The blocked Kajen candidate was also visually reviewed.
+The frontend suite passes **748 tests**, with five pre-existing skips; the production GitHub Pages build also passes.
+
+Regression coverage includes unchanged selection, imported tip cleanup, fitting and saving the three formerly blocked locations with unchanged neighbours, refusal to split a carriageway across another road, both crossing directions, full-width bicycle ends, islands, merge sizes and existing building/tree validation. The previous crossing review and larger Rödingsmarkt save/reopen checks remain covered. The browser was also used to verify unchanged selection, manually generate and save Meßberg, and compare the cleaned Kajen candidate with the original roads and built-in imagery.
 
 ```powershell
 npm test

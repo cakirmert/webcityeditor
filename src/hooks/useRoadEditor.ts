@@ -30,7 +30,6 @@ import {
 } from '../lib/transportation';
 import { processOsmXml } from '../lib/osm2streets';
 import { validateRoadRules } from '../lib/road-rules';
-import { automaticJunctionPreview } from '../lib/junction-generation';
 import type { JunctionEditTool } from '../lib/junction-footprint';
 import { buildConnectedJunctionPreview, buildRoadJunctionPlan, createRoadJunctionAtEndpoint, readRoadJunction, saveRoadJunction, type RoadJunctionDraft } from '../lib/road-junctions';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
@@ -658,11 +657,10 @@ export function useRoadEditor(
       try {
         const loaded = extractTransportationAreas(cityjson);
         const draft = readRoadJunction(loaded, area.roadId);
-        const proposed = automaticJunctionPreview(draft, loaded, {buildingFootprints:extractFootprints(cityjson),trees:roadFitTrees,metricCrs:activeMetricCrsForCityJson(cityjson),treeClearanceM:0});
-        setJunctionDraft(proposed); setJunctionBaseline(JSON.stringify(draft)); setJunctionHistory(proposed !== draft ? [draft] : []); setJunctionFuture([]);
+        setJunctionDraft(draft); setJunctionBaseline(JSON.stringify(draft)); setJunctionHistory([]); setJunctionFuture([]);
         setRoadDraft(null); setRoadDraftDirty(false); setEditingRoadId(null); setSelectedRoadArea(area);
         setJunctionEditTool('none'); setJunctionSource('__all__'); setSelectedOsmRoadId(null); setOsm2streetsSelection(null);
-        setRoadStatus(proposed !== draft ? 'Rounded intersection preview. All incoming roads and turns are shown together. Save to apply, or Undo to keep the original.' : 'All incoming roads are shown together. Select a lane to inspect turns; Shape offers Generate and a larger merge where the connected roads allow it.');
+        setRoadStatus('All incoming roads are shown together. Select a lane to inspect turns; click Generate in Shape to preview a new surface.');
       } catch (error) { setRoadStatus(String(error)); }
       return;
     }

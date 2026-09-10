@@ -12,7 +12,7 @@ Design streets, edit intersections and buildings, and keep the result in **CityJ
 2. Choose **Roads**, then click that junction. **Find a loaded road** also finds streets and intersection IDs in the current data.
 3. **Turns** opens with **All approaches, together**. Colours and approach numbers match the map. Select a lane card or a map connection to inspect that lane; **← All approaches** returns to the overview.
 4. Switch between **Map** and **Satellite** above the map. Adjust **Road overlay**, or hold the eye button to compare the road with the imagery.
-5. Open **Shape → Generate** for a rounded road surface. Eligible groups offer **Generate combined intersection**, with **Nearby pieces / Larger area** choices. The map fits all approaches when the group changes. Simple junctions can open with a checked, unsaved preview already prepared.
+5. Open **Shape → Generate** for a rounded road surface. Opening an intersection always keeps its saved shape; generation runs only when you click it. Eligible groups offer **Generate combined intersection**, with **Nearby pieces / Larger area** choices. The map fits all approaches when the group changes.
 6. Use **Undo** to restore the original. Choose **Save intersection** to apply the junction, its approach surfaces and turn permissions together. **More → Save local** or **Export CityJSON** keeps it after the session ends.
 
 These tools apply to loaded intersections throughout the network. The two study buttons and **Trace from satellite** have been removed. Satellite comparison and optional boundary handles remain. For a reproducible study, download the [original Mattentwiete import](public/examples/hamburg-mattentwiete-source.json) or [edited example](public/examples/hamburg-mattentwiete.json), then open it through **Data**. The [comparison notes](docs/intersection-reference-study.md) explain its estimated widths and visual kerb trace.
@@ -28,6 +28,7 @@ Download the [Rödingsmarkt example](public/examples/hamburg-roedingsmarkt.json)
 - Cycle lanes retain their width through the merge and at their ends. Existing bicycle pavement is reserved before generating the carriageway; compatible through connections can continue it across the junction.
 - The lane transition joins **three incoming to six outgoing driving lanes**, retaining separate lane arrows and dividers. Both reviewed left-only lanes lead to separate left-turn destinations.
 - **Generate → Save intersection** retains the generated surface and its arrows. Reopened generated surfaces are labelled **Saved generated surface**.
+- Generated corners fit around unchanged neighbouring roads. Old approach tips are cut at the new road mouths so detached rectangular remnants do not remain beside rounded kerbs. Cycling keeps its full-width ends. If fitting would disconnect an approach, generation asks for a combined junction or an adjusted boundary; overlap checks remain active.
 
 ![Saved lane transition with two distinct left-turn lanes, dividers and arrows](assets/readme/intersection-transition-current.jpg)
 

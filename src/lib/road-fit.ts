@@ -379,7 +379,7 @@ export function validateRoadOverlaps(preview: RoadArea[], saved: RoadArea[], met
   return conflicts;
 }
 
-function roadVerticalRelation(a?: RoadVerticalProfile, b?: RoadVerticalProfile): 'collision' | 'separated' | 'uncertain' {
+export function roadVerticalRelation(a?: RoadVerticalProfile, b?: RoadVerticalProfile): 'collision' | 'separated' | 'uncertain' {
   if (Number.isFinite(a?.elevationM) && Number.isFinite(b?.elevationM)) return Math.abs(a!.elevationM! - b!.elevationM!) > .5 ? 'separated' : 'collision';
   const gradeSeparated = [a?.placement, b?.placement].some((placement) => placement === 'elevated' || placement === 'underground');
   if (!gradeSeparated) return 'collision';
