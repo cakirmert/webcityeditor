@@ -36,6 +36,7 @@ export interface RoadFitValidationContext {
   roadAreas: RoadArea[];
   /** Saved network before this edit. Preview roads replace matching road IDs. */
   existingRoadAreas?: RoadArea[];
+  removedRoadIds?: string[];
   buildingFootprints?: Footprint[];
   trees?: RoadFitTree[];
   affectedLand?: Array<Pick<ParcelZone, 'id' | 'label' | 'polygon'>>;
@@ -79,7 +80,7 @@ export function validateRoadFit(context: RoadFitValidationContext): RoadFitConfl
     return [
       ...validateRoadFit({ ...context, existingRoadAreas: undefined, roadAreas: physical, trees: [] }),
       ...validateRoadFit({ ...context, existingRoadAreas: undefined, roadAreas: traffic, buildingFootprints: [], affectedLand: [], allowedCorridors: [] }),
-      ...validateRoadOverlaps(context.roadAreas, context.existingRoadAreas, context.metricCrs),
+      ...validateRoadOverlaps(context.roadAreas, context.existingRoadAreas, context.metricCrs, context.removedRoadIds),
     ];
   }
   const conflicts: RoadFitConflict[] = [];
@@ -320,9 +321,9 @@ function changedRoadCoverage(preview: RoadArea[], saved: RoadArea[], metricCrs?:
  * Shared edges are legal; a connection alone never grants permission to overlap.
  * Existing source overlaps may be retained, but cannot grow or move with an edit.
  */
-export function validateRoadOverlaps(preview: RoadArea[], saved: RoadArea[], metricCrs?: string): RoadFitConflict[] {
+export function validateRoadOverlaps(preview: RoadArea[], saved: RoadArea[], metricCrs?: string, removedRoadIds: string[] = []): RoadFitConflict[] {
   const replaced = new Set(preview.map((area) => area.roadId));
-  const peers = [...saved.filter((area) => !replaced.has(area.roadId)), ...preview];
+  const peers = [...saved.filter((area) => !replaced.has(area.roadId) && !removedRoadIds.includes(area.roadId)), ...preview];
   const indexed = peers.map((area) => ({ area, bbox: ringBbox(area.polygon) }));
   const savedByRoad = new Map<string, RoadArea[]>();
   for (const area of saved) {

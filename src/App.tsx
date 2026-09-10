@@ -1191,6 +1191,7 @@ export default function App() {
               junctionDraft={roadEditor.junctionDraft}
               junctionPlan={roadEditor.junctionPlan}
               junctionSource={roadEditor.junctionSource}
+              onJunctionSourceChange={roadEditor.setJunctionSource}
               junctionEditTool={roadEditor.junctionEditTool}
               onJunctionEditToolChange={roadEditor.setJunctionEditTool}
               onJunctionDraftChange={roadEditor.handleJunctionChange}

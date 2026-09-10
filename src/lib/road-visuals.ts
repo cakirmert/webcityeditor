@@ -4,6 +4,11 @@ import {
   type RoadArea,
   type RoadDirection,
 } from './transportation';
+import { laneInteriorCenterline, pointInRing } from './road-lane-geometry';
+import { readJunctionLaneGuides } from './junction-lane-guides';
+import { buildLaneConnectorSurface } from './road-connection-surfaces';
+import { localJunctionProjection } from './junction-footprint';
+import { intersection } from './polygon-boolean';
 
 export interface RoadLaneDivider {
   id: string;
@@ -68,6 +73,34 @@ export function buildRoadVisuals(areas: RoadArea[]): RoadVisuals {
       });
     }
   }
+  for (const id of new Set(areas.filter(isIntersection).map(a=>a.roadId))) {
+    const junction = areas.filter(a=>a.roadId===id), guides = readJunctionLaneGuides(junction[0].attributes.junctionLaneGuides);
+    if (!guides.length) continue;
+    const carriageway = junction.filter(a=>/driving|car|bus/i.test(String(a.attributes.sourceType ?? a.function)));
+    const inside = (p: [number,number]) => carriageway.some(a=>pointInRing(p,a.polygon)&&!(a.holes??[]).some(r=>pointInRing(p,r)));
+    const {project,unproject} = localJunctionProjection(junction[0].polygon[0]);
+    guides.forEach((guide,index)=>{
+      const ribbon = buildLaneConnectorSurface(guide);
+      try {
+        const patches = carriageway.flatMap(a=>intersection([ribbon.map(project)],[a.polygon.map(project),...(a.holes??[]).map(r=>r.map(project))]));
+        for (const [piece,patch] of patches.entries()) {
+          directions.push(...directionMarkers({id:`${id}-guide-${index}-${piece}`,roadId:id,sectionId:'junction',bandId:`guide-${index}`,surfaceIndex:index,surfaceType:'TrafficArea',function:'driving_lane',polygon:patch[0].map(unproject),holes:patch.slice(1).map(r=>r.map(unproject)),attributes:{trafficDirection:'forward',allowedTurns:guide.allowedTurns}},guide.path));
+        }
+      } catch { /* A failed optional marking never changes physical pavement. */ }
+    });
+    for (let i=0;i<guides.length;i++) for (let j=i+1;j<guides.length;j++) {
+      const a=guides[i], b=guides[j];
+      if (a.sourceRoadId!==b.sourceRoadId || a.targetRoadId!==b.targetRoadId || Math.abs(a.sourceBandIndex-b.sourceBandIndex)>1 || Math.abs(a.targetBandIndex-b.targetBandIndex)>1) continue;
+      const path: [number,number][] = [];
+      for(let k=0;k<=40;k++) {
+        const left=pointAtFraction(a.path,k/40),right=pointAtFraction(b.path,k/40);
+        const point:[number,number]=[(left[0]+right[0])/2,(left[1]+right[1])/2];
+        if(inside(point)) path.push(point);
+        else if(path.length) break;
+      }
+      if(path.length>=2) dividers.push({id:`${id}-transition-divider-${i}-${j}`,roadId:id,path,kind:'lane-divider'});
+    }
+  }
   return { dividers, directions };
 }
 
@@ -98,7 +131,7 @@ function directionMarkers(
     : 'none';
   if (direction === 'none') return [];
 
-  const laneCenterline = ribbonCenterline(area.polygon);
+  const laneCenterline = laneInteriorCenterline(area, roadCenterline);
   if (laneCenterline.length < 2) return [];
   const laneLengthM = lineLengthMeters(laneCenterline);
   if (laneLengthM < 2.4) return [];
@@ -200,6 +233,10 @@ function roadSourceCenterline(areas: RoadArea[]): [number, number][] | null {
 }
 
 function pointAtHalfLength(line: [number, number][]): [number, number] {
+  return pointAtFraction(line,.5);
+}
+
+function pointAtFraction(line: [number,number][], fraction: number): [number,number] {
   const lengths: number[] = [];
   let total = 0;
   for (let index = 0; index < line.length - 1; index++) {
@@ -207,7 +244,7 @@ function pointAtHalfLength(line: [number, number][]): [number, number] {
     lengths.push(length);
     total += length;
   }
-  let remaining = total / 2;
+  let remaining = total * fraction;
   for (let index = 0; index < lengths.length; index++) {
     const length = lengths[index];
     if (remaining <= length || index === lengths.length - 1) {
@@ -485,18 +522,6 @@ function lineLengthMeters(line: [number, number][]): number {
     total += localMeters(line[index], line[index + 1]);
   }
   return total;
-}
-
-function ribbonCenterline(polygon: [number, number][]): [number, number][] {
-  const ring = openRing(polygon);
-  if (ring.length < 4 || ring.length % 2 !== 0) return [];
-  const half = ring.length / 2;
-  const centerline: [number, number][] = [];
-  for (let index = 0; index < half; index++) {
-    const opposite = ring[ring.length - 1 - index];
-    centerline.push([(ring[index][0] + opposite[0]) / 2, (ring[index][1] + opposite[1]) / 2]);
-  }
-  return centerline;
 }
 
 function sharedBoundaryPath(

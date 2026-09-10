@@ -7,6 +7,8 @@ import { deriveEditableRoadDraftFromAreas } from './transportation';
 import type { RoadArea, RoadBandKind } from './transportation';
 import { buildAutomaticJunctionFootprint, junctionFootprintFromAreas, junctionPolygonArea, localJunctionProjection, validateJunctionFootprint, type JunctionFootprint } from './junction-footprint';
 import { union, difference, intersection } from './polygon-boolean';
+import { isLaneTransition } from './junction-presentation';
+import { buildJunctionLaneGuides } from './junction-lane-guides';
 
 export interface RoadJunctionDraft {
   id: string;
@@ -17,6 +19,9 @@ export interface RoadJunctionDraft {
   surfaceMode: 'preserve' | 'rebuild';
   curveFactor: number;
   footprint?: JunctionFootprint;
+  allowedLaneMovements?: string[];
+  mergedFrom?: { junctionIds: string[]; internalRoadIds: string[] };
+  retainedIslands?: Array<{ polygon: [number, number][]; holes: [number, number][][]; sourceType: string }>;
 }
 
 export interface RoadJunctionPlan {
@@ -27,6 +32,7 @@ export interface RoadJunctionPlan {
   error?: string;
   footprint?: JunctionFootprint;
   warnings?: string[];
+  removedRoadIds?: string[];
 }
 
 export function readRoadJunction(areas: RoadArea[], id: string): RoadJunctionDraft {
@@ -54,6 +60,9 @@ export function readRoadJunction(areas: RoadArea[], id: string): RoadJunctionDra
   return { id, name: String(area?.attributes.roadName ?? 'Intersection'), roadIds,
     endpoints, disabledMovements: [...(junction.disabledMovements ?? [])],
     surfaceMode: 'preserve', curveFactor: Number(area?.attributes.junctionCurveFactor) || 1 / 3,
+    ...(Array.isArray(area?.attributes.junctionAllowedLaneMovements) ? { allowedLaneMovements: area.attributes.junctionAllowedLaneMovements.map(String) } : {}),
+    ...(area?.attributes.junctionMergedFrom ? { mergedFrom: area.attributes.junctionMergedFrom as unknown as RoadJunctionDraft['mergedFrom'] } : {}),
+    ...(Array.isArray(area?.attributes.junctionRetainedIslands) ? { retainedIslands: area.attributes.junctionRetainedIslands as unknown as RoadJunctionDraft['retainedIslands'] } : {}),
     ...(area?.attributes.junctionFootprint ? { footprint: area.attributes.junctionFootprint as unknown as JunctionFootprint } : {}) };
 }
 
@@ -76,6 +85,8 @@ export function roadJunctionCandidateAreas(draft: RoadJunctionDraft, areas: Road
   return [...areas.filter((area) => area.roadId !== draft.id), ...base.map((area) => ({ ...area, attributes: {
     ...area.attributes, connectedCityRoadIds: draft.roadIds, cityRoadEndpoints: draft.endpoints,
     disabledMovements: [], junctionCurveFactor: draft.curveFactor,
+    junctionAllowedLaneMovements: draft.allowedLaneMovements ?? null,
+    ...(draft.allowedLaneMovements ? { allowedRoadMovements: null, junctionAllowedLaneMovements: draft.allowedLaneMovements } : {}),
   } }))];
 }
 
@@ -99,6 +110,18 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
   const movements = buildSelectedRoadConnections(index, selected?.id ?? null).continuations
     .filter((item) => item.id.startsWith(`junction-continuation:${draft.id}:`));
   const junctionAreas = areas.filter((area) => area.roadId === draft.id);
+  if (draft.mergedFrom) {
+    const originals = buildRoadConnectionIndex(areas).junctions;
+    const members = new Set(draft.mergedFrom.junctionIds);
+    for (const id of draft.mergedFrom.internalRoadIds.filter(id => areas.some(area => area.roadId === id))) {
+      const owners = originals.filter(junction => junction.roadIds.includes(id));
+      if (!owners.length || owners.some(junction => !members.has(junction.roadId))) return empty('A road marked for consolidation is connected outside this group. Reopen the source junction and build a fresh combined preview.');
+    }
+    for (const id of draft.mergedFrom.junctionIds.filter(id => id !== draft.id && areas.some(area => area.roadId === id))) {
+      const original = originals.find(junction => junction.roadId === id);
+      if (!original || original.roadIds.some(roadId => !draft.roadIds.includes(roadId) && !draft.mergedFrom!.internalRoadIds.includes(roadId))) return empty('The saved junction group no longer matches its approach roads. Build a fresh combined preview.');
+    }
+  }
   if (draft.surfaceMode === 'preserve') return junctionAreas.length ? {
     areas: junctionAreas, replacedRoadIds: [draft.id], movements,
     footprint: draft.footprint ?? junctionFootprintFromAreas(areas, draft.id) ?? buildAutomaticJunctionFootprint(draft.roadIds, draft.endpoints, areas, draft.curveFactor),
@@ -133,17 +156,19 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
   // Rebuilding must not pave over existing island openings. Include explicit
   // planting/median surfaces and holes in imported junction/approach pavement.
   const protectedIslands = junctionAreas.filter(area => /median|green|plant|island/i.test(String(area.attributes.sourceType ?? area.attributes.transportationUsage ?? area.function)));
-  const sourceOpenings: Polygon[] = draft.footprint ? [] : [
+  const sourceOpenings: Polygon[] = [...(draft.retainedIslands ?? []).map(island => [island.polygon.map(project), ...island.holes.map(ring => ring.map(project))]), ...(draft.footprint ? [] : [
     ...[...junctionAreas, ...approaches].flatMap(area => (area.holes ?? []).map(ring => [ring.map(project)])),
     ...protectedIslands.map(area => [area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))]),
-  ];
+  ])];
   const warnings: string[] = [];
   if (movements.some((movement) => movement.path.some((point) => Math.hypot(...project(point)) > 120))) return empty('Approaches are too far apart for a local junction. Move their ends closer first.');
   try {
     if (footprint && sourceOpenings.length) {
       const kept = difference([footprint.polygon.map(project), ...footprint.holes.map(ring => ring.map(project))], ...sourceOpenings);
-      if (kept.length !== 1) return empty('The source islands divide this junction into separate carriageways. Keep the imported surface or trace each connected junction boundary.');
-      footprint = { ...footprint, polygon: kept[0][0].map(unproject), holes: kept[0].slice(1).map(ring => ring.map(unproject)) };
+      if (kept.length !== 1 && !draft.mergedFrom) return empty('The source islands divide this junction into separate carriageways. Keep the imported surface or trace each connected junction boundary.');
+      // A consolidated junction is one CityObject with several semantic
+      // surfaces. A median may legitimately divide its carriageways.
+      if (kept.length === 1 && !draft.retainedIslands?.length) footprint = { ...footprint, polygon: kept[0][0].map(unproject), holes: kept[0].slice(1).map(ring => ring.map(unproject)) };
     }
     if (draft.footprint) {
       const shape: Polygon = [draft.footprint.polygon.map(project), ...draft.footprint.holes.map((ring) => ring.map(project))];
@@ -187,11 +212,24 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
       }
     }
     if (!generated.length) return empty('No valid junction surface could be constructed.');
+    for (const island of draft.retainedIslands ?? []) {
+      const clipped = intersection([island.polygon.map(project), ...island.holes.map(ring => ring.map(project))], [footprint!.polygon.map(project)]);
+      for (const polygon of clipped) {
+        const n = generated.length;
+        generated.push({ id: `${draft.id}-surface-${n}`, roadId: draft.id, sectionId: 'junction', bandId: `junction-island-${n}`, surfaceIndex: n,
+          surfaceType: 'AuxiliaryTrafficArea', function: 'traffic_island', polygon: polygon[0].map(unproject), holes: polygon.slice(1).map(ring => ring.map(unproject)), vertical: approaches[0]?.vertical,
+          attributes: { transportationUsage: 'intersection', sourceType: island.sourceType, junctionSurfaceMode: 'generated', connectedCityRoadIds: draft.roadIds, cityRoadEndpoints: draft.endpoints } });
+      }
+    }
+    if (isLaneTransition(draft,approaches)) {
+      const guides = buildJunctionLaneGuides(movements,approaches);
+      for (const area of generated) area.attributes.junctionLaneGuides = JSON.parse(JSON.stringify(guides));
+    }
     // Give the junction ownership of the connector footprint, trimming the
     // approach surfaces atomically. Preserve holes and per-band semantics.
-    const otherJunctions = areas.filter((area) => area.roadId !== draft.id && area.attributes.junctionSurfaceMode === 'generated' && Array.isArray(area.attributes.connectedCityRoadIds) && area.attributes.connectedCityRoadIds.some((id) => draft.roadIds.includes(String(id))));
+    const otherJunctions = areas.filter((area) => area.roadId !== draft.id && !draft.mergedFrom?.junctionIds.includes(area.roadId) && area.attributes.junctionSurfaceMode === 'generated' && Array.isArray(area.attributes.connectedCityRoadIds) && area.attributes.connectedCityRoadIds.some((id) => draft.roadIds.includes(String(id))));
     // Islands also remove pavement from the underlying approaches.
-    const islandPolygons: Polygon[] = (footprint?.holes ?? []).map((ring) => [ring.map(project)]);
+    const islandPolygons: Polygon[] = [...(footprint?.holes ?? []).map((ring): Polygon => [ring.map(project)]), ...sourceOpenings];
     const otherPolygons: Polygon[] = otherJunctions.map((area) => [area.polygon.map(project), ...(area.holes ?? []).map((ring) => ring.map(project))]);
     const trimFootprint = islandPolygons.length || otherPolygons.length ? union(occupied, ...islandPolygons, ...otherPolygons) : occupied;
     const trimmed = approaches.flatMap((area) => {
@@ -199,7 +237,8 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
       return difference(polygon, trimFootprint).map((part, i) => ({ ...area, id: `${area.id}-trim-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map((ring) => ring.map(unproject)) }));
     });
     if (draft.roadIds.some((id) => !trimmed.some((area) => area.roadId === id))) return empty('The junction would consume an entire short approach. Extend that road before rebuilding.');
-    return { areas: [...generated, ...(!draft.footprint ? protectedIslands : []), ...trimmed], replacedRoadIds: [draft.id, ...draft.roadIds], movements, baseApproaches: approaches, footprint, warnings };
+    const removedRoadIds = draft.mergedFrom ? [...draft.mergedFrom.junctionIds, ...draft.mergedFrom.internalRoadIds].filter(id => id !== draft.id && areas.some(a => a.roadId === id)) : [];
+    return { areas: [...generated, ...(!draft.footprint && !draft.retainedIslands ? protectedIslands : []), ...trimmed], replacedRoadIds: [draft.id, ...draft.roadIds], removedRoadIds, movements, baseApproaches: approaches, footprint, warnings };
   } catch (error) { return empty(`Unable to construct a valid junction: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
@@ -216,10 +255,33 @@ export function saveRoadJunction(doc: CityJsonDocument, draft: RoadJunctionDraft
     }
   } else if (!existing) throw new Error('Construct the new junction surface before saving.');
   const object = doc.CityObjects[draft.id];
+  const removed = new Set(plan.removedRoadIds ?? []);
+  if (removed.size && draft.surfaceMode !== 'rebuild') throw new Error('Consolidation must save the rebuilt surface and removed roads together.');
+  const parents = new Set(object.parents ?? []), children = new Set(object.children ?? []);
+  for (const id of removed) {
+    doc.CityObjects[id]?.parents?.forEach(parent => parents.add(parent));
+    doc.CityObjects[id]?.children?.forEach(child => children.add(child));
+  }
+  if (parents.size) object.parents = [...parents].filter(id => id !== draft.id && !removed.has(id));
+  if (children.size) object.children = [...children].filter(id => id !== draft.id && !removed.has(id));
+  for (const id of removed) delete doc.CityObjects[id];
+  for (const [id,cityObject] of Object.entries(doc.CityObjects)) {
+    if (cityObject.children) cityObject.children = [...new Set(cityObject.children.map(id => removed.has(id) ? draft.id : id))].filter(child => child !== id);
+    if (cityObject.parents) cityObject.parents = [...new Set(cityObject.parents.map(id => removed.has(id) ? draft.id : id))].filter(parent => parent !== id);
+    // Direct endpoint links to absorbed road pieces are superseded by the
+    // consolidated junction's external approach membership.
+    const layout = cityObject.attributes?._roadLayout as unknown as { sections?: Array<{ connections?: Record<string,{targetId:string}> }> } | undefined;
+    for (const section of layout?.sections ?? []) for (const [end,connection] of Object.entries(section.connections ?? {})) if (removed.has(connection.targetId)) delete section.connections![end];
+  }
   object.attributes = { ...object.attributes, name: draft.name, class: 'intersection', _transportationKind: 'intersection', _connectedCityRoadIds: draft.roadIds,
     _cityRoadEndpoints: draft.endpoints, _disabledMovements: draft.disabledMovements,
     _junctionCurveFactor: draft.curveFactor, _junctionSurfaceMode: draft.surfaceMode === 'rebuild' ? 'generated' : object.attributes?._junctionSurfaceMode ?? 'source',
     _junctionFootprint: draft.footprint ? JSON.parse(JSON.stringify(draft.footprint)) : null,
+    ...(draft.surfaceMode === 'rebuild' ? { _junctionLaneGuides: plan.areas.find(a=>a.roadId===draft.id)?.attributes.junctionLaneGuides ?? null } : {}),
+    _junctionAllowedLaneMovements: draft.allowedLaneMovements ?? null,
+    ...(draft.allowedLaneMovements ? { _allowedOsm2streetsRoadMovements: null } : {}),
+    ...(draft.mergedFrom ? { _junctionMergedFrom: JSON.parse(JSON.stringify(draft.mergedFrom)) } : {}),
+    ...(draft.retainedIslands ? { _junctionRetainedIslands: JSON.parse(JSON.stringify(draft.retainedIslands)) } : {}),
     _updatedAt: new Date().toISOString(),
   };
   return plan.replacedRoadIds;
@@ -294,7 +356,11 @@ function writeRoadSurfaces(doc: CityJsonDocument, id: string, areas: RoadArea[])
     surfaces.push({ ...oldGeometry?.semantics?.surfaces?.[semanticIndex], type: area.surfaceType, function: area.function,
       transportationUsage: area.attributes.transportationUsage, sectionId: area.sectionId, bandId: area.bandId,
       surfaceMaterial: area.attributes.surfaceMaterial ?? 'asphalt', sourceType: area.attributes.sourceType ?? null,
-      allowedModes: area.attributes.allowedModes ?? null });
+      allowedModes: area.attributes.allowedModes ?? null,
+      trafficDirection: area.attributes.trafficDirection ?? null, allowedTurns: area.attributes.allowedTurns ?? null,
+      widthMeters: area.attributes.widthMeters ?? null, osm2streetsLaneIndex: area.attributes.osm2streetsLaneIndex ?? null,
+      osm2streetsPropertiesJson: area.attributes.osm2streetsPropertiesJson ?? null,
+      allowedRoadMovements: area.attributes.allowedRoadMovements ?? null });
     return [area.polygon, ...(area.holes ?? [])].map((ring) => {
       const open = ring.length > 1 && ring[0][0] === ring.at(-1)![0] && ring[0][1] === ring.at(-1)![1] ? ring.slice(0, -1) : ring;
       return open.map((point) => {

@@ -49,7 +49,7 @@ import { Input } from './ui/input';
 interface Props {
   roadAreas?: RoadArea[];
   roadRuleIssues?: RoadRuleIssue[];
-  junction?: Pick<RoadEditorState, 'junctionDraft' | 'junctionPlan' | 'junctionDirty' | 'junctionConflicts' | 'handleJunctionChange' | 'handleSaveJunction' | 'handleCancelJunction' | 'handleCreateJunction' | 'handleUndoJunction' | 'handleRedoJunction' | 'canUndoJunction' | 'canRedoJunction' | 'setJunctionSource' | 'junctionEditTool' | 'setJunctionEditTool'>;
+  junction?: Pick<RoadEditorState, 'junctionDraft' | 'junctionPlan' | 'junctionDirty' | 'junctionConflicts' | 'junctionSaveError' | 'handleJunctionChange' | 'handleSaveJunction' | 'handleCancelJunction' | 'handleCreateJunction' | 'handleUndoJunction' | 'handleRedoJunction' | 'canUndoJunction' | 'canRedoJunction' | 'junctionSource' | 'setJunctionSource' | 'junctionEditTool' | 'setJunctionEditTool'>;
   osmRoads: OsmRoadFeature[];
   selectedOsmRoadId: string | null;
   draft: RoadDraft | null;
@@ -505,7 +505,8 @@ export default function RoadEditorPanel({
         }}>{tab[0].toUpperCase() + tab.slice(1)}{tab === 'rules' && blockingRuleCount > 0 ? ` (${blockingRuleCount})` : ''}</button>)}
       </div>}
       <div className="road-editor-panel__scroll" ref={scrollRef}>
-        {status && <details className="road-inspector-notice" open={/blocked|unable|cannot|failed|invalid|needs|before.*saving/i.test(status)}><summary>Status</summary><div role="status">{status}</div></details>}
+        {status && !junction?.junctionDraft && <details className="road-inspector-notice" open={/blocked|unable|cannot|failed|invalid|needs|before.*saving/i.test(status)}><summary>Status</summary><div role="status">{status}</div></details>}
+        {junction?.junctionSaveError && <div className="studio-feedback is-error" role="alert"><AlertTriangle size={17} /><p>{junction.junctionSaveError}</p></div>}
         <section className="road-editor-card" id="road-view-map" role={draft ? 'tabpanel' : undefined} aria-labelledby={draft ? 'road-tab-map' : undefined} hidden={!!junction?.junctionDraft || (!!draft && activeTab !== 'map')}>
           <PanelSectionHeader
             icon={<Route className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -547,7 +548,7 @@ export default function RoadEditorPanel({
           />
         )}
 
-        {junction?.junctionDraft && junction.junctionPlan && <RoadJunctionPanel key={junction.junctionDraft.id} draft={junction.junctionDraft} plan={junction.junctionPlan} areas={roadAreas} tool={junction.junctionEditTool} onToolChange={junction.setJunctionEditTool} onCompare={() => { onBasemapChange('satellite'); onSatelliteOpacityChange(1); onRoadOverlayOpacityChange(.35); }} onChange={junction.handleJunctionChange} onFocusSource={junction.setJunctionSource} onEditRoad={onEditSelectedRoadArea} />}
+        {junction?.junctionDraft && junction.junctionPlan && <RoadJunctionPanel key={junction.junctionDraft.id} draft={junction.junctionDraft} plan={junction.junctionPlan} areas={roadAreas} tool={junction.junctionEditTool} onToolChange={junction.setJunctionEditTool} onCompare={() => { onBasemapChange('satellite'); onSatelliteOpacityChange(1); onRoadOverlayOpacityChange(.35); }} onChange={junction.handleJunctionChange} onFocusSource={junction.setJunctionSource} focusedSource={junction.junctionSource} onEditRoad={onEditSelectedRoadArea} />}
         {junction?.junctionConflicts && junction.junctionConflicts.length > 0 && <FitConflictCard conflicts={junction.junctionConflicts} blockingCount={junction.junctionConflicts.filter((item) => item.severity === 'error').length} />}
         {draft && activeSection ? (
           <section className="road-editor-card space-y-4">

@@ -18,6 +18,29 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('proposes a same-street widening on open and requires Save to write it', () => {
+    const doc=JSON.parse(readFileSync('public/examples/hamburg-roedingsmarkt-source.json','utf8')),before=JSON.stringify(doc);
+    const {result}=renderHook(()=>useRoadEditor(coreStateFor(doc) as never,{pushUndo:vi.fn()} as never));
+    const area=extractTransportationAreas(doc).find(a=>a.roadId.endsWith('intersection-483'))!;
+    act(()=>result.current.handleEditSelectedRoadArea(area));
+    expect(result.current.junctionDraft?.surfaceMode).toBe('rebuild');
+    expect(result.current.junctionDirty).toBe(true);
+    expect(JSON.stringify(doc)).toBe(before);
+    act(()=>result.current.handleSaveJunction());
+    expect(result.current.junctionSaveError).toBeNull();
+    expect(result.current.junctionDirty).toBe(false);
+    expect(doc.CityObjects[area.roadId].attributes._junctionLaneGuides.length).toBe(6);
+  });
+  it('exposes a failed save to the panel without changing the document', () => {
+    const doc=JSON.parse(readFileSync('public/examples/hamburg-mattentwiete.json','utf8')),before=JSON.stringify(doc);
+    const {result}=renderHook(()=>useRoadEditor(coreStateFor(doc) as never,{pushUndo:vi.fn()} as never));
+    act(()=>result.current.handleEditSelectedRoadArea(extractTransportationAreas(doc).find(a=>a.roadId.includes('intersection'))!));
+    act(()=>result.current.handleJunctionChange({...result.current.junctionDraft!,surfaceMode:'rebuild',curveFactor:9}));
+    act(()=>result.current.handleSaveJunction());
+    expect(result.current.junctionSaveError).toMatch(/Curve reach/);
+    expect(JSON.stringify(doc)).toBe(before);
+    expect(result.current.junctionDirty).toBe(true);
+  });
   it('blocks a widened road overlapping its neighbour before the preview debounce runs', () => {
     const doc = buildSampleCube();
     const bands = [{ kind: 'car_lane' as const, widthM: 3.25, direction: 'forward' as const }];
@@ -59,7 +82,9 @@ describe('useRoadEditor road-edit lifecycle', () => {
     const area = extractTransportationAreas(doc).find(area => area.roadId.includes('intersection'))!;
     act(() => result.current.handleEditSelectedRoadArea(area));
     expect(result.current.showRoadEditor).toBe(true);
-    expect(result.current.junctionEditTool).toBe('vertices');
+    expect(result.current.junctionEditTool).toBe('none');
+    expect(result.current.junctionSource).toBe('__all__');
+    act(() => result.current.setJunctionEditTool('vertices'));
     expect(result.current.junctionPlan?.footprint?.polygon.length).toBeGreaterThan(3);
     const original = result.current.junctionDraft!;
     for (const delta of [.000001, .000002]) {

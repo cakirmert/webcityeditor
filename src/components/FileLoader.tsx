@@ -471,6 +471,9 @@ export default function FileLoader({
         <button className="intersection-sample-card" onClick={() => handleQuickSample({ label: 'Hamburg intersection study', description: 'Mattentwiete / Katharinenstraße', url: publicAssetUrl('examples/hamburg-mattentwiete.json') })}>
           <span>INTERSECTION DESIGN STUDY</span><b>Try the Hamburg intersection</b><small>A traced kerb outline, editable roads and lane connections. Visual estimates, ready to explore.</small>
         </button>
+        <button className="intersection-sample-card" onClick={() => handleQuickSample({ label: 'Rödingsmarkt junction study', description: 'Consolidated intersection, railway crossing and lane transition', url: publicAssetUrl('examples/hamburg-roedingsmarkt.json') })}>
+          <span>COMPLEX CROSSING & LANE SPLIT</span><b>Explore Rödingsmarkt</b><small>One combined junction, six outgoing lanes and an elevated railway. Open Roads to inspect its turns; use Levels to see the crossing.</small>
+        </button>
         <div className="flex items-center justify-between gap-2">
           {primaryHostedSample ? (
             <Button onClick={() => handleQuickSample(primaryHostedSample)}>

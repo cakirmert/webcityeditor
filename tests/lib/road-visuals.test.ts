@@ -35,6 +35,17 @@ function area(
 }
 
 describe('CityJSON road visuals', () => {
+  it('keeps arrows inside a clipped lane with an odd number of outline vertices', () => {
+    const x=9.98,y=53.55,point=(east:number,north:number):[number,number]=>[x+east/66000,y+north/111320];
+    const clipped=area('trimmed',0,[point(0,0),point(25,0),point(25,3),point(5,3),point(0,1.5)],'forward',['left']);
+    clipped.attributes.sourceCenterlineWgs84=[point(0,0),point(25,0)];
+    const result=buildRoadVisuals([clipped]);
+    expect(result.directions).toHaveLength(1);
+    expect(result.directions[0].turn).toBe('left');
+    expect(result.directions[0].position[1]).toBeGreaterThan(y);
+    expect(result.directions[0].position[1]).toBeLessThan(point(0,3)[1]);
+    expect(result.directions[0].angle).toBeCloseTo(0,2);
+  });
   it('derives a shared dashed divider and direction arrows from lane surfaces', () => {
     const visuals = buildRoadVisuals([
       area('lane-left', 0, [[0, 0], [10, 0], [10, 1], [0, 1], [0, 0]]),

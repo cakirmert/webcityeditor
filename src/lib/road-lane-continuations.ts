@@ -1,4 +1,5 @@
 import { buildLaneConnectorSurface, curveJunctionMovement } from './road-connection-surfaces';
+import { isLaneTransition } from './junction-presentation';
 import {
   deriveEditableRoadDraftFromAreas,
   roadAllowedTurnsPermitMovement,
@@ -66,6 +67,7 @@ export interface RoadConnectionJunction {
   allowedRoadMovements?: Set<string>;
   roadEndpoints?: Record<string, 'start' | 'end'>;
   disabledMovements?: Set<string>;
+  allowedLaneMovements?: Set<string>;
   curveFactor?: number;
 }
 
@@ -283,8 +285,9 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       }
     }
     const externalMovements = firstExplicitRoadMovements(junctionAreas);
+    const cityMovements = firstExplicitRoadMovements(junctionAreas, 'allowedCityRoadMovements');
     const allowedRoadMovements =
-      externalMovements === null
+      cityMovements !== null ? new Set(cityMovements.filter(([from,to]) => connectedCityRoadIds.has(from) && connectedCityRoadIds.has(to)).map(([from,to]) => directedRoadMovementKey(from,to))) : externalMovements === null
         ? undefined
         : new Set(
             externalMovements.flatMap(([sourceExternalId, targetExternalId]) =>
@@ -322,6 +325,7 @@ export function buildRoadConnectionIndex(areas: RoadArea[]): RoadConnectionIndex
       externalRoadIds,
       roadIds: [...connectedCityRoadIds].sort(),
       disabledMovements: new Set(junctionAreas.flatMap((area) => normalizeExternalIds(area.attributes.disabledMovements))),
+      ...(Array.isArray(junctionAreas[0]?.attributes.junctionAllowedLaneMovements) ? { allowedLaneMovements: new Set(junctionAreas[0].attributes.junctionAllowedLaneMovements.map(String)) } : {}),
       curveFactor: typeof junctionAreas[0]?.attributes.junctionCurveFactor === 'number' ? junctionAreas[0].attributes.junctionCurveFactor : undefined,
       ...(allowedRoadMovements ? { allowedRoadMovements } : {}),
       ...(Object.keys(roadEndpoints).length > 0 ? { roadEndpoints } : {}),
@@ -405,6 +409,13 @@ function buildJunctionRoadLaneContinuations(
   const seen = new Set<string>();
 
   for (const junction of junctions) {
+    if (junction.allowedLaneMovements) {
+      for (const key of junction.allowedLaneMovements) {
+        const movement = explicitJunctionMovement(key, junction, index, activeDraft, draftCache);
+        if (movement) continuations.push(movement);
+      }
+      continue;
+    }
     const approaches = junction.roadIds
       .map((roadId) => {
         const draft = resolveRoadDraft(index, roadId, activeDraft, draftCache);
@@ -423,6 +434,7 @@ function buildJunctionRoadLaneContinuations(
         (approach): approach is JunctionApproach => !!approach
       );
 
+    const transition = isLaneTransition({ id: junction.roadId, name: '', roadIds: junction.roadIds, endpoints: Object.fromEntries(approaches.map(a => [a.roadId,a.endpoint])), disabledMovements: [], surfaceMode: 'rebuild', curveFactor: junction.curveFactor ?? 1/3 }, junction.roadIds.flatMap(id => index.areasByRoadId.get(id) ?? []));
     for (const source of approaches) {
       const legalTargets = approaches.filter((target) => {
         const movementKey = directedRoadMovementKey(
@@ -442,6 +454,10 @@ function buildJunctionRoadLaneContinuations(
           bandCanDepartFromEndpoint(band, target.endpoint)
         )
       );
+      if (transition) {
+        appendTransitionContinuations(source, usableTargets, junction, index, activeDraft, draftCache, continuations);
+        continue;
+      }
       const targetTurns = classifyJunctionTargetTurns(source, usableTargets);
       const respectAllowedTurns = usableTargets.length > 1;
       const sourceBandAllocations = respectAllowedTurns
@@ -473,7 +489,7 @@ function buildJunctionRoadLaneContinuations(
   }
 
   return continuations.filter((movement) => !junctions.some((junction) =>
-    movement.id.startsWith(`junction-continuation:${junction.id}:`) && junction.disabledMovements?.has(roadMovementKey(movement))
+    movement.id.startsWith(`junction-continuation:${junction.id}:`) && (junction.disabledMovements?.has(roadMovementKey(movement)) || (junction.allowedLaneMovements !== undefined && !junction.allowedLaneMovements.has(roadMovementKey(movement))))
   )).map((movement) => {
     const junction = junctions.find((item) => movement.id.startsWith(`junction-continuation:${item.id}:`));
     const factor = junction?.curveFactor;
@@ -481,11 +497,55 @@ function buildJunctionRoadLaneContinuations(
   }).sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** Sort lanes across the travel direction, then match ranks monotonically.
+ * A widening fans out and a narrowing merges; every compatible target lane
+ * stays reachable, instead of silently dropping the extra lanes. */
+function appendTransitionContinuations(source: JunctionApproach, targets: JunctionApproach[], junction: RoadConnectionJunction, index: RoadConnectionIndex, active: RoadDraft | null, cache: Map<string,RoadDraft>, result: RoadLaneContinuation[]) {
+  const tangent = endpointTravelVector(source.section, source.endpoint, true);
+  const incoming = indexedBands(source.section).filter(({band}) => bandCanArriveAtEndpoint(band,source.endpoint));
+  const outgoing = targets.flatMap(target => indexedBands(target.section).filter(({band}) => bandCanDepartFromEndpoint(band,target.endpoint)).map(entry => ({...entry,target})));
+  const lateral = (point: [number,number] | undefined) => { const p = point ? localVectorMeters(junction.position,point) : [0,0]; return -p[0]*tangent[1]+p[1]*tangent[0]; };
+  for (const mode of new Set(incoming.flatMap(({band}) => bandModes(band)))) {
+    const from = incoming.filter(({band})=>bandModes(band).includes(mode)).sort((a,b)=>lateral(lanePoint(source.section,a.index,source.endpoint,0)?.position)-lateral(lanePoint(source.section,b.index,source.endpoint,0)?.position));
+    const to = outgoing.filter(({band})=>bandModes(band).includes(mode)).sort((a,b)=>lateral(lanePoint(a.target.section,a.index,a.target.endpoint,0)?.position)-lateral(lanePoint(b.target.section,b.index,b.target.endpoint,0)?.position));
+    if (!from.length || !to.length) continue;
+    for (let rank=0;rank<Math.max(from.length,to.length);rank++) {
+      const a=from[Math.min(from.length-1,Math.floor(rank*from.length/Math.max(from.length,to.length)))];
+      const b=to[Math.min(to.length-1,Math.floor(rank*to.length/Math.max(from.length,to.length)))];
+      const key=JSON.stringify([source.roadId,source.section.id,source.endpoint,a.band.id??a.index,b.target.roadId,b.target.section.id,b.target.endpoint,b.band.id??b.index,mode]);
+      const movement=explicitJunctionMovement(key,junction,index,active,cache);
+      if(movement)result.push(movement);
+    }
+  }
+}
+
 /** Stable across band reordering when the source carries persistent lane IDs. */
 export function roadMovementKey(movement: RoadLaneContinuation): string {
   return JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceEndpoint,
     movement.sourceBandId ?? movement.sourceBandIndex, movement.targetRoadId, movement.targetSectionId,
     movement.targetEndpoint, movement.targetBandId ?? movement.targetBandIndex, movement.mode]);
+}
+
+function explicitJunctionMovement(key: string, junction: RoadConnectionJunction, index: RoadConnectionIndex, active: RoadDraft | null, cache: Map<string, RoadDraft>): RoadLaneContinuation | null {
+  try {
+    const fields: unknown = JSON.parse(key);
+    if (!Array.isArray(fields) || fields.length !== 9) return null;
+    const [sourceRoadId, sourceSectionId, sourceEndpoint, sourceRef, targetRoadId, targetSectionId, targetEndpoint, targetRef, mode] = fields;
+    if (!junction.roadIds.includes(sourceRoadId) || !junction.roadIds.includes(targetRoadId) || !['start','end'].includes(sourceEndpoint) || !['start','end'].includes(targetEndpoint) || typeof mode !== 'string') return null;
+    const source = resolveRoadDraft(index, sourceRoadId, active, cache)?.sections.find(s => s.id === sourceSectionId);
+    const target = resolveRoadDraft(index, targetRoadId, active, cache)?.sections.find(s => s.id === targetSectionId);
+    if (!source || !target) return null;
+    const sourceBandIndex = source.bands.findIndex((band, i) => typeof sourceRef === 'number' ? i === sourceRef : band.id === sourceRef);
+    const targetBandIndex = target.bands.findIndex((band, i) => typeof targetRef === 'number' ? i === targetRef : band.id === targetRef);
+    const from = source.bands[sourceBandIndex], to = target.bands[targetBandIndex];
+    if (!from || !to || !bandModes(from).includes(mode) || !bandModes(to).includes(mode) || !bandCanArriveAtEndpoint(from, sourceEndpoint) || !bandCanDepartFromEndpoint(to, targetEndpoint)) return null;
+    const path = movementPath(source, sourceEndpoint, sourceBandIndex, target, targetEndpoint, targetBandIndex);
+    const polygon = buildLaneConnectorSurface({path, sourceWidthM:from.widthM, targetWidthM:to.widthM});
+    if (path.length < 2 || polygon.length < 4) return null;
+    return {id:`junction-continuation:${junction.id}:${key}`, sourceRoadId,sourceSectionId,sourceEndpoint,sourceBandIndex,sourceBandId:from.id,
+      targetRoadId,targetSectionId,targetEndpoint,targetBandIndex,targetBandId:to.id,mode,sourceKind:from.kind,sourceType:from.sourceType,
+      turn:classifyTurn(source,sourceEndpoint,target,targetEndpoint),path,polygon,sourceWidthM:from.widthM,targetWidthM:to.widthM};
+  } catch { return null; }
 }
 
 function classifyJunctionTargetTurns(
@@ -1195,13 +1255,13 @@ function normalizeExternalId(value: unknown): string | null {
 }
 
 function firstExplicitRoadMovements(
-  areas: RoadArea[]
+  areas: RoadArea[], attribute = 'allowedRoadMovements'
 ): Array<[string, string]> | null {
   let found = false;
   const result: Array<[string, string]> = [];
   const seen = new Set<string>();
   for (const area of areas) {
-    const value = area.attributes.allowedRoadMovements;
+    const value = area.attributes[attribute];
     if (!Array.isArray(value)) continue;
     found = true;
     for (const entry of value) {
