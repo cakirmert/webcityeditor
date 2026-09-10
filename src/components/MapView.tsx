@@ -2050,7 +2050,7 @@ export default function MapView({
   const buildingSelectionEnabled =
     !mapSelectionLocked && !planningInteractionOnly;
   const roadSelectionEnabled =
-    !mapSelectionLocked && roadWorkspaceOpen && !planningInteractionOnly;
+    drawMode === 'none' && !onPlacementClick && !footprintEdit && !dragTransformId && roadWorkspaceOpen && !planningInteractionOnly && !junctionEditTool.startsWith('trace-');
   const planningSelectionEnabled =
     !mapSelectionLocked && planningInteractionOnly;
   const streamedBuildingSelectionEnabled =
@@ -3401,7 +3401,12 @@ export default function MapView({
           lineWidthMinPixels: 1,
           stroked: !junctionDraft,
           filled: true,
-          pickable: false,
+          pickable: roadSelectionEnabled,
+          onClick: (info: PickingInfo<RoadArea>) => {
+            // Resolve against saved geometry, not the clipped preview band.
+            const saved = info.object && roadAreas.find(area => area.roadId === info.object!.roadId);
+            if (roadSelectionEnabled && saved) onRoadAreaSelect?.(saved);
+          },
           extruded: false,
           parameters: { depthTest: false } as unknown as never,
           updateTriggers: {

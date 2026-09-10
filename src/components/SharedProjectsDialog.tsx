@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { Cloud, FolderPlus, RefreshCw } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from './ui/dialog';
 import type { SharedProjectsState } from '../hooks/useSharedProjects';
+import type { ProjectRoadResetState } from '../hooks/useProjectRoadReset';
 
-export default function SharedProjectsDialog({ open, onOpenChange, state, hasDocument, draftActive, fileName }: {
+export default function SharedProjectsDialog({ open, onOpenChange, state, hasDocument, draftActive, fileName, roadReset }: {
   open: boolean; onOpenChange: (open: boolean) => void; state: SharedProjectsState; hasDocument: boolean; draftActive: boolean; fileName: string;
+  roadReset?: ProjectRoadResetState;
 }) {
   const [url, setUrl] = useState(state.serverUrl), [token, setToken] = useState('');
   const [workspaceName, setWorkspaceName] = useState(''), [projectName, setProjectName] = useState('');
@@ -13,7 +15,7 @@ export default function SharedProjectsDialog({ open, onOpenChange, state, hasDoc
   useEffect(() => { if (open && state.connected) void state.refresh(); }, [open, state.connected, state.refresh]);
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="shared-projects-dialog">
-      <div className="shared-projects-heading"><Cloud size={25} /><div><DialogTitle>Shared projects</DialogTitle><DialogDescription>Keep city edits together, across devices.</DialogDescription></div></div>
+      <div className="shared-projects-heading"><Cloud size={25} /><div><DialogTitle>Projects</DialogTitle><DialogDescription>Project data and shared storage.</DialogDescription></div></div>
       <div className="shared-projects-body">
       {!state.connected ? <>
         <p className="shared-projects-intro">Connect your team's storage server to save and reopen projects. Until then, use <b>Save local</b> or <b>Export CityJSON</b> in More.</p>
@@ -50,6 +52,19 @@ export default function SharedProjectsDialog({ open, onOpenChange, state, hasDoc
         </form>
       </>}
       <p className={`shared-status is-${state.status}`} role="status">{state.message}</p>
+      {roadReset && <details className="project-road-reset"><summary>Reset project roads from OSM</summary>
+        <p>This optional reset replaces <b>all roads, intersections, lane edits and turn restrictions in the loaded project</b> with a fresh OSM conversion. It uses the entire project area, regardless of map zoom. Buildings and other objects remain.</p>
+        <p>Generation stays manual in the road editor. A reset starts over from OSM; it does not preserve your road designs. Review the replacement first. Resetting creates a local recovery copy and supports Undo. In a shared project, the replacement will sync to your team.</p>
+        {draftActive && <p className="project-reset-notice">Save or discard all active and kept drafts before resetting.</p>}
+        {!roadReset.preview && <button disabled={!hasDocument || draftActive || roadReset.busy || state.busy || state.status === 'saving'} onClick={() => void roadReset.prepare()}>{roadReset.busy ? 'Preparing replacement…' : 'Prepare project-wide reset'}</button>}
+        {roadReset.preview && <div className="project-reset-preview"><b>{roadReset.preview.summary}</b>
+          {roadReset.preview.notices.length > 0 && <details><summary>{roadReset.preview.notices.length} OSM conversion notices</summary><ul>{roadReset.preview.notices.map((notice, i) => <li key={i}>{notice}</li>)}</ul></details>}
+          <button onClick={roadReset.downloadPreview}>Download replacement preview</button>
+          <button className="project-reset-apply" disabled={draftActive || roadReset.busy || state.busy || state.status === 'saving'} onClick={() => void roadReset.apply()}>Reset all project roads</button>
+        </div>}
+        {(roadReset.preview || roadReset.busy) && <button disabled={roadReset.busy && !!roadReset.preview} onClick={roadReset.cancel}>Cancel reset</button>}
+        {roadReset.message && <p className="project-reset-notice" role="status">{roadReset.message}</p>}
+      </details>}
       </div>
     </DialogContent>
   </Dialog>;

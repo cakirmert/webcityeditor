@@ -30,11 +30,21 @@ On the unchanged Rödingsmarkt crop, Nearby combines nine junction records and e
 
 The automatic-on-selection proposal was removed after user review. Selecting any junction opens all its incoming roads and turn connections without creating a geometry edit or an Undo entry. **Shape → Generate** prepares the rounded draft; **Keep current** or Undo restores the original. Previewing does not mutate CityJSON.
 
-Generated corners now fit to the boundaries of unchanged neighbouring roads at the same crossing level. The neighbouring objects are not edited. A generated component can be discarded as a redundant scrap only if the remaining component reaches every original driving approach; a road cutting through the carriageway still blocks generation. Drawn outlines retain their blocking fit checks. Grade-separated crossings are not clipped into holes.
+Generated corners fit to unchanged neighbouring roads at the same crossing level. The neighbouring objects are not edited. A generated component is discarded only if the remaining component reaches every original driving approach. When clipping would split the carriageway, the original connected candidate is retained and its overlaps are reported. Grade-separated crossings are not clipped into holes. The user can explicitly save design conflicts with warnings; invalid geometry remains blocked.
 
 Ordinary generation trims each old road tip at the same cross-section used to construct the new kerb. Detached rectangular remnants no longer survive outside that rounded corner. Combined footprints also drop detached tip components; real outward approaches and full-width bicycle ends remain. Short **separate source roads** outside an ordinary junction are intentionally still separate: use **Generate combined intersection** to absorb eligible connected pieces together.
 
-All ten locations in the comparison now pass road-overlap checks, including the previously blocked Kajen / Hohe Brücke, Meßberg / Dovenfleet / Willy-Brandt-Straße, and Rathausmarkt / Große Johannisstraße / Rathausstraße. The three complex Rödingsmarkt checks in 5,605 CityObjects across two streamed tiles also pass road-overlap checks after fitting. This is not a claim that every preview passes every surroundings check: in the browser, a seven-piece Meßberg merge remains blocked at two tree trunks, while the ordinary generated junction saves successfully.
+The ten-location regression includes Kajen / Hohe Brücke, Meßberg / Dovenfleet / Willy-Brandt-Straße, and Rathausmarkt / Große Johannisstraße / Rathausstraße. The larger Rödingsmarkt merge was also reviewed against 5,605 CityObjects across two streamed tiles. It now retains a connected carriageway and reports four overlap conflicts with nearby footways, steps and junctions; the browser successfully saved it with warnings. This is not a claim that every preview fits its surroundings without conflicts.
+
+## Follow-up: square fragments, warnings and switching drafts
+
+The reported green squares were retained cycling segments from internal source roads, plus fragments severed during neighbour fitting. Cycling is now fitted and tested for connection to external approaches **before** its space is reserved in the motor and walking pavement. Isolated internal parts are omitted without leaving rectangular holes. Full-width external cycle ends remain. Both Nearby and Larger merges of source junction `3376` are covered by save/reopen tests on the actual streamed tiles.
+
+Warning cards use solid, contrasting colours and can expand their complete lists. **Save with N warnings** records accepted design issues in `_roadFitReview`; reopening shows them as results from the last save. Fresh checks still run synchronously before a commit. Structural validity and incomplete geometry are not bypassed.
+
+Road and intersection selections switch directly on the map, including preview surfaces. Unsaved drafts and their undo histories are kept in the inspector. They are session drafts, not persisted project edits. Source signatures prevent a kept draft from silently overwriting geometry changed by another saved operation.
+
+The old viewport OSM refresh was removed. **Projects → Reset project roads from OSM** prepares a complete replacement over the loaded project's extent using the same network-to-CityJSON converter as the Rust pipeline's CLI. Counts, notices and a downloadable preview precede the explicit reset. Application requires a recovery copy, creates an Undo entry, preserves non-Road objects, and stops old road tile streaming. A live browser test prepared 207 roads and 127 intersections from the 75-object source crop, applied the reset, then restored its original 48 roads and 27 junctions with Undo. Public Overpass availability and a 25 km² browser limit constrain this optional workflow.
 
 ![Built-in imagery, original import and rounded candidate at Kurze Mühren](../assets/readme/junction-generation-review.jpg)
 
@@ -42,7 +52,7 @@ Checks cover **loaded** buildings, roads and trees. A roads-only crop contains n
 
 ## Verification and reproduction
 
-The frontend suite passes **748 tests**, with five pre-existing skips; the production GitHub Pages build also passes.
+The frontend suite passes **768 tests**, with five pre-existing skips; the production GitHub Pages build also passes.
 
 Regression coverage includes unchanged selection, imported tip cleanup, fitting and saving the three formerly blocked locations with unchanged neighbours, refusal to split a carriageway across another road, both crossing directions, full-width bicycle ends, islands, merge sizes and existing building/tree validation. The previous crossing review and larger Rödingsmarkt save/reopen checks remain covered. The browser was also used to verify unchanged selection, manually generate and save Meßberg, and compare the cleaned Kajen candidate with the original roads and built-in imagery.
 

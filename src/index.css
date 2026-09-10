@@ -2651,12 +2651,30 @@ select:focus {
 .road-handle-guide__title { color: #526984; }
 .road-handle-guide__title span { background: #e7eef8; color: #527198; }
 /* Shared storage is a single, phone-friendly dialog, separate from map editing. */
+.road-editor-panel .road-fit-card { padding: 12px; border: 1px solid #c99947; border-radius: 9px; background: #fff5df; color: #64410e; font-size: 12px; line-height: 1.5; }
+.road-editor-panel .road-fit-card.has-conflicts { background: #fff0ea; border-color: #ce8871; color: #792c18; }
+.road-fit-card p { margin: 6px 0 10px; color: inherit; }
+.road-fit-card li { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; padding: 6px 0; overflow-wrap: anywhere; border-top: 1px solid #94632826; }
+.road-fit-card__severity { font-size: 10px; font-weight: 700; }
+.road-fit-card__count { padding: 2px 7px; border-radius: 5px; background: #9463281c; }
+.road-fit-card button { color: inherit; text-decoration: underline; padding-top: 8px; font-weight: 600; cursor: pointer; }
+.road-kept-drafts { padding: 12px; border: 1px solid #bbcce3; background: #eff5ff; border-radius: 9px; color: #304f7a; font-size: 12px; }
+.road-kept-drafts p { margin: 5px 0 8px; font-size: 11px; }
+.road-kept-drafts button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; text-align: left; border-top: 1px solid #ccd9eb; cursor: pointer; overflow-wrap: anywhere; }
+.road-kept-drafts small { font-size: 10px; font-weight: 400; }
 .shared-projects-dialog { width: min(560px, calc(100vw - 24px)); max-width: 560px !important; max-height: calc(100dvh - 24px); overflow-y: auto; padding: 24px; color: #25364e; background: #f7f9fc; border-color: #d7e1ef; border-radius: 18px; gap: 16px; }
 .shared-projects-heading { display: flex; gap: 12px; align-items: center; padding-right: 28px; color: #356dd0; }
 .shared-projects-heading h2 { font-size: 19px; color: #25364e; line-height: 1.3; }
 .shared-projects-heading p { color: #738097; margin-top: 5px; }
 .shared-projects-dialog p { font-size: 12px; line-height: 1.6; }
 .shared-projects-intro { color: #67788e; }
+.project-road-reset { border-top: 1px solid #cdd9e9; padding-top: 15px; font-size: 12px; color: #3b4f69; }
+.project-road-reset > summary { cursor: pointer; color: #8b381e; font-weight: 600; }
+.project-road-reset p { margin: 10px 0; }
+.project-reset-preview { display: grid; gap: 10px; padding: 12px; background: #fff5e6; border: 1px solid #dbb27b; border-radius: 9px; }
+.project-reset-preview ul { max-height: 150px; overflow-y: auto; overflow-wrap: anywhere; padding-left: 16px; }
+.shared-projects-dialog .project-reset-apply { color: white; background: #a13e22; border-color: #a13e22; }
+.project-reset-notice { color: #754916; background: #fff3db; border-radius: 7px; padding: 10px; }
 .shared-projects-form, .shared-save-new { display: grid; gap: 12px; }
 .shared-projects-dialog label { display: grid; gap: 6px; font-size: 11px; color: #586f8b; min-width: 0; }
 .shared-projects-dialog input, .shared-projects-dialog select { min-width: 0; width: 100%; height: 44px; padding: 9px 11px; color: #273d58; background: white; border: 1px solid #cdd9e9; border-radius: 8px; font-size: 14px; }

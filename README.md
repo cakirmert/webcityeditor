@@ -13,11 +13,11 @@ Design streets, edit intersections and buildings, and keep the result in **CityJ
 3. **Turns** opens with **All approaches, together**. Colours and approach numbers match the map. Select a lane card or a map connection to inspect that lane; **← All approaches** returns to the overview.
 4. Switch between **Map** and **Satellite** above the map. Adjust **Road overlay**, or hold the eye button to compare the road with the imagery.
 5. Open **Shape → Generate** for a rounded road surface. Opening an intersection always keeps its saved shape; generation runs only when you click it. Eligible groups offer **Generate combined intersection**, with **Nearby pieces / Larger area** choices. The map fits all approaches when the group changes.
-6. Use **Undo** to restore the original. Choose **Save intersection** to apply the junction, its approach surfaces and turn permissions together. **More → Save local** or **Export CityJSON** keeps it after the session ends.
+6. Use **Undo** to restore the original. Choose **Save intersection**, or **Save with warnings** after reviewing the highlighted conflicts, to apply the junction, its approach surfaces and turns together. **More → Save local** or **Export CityJSON** keeps it after the session ends.
 
 These tools apply to loaded intersections throughout the network. The two study buttons and **Trace from satellite** have been removed. Satellite comparison and optional boundary handles remain. For a reproducible study, download the [original Mattentwiete import](public/examples/hamburg-mattentwiete-source.json) or [edited example](public/examples/hamburg-mattentwiete.json), then open it through **Data**. The [comparison notes](docs/intersection-reference-study.md) explain its estimated widths and visual kerb trace.
 
-The [latest crossing and junction notes](docs/intersections-and-crossings-2026-09-10.md) cover road-over-rail rendering, cycle-lane preservation, larger merges and their limits. The [eight-location satellite review](docs/intersection-validation-2026-09.md) includes the earlier **608-junction audit**. Generated geometry is still a proposal: collisions or incompatible levels block saving.
+The [latest crossing and junction notes](docs/intersections-and-crossings-2026-09-10.md) cover road-over-rail rendering, cycle-lane preservation, larger merges and their limits. The [eight-location satellite review](docs/intersection-validation-2026-09.md) includes the earlier **608-junction audit**. Generated geometry is a proposal: collisions remain visible and can be accepted explicitly. Invalid geometry and incompatible crossing levels still need correction.
 
 ### Try the complex crossing and lane split
 
@@ -28,7 +28,7 @@ Download the [Rödingsmarkt example](public/examples/hamburg-roedingsmarkt.json)
 - Cycle lanes retain their width through the merge and at their ends. Existing bicycle pavement is reserved before generating the carriageway; compatible through connections can continue it across the junction.
 - The lane transition joins **three incoming to six outgoing driving lanes**, retaining separate lane arrows and dividers. Both reviewed left-only lanes lead to separate left-turn destinations.
 - **Generate → Save intersection** retains the generated surface and its arrows. Reopened generated surfaces are labelled **Saved generated surface**.
-- Generated corners fit around unchanged neighbouring roads. Old approach tips are cut at the new road mouths so detached rectangular remnants do not remain beside rounded kerbs. Cycling keeps its full-width ends. If fitting would disconnect an approach, generation asks for a combined junction or an adjusted boundary; overlap checks remain active.
+- Generated corners fit around unchanged neighbouring roads. Detached old road tips and isolated internal cycling rectangles are removed before pavement is allocated, avoiding both green squares and rectangular holes. Cycling keeps its full-width approach ends. If clipping would disconnect the carriageway, the connected surface stays and its overlaps are reported for review.
 
 ![Saved lane transition with two distinct left-turn lanes, dividers and arrows](assets/readme/intersection-transition-current.jpg)
 
@@ -42,14 +42,14 @@ The [original crop](public/examples/hamburg-roedingsmarkt-source.json) remains u
 
 ## Edit a road
 
-Choose **Roads** and select a street. The same inspector holds its preview, properties and save controls. If another edit is already active, finish it or use the selected road's **Edit road** action.
+Choose **Roads** and select a street. The same inspector holds its preview, properties and save controls. Click another road or intersection to switch directly. Unsaved drafts appear under **Kept drafts**; click the road again or **Resume** to restore its edits and undo history. These drafts stay in this browser session until saved or discarded. If another saved edit changes a kept draft's source geometry, the editor asks you to reopen that road before saving over it.
 
 | Tab | What you can do |
 | --- | --- |
 | **Lanes** | Select a band in the proportional street preview. Change width, type, surface, direction and order; add driving, cycling, sidewalk, parking or planting space. |
 | **Shape** | Move centreline anchors, add bends with the white `+` handles, choose **Smooth** or **Straight**, adjust elevation or split a section. |
 | **Connections** | Inspect Start/End joins, open their existing intersections, or construct one together with an unsaved road draft. |
-| **Rules** | Review minimum/maximum widths, set left/right extent limits, fit widths into available space, and import or export a city policy. OSM refresh is under **Advanced**. |
+| **Rules** | Review minimum/maximum widths, set left/right extent limits, fit widths into available space, and import or export a city policy. |
 
 ![Road design with a live street preview and the lane controls in the same inspector](assets/readme/road-design-current.jpg)
 
@@ -64,7 +64,20 @@ Changes stay in a draft until **Save road changes** or **Save exact attributes**
 5. Choose **Build intersection** to preview the junction together with the unsaved road. **Save intersection** commits both; **Discard** returns to the road draft. Ordinary road saves also construct confirmed coincident endpoint joins atomically.
 6. In the intersection's **Roads** tab, select a street card to highlight its road and Start/End point. **Add another approach** lists named road-end cards with compass direction and distance.
 
-A failed fit explains the conflict and preserves the draft. Excessive band widths and new overlap with other roads block saving, even for connected roads. Shared edges and retained source overlaps are allowed. Width fitting respects the project's limits and the available space on each side; maximums are editable project guardrails, not statutory limits. Existing trees on sidewalks, planted strips and traffic-island openings are allowed. Expanding driving, cycling or parking pavement onto a mapped trunk blocks saving.
+A fit warning explains the conflict and highlights it on the map, including overlaps with connected roads. **Show all warnings** expands the complete list. **Save with N warnings** explicitly accepts the design and records the issues in CityJSON; reopening shows **Warnings accepted at last save**. Width and extent policy violations can also be accepted, but invalid numbers, unfinished outlines and structurally invalid geometry cannot be saved. Existing trees on sidewalks, planted strips and traffic-island openings remain allowed; newly covering a trunk with driving, cycling or parking pavement produces a warning.
+
+![Readable overlap warnings alongside the cleaned Rödingsmarkt junction](assets/readme/junction-warnings-current.jpg)
+
+### Reset project roads from OSM
+
+The road inspector has no OSM refresh control. Open **Projects → Reset project roads from OSM** only when you intend to replace the project's road designs.
+
+1. Save or discard active and kept drafts.
+2. Choose **Prepare project-wide reset**. The whole loaded project's extent is used, including its buildings, regardless of camera zoom. Preparation leaves the document untouched.
+3. Review the replacement counts and conversion notices. **Download replacement preview** lets you inspect the complete CityJSON before applying it.
+4. **Reset all project roads** replaces every Road object, including intersections, lane edits and turn restrictions. Buildings and other object types remain. A local recovery copy is created first; **Undo** restores the previous network. The reset stops viewport road streaming so old reference tiles cannot reappear over the replacement.
+
+This works without a storage server. Shared projects sync the applied replacement to their workspace. The browser reset is limited to 25 km² and depends on the public OSM service; oversized, incomplete or failed downloads leave the current project intact. Use the repository's converter for larger datasets.
 
 ## Shape an intersection
 
@@ -73,7 +86,7 @@ The intersection inspector separates its physical outline from its permitted mov
 - **Shape → Keep current** retains the saved surface.
 - **Shape → Generate** connects the approach kerbs with curved returns and retains lane arrows. Opening Shape keeps handles hidden until you choose to adjust them.
 - **Generate combined intersection** appears for eligible groups joined by short internal roads. Choose **Nearby pieces** or **Larger area**; the counts show exactly what the preview will absorb. **Save intersection** removes those pieces in the same transaction. **Undo** returns to the separate draft and size options. Bridges, tunnels and roads connected outside the group are excluded.
-- Unedited junctions with up to four approaches, including same-street lane transitions, can open with a proposed rounded surface when geometry and fit checks pass. Previewing changes nothing in the document; **Save** is still required. Complex, conflicting or differently elevated junctions keep their source surface and turn editor. The app does not silently rewrite the whole city.
+- Every intersection opens with its saved surface. Rounded generation, including small lane transitions, runs only when clicked. Previewing changes nothing in the document; **Save** is still required.
 - **Adjust boundary on map** provides draggable corners and midpoint insertion. With a point focused, arrow keys nudge it; **Shift + arrow** moves farther and **Delete** removes it. A whole drag is one undo step.
 - **Trace an island** creates an opening for a raised island, median or tree bed. Islands must remain inside the boundary and separate from each other.
 - **Turns** starts with all driving approaches. Select a lane to see its numbered destinations; click a curve or checkbox to change permission. The View selector also exposes cycle lanes and sidewalks. The compact diagram uses the same approach colours.

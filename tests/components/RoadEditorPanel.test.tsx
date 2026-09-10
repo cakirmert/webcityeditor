@@ -32,6 +32,9 @@ function renderPanel(
     selectedRoadArea?: RoadArea;
     draft?: RoadDraft | null;
     draftDirty?: boolean;
+    roadFitConflicts?: ComponentProps<typeof RoadEditorPanel>['roadFitConflicts'];
+    savedFitReview?: ComponentProps<typeof RoadEditorPanel>['savedFitReview'];
+    onSaveRoadWithWarnings?: () => void;
     editingRoadId?: string;
     onCancelEdit?: () => void;
     onEditSelectedRoadArea?: (area: RoadArea) => void;
@@ -56,6 +59,9 @@ function renderPanel(
       selectedOsmRoadId={null}
       draft={options.draft === undefined ? draft : options.draft}
       draftDirty={options.draftDirty ?? false}
+      roadFitConflicts={options.roadFitConflicts}
+      savedFitReview={options.savedFitReview}
+      onSaveRoadWithWarnings={options.onSaveRoadWithWarnings}
       editingRoadId={options.editingRoadId ?? null}
       status={null}
       basemap="topplus"
@@ -69,7 +75,6 @@ function renderPanel(
       drawMode="none"
       backendUrl="http://127.0.0.1:8787/api/roads"
       onClose={() => {}}
-      onFetchOsmRoads={() => {}}
       onBasemapChange={() => {}}
       onSatelliteOpacityChange={() => {}}
       onRoadOverlayOpacityChange={() => {}}
@@ -113,6 +118,22 @@ function createDataTransfer() {
 }
 
 describe('<RoadEditorPanel />', () => {
+  it('shows readable, expandable warnings and allows an explicit save from the lane tab', () => {
+    const onSave = vi.fn();
+    const conflicts = Array.from({ length: 6 }, (_, i) => ({ id: `overlap-${i}`, kind: 'road_overlap' as const, severity: 'error' as const, roadAreaId: 'road-1', label: `Road overlaps neighbour ${i + 1}`, polygon: [] }));
+    renderPanel(vi.fn(), { draftDirty: true, roadFitConflicts: conflicts, onSaveRoadWithWarnings: onSave });
+    expect(screen.getByRole('region', { name: 'Road fit warnings' })).toHaveClass('road-fit-card');
+    expect(screen.getByText('Road overlaps neighbour 1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 6 warnings' }));
+    expect(screen.getByText('Road overlaps neighbour 6')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save with 6 warnings' })); expect(onSave).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/refresh OSM reference/)).not.toBeInTheDocument();
+  });
+  it('shows the warnings recorded at the last save when reopening a saved road', () => {
+    renderPanel(vi.fn(), { savedFitReview: { checkedAt: new Date().toISOString(), warnings: [{ id: 'one', label: 'Road overlaps a building', severity: 'error' }] } });
+    expect(screen.getByText('Warnings accepted at last save')).toBeVisible();
+    expect(screen.getByText('Road overlaps a building')).toBeVisible();
+  });
   it('expands into a larger right-side road workspace on demand', () => {
     renderPanel();
 

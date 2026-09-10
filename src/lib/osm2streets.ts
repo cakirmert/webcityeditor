@@ -12,6 +12,7 @@ export interface Osm2StreetsResult {
   intersectionMarkings: GeoJsonFeatureCollection;
   engine: 'fork';
   diagnostics: Osm2StreetsDiagnostic[];
+  network?: unknown;
 }
 
 export interface GeoJsonFeatureCollection {
@@ -42,6 +43,7 @@ export interface Osm2StreetsDiagnostic {
 
 interface ProcessOsmXmlOptions {
   echoDiagnostics?: boolean;
+  includeNetwork?: boolean;
 }
 
 let initPromise: Promise<any> | null = null;
@@ -77,7 +79,7 @@ export async function processOsmXml(
     if (echoDiagnostics) originalError(...args);
   };
   try {
-    return readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions, diagnostics);
+    return readOsm2StreetsResult(osmXml, clipPtsGeojson, importOptions, diagnostics, options.includeNetwork);
   } finally {
     console.warn = originalWarn;
     console.error = originalError;
@@ -112,7 +114,8 @@ function readOsm2StreetsResult(
   osmXml: string,
   clipPtsGeojson: string,
   importOptions: Osm2StreetsImportOptions,
-  diagnostics: Osm2StreetsDiagnostic[]
+  diagnostics: Osm2StreetsDiagnostic[],
+  includeNetwork = false
 ): Osm2StreetsResult {
   const network = new JsStreetNetwork(textEncoder.encode(osmXml), clipPtsGeojson, importOptions);
   try {
@@ -141,6 +144,7 @@ function readOsm2StreetsResult(
       intersectionMarkings,
       engine: 'fork',
       diagnostics,
+      ...(includeNetwork ? { network: JSON.parse(network.toJson()) } : {}),
     };
   } finally {
     network.free();

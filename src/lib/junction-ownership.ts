@@ -35,7 +35,8 @@ export function fitGeneratedJunctionEdges(generated: RoadArea[], areas: RoadArea
       // redundant scraps of this new corner, not another road to retain.
       if (parts.length > 1 && connected.length) parts = [connected[0]];
       if (parts.length === 0 || (required.size > 0 && connected.length === 0) || parts.filter(part => junctionPolygonArea([part]) > .04).length > 1) {
-        error = 'A neighbouring road cuts through this junction. Combine the connected pieces or adjust the approaches before generating; the road cannot be removed or the junction split silently.';
+        error = 'A neighbouring road cuts through this junction. The connected surface is retained to avoid detached pieces. Review the highlighted overlap; combine the connected pieces or save with warnings.';
+        return [area];
       }
     }
     return parts.map((part, i) => ({ ...area, id: `${area.id}-fit-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map(ring => ring.map(unproject)) }));
@@ -58,4 +59,11 @@ export function junctionApproachEndMask(road: RoadDraft, endpoint: 'start' | 'en
 export function removeJunctionTipFragments(parts: MultiPolygon, endMask: Polygon | undefined): MultiPolygon {
   if (!endMask || parts.length < 2) return parts;
   return parts.filter(part => junctionPolygonArea(difference(part, endMask)) > .001);
+}
+
+/** Internal source segments are often tiny, disconnected rectangles after a
+ * junction merge. Only keep cycle paving connected to a full-width approach;
+ * decide ownership before cutting it out of the motor/walking surfaces. */
+export function connectedCyclewayComponents(network: MultiPolygon, approaches: Polygon[]): MultiPolygon {
+  return network.filter(part => approaches.some(approach => junctionPolygonArea(intersection(part, approach)) > .001));
 }

@@ -3,6 +3,7 @@ import Toolbar from './components/Toolbar';
 import FileLoader from './components/FileLoader';
 import SharedProjectsDialog from './components/SharedProjectsDialog';
 import { useSharedProjects } from './hooks/useSharedProjects';
+import { useProjectRoadReset } from './hooks/useProjectRoadReset';
 import MapView from './components/MapView';
 import BuildingDetailPreview from './components/BuildingDetailPreview';
 import AttributePanel from './components/AttributePanel';
@@ -364,7 +365,7 @@ export default function App() {
       importExport.handleCatalogLoaded(loaded, catalogUrl, options);
       if (options.loadMode === 'all' && loaded.doc) {
         roadEditor.setRoadStatus(
-          `Loaded ${loaded.tiles.length} Hamburg catalog tile${loaded.tiles.length === 1 ? '' : 's'}. Open Roads and click Fetch / Recalculate View when you want OSM roads.`
+          `Loaded ${loaded.tiles.length} Hamburg catalog tile${loaded.tiles.length === 1 ? '' : 's'}. Open Roads and select a road or intersection to edit.`
         );
       }
     },
@@ -375,7 +376,7 @@ export default function App() {
     ]
   );
 
-  const hasMapDraft = roadEditor.roadDraftDirty || roadEditor.junctionDirty || !!buildingEditor.pendingTransform || !!buildingEditor.footprintEdit || coreState.drawMode !== 'none';
+  const hasMapDraft = roadEditor.roadDraftDirty || roadEditor.junctionDirty || roadEditor.parkedDrafts.length > 0 || !!buildingEditor.pendingTransform || !!buildingEditor.footprintEdit || coreState.drawMode !== 'none';
   const sharedProjects = useSharedProjects(coreState, (doc, name) => {
     documentLoadVersion.current++;
     setAutoHamburgStatus(null);
@@ -392,6 +393,11 @@ export default function App() {
     catalog.setCatalogStatus({ kind: 'idle' });
   });
   sharedDetachRef.current = sharedProjects.detach;
+  const projectRoadReset = useProjectRoadReset(coreState, undoRedo, hasMapDraft, () => {
+    documentLoadVersion.current++; setAutoHamburgStatus(null);
+    catalog.setCatalogConnection(null); catalog.setCatalogStatus({ kind: 'idle' });
+    roadEditor.clearOsmRoadData();
+  });
 
   useEffect(() => {
     if (autoHamburgLoadStartedRef.current || coreState.cityjson) return;
@@ -1101,7 +1107,6 @@ export default function App() {
               undoDraftLabel={roadEditor.roadDraftHistoryState.undoLabel}
               redoDraftLabel={roadEditor.roadDraftHistoryState.redoLabel}
               onClose={roadEditor.handleCloseRoadWorkspace}
-              onFetchOsmRoads={() => void roadEditor.handleFetchOsmRoads()}
               onBasemapChange={roadEditor.setBasemap}
               onSatelliteOpacityChange={roadEditor.setSatelliteOpacity}
               onRoadOverlayOpacityChange={roadEditor.setRoadOverlayOpacity}
@@ -1120,6 +1125,10 @@ export default function App() {
               onRedoDraft={roadEditor.handleRedoRoadDraft}
               onSplitDraft={roadEditor.handleSplitRoadDraft}
               onInsertRoad={roadEditor.handleInsertRoad}
+              onSaveRoadWithWarnings={() => roadEditor.handleInsertRoad({ allowWarnings: true })}
+              savedFitReview={roadEditor.savedFitReview}
+              parkedDrafts={roadEditor.parkedDrafts}
+              onResumeDraft={roadEditor.handleResumeDraft}
               onExportPayload={roadEditor.handleExportRoadPayload}
               onPostPayload={() => void roadEditor.handlePostRoadPayload()}
               onBackendUrlChange={roadEditor.setRoadBackendUrl}
@@ -1198,7 +1207,7 @@ export default function App() {
               roadFitConflicts={roadEditor.junctionDraft ? roadEditor.junctionConflicts : roadEditor.roadFitConflicts}
               selectedRoadAreaId={roadEditor.selectedRoadArea?.id ?? null}
               onRoadAreaSelect={(area) => {
-                if (roadEditor.showRoadEditor && !roadEditor.roadDraft && !roadEditor.junctionDraft) roadEditor.handleEditSelectedRoadArea(area);
+                if (roadEditor.showRoadEditor) roadEditor.handleEditSelectedRoadArea(area);
                 roadEditor.setSelectedRoadArea(area);
                 // Road surfaces are edited in the dedicated transportation
                 // workspace. Opening the building inspector here exposed roof
@@ -1272,7 +1281,7 @@ export default function App() {
           {autoHamburgLoading && !coreState.cityjson && (
             <AutoHamburgLoading message={autoHamburgStatus.message} />
           )}
-          <SharedProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} state={sharedProjects} hasDocument={!!coreState.cityjson} draftActive={hasMapDraft} fileName={coreState.fileName} />
+          <SharedProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} state={sharedProjects} hasDocument={!!coreState.cityjson} draftActive={hasMapDraft} fileName={coreState.fileName} roadReset={projectRoadReset} />
           {sharedProjects.active && <button className={`app-project-status is-${sharedProjects.status}`} onClick={() => setProjectsOpen(true)} aria-label={`Shared project save status: ${hasMapDraft ? 'Apply draft to sync' : sharedProjects.message}`}>
             {hasMapDraft ? 'Draft edits · apply to sync' : sharedProjects.remoteRevision ? 'Newer shared version available' : sharedProjects.status === 'saved' ? `Saved · ${sharedProjects.active.name}` : sharedProjects.status === 'saving' ? 'Saving shared project…' : sharedProjects.status === 'pending' ? 'Waiting to sync…' : 'Shared project needs attention'}
           </button>}

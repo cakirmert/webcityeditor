@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoadArea } from '../../src/lib/transportation';
-import { fitGeneratedJunctionEdges, removeJunctionTipFragments } from '../../src/lib/junction-ownership';
+import { connectedCyclewayComponents, fitGeneratedJunctionEdges, removeJunctionTipFragments } from '../../src/lib/junction-ownership';
 import { difference, intersection } from '../../src/lib/polygon-boolean';
 import { junctionPolygonArea, type JunctionPoint } from '../../src/lib/junction-footprint';
 
@@ -24,6 +24,7 @@ describe('junction pavement ownership', () => {
   it('refuses to hide an unrelated road by splitting the carriageway around it', () => {
     const result = fitGeneratedJunctionEdges([area('junction',box(0,0,10,10))],[area('crossing',box(0,4,10,2))],new Set(['junction']),identity,identity);
     expect(result.error).toMatch(/cuts through/);
+    expect(result.areas).toEqual([area('junction', box(0, 0, 10, 10))]);
   });
   it('drops a detached generated scrap only when the remaining surface still reaches every approach', () => {
     const generated=[area('junction',box(0,0,10,10))],neighbour=area('neighbour',box(8,0,1,10));
@@ -45,5 +46,9 @@ describe('junction pavement ownership', () => {
     const result=removeJunctionTipFragments([tip,outward],mask);
     expect(result).toEqual([outward]);
     expect(junctionPolygonArea(difference(outward,...result))).toBe(0);
+  });
+  it('removes isolated cycling rectangles while keeping a complete approach, regardless of its length', () => {
+    const long = [box(0, 0, 2, 50)], short = [box(10, 0, 2, 2)], fragment = [box(5, 5, 2, 3)];
+    expect(connectedCyclewayComponents([long, short, fragment], [long, short])).toEqual([long, short]);
   });
 });

@@ -9,7 +9,7 @@ import { buildAutomaticJunctionFootprint, junctionFootprintFromAreas, junctionPo
 import { union, difference, intersection } from './polygon-boolean';
 import { isLaneTransition } from './junction-presentation';
 import { buildJunctionLaneGuides } from './junction-lane-guides';
-import { fitGeneratedJunctionEdges, junctionApproachEndMask, removeJunctionTipFragments } from './junction-ownership';
+import { connectedCyclewayComponents, fitGeneratedJunctionEdges, junctionApproachEndMask, removeJunctionTipFragments } from './junction-ownership';
 
 export interface RoadJunctionDraft {
   id: string;
@@ -200,6 +200,18 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     let cycleNetwork = cycleParts.length ? union(cycleParts[0], ...cycleParts.slice(1)) : [];
     const cycleOpenings: Polygon[] = [...sourceOpenings, ...(footprint?.holes ?? []).map(ring => [ring.map(project)])];
     if (cycleOpenings.length && cycleNetwork.length) cycleNetwork = difference(cycleNetwork, ...cycleOpenings);
+    if (cycleNetwork.length && (!draft.footprint || draft.footprint.source === 'generated')) {
+      const replaced = new Set([draft.id, ...draft.roadIds, ...(draft.mergedFrom?.junctionIds ?? []), ...(draft.mergedFrom?.internalRoadIds ?? [])]);
+      const cycleSurfaces = cycleNetwork.map((part, i): RoadArea => ({ ...approaches[0], id: `cycle-network-${i}`, roadId: draft.id,
+        polygon: part[0].map(unproject), holes: part.slice(1).map(ring => ring.map(unproject)), attributes: { sourceType: 'Biking' } }));
+      const fitted = fitGeneratedJunctionEdges(cycleSurfaces, areas, replaced, project, unproject);
+      cycleNetwork = fitted.areas.map(area => [area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))]);
+    }
+    cycleNetwork = connectedCyclewayComponents(cycleNetwork, cycleApproaches);
+    // Approach ends retain their source width, including existing overlaps;
+    // only new internal paving is fitted and filtered above.
+    const fullCycleEnds = cycleOpenings.length && cycleApproaches.length ? difference(cycleApproaches, ...cycleOpenings) : cycleApproaches;
+    if (fullCycleEnds.length) cycleNetwork = union(cycleNetwork, fullCycleEnds);
     if (cycleOpenings.length && cycleEndOwnership.length) cycleEndOwnership = difference(cycleEndOwnership, ...cycleOpenings);
     let occupied: MultiPolygon = [];
     let generated: RoadArea[] = [];
@@ -261,9 +273,12 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     }
     if (!draft.footprint || draft.footprint.source === 'generated') {
       const replaced = new Set([draft.id, ...draft.roadIds, ...(draft.mergedFrom?.junctionIds ?? []), ...(draft.mergedFrom?.internalRoadIds ?? [])]);
-      const fitted = fitGeneratedJunctionEdges(generated, areas, replaced, project, unproject, approaches);
-      if (fitted.error) return empty(fitted.error);
-      generated = fitted.areas;
+      // Cycling was already fitted before reserving its space. Cutting it a
+      // second time can sever sub-millimetre seams at shared approach ends.
+      const cycles = generated.filter(isCycleway);
+      const fitted = fitGeneratedJunctionEdges(generated.filter(area => !isCycleway(area)), areas, replaced, project, unproject, approaches);
+      if (fitted.error) warnings.push(fitted.error);
+      generated = [...fitted.areas, ...cycles];
       if (!generated.length) return empty('There is no space for this intersection between the neighbouring roads. Adjust the approaches or combine the connected pieces.');
       if (fitted.fittedRoads) warnings.push(`Generated edges fit around ${fitted.fittedRoads} neighbouring road${fitted.fittedRoads === 1 ? '' : 's'}.`);
       const surfaces = generated.map(area => [area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))]);

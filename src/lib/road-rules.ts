@@ -68,6 +68,14 @@ export function roadSectionExtents(section: RoadSectionDraft) {
   return { widthM, leftM: widthM / 2 + offsetM, rightM: widthM / 2 - offsetM };
 }
 
+/** Explicit acceptance covers design limits, never invalid geometry inputs. */
+export function canAcceptRoadRuleWarning(issue: RoadRuleIssue, draft: RoadDraft): boolean {
+  if (issue.code === 'configuration') return false;
+  if (issue.code !== 'width') return true;
+  const band = draft.sections.find(section => section.id === issue.sectionId)?.bands[issue.bandIndex ?? -1];
+  return !!band && Number.isFinite(band.widthM) && band.widthM > 0;
+}
+
 export function validateRoadRules(draft: RoadDraft, baseline?: RoadDraft | null): RoadRuleIssue[] {
   const profile = draft.ruleProfile ?? HAMBURG_ROAD_RULES;
   const issues: RoadRuleIssue[] = [];

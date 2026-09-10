@@ -1,0 +1,742 @@
+import proj4 from 'proj4';
+proj4.defs('EPSG:25832', '+proj=utm +zone=32 +ellps=GRS80 +units=m +no_defs');
+
+export function convertLanePolygonsToCityJson(geojson, options) {
+  if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
+    throw new Error('Expected an osm2streets lane FeatureCollection.');
+  }
+
+  const groups = groupLaneFeatures(geojson.features);
+  if (groups.length === 0) {
+    throw new Error('No polygon lane features were found.');
+  }
+
+  const roadGroups = groups
+    .map((group) =>
+      projectRoadGroup(
+        group,
+        options.idPrefix,
+        options.roadMetadataById,
+        options.roadMapEdgeEndpointsById,
+        options.sourceNetwork
+      )
+    )
+    .filter((group) => group.surfaces.length > 0);
+  if (roadGroups.length === 0) {
+    throw new Error('No convertible polygon lane features were found.');
+  }
+  const intersectionGroups = projectIntersectionGroups(options.sourceNetwork, options.idPrefix);
+  const projectedGroups = [...roadGroups, ...intersectionGroups];
+
+  const bbox = computeProjectedBbox(projectedGroups);
+  const transform = {
+    scale: [0.001, 0.001, 0.001],
+    translate: [round3(Math.floor(bbox[0])), round3(Math.floor(bbox[1])), 0],
+  };
+  const metadata = {
+    referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832',
+    geographicalExtent: [round3(bbox[0]), round3(bbox[1]), 0, round3(bbox[3]), round3(bbox[4]), 0],
+    title: 'osm2streets lane polygons converted to CityJSON Transportation Roads',
+    source: options.sourceLabel,
+    generatedAt: options.generatedAt,
+  };
+
+  const doc = {
+    type: 'CityJSON',
+    version: '2.0',
+    transform,
+    metadata,
+    CityObjects: {},
+    vertices: [],
+  };
+  const sequenceFeatures = [];
+  let surfaceCount = 0;
+
+  for (const group of projectedGroups) {
+    const featureVertices = [];
+    const { object, localVertexCount, surfaces } = group.kind === 'intersection'
+      ? intersectionObjectFromProjectedGroup(group, transform, featureVertices, options.generatedAt)
+      : roadObjectFromProjectedGroup(group, transform, featureVertices, options.generatedAt);
+    const offset = doc.vertices.length;
+    doc.vertices.push(...featureVertices);
+    doc.CityObjects[group.cityObjectId] = reindexRoadObject(object, offset);
+    sequenceFeatures.push({
+      type: 'CityJSONFeature',
+      id: group.cityObjectId,
+      CityObjects: {
+        [group.cityObjectId]: object,
+      },
+      vertices: featureVertices,
+    });
+    surfaceCount += surfaces;
+    if (localVertexCount !== featureVertices.length) {
+      throw new Error(`Internal vertex count mismatch for ${group.cityObjectId}`);
+    }
+  }
+
+  return {
+    doc,
+    sequenceHeader: {
+      type: 'CityJSON',
+      version: '2.0',
+      CityObjects: {},
+      vertices: [],
+      transform,
+      metadata,
+    },
+    sequenceFeatures,
+    summary: {
+      roads: roadGroups.length,
+      intersections: intersectionGroups.length,
+      surfaces: surfaceCount,
+      vertices: doc.vertices.length,
+    },
+  };
+}
+
+function projectIntersectionGroups(network, idPrefix) {
+  if (!network || !Array.isArray(network.intersections)) return [];
+  const toWgs84 = networkPointToWgs84(network);
+  if (!toWgs84) return [];
+  const roadMetadataById = readRoadMetadata(network);
+  const result = [];
+  for (const entry of network.intersections) {
+    if (!Array.isArray(entry) || !isObject(entry[1])) continue;
+    const value = entry[1];
+    if (value.kind === 'MapEdge' || !Array.isArray(value.roads) || value.roads.length < 2) continue;
+    const rings = (value.polygon?.rings ?? [])
+      .map((ring) => (ring?.pts ?? []).map(toWgs84))
+      .map(cleanRing)
+      .filter((ring) => ring.length >= 3)
+      .map((ring, ringIndex) => {
+        const projected = ring.map(([lng, lat]) => {
+          const [x, y] = proj4('EPSG:4326', 'EPSG:25832', [lng, lat]);
+          return [x, y, 0];
+        });
+        const area = signedArea(projected);
+        if ((ringIndex === 0 && area < 0) || (ringIndex > 0 && area > 0)) projected.reverse();
+        return projected;
+      });
+    if (!rings[0]) continue;
+    const id = String(entry[0]);
+    const allowedRoadMovements = normalizeRoadMovementPairs(value.movements);
+    result.push({
+      kind: 'intersection',
+      roadId: `intersection-${id}`,
+      cityObjectId: `${idPrefix}osm2streets-intersection-${id}`,
+      sourceIntersectionId: id,
+      connectedRoadIds: uniqueValues(value.roads).map(String),
+      allowedRoadMovements,
+      roadEndpoints: roadEndpointsAtIntersection(
+        id,
+        value.roads,
+        roadMetadataById
+      ),
+      osmNodeIds: uniqueValues(Array.isArray(value.osm_ids) ? value.osm_ids : []).map(String),
+      control: String(value.control ?? 'Uncontrolled'),
+      intersectionKind: String(value.kind ?? 'Intersection'),
+      surfaces: [{ rings }],
+    });
+  }
+  return result;
+}
+
+function intersectionObjectFromProjectedGroup(group, transform, vertices, generatedAt) {
+  const boundaries = group.surfaces.map((surface) =>
+    surface.rings.map((ring) =>
+      ring.map((point) => {
+        vertices.push(toCityVertex(point, transform));
+        return vertices.length - 1;
+      })
+    )
+  );
+  const surface = {
+    type: 'TrafficArea',
+    function: 'intersection',
+    transportationUsage: 'intersection',
+    surfaceMaterial: 'asphalt',
+    source: 'osm2streets',
+    sourceType: group.intersectionKind,
+    osm2streetsIntersectionId: group.sourceIntersectionId,
+    connectedRoadIds: group.connectedRoadIds,
+    allowedRoadMovements: group.allowedRoadMovements,
+    roadEndpoints: group.roadEndpoints,
+    osmNodeIds: group.osmNodeIds,
+  };
+  return {
+    object: {
+      type: 'Road',
+      attributes: {
+        class: 'transportation',
+        function: 'intersection',
+        name: `Intersection ${group.sourceIntersectionId}`,
+        _createdBy: 'webcityeditor',
+        _createdAt: generatedAt,
+        _source: 'osm2streets',
+        _transportationKind: 'intersection',
+        _osm2streetsIntersectionId: group.sourceIntersectionId,
+        _connectedOsm2streetsRoadIds: group.connectedRoadIds,
+        _allowedOsm2streetsRoadMovements: group.allowedRoadMovements,
+        _osm2streetsRoadEndpoints: group.roadEndpoints,
+        _osmNodeIds: group.osmNodeIds,
+        _intersectionControl: group.control,
+        _verticalProfile: { placement: 'surface', source: 'osm_tags', elevationM: 0, osmLayer: 0 },
+      },
+      geometry: [{
+        type: 'MultiSurface',
+        lod: '2',
+        boundaries,
+        semantics: { surfaces: [surface], values: boundaries.map(() => 0) },
+      }],
+    },
+    localVertexCount: vertices.length,
+    surfaces: boundaries.length,
+  };
+}
+
+function normalizeRoadMovementPairs(value) {
+  if (!Array.isArray(value)) return null;
+  const result = [];
+  const seen = new Set();
+  for (const entry of value) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length < 2 ||
+      !['string', 'number'].includes(typeof entry[0]) ||
+      !['string', 'number'].includes(typeof entry[1])
+    ) {
+      continue;
+    }
+    const pair = [String(entry[0]), String(entry[1])];
+    const key = `${pair[0]}\u0000${pair[1]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(pair);
+  }
+  return result;
+}
+
+function roadEndpointsAtIntersection(
+  intersectionId,
+  roadIds,
+  roadMetadataById
+) {
+  const result = {};
+  for (const rawRoadId of roadIds) {
+    const roadId = String(rawRoadId);
+    const road = roadMetadataById.get(roadId);
+    if (!road) continue;
+    if (String(road.src_i) === intersectionId) result[roadId] = 'start';
+    else if (String(road.dst_i) === intersectionId) result[roadId] = 'end';
+  }
+  return result;
+}
+
+function groupLaneFeatures(features) {
+  const groups = new Map();
+  features.forEach((feature, index) => {
+    if (!feature || feature.type !== 'Feature' || !feature.geometry) return;
+    if (feature.geometry.type !== 'Polygon' && feature.geometry.type !== 'MultiPolygon') return;
+    const props = isObject(feature.properties) ? feature.properties : {};
+    const roadId = props.road ?? props.road_id ?? props.roadId ?? `ungrouped-${index}`;
+    const key = String(roadId);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        roadId,
+        features: [],
+      });
+    }
+    groups.get(key).features.push({ feature, index });
+  });
+  return [...groups.values()].sort((a, b) => String(a.roadId).localeCompare(String(b.roadId)));
+}
+
+function projectRoadGroup(
+  group,
+  idPrefix,
+  roadMetadataById,
+  roadMapEdgeEndpointsById,
+  sourceNetwork
+) {
+  const cityObjectId = cityObjectIdForRoad(group.roadId, idPrefix);
+  const roadMetadata = roadMetadataById.get(String(group.roadId)) ?? null;
+  const sourceOsmWayIds = uniqueValues([
+    ...group.features.flatMap(({ feature }) => osmWayIds(feature)),
+    ...(Array.isArray(roadMetadata?.osm_ids) ? roadMetadata.osm_ids : []),
+  ]);
+  const surfaces = [];
+
+  for (const { feature, index } of group.features) {
+    const props = isObject(feature.properties) ? feature.properties : {};
+    const polygons = polygonsFromGeometry(feature.geometry);
+    polygons.forEach((polygon, polygonIndex) => {
+      const rings = polygon
+        .map((ring) => cleanRing(ring))
+        .filter((ring) => ring.length >= 3)
+        .map((ring, ringIndex) => {
+          const projected = ring.map(([lng, lat]) => {
+            const [x, y] = proj4('EPSG:4326', 'EPSG:25832', [lng, lat]);
+            return [x, y, 0];
+          });
+          const area = signedArea(projected);
+          if ((ringIndex === 0 && area < 0) || (ringIndex > 0 && area > 0)) {
+            projected.reverse();
+          }
+          return projected;
+        });
+      if (!rings[0]) return;
+      surfaces.push({
+        sourceIndex: index,
+        polygonIndex,
+        rings,
+        properties: jsonRecord(props),
+        osmWayIds: osmWayIds(feature),
+      });
+    });
+  }
+
+  return {
+    roadId: group.roadId,
+    cityObjectId,
+    roadMetadata,
+    sourceCenterlineWgs84: roadCenterlineWgs84(roadMetadata, sourceNetwork),
+    sourceMapEdgeEndpointsWgs84:
+      roadMapEdgeEndpointsById.get(String(group.roadId)) ?? null,
+    sourceOsmWayIds,
+    surfaces,
+  };
+}
+
+function roadObjectFromProjectedGroup(group, transform, vertices, generatedAt) {
+  const boundaries = [];
+  const semanticSurfaces = [];
+  const values = [];
+  const sourceOsmWayIds = group.sourceOsmWayIds.map(String);
+  const layer = roadLayer(group);
+  const placement = verticalPlacementForLayer(layer);
+  const name = roadName(group);
+
+  group.surfaces.forEach((surface, surfaceIndex) => {
+    const face = surface.rings.map((ring) =>
+      ring.map(([x, y, z]) => {
+        vertices.push(toCityVertex([x, y, z], transform));
+        return vertices.length - 1;
+      })
+    );
+    const semantics = surfaceSemantics(surface, group, surfaceIndex);
+    boundaries.push(face);
+    semanticSurfaces.push(semantics);
+    values.push(surfaceIndex);
+  });
+
+  const object = {
+    type: 'Road',
+    attributes: {
+      class: 'transportation',
+      function: 'road',
+      name,
+      _createdBy: 'webcityeditor',
+      _createdAt: generatedAt,
+      _source: 'osm2streets',
+      _osm2streetsRoadId: String(group.roadId),
+      _sourceCenterlineWgs84: group.sourceCenterlineWgs84,
+      ...(group.sourceMapEdgeEndpointsWgs84
+        ? { _sourceMapEdgeEndpointsWgs84: group.sourceMapEdgeEndpointsWgs84 }
+        : {}),
+      _osmWayIds: sourceOsmWayIds,
+      _osm2streetsLaneCount: group.surfaces.length,
+      _highwayType: group.roadMetadata?.highway_type ?? null,
+      _osmTags: {
+        ...(group.roadMetadata?.highway_type
+          ? { highway: String(group.roadMetadata.highway_type) }
+          : {}),
+        ...(name ? { name } : {}),
+        layer: String(layer),
+      },
+      _verticalProfile: {
+        placement,
+        source: 'osm_tags',
+        elevationM: placement === 'surface' ? 0 : null,
+        osmLayer: layer,
+      },
+    },
+    geometry: [
+      {
+        type: 'MultiSurface',
+        lod: '2',
+        boundaries,
+        semantics: {
+          surfaces: semanticSurfaces,
+          values,
+        },
+      },
+    ],
+  };
+
+  return {
+    object,
+    localVertexCount: vertices.length,
+    surfaces: boundaries.length,
+  };
+}
+
+function surfaceSemantics(surface, group, surfaceIndex) {
+  const laneType = String(surface.properties.type ?? '');
+  const kind = roadBandKindFromLaneType(laneType);
+  const functionName = functionForBand(kind);
+  const result = {
+    type: kind === 'median' || kind === 'green' ? 'AuxiliaryTrafficArea' : 'TrafficArea',
+    function: functionName,
+    sectionId: `${group.cityObjectId}-section-1`,
+    bandId: `osm2streets-${kind}-${surface.sourceIndex}-${surface.polygonIndex}`,
+    trafficDirection: directionFromLaneDirection(String(surface.properties.direction ?? '')),
+    transportationUsage: kind,
+    surfaceMaterial: sourceSurfaceMaterial(surface.properties, kind),
+    maxspeed: parseSpeedKmh(surface.properties.speed_limit),
+    verticalPlacement: verticalPlacementForLayer(roadLayer(group)),
+    roadElevation: verticalPlacementForLayer(roadLayer(group)) === 'surface' ? 0 : null,
+    source: 'osm2streets',
+    sourceType: laneType,
+    sourceSurfaceIndex: surfaceIndex,
+    osm2streetsRoadId: String(group.roadId),
+    osm2streetsLaneIndex: numberValue(surface.properties.index, surface.sourceIndex),
+    osmWayIds: surface.osmWayIds.map(String),
+    osm2streetsPropertiesJson: JSON.stringify(surface.properties),
+  };
+  const modes = allowedModesForLaneType(laneType);
+  if (modes.length > 0) result.allowedModes = modes;
+  return result;
+}
+
+function reindexRoadObject(object, offset) {
+  return {
+    ...object,
+    geometry: object.geometry.map((geometry) => ({
+      ...geometry,
+      boundaries: geometry.boundaries.map((face) =>
+        face.map((ring) => ring.map((index) => index + offset))
+      ),
+    })),
+  };
+}
+
+export function cityjsonSeqText(cityjson) {
+  return [
+    JSON.stringify(cityjson.sequenceHeader),
+    ...cityjson.sequenceFeatures.map((feature) => JSON.stringify(feature)),
+    '',
+  ].join('\n');
+}
+
+function polygonsFromGeometry(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === 'Polygon') return Array.isArray(geometry.coordinates) ? [geometry.coordinates] : [];
+  if (geometry.type === 'MultiPolygon') {
+    return Array.isArray(geometry.coordinates) ? geometry.coordinates : [];
+  }
+  return [];
+}
+
+function cleanRing(ring) {
+  if (!Array.isArray(ring)) return [];
+  const result = [];
+  for (const point of ring) {
+    if (
+      Array.isArray(point) &&
+      point.length >= 2 &&
+      Number.isFinite(point[0]) &&
+      Number.isFinite(point[1])
+    ) {
+      const prev = result[result.length - 1];
+      if (!prev || prev[0] !== point[0] || prev[1] !== point[1]) {
+        result.push([point[0], point[1]]);
+      }
+    }
+  }
+  const first = result[0];
+  const last = result[result.length - 1];
+  if (first && last && first[0] === last[0] && first[1] === last[1]) result.pop();
+  return result;
+}
+
+function toCityVertex([x, y, z], transform) {
+  return [
+    Math.round((x - transform.translate[0]) / transform.scale[0]),
+    Math.round((y - transform.translate[1]) / transform.scale[1]),
+    Math.round((z - transform.translate[2]) / transform.scale[2]),
+  ];
+}
+
+function computeProjectedBbox(groups) {
+  const bbox = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+  for (const group of groups) {
+    for (const surface of group.surfaces) {
+      for (const ring of surface.rings) {
+        for (const [x, y, z] of ring) {
+          bbox[0] = Math.min(bbox[0], x);
+          bbox[1] = Math.min(bbox[1], y);
+          bbox[2] = Math.min(bbox[2], z);
+          bbox[3] = Math.max(bbox[3], x);
+          bbox[4] = Math.max(bbox[4], y);
+          bbox[5] = Math.max(bbox[5], z);
+        }
+      }
+    }
+  }
+  if (!bbox.every(Number.isFinite)) throw new Error('Could not compute projected extent.');
+  return bbox;
+}
+
+function cityObjectIdForRoad(roadId, prefix = '') {
+  const slug = String(roadId).replace(/[^A-Za-z0-9_.-]/g, '-');
+  const normalizedPrefix = prefix ? `${String(prefix).replace(/[^A-Za-z0-9_.-]/g, '-')}` : '';
+  return `${normalizedPrefix}osm2streets-road-${slug || 'unknown'}`;
+}
+
+function roadName(group) {
+  if (typeof group.roadMetadata?.name === 'string' && group.roadMetadata.name.trim()) {
+    return group.roadMetadata.name.trim();
+  }
+  for (const surface of group.surfaces) {
+    const name = surface.properties.name ?? surface.properties.road_name;
+    if (typeof name === 'string' && name.trim()) return name.trim();
+  }
+  return `osm2streets road ${group.roadId}`;
+}
+
+export function readRoadMetadata(network) {
+  const result = new Map();
+  if (!network || !Array.isArray(network.roads)) return result;
+  for (const entry of network.roads) {
+    if (!Array.isArray(entry) || entry.length < 2 || !isObject(entry[1])) continue;
+    result.set(String(entry[0]), entry[1]);
+  }
+  return result;
+}
+
+export function readRoadMapEdgeEndpoints(network, roadMetadataById) {
+  const result = new Map();
+  const toWgs84 = networkPointToWgs84(network);
+  if (!toWgs84 || !Array.isArray(network?.intersections)) return result;
+
+  for (const entry of network.intersections) {
+    if (!Array.isArray(entry) || !isObject(entry[1])) continue;
+    const intersectionId = String(entry[0]);
+    const intersection = entry[1];
+    if (intersection.kind !== 'MapEdge' || !Array.isArray(intersection.roads)) continue;
+
+    for (const rawRoadId of intersection.roads) {
+      const roadId = String(rawRoadId);
+      const road = roadMetadataById.get(roadId);
+      if (!road) continue;
+      const endpoint =
+        String(road.src_i) === intersectionId
+          ? 'start'
+          : String(road.dst_i) === intersectionId
+            ? 'end'
+            : null;
+      if (!endpoint) continue;
+      const referencePoints = road.reference_line?.pts ?? road.center_line?.pts;
+      if (!Array.isArray(referencePoints) || referencePoints.length < 2) continue;
+      const point = endpoint === 'start' ? referencePoints[0] : referencePoints.at(-1);
+      if (
+        !isObject(point) ||
+        !Number.isFinite(Number(point.x)) ||
+        !Number.isFinite(Number(point.y))
+      ) {
+        continue;
+      }
+      const endpoints = result.get(roadId) ?? {};
+      endpoints[endpoint] = toWgs84(point);
+      result.set(roadId, endpoints);
+    }
+  }
+
+  return result;
+}
+
+function networkPointToWgs84(network) {
+  if (!network || !isObject(network.gps_bounds)) return null;
+  const bounds = network.gps_bounds;
+  const boundaryRing = network.boundary_polygon?.rings?.[0]?.pts;
+  const maxX = Array.isArray(boundaryRing)
+    ? Math.max(...boundaryRing.map((point) => Number(point?.x)).filter(Number.isFinite))
+    : NaN;
+  const maxY = Array.isArray(boundaryRing)
+    ? Math.max(...boundaryRing.map((point) => Number(point?.y)).filter(Number.isFinite))
+    : NaN;
+  if (
+    ![bounds.min_lon, bounds.min_lat, bounds.max_lon, bounds.max_lat, maxX, maxY].every(Number.isFinite) ||
+    maxX <= 0 || maxY <= 0
+  ) {
+    return null;
+  }
+  return (point) => [
+    bounds.min_lon + (Number(point.x) / maxX) * (bounds.max_lon - bounds.min_lon),
+    bounds.max_lat - (Number(point.y) / maxY) * (bounds.max_lat - bounds.min_lat),
+  ];
+}
+
+function roadCenterlineWgs84(roadMetadata, network) {
+  const toWgs84 = networkPointToWgs84(network);
+  if (!toWgs84) return null;
+  const points = roadMetadata?.center_line?.pts ?? roadMetadata?.reference_line?.pts;
+  if (!Array.isArray(points)) return null;
+  const line = [];
+  for (const point of points) {
+    if (!isObject(point) || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
+      return null;
+    }
+    const converted = toWgs84(point);
+    const previous = line.at(-1);
+    if (!previous || Math.hypot(previous[0] - converted[0], previous[1] - converted[1]) > 1e-12) {
+      line.push(converted);
+    }
+  }
+  return line.length >= 2 ? line : null;
+}
+
+function roadLayer(group) {
+  if (typeof group.roadMetadata?.layer === 'number' && Number.isFinite(group.roadMetadata.layer)) {
+    return group.roadMetadata.layer;
+  }
+  for (const surface of group.surfaces) {
+    if (typeof surface.properties.layer === 'number' && Number.isFinite(surface.properties.layer)) {
+      return surface.properties.layer;
+    }
+  }
+  return 0;
+}
+
+function verticalPlacementForLayer(layer) {
+  if (layer < 0) return 'underground';
+  if (layer > 0) return 'elevated';
+  return 'surface';
+}
+
+function sourceSurfaceMaterial(properties, kind) {
+  const sourceKind = properties?.muv?.surface?.kind;
+  if (typeof sourceKind === 'string' && sourceKind.trim()) {
+    return sourceKind
+      .trim()
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .toLowerCase();
+  }
+  return kind === 'green' ? 'grass' : 'asphalt';
+}
+
+function osmWayIds(feature) {
+  const props = isObject(feature.properties) ? feature.properties : {};
+  const raw = props.osm_way_ids ?? props.osmWayIds ?? props.osm_way_id;
+  const values = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
+  return uniqueValues(values);
+}
+
+function roadBandKindFromLaneType(type) {
+  const key = normalizeType(type);
+  if (key === 'driving' || key === 'bus' || key === 'lightrail' || key === 'construction') {
+    return 'car_lane';
+  }
+  if (key === 'biking' || key === 'bike' || key === 'cycleway') return 'bike_lane';
+  if (key === 'sidewalk' || key === 'footway' || key === 'shoulder' || key === 'shareduse') {
+    return 'sidewalk';
+  }
+  if (key.includes('parking')) return 'parking';
+  if (key.includes('buffer')) return 'median';
+  if (key.includes('green') || key.includes('planter')) return 'green';
+  return 'road_surface';
+}
+
+function functionForBand(kind) {
+  if (kind === 'car_lane') return 'driving_lane';
+  if (kind === 'bike_lane') return 'bike_lane';
+  if (kind === 'sidewalk') return 'sidewalk';
+  if (kind === 'parking') return 'parking_lane';
+  if (kind === 'green') return 'green_verge';
+  if (kind === 'median') return 'median';
+  return 'road_surface';
+}
+
+function allowedModesForLaneType(type) {
+  const key = normalizeType(type);
+  if (key === 'biking' || key === 'bike' || key === 'cycleway') return ['bicycle'];
+  if (key === 'sidewalk' || key === 'footway' || key === 'shoulder') return ['pedestrian'];
+  if (key === 'shareduse') return ['pedestrian', 'bicycle'];
+  if (key === 'bus') return ['bus'];
+  if (key.includes('parking')) return ['car'];
+  if (key === 'driving' || key === 'lightrail' || key === 'construction') return ['car'];
+  return [];
+}
+
+function directionFromLaneDirection(direction) {
+  switch (normalizeType(direction)) {
+    case 'forward':
+      return 'forward';
+    case 'backward':
+      return 'backward';
+    case 'both':
+    case 'bidirectional':
+      return 'both';
+    default:
+      return 'none';
+  }
+}
+
+function parseSpeedKmh(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || value.toLowerCase() === 'none') return null;
+  const match = value.match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const speed = Number(match[0]);
+  if (/\bSpeed\s*\(/i.test(value)) return Math.round(speed * 3_600) / 1_000;
+  if (/\bMph\s*\(/i.test(value)) return Math.round(speed * 1_609.344) / 1_000;
+  return speed;
+}
+
+function numberValue(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function signedArea(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a[0] * b[1] - b[0] * a[1];
+  }
+  return sum / 2;
+}
+
+function normalizeType(type) {
+  return type.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function uniqueValues(values) {
+  return [...new Map(values.map((value) => [String(value), value])).values()];
+}
+
+function jsonRecord(record) {
+  const result = {};
+  for (const [key, value] of Object.entries(record)) {
+    result[key] = toJsonValue(value);
+  }
+  return result;
+}
+
+function toJsonValue(value) {
+  if (value === null) return null;
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.map(toJsonValue);
+  if (typeof value === 'object') return jsonRecord(value);
+  return String(value);
+}
+
+function isObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function round3(value) {
+  return Math.round(value * 1000) / 1000;
+}
+

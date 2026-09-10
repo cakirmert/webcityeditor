@@ -33,6 +33,7 @@ import {
   type RoadVerticalPlacement,
 } from '../lib/transportation';
 import type { RoadFitConflict } from '../lib/road-fit';
+import type { RoadFitReview } from '../lib/road-fit-review';
 import type { BasemapMode } from '../lib/basemap';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
 import Osm2StreetsInspector from './Osm2StreetsInspector';
@@ -40,7 +41,7 @@ import RoadRulesPanel from './RoadRulesPanel';
 import RoadSectionPreview from './RoadSectionPreview';
 import RoadConnectionsPanel from './RoadConnectionsPanel';
 import RoadJunctionPanel from './RoadJunctionPanel';
-import { roadWidthRule, type RoadRuleIssue } from '../lib/road-rules';
+import { canAcceptRoadRuleWarning, roadWidthRule, type RoadRuleIssue } from '../lib/road-rules';
 import { roadDisplayName } from '../lib/road-labels';
 import type { RoadEditorState } from '../hooks/useRoadEditor';
 import { Button } from './ui/button';
@@ -67,6 +68,10 @@ interface Props {
   insertedRoadId?: string | null;
   roadFitConflicts?: RoadFitConflict[];
   roadFitPending?: boolean;
+  savedFitReview?: RoadFitReview | null;
+  onSaveRoadWithWarnings?: () => void;
+  parkedDrafts?: Array<{ id: string; name: string; kind: string }>;
+  onResumeDraft?: (id: string) => void;
   selectedRoadArea?: RoadArea | null;
   selectedRoadBand?: { sectionId: string; bandIndex: number } | null;
   osm2streetsSelection?: Osm2StreetsSelection;
@@ -75,7 +80,6 @@ interface Props {
   undoDraftLabel?: string;
   redoDraftLabel?: string;
   onClose: () => void;
-  onFetchOsmRoads: () => void;
   onBasemapChange: (basemap: BasemapMode) => void;
   onSatelliteOpacityChange: (opacity: number) => void;
   onRoadOverlayOpacityChange: (opacity: number) => void;
@@ -135,6 +139,10 @@ export default function RoadEditorPanel({
   insertedRoadId,
   roadFitConflicts = [],
   roadFitPending = false,
+  savedFitReview,
+  onSaveRoadWithWarnings,
+  parkedDrafts = [],
+  onResumeDraft,
   selectedRoadArea = null,
   selectedRoadBand = null,
   osm2streetsSelection = null,
@@ -143,7 +151,6 @@ export default function RoadEditorPanel({
   undoDraftLabel,
   redoDraftLabel,
   onClose,
-  onFetchOsmRoads,
   onBasemapChange,
   onSatelliteOpacityChange,
   onRoadOverlayOpacityChange,
@@ -235,7 +242,9 @@ export default function RoadEditorPanel({
   const blockingFitConflicts = roadFitConflicts.filter(
     (conflict) => conflict.severity === 'error'
   );
-  const blockingRuleCount = roadRuleIssues.filter((issue) => issue.severity === 'error').length;
+  const blockingRuleCount = roadRuleIssues.filter(issue => issue.severity === 'error' && !(onSaveRoadWithWarnings && draft && canAcceptRoadRuleWarning(issue, draft))).length;
+  const designWarnings = roadRuleIssues.filter(issue => draft && canAcceptRoadRuleWarning(issue, draft)).map((issue, i) => ({ id: `rule-${i}`, label: issue.message, severity: issue.severity }));
+  const visibleRoadWarnings = [...roadFitConflicts, ...designWarnings];
   const tabs = ['lanes', 'shape', 'connections', 'rules'];
   const warningFitConflicts = roadFitConflicts.length - blockingFitConflicts.length;
   const activeTotalWidth = activeSection
@@ -528,12 +537,14 @@ export default function RoadEditorPanel({
           {roadSearch.trim() && <div className="road-search-results">{searchResults.map(area => <button key={area.roadId} onClick={() => { onEditSelectedRoadArea(area); setRoadSearch(''); }}><b>{roadDisplayName(roadAreas, area.roadId)}</b><small>{area.function === 'intersection' ? 'Intersection · edit boundary and turns' : `Road · ${area.roadId.split('-').at(-1)}`}</small></button>)}{!searchResults.length && <p>No matching road is loaded. Pan closer to that street to load it.</p>}</div>}
         </section>
 
-        {roadFitConflicts.length > 0 && (!draft || activeTab === 'rules') && (
+        {parkedDrafts.length > 0 && <section className="road-kept-drafts" aria-label="Kept drafts"><b>{parkedDrafts.length} other unsaved draft{parkedDrafts.length === 1 ? '' : 's'}</b><p>Click a road on the map to switch. Your drafts stay here until saved or discarded.</p>{parkedDrafts.map(entry => <button key={entry.id} onClick={() => onResumeDraft?.(entry.id)}>Resume {entry.name}<small>{entry.kind === 'junction' ? 'Intersection' : 'Road'}</small></button>)}</section>}
+        {visibleRoadWarnings.length > 0 && (
           <FitConflictCard
-            conflicts={roadFitConflicts}
+            conflicts={visibleRoadWarnings}
             blockingCount={blockingFitConflicts.length}
           />
         )}
+        {savedFitReview && !draftDirty && !junction?.junctionDirty && <FitConflictCard conflicts={savedFitReview.warnings} blockingCount={0} saved />}
 
         <Osm2StreetsInspector
           selection={osm2streetsSelection}
@@ -1009,7 +1020,6 @@ export default function RoadEditorPanel({
             </div>
             <div id="road-view-rules" role="tabpanel" aria-labelledby="road-tab-rules" hidden={activeTab !== 'rules'}>
               <RoadRulesPanel draft={draft} section={activeSection} issues={roadRuleIssues} onChange={onDraftChange} />
-              <details className="road-osm-update"><summary>Advanced · refresh OSM reference</summary><p>Compare a fresh OSM download with the loaded CityJSON roads.</p><Button onClick={onFetchOsmRoads}>Load OSM comparison</Button></details>
             </div>
 
             <details
@@ -1065,7 +1075,7 @@ export default function RoadEditorPanel({
               {roadFitPending
                 ? 'Updating fit check…'
                 : blockingFitConflicts.length > 0
-                  ? `${blockingFitConflicts.length} blocking conflict${blockingFitConflicts.length === 1 ? '' : 's'}`
+                  ? `${blockingFitConflicts.length} conflicts need review — you can save with warnings`
                   : exactGeometryStatus === 'preserved'
                     ? 'Ready to update attributes on the exact polygons'
                     : exactGeometryStatus === 'changed'
@@ -1086,22 +1096,22 @@ export default function RoadEditorPanel({
             <Button
               variant="primary"
               className="h-12"
-              onClick={onInsertRoad}
+              onClick={visibleRoadWarnings.length && onSaveRoadWithWarnings ? onSaveRoadWithWarnings : onInsertRoad}
               disabled={
                 roadFitPending ||
-                blockingFitConflicts.length > 0 || blockingRuleCount > 0 ||
+                (blockingFitConflicts.length > 0 && !onSaveRoadWithWarnings) || blockingRuleCount > 0 ||
                 (!!editingRoadId && !draftDirty)
               }
               title={
                 blockingFitConflicts.length > 0
-                  ? 'Resolve road-fit conflicts before saving.'
+                  ? 'Save this design with the listed warnings recorded in the project.'
                   : editingRoadId && !draftDirty
                     ? 'Change the road layout before saving.'
                     : undefined
               }
             >
               <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-              {exactGeometryStatus === 'preserved'
+              {visibleRoadWarnings.length && onSaveRoadWithWarnings ? `Save with ${visibleRoadWarnings.length} warning${visibleRoadWarnings.length === 1 ? '' : 's'}` : exactGeometryStatus === 'preserved'
                 ? 'Save exact attributes'
                 : editingRoadId
                   ? 'Save road changes'
@@ -1112,7 +1122,7 @@ export default function RoadEditorPanel({
       )}
       {junction?.junctionDraft && <footer className="road-editor-footer"><div className="road-editor-footer__status"><b>{junction.junctionDirty ? 'Unsaved intersection' : 'Intersection saved'}</b><span>{junction.junctionDraft.surfaceMode === 'preserve' ? 'Current surface retained' : 'Rebuild junction and approaches'}</span></div><div className="road-editor-footer__actions">
         <Button variant="outline" onClick={junction.handleCancelJunction}>Discard</Button>
-        <Button variant="primary" disabled={!junction.junctionDirty || junction.junctionEditTool.startsWith('trace-') || !!junction.junctionPlan?.error || junction.junctionConflicts.some((item) => item.severity === 'error')} onClick={junction.handleSaveJunction}>Save intersection</Button>
+        <Button variant="primary" disabled={!junction.junctionDirty || junction.junctionEditTool.startsWith('trace-') || !!junction.junctionPlan?.error} onClick={() => junction.handleSaveJunction({ allowWarnings: true })}>{junction.junctionConflicts.length ? `Save with ${junction.junctionConflicts.length} warning${junction.junctionConflicts.length === 1 ? '' : 's'}` : 'Save intersection'}</Button>
       </div></footer>}
     </aside>
   );
@@ -1143,35 +1153,37 @@ function PanelSectionHeader({
 function FitConflictCard({
   conflicts,
   blockingCount,
+  saved = false,
 }: {
-  conflicts: RoadFitConflict[];
+  conflicts: Array<Pick<RoadFitConflict, 'id' | 'label' | 'severity'>>;
   blockingCount: number;
+  saved?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <section className="rounded-md border border-red-400/35 bg-red-500/10 p-2.5 text-[11px] text-red-100">
+    <section className={`road-fit-card${blockingCount ? ' has-conflicts' : ''}`} aria-label={saved ? 'Saved road warnings' : 'Road fit warnings'}>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 font-semibold">
           <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>Road fit {blockingCount > 0 ? 'blocked' : 'warnings'}</span>
+          <span>{saved ? 'Warnings accepted at last save' : 'Road fit warnings'}</span>
         </div>
-        <span className="rounded bg-red-950/30 px-1.5 py-0.5 text-[10px]">
+        <span className="road-fit-card__count">
           {conflicts.length}
         </span>
       </div>
+      <p>{saved ? 'Recorded with the saved design. These are the results of its last geometry check.' : 'Review the highlighted areas. Save with warnings keeps the design and records these issues.'}</p>
       <ul className="space-y-1">
-        {conflicts.slice(0, 4).map((conflict) => (
-          <li key={conflict.id} className="grid grid-cols-[38px_1fr] gap-1.5">
-            <span className="text-red-100/70">
-              {conflict.severity === 'error' ? 'Block' : 'Warn'}
+        {(expanded ? conflicts : conflicts.slice(0, 4)).map((conflict) => (
+          <li key={conflict.id}>
+            <span className="road-fit-card__severity">
+              {conflict.severity === 'error' ? 'Conflict' : 'Check'}
             </span>
             <span>{conflict.label}</span>
           </li>
         ))}
       </ul>
       {conflicts.length > 4 && (
-        <div className="mt-1.5 text-red-100/70">
-          +{conflicts.length - 4} more conflict{conflicts.length - 4 === 1 ? '' : 's'}
-        </div>
+        <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer warnings' : `Show all ${conflicts.length} warnings`}</button>
       )}
     </section>
   );

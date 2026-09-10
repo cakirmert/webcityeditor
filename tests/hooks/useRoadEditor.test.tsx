@@ -18,6 +18,79 @@ const roadLine: [number, number][] = [
 ];
 
 describe('useRoadEditor road-edit lifecycle', () => {
+  it('allows explicit width-policy exceptions but still refuses non-positive geometry', () => {
+    const doc = buildSampleCube();
+    insertRoadIntoCityJson(doc, createManualRoadDraft(roadLine), { id: 'edited' });
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    act(() => result.current.handleEditSelectedRoadArea(extractTransportationAreas(doc).find(area => area.roadId === 'edited')!));
+    act(() => result.current.handleRoadDraftChange(withFirstBandWidth(result.current.roadDraft!, 40)));
+    act(() => result.current.handleInsertRoad({ allowWarnings: true }));
+    expect(result.current.roadDraftDirty).toBe(false); expect(result.current.savedFitReview?.warnings.some(issue => /project limit/.test(issue.label))).toBe(true);
+    const saved = JSON.stringify(doc);
+    act(() => result.current.handleRoadDraftChange(withFirstBandWidth(result.current.roadDraft!, -1)));
+    act(() => result.current.handleInsertRoad({ allowWarnings: true }));
+    expect(JSON.stringify(doc)).toBe(saved); expect(result.current.roadDraftDirty).toBe(true);
+  });
+  it('switches roads without discarding drafts and restores each undo history', () => {
+    const doc = buildSampleCube();
+    for (const id of ['one', 'two']) insertRoadIntoCityJson(doc, createManualRoadDraft(roadLine), { id });
+    const before = JSON.stringify(doc), confirm = vi.spyOn(window, 'confirm');
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    const areas = extractTransportationAreas(doc);
+    act(() => result.current.handleEditSelectedRoadArea(areas.find(area => area.roadId === 'one')!));
+    act(() => result.current.handleRoadDraftChange({ ...result.current.roadDraft!, name: 'First edit' }));
+    act(() => result.current.handleEditSelectedRoadArea(areas.find(area => area.roadId === 'one')!));
+    expect(result.current.roadDraft?.name).toBe('First edit');
+    act(() => result.current.handleEditSelectedRoadArea(areas.find(area => area.roadId === 'two')!));
+    expect(result.current.editingRoadId).toBe('two'); expect(result.current.parkedDrafts).toHaveLength(1);
+    act(() => result.current.handleRoadDraftChange({ ...result.current.roadDraft!, name: 'Second edit' }));
+    act(() => result.current.handleResumeDraft('one'));
+    expect(result.current.roadDraft?.name).toBe('First edit'); expect(result.current.parkedDrafts[0].id).toBe('two');
+    act(() => result.current.handleUndoRoadDraft());
+    expect(result.current.roadDraft?.name).not.toBe('First edit');
+    expect(confirm).not.toHaveBeenCalled(); expect(JSON.stringify(doc)).toBe(before);
+    confirm.mockRestore();
+  });
+  it('retains a generated intersection draft when switching to an approach and back', () => {
+    const doc = JSON.parse(readFileSync('public/examples/hamburg-roedingsmarkt-source.json', 'utf8'));
+    const areas = extractTransportationAreas(doc), area = areas.find(area => area.roadId.endsWith('intersection-483'))!;
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    act(() => result.current.handleEditSelectedRoadArea(area));
+    act(() => result.current.handleJunctionChange({ ...result.current.junctionDraft!, surfaceMode: 'rebuild', footprint: undefined }));
+    const generated = result.current.junctionDraft;
+    act(() => result.current.handleEditSelectedRoadArea(areas.find(area => area.roadId === generated!.roadIds[0])!));
+    expect(result.current.junctionDraft).toBeNull(); expect(result.current.parkedDrafts).toHaveLength(1);
+    act(() => result.current.handleEditSelectedRoadArea(area));
+    expect(result.current.junctionDraft).toEqual(generated); expect(result.current.canUndoJunction).toBe(true);
+    act(() => result.current.handleSaveJunction()); expect(result.current.junctionSaveError).toBeNull();
+  });
+  it('saves an overlapping road only with explicit warning acceptance and records the visible warnings', () => {
+    const doc = buildSampleCube(), bands = [{ kind: 'car_lane' as const, widthM: 3.25, direction: 'forward' as const }];
+    insertRoadIntoCityJson(doc, createManualRoadDraft([[4.4, 52.05], [4.401, 52.05]], { bands }), { id: 'edited' });
+    insertRoadIntoCityJson(doc, createManualRoadDraft([[4.4, 52.050032], [4.401, 52.050032]], { bands }), { id: 'neighbour' });
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    act(() => result.current.handleEditSelectedRoadArea(extractTransportationAreas(doc).find(area => area.roadId === 'edited')!));
+    act(() => result.current.handleRoadDraftChange(withFirstBandWidth(result.current.roadDraft!, 4.8), 'Widen road'));
+    act(() => result.current.handleInsertRoad({ allowWarnings: true }));
+    expect(result.current.roadDraftDirty).toBe(false);
+    expect(result.current.savedFitReview?.warnings.some(item => /overlaps/.test(item.label))).toBe(true);
+    const saved = JSON.parse(JSON.stringify(doc));
+    expect(saved.CityObjects.edited.attributes._roadFitReview.warnings.length).toBeGreaterThan(0);
+  });
+  it('does not overwrite a parked road changed by another saved edit', () => {
+    const doc = buildSampleCube();
+    for (const id of ['one', 'two']) insertRoadIntoCityJson(doc, createManualRoadDraft(roadLine), { id });
+    const { result } = renderHook(() => useRoadEditor(coreStateFor(doc) as never, { pushUndo: vi.fn() } as never));
+    const areas = extractTransportationAreas(doc);
+    act(() => result.current.handleEditSelectedRoadArea(areas.find(area => area.roadId === 'one')!));
+    act(() => result.current.handleRoadDraftChange({ ...result.current.roadDraft!, name: 'Parked edit' }));
+    act(() => result.current.handleEditSelectedRoadArea(areas.find(area => area.roadId === 'two')!));
+    doc.CityObjects.one.attributes!.name = 'A newer saved edit';
+    act(() => result.current.handleResumeDraft('one'));
+    act(() => result.current.handleInsertRoad({ allowWarnings: true }));
+    expect(doc.CityObjects.one.attributes!.name).toBe('A newer saved edit');
+    expect(result.current.roadStatus).toMatch(/Saved geometry changed/); expect(result.current.roadDraftDirty).toBe(true);
+  });
   it('opens an intersection unchanged and generates only after an explicit edit', () => {
     const doc=JSON.parse(readFileSync('public/examples/hamburg-roedingsmarkt-source.json','utf8')),before=JSON.stringify(doc);
     const {result}=renderHook(()=>useRoadEditor(coreStateFor(doc) as never,{pushUndo:vi.fn()} as never));
