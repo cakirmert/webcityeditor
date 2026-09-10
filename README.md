@@ -12,7 +12,7 @@ Design streets, edit intersections and buildings, and keep the result in **CityJ
 2. Choose **Roads**, then click that junction. **Find a loaded road** also finds streets and intersection IDs in the current data.
 3. **Turns** opens with **All approaches, together**. Colours and approach numbers match the map. Select a lane card or a map connection to inspect that lane; **← All approaches** returns to the overview.
 4. Switch between **Map** and **Satellite** above the map. Adjust **Road overlay**, or hold the eye button to compare the road with the imagery.
-5. Open **Shape → Generate** for a rounded road surface. Opening an intersection always keeps its saved shape; generation runs only when you click it. Eligible groups offer **Generate combined intersection**, with **Nearby pieces / Larger area** choices. The map fits all approaches when the group changes.
+5. Open **Shape → Generate** for a rounded road surface. **Selected intersection** is the default: only this junction and its approach ends are reshaped; neighbouring junctions and connected roads stay separate. To combine a wider group, explicitly choose **Larger area → Generate combined intersection**. Opening an intersection always keeps its saved shape until you generate.
 6. Use **Undo** to restore the original. Choose **Save intersection**, or **Save with warnings** after reviewing the highlighted conflicts, to apply the junction, its approach surfaces and turns together. **More → Save local** or **Export CityJSON** keeps it after the session ends.
 
 These tools apply to loaded intersections throughout the network. The two study buttons and **Trace from satellite** have been removed. Satellite comparison and optional boundary handles remain. For a reproducible study, download the [original Mattentwiete import](public/examples/hamburg-mattentwiete-source.json) or [edited example](public/examples/hamburg-mattentwiete.json), then open it through **Data**. The [comparison notes](docs/intersection-reference-study.md) explain its estimated widths and visual kerb trace.
@@ -21,7 +21,7 @@ The [latest crossing and junction notes](docs/intersections-and-crossings-2026-0
 
 ### Try the complex crossing and lane split
 
-Download the [Rödingsmarkt example](public/examples/hamburg-roedingsmarkt.json), load it through **Data**, then choose **Roads**. Search **intersection-210** to inspect the combined crossing, or **intersection-483** for the nearby Willy-Brandt-Straße lane split. To try the merge yourself, load the [unchanged source crop](public/examples/hamburg-roedingsmarkt-source.json), select intersection 210, and use **Shape → Generate combined intersection**.
+Download the [Rödingsmarkt example](public/examples/hamburg-roedingsmarkt.json), load it through **Data**, then choose **Roads**. Search **intersection-210** to inspect the combined crossing, or **intersection-483** for the nearby Willy-Brandt-Straße lane split. To try a wider merge yourself, load the [unchanged source crop](public/examples/hamburg-roedingsmarkt-source.json), select intersection 210, and use **Shape → Larger area → Generate combined intersection**. Review the listed piece counts before generating; the larger scope includes more roads than the saved example.
 
 - The example consolidates **nine junction records and eleven short internal roads** into one editable junction with thirteen external approaches. Separate-level railway geometry remains context above the road.
 - **Levels** tilts the map and separates crossing levels schematically. Roads and railways share the same crossing order: an elevated road can sit above a railway. Open railway cuttings stay visible; true tunnels remain underground. Display heights are illustrative and never written into CityJSON. Switch Levels off to edit a flat boundary.
@@ -43,6 +43,10 @@ The [original crop](public/examples/hamburg-roedingsmarkt-source.json) remains u
 ## Edit a road
 
 Choose **Roads** and select a street. The same inspector holds its preview, properties and save controls. Click another road or intersection to switch directly. Unsaved drafts appear under **Kept drafts**; click the road again or **Resume** to restore its edits and undo history. These drafts stay in this browser session until saved or discarded. If another saved edit changes a kept draft's source geometry, the editor asks you to reopen that road before saving over it.
+
+In **Lanes**, choose a type under **Add another band**, then click the blue **+ Add band** button. The new band is selected immediately so you can adjust its width and direction.
+
+![A readable blue Add band button beside the band type selector](assets/readme/road-add-band-current.jpg)
 
 | Tab | What you can do |
 | --- | --- |
@@ -85,7 +89,7 @@ The intersection inspector separates its physical outline from its permitted mov
 
 - **Shape → Keep current** retains the saved surface.
 - **Shape → Generate** connects the approach kerbs with curved returns and retains lane arrows. Opening Shape keeps handles hidden until you choose to adjust them.
-- **Generate combined intersection** appears for eligible groups joined by short internal roads. Choose **Nearby pieces** or **Larger area**; the counts show exactly what the preview will absorb. **Save intersection** removes those pieces in the same transaction. **Undo** returns to the separate draft and size options. Bridges, tunnels and roads connected outside the group are excluded.
+- **Selected intersection** is the default generation extent, including when you switch to another junction. Connected roads keep their identities and only their ends are fitted to the selected junction. **Larger area** explicitly enables **Generate combined intersection** for eligible groups joined by short internal roads; the counts show what the preview will absorb. Saving removes those pieces in the same transaction. **Undo** restores the separate draft. Bridges, tunnels and roads connected outside the group are excluded.
 - Every intersection opens with its saved surface. Rounded generation, including small lane transitions, runs only when clicked. Previewing changes nothing in the document; **Save** is still required.
 - **Adjust boundary on map** provides draggable corners and midpoint insertion. With a point focused, arrow keys nudge it; **Shift + arrow** moves farther and **Delete** removes it. A whole drag is one undo step.
 - **Trace an island** creates an opening for a raised island, median or tree bed. Islands must remain inside the boundary and separate from each other.

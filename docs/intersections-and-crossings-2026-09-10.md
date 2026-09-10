@@ -22,7 +22,9 @@ The old cycling surface was the difference between an outer bicycle outline and 
 
 Generation now reserves the original approach cycleways before constructing motor and walking surfaces. Absorbed internal bicycle pavement is retained in the combined junction. Compatible through or slight-turn bicycle continuations use ribbons with positive widths at both ends. Other turning permissions remain visible as connection guides. An unconnected cycle lane keeps its original full-width end. Shared cycle-lane ends are assigned to the junction once, avoiding overlapping approach polygons. Cycle geometry and metadata survive save, reopen and regeneration.
 
-**Nearby pieces** searches within 65 m, using internal roads up to 20 m and at most 12 junction records. **Larger area** extends these limits to 90 m, 35 m and 18 records. Both follow actual endpoint ownership and reject roads connected outside the selected group. A larger search never weakens the crossing-level check. Consolidation stays at ground level; an individual flat underground junction can be rebuilt without losing its underground profile, while mixed levels are refused.
+**Selected intersection** is now the default generation extent. It rebuilds the selected junction and fits its approach ends without deleting connected road objects or changing neighbouring junctions. The former **Nearby pieces** default was removed because even that search could absorb a chain of junctions. Only explicitly choosing **Larger area** enables **Generate combined intersection**. Switching to another junction starts with the selected-only scope again.
+
+The larger search follows actual endpoint ownership within 90 m, using internal roads up to 35 m and at most 18 junction records. Its initial smaller search (65 m, 20 m and 12 records) remains an internal algorithm step, not a default UI action. Roads connected outside the group are excluded. A larger search never weakens the crossing-level check. Consolidation stays at ground level; an individual flat underground junction can be rebuilt without losing its underground profile, while mixed levels are refused.
 
 On the unchanged Rödingsmarkt crop, Nearby combines nine junction records and eleven internal roads, leaving thirteen outside approaches. Larger combines thirteen records and seventeen internal roads, leaving twelve outside approaches. Both pass the overlap and save/reopen checks. The camera reframes when the approach set changes. Saved generated boundaries are labelled accordingly.
 
@@ -52,7 +54,7 @@ Checks cover **loaded** buildings, roads and trees. A roads-only crop contains n
 
 ## Verification and reproduction
 
-The frontend suite passes **768 tests**, with five pre-existing skips; the production GitHub Pages build also passes.
+The frontend suite passes **773 tests**, with five pre-existing skips; the production GitHub Pages build also passes. Generation-scope regressions exercise the default, explicit expansion, switching back and selecting another junction. On the full streamed Rödingsmarkt source, selected-only generation and repeated save/reopen preserve every road and junction ID and leave objects outside the selected junction and its four approaches unchanged.
 
 Regression coverage includes unchanged selection, imported tip cleanup, fitting and saving the three formerly blocked locations with unchanged neighbours, refusal to split a carriageway across another road, both crossing directions, full-width bicycle ends, islands, merge sizes and existing building/tree validation. The previous crossing review and larger Rödingsmarkt save/reopen checks remain covered. The browser was also used to verify unchanged selection, manually generate and save Meßberg, and compare the cleaned Kajen candidate with the original roads and built-in imagery.
 

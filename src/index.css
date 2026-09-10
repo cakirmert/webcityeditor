@@ -2493,7 +2493,7 @@ select:focus {
 .junction-approach-overview button b { font-size: 24px; line-height: 1.1; }
 .junction-cluster-note, .junction-transition-note { padding: 12px; border: 1px solid #c7d8ea; background: #eef5fe; border-radius: 9px; font-size: 12px; }
 .junction-cluster-note p, .junction-transition-note p { margin: 7px 0 10px; }
-.junction-merge-size { display: flex; gap: 6px; }
+.junction-merge-size { display: flex; gap: 6px; margin-top: 9px; }
 .junction-merge-size button { flex: 1; padding: 8px; border: 1px solid #c7d8ea; border-radius: 7px; background: #fff; color: #304762; cursor: pointer; }
 .junction-merge-size button[aria-pressed='true'] { border-color: #6393e9; background: #deebff; font-weight: 700; }
 .junction-cluster-note > small { display: block; margin-top: 8px; }
@@ -2521,6 +2521,10 @@ select:focus {
 .road-direction-control { background: #f1f5fa; border: 1px solid #e0e7f0; padding: 4px; border-radius: 9px; }
 .road-direction-control button, .road-band-actions button { background: #fff; color: #64758a; border-color: #dce4ee; box-shadow: none; }
 .road-direction-control button.is-active, .road-direction-control button[aria-pressed='true'] { color: #245ddd; background: #e9f1ff; border-color: #8eafe9; }
+.road-add-band label > span { color: #50647f; font-size: 12px; font-weight: 600; }
+.road-editor-panel .road-add-band__button { min-width: 116px; padding: 10px 15px; border: 1px solid #245ddd; border-radius: 8px; background: #245ddd; color: #fff; font-size: 13px; font-weight: 700; box-shadow: 0 1px 2px #183c7826; }
+.road-editor-panel .road-add-band__button:hover { background: #1c4fc1; border-color: #1c4fc1; }
+.road-editor-panel .road-add-band__button:active { background: #1944a6; }
 .road-wide-action, .road-profile-actions button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; background: #fff; border-color: #d3deed; color: #31527f; border-radius: 8px; font-weight: 650; min-height: 40px; }
 .road-wide-action:hover, .road-profile-actions button:hover { background: #edf3fc; border-color: #a5bcdf; }
 .road-rule-table caption { color: #74859b; }

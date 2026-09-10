@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
-  Bike,
-  Car,
   CheckCircle2,
   Download,
-  Footprints,
   GripVertical,
   Maximize2,
   Minimize2,
   PencilLine,
+  Plus,
   Road,
   Route,
   Redo2,
@@ -1006,10 +1004,8 @@ export default function RoadEditorPanel({
                     ))}
                   </select>
                 </label>
-                <Button className="h-12" onClick={() => addBand(newBandKind)}>
-                  {newBandKind === 'bike_lane' ? <Bike aria-hidden="true" /> :
-                    newBandKind === 'sidewalk' ? <Footprints aria-hidden="true" /> :
-                      <Car aria-hidden="true" />}
+                <Button variant="primary" className="road-add-band__button" onClick={() => addBand(newBandKind)}>
+                  <Plus aria-hidden="true" />
                   Add band
                 </Button>
               </div>

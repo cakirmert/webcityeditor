@@ -25,6 +25,28 @@ const distanceToSegment = (p: number[], a: number[], b: number[]) => {
 };
 
 describe('reported Rödingsmarkt source fragments', () => {
+  it('regenerates the selected intersection without absorbing any neighbouring road or junction, including after reopening', () => {
+    const doc = load(), before = JSON.parse(JSON.stringify(doc)), areas = extractTransportationAreas(doc);
+    const selected = readRoadJunction(areas, id);
+    expect(suggestJunctionCluster(areas, id, 'larger')!.internalRoadIds.length).toBeGreaterThan(10);
+    const changedIds = new Set([id, ...selected.roadIds]);
+    for (let pass = 0; pass < 2; pass++) {
+      const current = extractTransportationAreas(doc);
+      const draft = { ...readRoadJunction(current, id), surfaceMode: 'rebuild' as const, footprint: undefined };
+      const plan = buildRoadJunctionPlan(draft, current);
+      expect(plan.error).toBeUndefined();
+      expect(plan.removedRoadIds).toEqual([]);
+      expect(new Set(plan.replacedRoadIds)).toEqual(changedIds);
+      saveRoadJunction(doc, draft, plan);
+      expect(Object.keys(doc.CityObjects).sort()).toEqual(Object.keys(before.CityObjects).sort());
+      for (const [roadId, object] of Object.entries(before.CityObjects)) {
+        if (!changedIds.has(roadId)) expect(doc.CityObjects[roadId]).toEqual(object);
+        else expect(doc.CityObjects[roadId].geometry?.length).toBeGreaterThan(0);
+      }
+    }
+    expect(checkIntegrity(doc).ok).toBe(true);
+  });
+
   it.each(['nearby', 'larger'] as const)('removes detached cycling rectangles in the %s merge, keeping full approach widths through save', extent => {
     const doc = load(), areas = extractTransportationAreas(doc);
     const group = suggestJunctionCluster(areas, id, extent)!;
