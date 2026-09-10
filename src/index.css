@@ -2493,6 +2493,10 @@ select:focus {
 .junction-approach-overview button b { font-size: 24px; line-height: 1.1; }
 .junction-cluster-note, .junction-transition-note { padding: 12px; border: 1px solid #c7d8ea; background: #eef5fe; border-radius: 9px; font-size: 12px; }
 .junction-cluster-note p, .junction-transition-note p { margin: 7px 0 10px; }
+.junction-merge-size { display: flex; gap: 6px; }
+.junction-merge-size button { flex: 1; padding: 8px; border: 1px solid #c7d8ea; border-radius: 7px; background: #fff; color: #304762; cursor: pointer; }
+.junction-merge-size button[aria-pressed='true'] { border-color: #6393e9; background: #deebff; font-weight: 700; }
+.junction-cluster-note > small { display: block; margin-top: 8px; }
 @media (min-width: 768px) and (max-width: 1100px) {
   .road-editor-panel { width: 330px; max-width: 44vw; }
   .road-editor-panel.is-expanded { width: 390px; max-width: 49vw; }

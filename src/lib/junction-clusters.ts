@@ -6,48 +6,63 @@ import { intersection, union } from './polygon-boolean';
 import type { Polygon } from 'polygon-clipping';
 
 export interface JunctionClusterSuggestion { junctionIds: string[]; internalRoadIds: string[]; roadIds: string[]; }
+export type JunctionMergeSize = 'nearby' | 'larger';
 
 /** Connected short segments, never proximity alone. Keep the search local and
  * refuse bridges, tunnels and ambiguous connections across distinct levels. */
-export function suggestJunctionCluster(areas: RoadArea[], id: string): JunctionClusterSuggestion | null {
+export function suggestJunctionCluster(areas: RoadArea[], id: string, size: JunctionMergeSize = 'nearby'): JunctionClusterSuggestion | null {
+  const limits = size === 'larger' ? {radius:90, spacing:50, roadLength:35, pieces:18} : {radius:65, spacing:35, roadLength:20, pieces:12};
   const index = buildRoadConnectionIndex(areas), selected = index.junctions.find(j => j.roadId === id);
   if (!selected) return null;
+  const ownersByRoad = new Map<string, typeof index.junctions>();
+  for (const junction of index.junctions) for (const roadId of junction.roadIds) ownersByRoad.set(roadId, [...(ownersByRoad.get(roadId) ?? []), junction]);
   const { project } = localJunctionProjection(selected.position);
-  const junctions = index.junctions.filter(j => Math.hypot(...project(j.position)) < 65);
-  const members = new Set([id]);
+  const junctions = index.junctions.filter(j => Math.hypot(...project(j.position)) < limits.radius);
+  const nearby = size === 'larger' ? suggestJunctionCluster(areas,id,'nearby') : null;
+  const members = new Set(nearby?.junctionIds ?? [id]);
   const eligible = new Set<string>();
   for (const [roadId, list] of index.areasByRoadId) {
-    const ends = junctions.filter(j => j.roadIds.includes(roadId));
+    const ends = ownersByRoad.get(roadId) ?? [];
     if (ends.length !== 2 || ends.some(j => j.roadId === roadId)) continue;
-    if (Math.hypot(...localJunctionProjection(ends[0].position).project(ends[1].position)) > 35) continue;
+    if (ends.some(j => !junctions.includes(j))) continue;
+    if (Math.hypot(...localJunctionProjection(ends[0].position).project(ends[1].position)) > limits.spacing) continue;
     if (list.some(a => a.vertical?.placement === 'underground' || a.vertical?.placement === 'elevated' || (a.vertical?.osmLayer ?? 0) !== 0 || /rail|tram/i.test(String(a.attributes.sourceType)))) continue;
     try {
       const layout = list[0].editableDraft ?? deriveEditableRoadDraftFromAreas(list, roadId);
       const line = layout.sections.flatMap(s => s.centerlineWgs84).map(project);
       const length = line.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - line[i][0], p[1] - line[i][1]), 0);
-      if (length <= 20) eligible.add(roadId);
+      if (length <= limits.roadLength) eligible.add(roadId);
     } catch { /* Unsupported approaches stay separate. */ }
   }
   let changed = true;
-  while (changed && members.size < 12) {
+  while (changed && members.size < limits.pieces) {
     changed = false;
     for (const roadId of eligible) {
-      const ends = junctions.filter(j => j.roadIds.includes(roadId));
+      const ends = ownersByRoad.get(roadId)!;
       if (ends.some(j => members.has(j.roadId)) && ends.some(j => !members.has(j.roadId))) {
+        const expanded = new Set([...members, ...ends.map(j => j.roadId)]);
+        if (expanded.size > limits.pieces) continue;
+        // A newly enclosed loop must not swallow a longer road or a bridge
+        // merely because both of its junctions became members of this group.
+        const wouldAbsorbOutsideLink = [...ownersByRoad].some(([id,owners]) => owners.length === 2 && owners.every(j=>expanded.has(j.roadId)) && !eligible.has(id));
+        if (wouldAbsorbOutsideLink) continue;
         ends.forEach(j => members.add(j.roadId)); changed = true;
       }
     }
   }
-  if (members.size < 2 || members.size > 12) return null;
+  if (members.size < 2 || members.size > limits.pieces) return null;
   const group = junctions.filter(j => members.has(j.roadId));
   const allRoads = [...new Set(group.flatMap(j => j.roadIds))];
   const internalRoadIds = allRoads.filter(roadId => {
-    const owners = index.junctions.filter(j => j.roadIds.includes(roadId));
+    const owners = ownersByRoad.get(roadId) ?? [];
     return owners.length === 2 && owners.every(j => members.has(j.roadId));
   });
   const roadIds = allRoads.filter(roadId => !internalRoadIds.includes(roadId));
+  if (internalRoadIds.some(id => !eligible.has(id))) return null;
   if (roadIds.length < 2) return null;
-  const heights = areas.filter(a => allRoads.includes(a.roadId)).map(a => a.vertical?.elevationM).filter((h): h is number => Number.isFinite(h));
+  const network = areas.filter(a => allRoads.includes(a.roadId));
+  if (network.some(a => a.vertical?.placement === 'underground' || a.vertical?.placement === 'elevated' || (a.vertical?.osmLayer ?? 0) !== 0)) return null;
+  const heights = network.map(a => a.vertical?.elevationM).filter((h): h is number => Number.isFinite(h));
   if (heights.length && Math.max(...heights) - Math.min(...heights) > .01) return null;
   return { junctionIds: [...members].sort(), internalRoadIds: internalRoadIds.sort(), roadIds: roadIds.sort() };
 }
@@ -126,6 +141,8 @@ export function consolidateJunctionCluster(areas: RoadArea[], draft: RoadJunctio
   for (const area of traffic) for (const hole of area.holes ?? []) {
     for (const polygon of intersection([hole.map(project)],shape)) if (junctionPolygonArea([polygon]) > .25) retainedIslands.push({ polygon: openJunctionRing(polygon[0].map(unproject)), holes: polygon.slice(1).map(ring => openJunctionRing(ring.map(unproject))), sourceType: 'Median' });
   }
-  return { ...draft, roadIds: suggestion.roadIds, endpoints, surfaceMode: 'rebuild', footprint, retainedIslands,
+  const retainedCycleways = owned.filter(a => internal.has(a.roadId) && /bik|cycl/i.test(String(a.attributes.sourceType ?? a.function)))
+    .map(a => ({polygon:a.polygon,holes:a.holes ?? []}));
+  return { ...draft, roadIds: suggestion.roadIds, endpoints, surfaceMode: 'rebuild', footprint, retainedIslands, retainedCycleways,
     allowedLaneMovements: [...allowed], mergedFrom: { junctionIds: suggestion.junctionIds, internalRoadIds: suggestion.internalRoadIds } };
 }

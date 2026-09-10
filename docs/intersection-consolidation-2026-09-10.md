@@ -2,6 +2,8 @@
 
 10 September 2026
 
+This records the first implementation. See the [subsequent crossing, cycle-lane and generation changes](intersections-and-crossings-2026-09-10.md) for the current controls and verification.
+
 The latest work keeps the existing Shape tools and improves the few junctions where short imported road pieces overlapped or made the network difficult to understand. Two real sites supplement the [earlier eight-location comparison](intersection-validation-2026-09.md).
 
 ## What changed
@@ -30,10 +32,10 @@ The existing Esri imagery in the UI was used for comparison. Its acquisition dat
 
 ## Editing and saving
 
-1. Open **Data → Explore Rödingsmarkt**, then **Roads**.
+1. Download the [Rödingsmarkt example](../public/examples/hamburg-roedingsmarkt.json), open it through **Data**, then choose **Roads**. The original study card was removed in the follow-up.
 2. Search **intersection-210** for the combined junction, or **intersection-483** for the widening.
 3. **Turns** starts with all driving approaches, coloured and numbered consistently with the map. Select a lane card or map connection; use **← All approaches** to return.
-4. Use **Shape → Generate**, **Adjust boundary on map**, or the existing trace tools. Eligible source clusters offer **Preview one combined intersection**. Simple same-street transitions can be proposed automatically, but still require explicit Save.
+4. Use **Shape → Generate** or **Adjust boundary on map**. Eligible source clusters now offer **Generate combined intersection**, including a larger-area option. Simple junctions can be proposed automatically, but still require explicit Save.
 5. **Save intersection** applies the geometry, trims and turn permissions together. Save errors remain visible. A reopened generated shape is labelled **Saved generated surface**, rather than looking like a reversion to the import.
 6. **Save local**, CityJSON export, or a configured shared project retains work beyond the current session. The optional Docker storage service remains prepared for later hosting; GitHub Pages has no hosted database.
 

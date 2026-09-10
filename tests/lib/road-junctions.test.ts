@@ -8,6 +8,7 @@ import { buildRoadPreviewAreas, createManualRoadDraft, extractTransportationArea
 import { buildRoadConnectionIndex, buildSelectedRoadConnections, roadMovementKey } from '../../src/lib/road-lane-continuations';
 import { buildConnectedJunctionPreview, buildRoadJunctionPlan, createRoadJunctionAtEndpoint, readRoadJunction, saveRoadJunction, type RoadJunctionDraft } from '../../src/lib/road-junctions';
 import { localJunctionProjection, junctionPolygonArea } from '../../src/lib/junction-footprint';
+import { automaticJunctionPreview } from '../../src/lib/junction-generation';
 
 function fixture(fourWay = false) {
   const doc: CityJsonDocument = { type: 'CityJSON', version: '2.0', transform: { scale: [.001, .001, .001], translate: [565000, 5935000, 0] }, metadata: { referenceSystem: 'https://www.opengis.net/def/crs/EPSG/0/25832' }, vertices: [[0, 0, 0]], CityObjects: {} };
@@ -27,6 +28,42 @@ function fixture(fourWay = false) {
 }
 
 describe('intersection editing and construction', () => {
+  it('keeps a cycleway full width while still cutting out an explicitly added island', () => {
+    const {doc,draft}=fixture();
+    const west=extractTransportationAreas(doc).find(a=>a.roadId==='west')!.editableDraft!;
+    west.sections[0].bands.push({id:'bike',kind:'bike_lane',widthM:1.5,direction:'forward'});
+    insertRoadIntoCityJson(doc,west,{id:'west'});
+    const p=(x:number,y:number)=>proj4('EPSG:25832','EPSG:4326',[565000+x,5935000+y]) as [number,number];
+    const island=[p(-10.4,-3.65),p(-9.6,-3.65),p(-9.6,-2.85),p(-10.4,-2.85)];
+    draft.footprint={polygon:[p(-15,-15),p(15,-15),p(15,15),p(-15,15)],holes:[island],source:'drawn'};
+    const plan=buildRoadJunctionPlan(draft,extractTransportationAreas(doc));
+    expect(plan.error).toBeUndefined();
+    const {project}=localJunctionProjection(island[0]);
+    for(const area of plan.areas) expect(junctionPolygonArea(intersection([area.polygon.map(project),...(area.holes??[]).map(r=>r.map(project))],[island.map(project)]))).toBeLessThan(.003);
+    expect(plan.areas.some(a=>a.roadId==='west'&&a.bandId==='bike'&&a.holes?.length)).toBe(true);
+  });
+  it('offers an ordinary rounded junction automatically, but refuses a building in its new pavement', () => {
+    const {doc,draft}=fixture(),areas=extractTransportationAreas(doc);
+    const original={...draft,surfaceMode:'preserve' as const};
+    expect(automaticJunctionPreview(original,areas).surfaceMode).toBe('rebuild');
+    const {unproject}=localJunctionProjection(proj4('EPSG:25832','EPSG:4326',[565000,5935000]) as [number,number]);
+    const polygon=([[-1,-1],[1,-1],[1,1],[-1,1],[-1,-1]] as [number,number][]).map(p=>[...unproject(p),0] as [number,number,number]);
+    expect(automaticJunctionPreview(original,areas,{buildingFootprints:[{id:'building-in-gap',type:'Building',polygon,height:12,baseElevation:0,attributes:{}}]})).toBe(original);
+  });
+  it('preserves an underground junction on generation and save, and refuses mixed levels', () => {
+    const {doc,draft}=fixture();
+    for(const o of Object.values(doc.CityObjects)) o.attributes!._verticalProfile={placement:'underground',osmLayer:-1,source:'osm_tags',elevationM:null};
+    const areas=extractTransportationAreas(doc),plan=buildRoadJunctionPlan(draft,areas);
+    expect(plan.error).toBeUndefined();
+    saveRoadJunction(doc,draft,plan);
+    const saved=extractTransportationAreas(doc).filter(a=>a.roadId===draft.id);
+    expect(saved.length).toBeGreaterThan(0);
+    expect(saved.every(a=>a.vertical?.placement==='underground'&&a.vertical?.osmLayer===-1)).toBe(true);
+    const mixed=areas.map(a=>a.roadId==='north'?{...a,vertical:{placement:'elevated' as const,osmLayer:1,source:'osm_tags' as const}}:a);
+    expect(buildRoadJunctionPlan(draft,mixed).error).toMatch(/different levels/);
+    const original={...draft,surfaceMode:'preserve' as const};
+    expect(automaticJunctionPreview(original,mixed)).toBe(original);
+  });
   it('constructs physical pavement when every lane points away from the junction', () => {
     const { doc, draft } = fixture();
     const areas = extractTransportationAreas(doc);

@@ -30,7 +30,7 @@ import {
 } from '../lib/transportation';
 import { processOsmXml } from '../lib/osm2streets';
 import { validateRoadRules } from '../lib/road-rules';
-import { isLaneTransition } from '../lib/junction-presentation';
+import { automaticJunctionPreview } from '../lib/junction-generation';
 import type { JunctionEditTool } from '../lib/junction-footprint';
 import { buildConnectedJunctionPreview, buildRoadJunctionPlan, createRoadJunctionAtEndpoint, readRoadJunction, saveRoadJunction, type RoadJunctionDraft } from '../lib/road-junctions';
 import type { Osm2StreetsSelection } from '../lib/osm2streets';
@@ -658,12 +658,11 @@ export function useRoadEditor(
       try {
         const loaded = extractTransportationAreas(cityjson);
         const draft = readRoadJunction(loaded, area.roadId);
-        const candidate = isLaneTransition(draft,loaded) && area.attributes.junctionSurfaceMode !== 'generated' ? {...draft,surfaceMode:'rebuild' as const} : draft;
-        const proposed = candidate !== draft && !buildRoadJunctionPlan(candidate,loaded).error ? candidate : draft;
+        const proposed = automaticJunctionPreview(draft, loaded, {buildingFootprints:extractFootprints(cityjson),trees:roadFitTrees,metricCrs:activeMetricCrsForCityJson(cityjson),treeClearanceM:0});
         setJunctionDraft(proposed); setJunctionBaseline(JSON.stringify(draft)); setJunctionHistory(proposed !== draft ? [draft] : []); setJunctionFuture([]);
         setRoadDraft(null); setRoadDraftDirty(false); setEditingRoadId(null); setSelectedRoadArea(area);
         setJunctionEditTool('none'); setJunctionSource('__all__'); setSelectedOsmRoadId(null); setOsm2streetsSelection(null);
-        setRoadStatus('All incoming roads are shown together. Select a lane to inspect turns, or open Shape to generate or adjust its boundary.');
+        setRoadStatus(proposed !== draft ? 'Rounded intersection preview. All incoming roads and turns are shown together. Save to apply, or Undo to keep the original.' : 'All incoming roads are shown together. Select a lane to inspect turns; Shape offers Generate and a larger merge where the connected roads allow it.');
       } catch (error) { setRoadStatus(String(error)); }
       return;
     }
@@ -712,7 +711,7 @@ export function useRoadEditor(
         ? `Loaded editable layout from ${area.roadId}. Changes stay in the draft until you save them.`
         : `Editing ${area.roadId} on its exact CityJSON polygons. Type, direction, material, access and speed edits preserve them; moving handles, changing widths or restructuring bands rebuilds editable ribbons.`
     );
-  }, [cityjson, clearRoadDraftHistory, roadDraftDirty, junctionDirty]);
+  }, [cityjson, clearRoadDraftHistory, roadDraftDirty, junctionDirty, roadFitTrees]);
 
   const handleCancelRoadEdit = useCallback((force = false) => {
     if (!force && roadDraftDirty && !window.confirm('Discard the unsaved road-edit draft?')) return;

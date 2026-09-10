@@ -441,6 +441,7 @@ describe('useRoadEditor road-edit lifecycle', () => {
   });
 
   it('moves a generated peer endpoint when saving a connected road edit', () => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     const doc = buildSampleCube();
     const target = createManualRoadDraft(roadLine, { maxspeedKmh: 30 });
     insertRoadIntoCityJson(doc, target, { id: 'road-target' });
@@ -492,6 +493,8 @@ describe('useRoadEditor road-edit lifecycle', () => {
 
     const savedSource = readEditableRoadDraftFromCityObject(doc.CityObjects['road-source'])!;
     const savedTarget = readEditableRoadDraftFromCityObject(doc.CityObjects['road-target'])!;
+    expect(alert.mock.calls).toEqual([]);
+    expect(result.current.roadStatus).toContain('moved 1 connected road endpoint');
     expect(savedSource.sections[0].connections?.end).toMatchObject({
       targetId: 'road-target',
       targetEndpoint: 'start',
@@ -501,9 +504,9 @@ describe('useRoadEditor road-edit lifecycle', () => {
       targetId: 'road-source',
       targetEndpoint: 'end',
     });
-    expect(result.current.roadStatus).toContain('moved 1 connected road endpoint');
     expect(prepareValidatedCityJsonExport(doc).ok).toBe(true);
     confirm.mockRestore();
+    alert.mockRestore();
   });
 
   it('undoes and redoes unsaved road-draft changes before CityJSON is saved', () => {

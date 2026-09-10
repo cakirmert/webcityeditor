@@ -82,8 +82,8 @@ import {
 } from '../lib/cityjson-map-mesh';
 import { editorPlacedAssetObjectIds } from '../lib/building-assets';
 import { buildRoadVisuals } from '../lib/road-visuals';
-import { railwayInBounds, readRailwayContext, schematicRoadHeight, type RailwayContext } from '../lib/crossing-levels';
-import { railwayContextLayers } from './railway-context-layers';
+import { railwayInBounds, readRailwayContext, schematicRoadHeight, visibleRailwaySegments, type RailwayContext } from '../lib/crossing-levels';
+import { orderTransportCrossings } from './transport-crossing-layers';
 import { approachColor, isDrivingMovement, laneSourceKey } from '../lib/junction-presentation';
 import {
   buildRoadConnectionIndex,
@@ -1129,6 +1129,8 @@ export default function MapView({
     },
     [roadAreas, editFocusBbox, roadPreviewAreas, junctionPlan, roadWorkspaceOpen]
   );
+
+  const crossingRailways = useMemo(() => crossingLevels ? visibleRailways : visibleRailwaySegments(visibleRailways, [...renderedRoadAreas,...roadPreviewAreas]), [visibleRailways,crossingLevels,renderedRoadAreas,roadPreviewAreas]);
 
   const roadMarkingsVisible =
     zoom >= 15 ||
@@ -4132,8 +4134,8 @@ export default function MapView({
       );
     }
 
-    if (visibleRailways.length) layers.push(...railwayContextLayers(visibleRailways, crossingLevels, roadOverlayOpacity));
-    overlay.setProps({ layers: roadOverlayOpacity === 0 ? layers.filter((layer) => !/road|osm2streets/i.test(layer.id)) : layers });
+    const crossingLayers = roadWorkspaceOpen ? orderTransportCrossings(layers, [...renderedRoadAreas, ...roadPreviewAreas], crossingRailways, crossingLevels, roadOverlayOpacity) : layers;
+    overlay.setProps({ layers: roadOverlayOpacity === 0 ? crossingLayers.filter((layer) => !/road|osm2streets/i.test(layer.id)) : crossingLayers });
   }, [
     footprints,
     renderedFootprints,
@@ -4154,7 +4156,7 @@ export default function MapView({
     onZoneSelect,
     roadPreviewAreas,
     roadVisuals,
-    visibleRailways,
+    crossingRailways,
     crossingLevels,
     roadDisplayHeights,
     roadDirectionsVisible,
@@ -4223,7 +4225,8 @@ export default function MapView({
   ]);
 
   // Keep the selected edit in the visible map when the inspector opens,
-  // expands or changes device layout. Width/handle edits do not move the camera.
+  // expands or includes more approaches. Width/handle edits do not move the camera.
+  const junctionScopeKey = junctionDraft?.roadIds.slice().sort().join('|');
   useEffect(() => {
     const map = mapRef.current;
     const container = containerRef.current;
@@ -4236,7 +4239,7 @@ export default function MapView({
         const current = roadEditorFocusRef.current;
         const points = current.roadDraft
           ? current.roadDraft.sections.flatMap((section) => section.centerlineWgs84)
-          : (current.junctionPlan?.areas.length ? current.junctionPlan.areas : current.roadAreas).filter((area) => area.roadId === current.junctionDraft?.id).flatMap((area) => area.polygon);
+          : [...(current.junctionPlan?.areas.length ? current.junctionPlan.areas : current.roadAreas).filter((area) => area.roadId === current.junctionDraft?.id).flatMap((area) => area.polygon), ...(current.junctionPlan?.movements.flatMap(m => m.path) ?? [])];
         const bounds = expandLngLatBbox(pointsBbox(points), 0.00012);
         if (!bounds) return;
         const view = container.getBoundingClientRect(), inspector = panel.getBoundingClientRect();
@@ -4251,7 +4254,7 @@ export default function MapView({
     fit();
     if (!map.isStyleLoaded()) map.once('load', fit);
     return () => { observer.disconnect(); map.off('load', fit); cancelAnimationFrame(frame); };
-  }, [roadWorkspaceOpen, roadDraft?.id, junctionDraft?.id]);
+  }, [roadWorkspaceOpen, roadDraft?.id, junctionDraft?.id, junctionScopeKey]);
 
   // Terra Draw lifecycle — activate/deactivate based on drawMode
   useEffect(() => {

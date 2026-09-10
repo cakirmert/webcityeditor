@@ -6,31 +6,36 @@ Design streets, edit intersections and buildings, and keep the result in **CityJ
 
 ![All intersection approaches, numbered and coloured together, with the railway shown separately](assets/readme/intersection-overview-current.jpg)
 
-## Try the intersection in one minute
+## Edit an intersection in one minute
 
-1. Open **Data → Try the Hamburg intersection**.
-2. Choose **Roads**, then click the central junction or search **Mattentwiete** under **Find a loaded road**. Choose the **Intersection** result.
+1. Open the live editor and let the Hamburg data load. Pan and zoom to a junction.
+2. Choose **Roads**, then click that junction. **Find a loaded road** also finds streets and intersection IDs in the current data.
 3. **Turns** opens with **All approaches, together**. Colours and approach numbers match the map. Select a lane card or a map connection to inspect that lane; **← All approaches** returns to the overview.
 4. Switch between **Map** and **Satellite** above the map. Adjust **Road overlay**, or hold the eye button to compare the road with the imagery.
-5. Enable or disable the selected lane's numbered destinations. The incoming lane is blue; permitted turns are cyan and blocked turns remain visible in red. Open **Shape → Adjust boundary on map** to drag the kerb points instead.
-6. Use **Undo** to review a change. Choose **Save intersection** to update the junction and its approach surfaces together.
+5. Open **Shape → Generate** for a rounded road surface. Eligible groups offer **Generate combined intersection**, with **Nearby pieces / Larger area** choices. The map fits all approaches when the group changes. Simple junctions can open with a checked, unsaved preview already prepared.
+6. Use **Undo** to restore the original. Choose **Save intersection** to apply the junction, its approach surfaces and turn permissions together. **More → Save local** or **Export CityJSON** keeps it after the session ends.
 
-The example includes a 28-point visual kerb trace and estimated approach widths. Parking allocations are illustrative; the source lane counts and directions are retained. The [original import](public/examples/hamburg-mattentwiete-source.json), [edited example](public/examples/hamburg-mattentwiete.json) and [comparison notes](docs/intersection-reference-study.md) make the changes inspectable.
+These tools apply to loaded intersections throughout the network. The two study buttons and **Trace from satellite** have been removed. Satellite comparison and optional boundary handles remain. For a reproducible study, download the [original Mattentwiete import](public/examples/hamburg-mattentwiete-source.json) or [edited example](public/examples/hamburg-mattentwiete.json), then open it through **Data**. The [comparison notes](docs/intersection-reference-study.md) explain its estimated widths and visual kerb trace.
 
-The [eight-location satellite review](docs/intersection-validation-2026-09.md) includes the earlier **608-junction audit**. The [Rödingsmarkt and lane-transition follow-up](docs/intersection-consolidation-2026-09-10.md) documents the latest corrections, save/reload checks and railway context. Automatic candidates still need visual correction where inferred widths or kerbs differ from reality.
+The [latest crossing and junction notes](docs/intersections-and-crossings-2026-09-10.md) cover road-over-rail rendering, cycle-lane preservation, larger merges and their limits. The [eight-location satellite review](docs/intersection-validation-2026-09.md) includes the earlier **608-junction audit**. Generated geometry is still a proposal: collisions or incompatible levels block saving.
 
 ### Try the complex crossing and lane split
 
-Choose **Data → Explore Rödingsmarkt → Roads**. Search **intersection-210** to inspect the combined crossing, or **intersection-483** for the nearby Willy-Brandt-Straße lane split.
+Download the [Rödingsmarkt example](public/examples/hamburg-roedingsmarkt.json), load it through **Data**, then choose **Roads**. Search **intersection-210** to inspect the combined crossing, or **intersection-483** for the nearby Willy-Brandt-Straße lane split. To try the merge yourself, load the [unchanged source crop](public/examples/hamburg-roedingsmarkt-source.json), select intersection 210, and use **Shape → Generate combined intersection**.
 
 - The example consolidates **nine junction records and eleven short internal roads** into one editable junction with thirteen external approaches. Separate-level railway geometry remains context above the road.
-- **Levels** tilts the map and separates crossing levels schematically. Railway alignments and layer tags come from the Hamburg OSM extract. Display heights are illustrative and never written into CityJSON. Switch Levels off to edit a flat boundary.
+- **Levels** tilts the map and separates crossing levels schematically. Roads and railways share the same crossing order: an elevated road can sit above a railway. Open railway cuttings stay visible; true tunnels remain underground. Display heights are illustrative and never written into CityJSON. Switch Levels off to edit a flat boundary.
+- Cycle lanes retain their width through the merge and at their ends. Existing bicycle pavement is reserved before generating the carriageway; compatible through connections can continue it across the junction.
 - The lane transition joins **three incoming to six outgoing driving lanes**, retaining separate lane arrows and dividers. Both reviewed left-only lanes lead to separate left-turn destinations.
 - **Generate → Save intersection** retains the generated surface and its arrows. Reopened generated surfaces are labelled **Saved generated surface**.
 
 ![Saved lane transition with two distinct left-turn lanes, dividers and arrows](assets/readme/intersection-transition-current.jpg)
 
 ![The railway above the road in the schematic Levels view](assets/readme/intersection-levels-current.jpg)
+
+![Altmannbrücke road bridges above the station tracks, compared with the built-in satellite imagery](assets/readme/road-over-rail-current.jpg)
+
+At **Altmannbrücke**, the opposite crossing order is required. The [source crop](public/examples/hamburg-altmannbruecke.json) retains the road bridge's layer +1 and is used by a regression test against the mapped railway cutting at layer −1.
 
 The [original crop](public/examples/hamburg-roedingsmarkt-source.json) remains unchanged. The [edited example](public/examples/hamburg-roedingsmarkt.json) records the two left-arrow corrections explicitly: OSM way `43118557` has no `turn:lanes` tag. These are review edits, not newly discovered source tags.
 
@@ -65,10 +70,9 @@ A failed fit explains the conflict and preserves the draft. Excessive band width
 The intersection inspector separates its physical outline from its permitted movements:
 
 - **Shape → Keep current** retains the saved surface.
-- **Shape → Generate** connects the approach kerbs with curved returns. It is a starting point for a local, flat junction.
-- **Preview one combined intersection** appears for eligible groups joined by short internal roads. It previews the replacement junction and all approach trims; **Save intersection** removes the absorbed pieces in the same transaction. **Undo** restores the separate draft. Bridges, tunnels and roads connected outside the group are excluded.
-- Nearly parallel two- or three-arm junctions on the same named street can open with a proposed **lane transition**. Previewing changes nothing in the document; **Save** is still required. Ordinary crossings are not automatically consolidated.
-- **Trace from satellite** lets you click around the visible carriageway boundary. Extend the outline slightly into each approach, then choose **Finish**. A crossing or detached boundary cannot be saved.
+- **Shape → Generate** connects the approach kerbs with curved returns and retains lane arrows. Opening Shape keeps handles hidden until you choose to adjust them.
+- **Generate combined intersection** appears for eligible groups joined by short internal roads. Choose **Nearby pieces** or **Larger area**; the counts show exactly what the preview will absorb. **Save intersection** removes those pieces in the same transaction. **Undo** returns to the separate draft and size options. Bridges, tunnels and roads connected outside the group are excluded.
+- Unedited junctions with up to four approaches, including same-street lane transitions, can open with a proposed rounded surface when geometry and fit checks pass. Previewing changes nothing in the document; **Save** is still required. Complex, conflicting or differently elevated junctions keep their source surface and turn editor. The app does not silently rewrite the whole city.
 - **Adjust boundary on map** provides draggable corners and midpoint insertion. With a point focused, arrow keys nudge it; **Shift + arrow** moves farther and **Delete** removes it. A whole drag is one undo step.
 - **Trace an island** creates an opening for a raised island, median or tree bed. Islands must remain inside the boundary and separate from each other.
 - **Turns** starts with all driving approaches. Select a lane to see its numbered destinations; click a curve or checkbox to change permission. The View selector also exposes cycle lanes and sidewalks. The compact diagram uses the same approach colours.
@@ -76,7 +80,7 @@ The intersection inspector separates its physical outline from its permitted mov
 
 ![Numbered cyan permitted turns and a red blocked turn, with the incoming lane highlighted blue](assets/readme/intersection-turns-current.jpg)
 
-Automatic junctions follow connected road geometry changes. A manually traced outline remains fixed until you edit it; check its joins again after changing an approach. Islands are retained through save and reload, and the editor warns when a permitted connection crosses one.
+Automatic junctions follow connected road geometry changes. An explicitly adjusted outline remains fixed until you edit it; check its joins again after changing an approach. Islands, bicycle surfaces and crossing levels are retained through save and reload, and the editor warns when a permitted connection crosses an island. Fit checks use the roads, buildings and trees loaded in the document; a roads-only example cannot check buildings that it does not contain.
 
 Imagery makes a close visual reconstruction practical. It does not supply surveyed kerbs, current legal turn restrictions, vehicle turning envelopes or elevations. Physical junction rebuilding still requires approaches on a shared flat level. The railway context and schematic Levels view explain grade separation; they do not construct an engineered bridge or underpass. Signals, stop lines and swept-path engineering need additional data and tools. See the [reference study](docs/intersection-reference-study.md).
 

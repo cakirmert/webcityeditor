@@ -1249,6 +1249,7 @@ export function extractTransportationAreas(doc: CityJsonDocument): RoadArea[] {
             junctionAllowedLaneMovements: (object.attributes?._junctionAllowedLaneMovements ?? null) as JsonValue,
             junctionMergedFrom: (object.attributes?._junctionMergedFrom ?? null) as JsonValue,
             junctionRetainedIslands: (object.attributes?._junctionRetainedIslands ?? null) as JsonValue,
+            junctionRetainedCycleways: (object.attributes?._junctionRetainedCycleways ?? null) as JsonValue,
             junctionLaneGuides: (object.attributes?._junctionLaneGuides ?? null) as JsonValue,
             elevationRangeM: Number.isFinite(minElevation) && Number.isFinite(maxElevation) ? maxElevation - minElevation : null,
             allowedRoadMovements: (

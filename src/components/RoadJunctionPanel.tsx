@@ -1,4 +1,4 @@
-import { ArrowUpRight, AlertTriangle, Copy, GitBranch, Layers2, MousePointer2, PencilLine, Pentagon, Plus, Route, Trash2, WandSparkles } from 'lucide-react';
+import { AlertTriangle, Copy, GitBranch, Layers2, MousePointer2, Pentagon, Plus, Route, Trash2, WandSparkles } from 'lucide-react';
 import { openJunctionRing, type JunctionEditTool, type JunctionFootprint } from '../lib/junction-footprint';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { roadMovementKey, type RoadLaneContinuation } from '../lib/road-lane-continuations';
@@ -6,7 +6,7 @@ import type { RoadJunctionDraft, RoadJunctionPlan } from '../lib/road-junctions'
 import { deriveEditableRoadDraftFromAreas, type RoadArea } from '../lib/transportation';
 import { roadDisplayName, roadEndpointBearing } from '../lib/road-labels';
 import { approachColor, isDrivingMovement, isLaneTransition, turnSymbol } from '../lib/junction-presentation';
-import { consolidateJunctionCluster, suggestJunctionCluster } from '../lib/junction-clusters';
+import { consolidateJunctionCluster, suggestJunctionCluster, type JunctionMergeSize } from '../lib/junction-clusters';
 
 export const junctionSourceKey = (movement: RoadLaneContinuation) => JSON.stringify([movement.sourceRoadId, movement.sourceSectionId, movement.sourceBandIndex]);
 
@@ -23,7 +23,9 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
   const [focusedRoad, setFocusedRoad] = useState(draft.roadIds[0] ?? '');
   const [copyStatus, setCopyStatus] = useState('');
   const [groupError, setGroupError] = useState('');
-  const cluster = useMemo(() => draft.mergedFrom ? null : suggestJunctionCluster(areas,draft.id),[areas,draft.id,draft.mergedFrom]);
+  const [mergeSize, setMergeSize] = useState<JunctionMergeSize>('nearby');
+  const cluster = useMemo(() => draft.mergedFrom ? null : suggestJunctionCluster(areas,draft.id,mergeSize),[areas,draft.id,draft.mergedFrom,mergeSize]);
+  const largerCluster = useMemo(() => draft.mergedFrom ? null : suggestJunctionCluster(areas,draft.id,'larger'),[areas,draft.id,draft.mergedFrom]);
   const transition = useMemo(() => isLaneTransition(draft,areas),[draft,areas]);
   const pendingMerge = !!draft.mergedFrom && [...draft.mergedFrom.junctionIds, ...draft.mergedFrom.internalRoadIds].some(id => id !== draft.id && areas.some(a => a.roadId === id));
   const name = (id: string) => roadDisplayName(areas, id);
@@ -70,6 +72,7 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
   }, [areas, draft.id, draft.roadIds, draft.footprint, plan.footprint, plan.movements]);
   const footprint = draft.footprint ?? plan.footprint;
   const savedGenerated = areas.some(area => area.roadId === draft.id && area.attributes.junctionSurfaceMode === 'generated');
+  const outlineLabel = draft.surfaceMode === 'preserve' && savedGenerated ? 'Saved generated surface' : draft.footprint?.source === 'generated' ? 'Generated combined boundary' : draft.footprint ? 'Custom boundary' : draft.surfaceMode === 'preserve' ? 'Imported surface' : 'Generated kerb outline';
   const beginEditing = () => {
     if (!footprint) return;
     onChange({ ...draft, surfaceMode: 'rebuild', footprint: { ...footprint, polygon: openJunctionRing(footprint.polygon), holes: footprint.holes.map(openJunctionRing) } });
@@ -78,24 +81,23 @@ export default function RoadJunctionPanel({ draft, plan, areas, tool, onToolChan
   const tabs = [{ id: 'shape', label: 'Shape', icon: <Pentagon size={15} /> }, { id: 'turns', label: 'Turns', icon: <Route size={15} /> }, { id: 'approaches', label: 'Roads', icon: <GitBranch size={15} /> }];
   return <div className="junction-editor">
     {plan.error && <div className="studio-feedback is-error" role="alert"><AlertTriangle size={17} /><p>{plan.error}</p></div>}
-    <div className="junction-workflow-tabs" role="tablist" aria-label="Intersection tools">{tabs.map((item, i) => <button key={item.id} id={`junction-tab-${item.id}`} role="tab" aria-selected={tab === item.id} aria-controls={`junction-view-${item.id}`} tabIndex={tab === item.id ? 0 : -1} onClick={() => { setTab(item.id); onToolChange(item.id === 'shape' ? 'vertices' : 'none'); }} onKeyDown={(event) => {
+    <div className="junction-workflow-tabs" role="tablist" aria-label="Intersection tools">{tabs.map((item, i) => <button key={item.id} id={`junction-tab-${item.id}`} role="tab" aria-selected={tab === item.id} aria-controls={`junction-view-${item.id}`} tabIndex={tab === item.id ? 0 : -1} onClick={() => { setTab(item.id); onToolChange('none'); }} onKeyDown={(event) => {
       const next = event.key === 'ArrowRight' ? (i + 1) % tabs.length : event.key === 'ArrowLeft' ? (i + tabs.length - 1) % tabs.length : -1;
-      if (next >= 0) { event.preventDefault(); setTab(tabs[next].id); onToolChange(tabs[next].id === 'shape' ? 'vertices' : 'none'); document.getElementById(`junction-tab-${tabs[next].id}`)?.focus(); }
+      if (next >= 0) { event.preventDefault(); setTab(tabs[next].id); onToolChange('none'); document.getElementById(`junction-tab-${tabs[next].id}`)?.focus(); }
     }}>{item.icon}{item.label}</button>)}</div>
     <div id="junction-view-shape" role="tabpanel" aria-labelledby="junction-tab-shape" hidden={tab !== 'shape'} className="junction-tab-body">
       {transition && <div className="junction-transition-note"><b>Lane transition</b><p>Generate joins the changing lane widths and retains their arrows. Review the preview, then save to apply it.</p></div>}
-      {cluster && <div className="junction-cluster-note"><b>{cluster.junctionIds.length} connected junction pieces</b><p>Consolidate these junctions and {cluster.internalRoadIds.length} short internal roads into one editable intersection. Review its boundary against the imagery before saving.</p><button className="road-wide-action" onClick={() => { try { onChange(consolidateJunctionCluster(areas,draft,cluster)); setGroupError(''); onToolChange('vertices'); } catch(error) { setGroupError(error instanceof Error ? error.message : String(error)); } }}>Preview one combined intersection</button></div>}
-      {draft.mergedFrom && <p className="junction-transition-note">One intersection from {draft.mergedFrom.junctionIds.length} source pieces. Internal road seams are removed together when you save.</p>}
+      {(cluster || largerCluster) && <div className="junction-cluster-note"><b>Make one larger intersection</b><p>Join connected pieces and short internal roads. Cycle lanes and permitted turns stay; bridges and tunnels stay separate.</p><div className="junction-merge-size" role="group" aria-label="Merge extent"><button aria-pressed={mergeSize === 'nearby'} onClick={() => setMergeSize('nearby')}>Nearby pieces</button><button aria-pressed={mergeSize === 'larger'} onClick={() => setMergeSize('larger')}>Larger area</button></div><p>{cluster ? `${cluster.junctionIds.length} junction pieces · ${cluster.internalRoadIds.length} internal roads · ${cluster.roadIds.length} outside approaches` : 'No group at this size. Try Larger area.'}</p><button className="road-wide-action" disabled={!cluster} onClick={() => { if (!cluster) return; try { onChange(consolidateJunctionCluster(areas,draft,cluster)); setGroupError(''); onToolChange('none'); } catch(error) { setGroupError(error instanceof Error ? error.message : String(error)); } }}>Generate combined intersection</button><small>Preview first. Save checks buildings, neighbouring roads and crossing levels.</small></div>}
+      {draft.mergedFrom && <p className="junction-transition-note">One intersection from {draft.mergedFrom.junctionIds.length} source pieces. {pendingMerge ? 'Save removes the internal pieces together. Undo returns to the merge-size options.' : 'The internal road seams have been removed.'}</p>}
       {groupError && <p role="alert" className="road-inline-error">{groupError}</p>}
-      <div className="junction-intro"><h3>{footprint ? tool === 'vertices' ? 'Drag a boundary point on the map' : 'Review the junction boundary' : 'Create a continuous boundary'}</h3><p>{footprint ? 'Use Adjust boundary on map to move corners. Small dots add a corner; Undo restores the previous shape.' : 'The imported surface has separate or invalid fragments. Generate a connected outline, or trace the visible kerb from satellite.'}</p></div>
+      <div className="junction-intro"><h3>{footprint ? tool === 'vertices' ? 'Drag a boundary point on the map' : 'Review the junction boundary' : 'Create a continuous boundary'}</h3><p>{footprint ? 'Generate rounds the connected road ends. Adjust boundary on map is optional; Undo restores the previous shape.' : 'Generate a rounded surface between the connected road ends. Its lane arrows and connections are retained.'}</p></div>
       <div className="junction-shape-modes" role="group" aria-label="Junction surface">
         <button aria-pressed={draft.surfaceMode === 'preserve'} disabled={pendingMerge || !areas.some((area) => area.roadId === draft.id)} title={pendingMerge ? 'Undo the combined preview to keep the separate source junctions.' : undefined} onClick={() => { const saved = areas.find((area) => area.roadId === draft.id)?.attributes.junctionFootprint as unknown as JunctionFootprint | undefined; onChange({ ...draft, surfaceMode: 'preserve', footprint: saved || undefined }); onToolChange('none'); }}><Layers2 size={19} /><b>Keep current</b><span>Retain its exact surface</span></button>
-        <button aria-pressed={draft.surfaceMode === 'rebuild' && !draft.footprint} onClick={() => { onChange({ ...draft, surfaceMode: 'rebuild', footprint: undefined }); onToolChange('none'); }}><WandSparkles size={19} /><b>Generate</b><span>Connect the road kerbs</span></button>
+        <button aria-pressed={draft.surfaceMode === 'rebuild' && (!draft.footprint || draft.footprint.source === 'generated')} onClick={() => { onChange({ ...draft, surfaceMode: 'rebuild', footprint: undefined }); onToolChange('none'); }}><WandSparkles size={19} /><b>Generate</b><span>Connect the road kerbs</span></button>
       </div>
-      <button className="junction-trace-action" onClick={() => { onCompare(); onToolChange('trace-boundary'); }}><PencilLine size={19} /><span><b>{draft.footprint ? 'Retrace boundary' : 'Trace from satellite'}</b><small>Click around the actual road edge</small></span><ArrowUpRight size={18} /></button>
-      <div className="junction-outline-summary"><span><i className={draft.footprint ? 'is-traced' : ''} />{draft.footprint ? 'Custom boundary' : draft.surfaceMode === 'preserve' ? savedGenerated ? 'Saved generated surface' : 'Imported surface' : 'Generated kerb outline'}</span>{footprint && <small>{openJunctionRing(footprint.polygon).length} points</small>}</div>
+      <div className="junction-outline-summary"><span><i className={draft.footprint ? 'is-traced' : ''} />{outlineLabel}</span>{footprint && <small>{openJunctionRing(footprint.polygon).length} points</small>}</div>
       <button className="road-wide-action junction-edit-boundary" disabled={!footprint} onClick={beginEditing}><MousePointer2 size={16} />{tool === 'vertices' ? 'Boundary handles are active' : 'Adjust boundary on map'}</button>
-      {!draft.footprint && draft.surfaceMode === 'rebuild' && <label className="road-field junction-curvature"><span>Corner shape <output>{Math.round(draft.curveFactor * 100)}%</output></span><input aria-label="Corner shape" type="range" min=".15" max=".65" step=".025" value={draft.curveFactor} onChange={(event) => onChange({ ...draft, curveFactor: Number(event.target.value) })} /><small>Gentle ↔ tighter curves. Trace irregular kerbs directly.</small></label>}
+      {!draft.footprint && draft.surfaceMode === 'rebuild' && <label className="road-field junction-curvature"><span>Corner shape <output>{Math.round(draft.curveFactor * 100)}%</output></span><input aria-label="Corner shape" type="range" min=".15" max=".65" step=".025" value={draft.curveFactor} onChange={(event) => onChange({ ...draft, curveFactor: Number(event.target.value) })} /><small>Gentle ↔ tighter curves.</small></label>}
       <section className="junction-islands"><div><h4>Traffic islands</h4><span>{(draft.footprint?.holes.length ?? 0) + (draft.retainedIslands?.length ?? 0)}</span></div><p>Cut out raised islands, medians and tree beds.</p>
         {!!draft.retainedIslands?.length && <p>{draft.retainedIslands.length} source kerb and island surfaces retained. They remain separate semantic surfaces within this intersection.</p>}
         {draft.footprint?.holes.map((hole, i) => <div className="junction-island-row" key={i}><span>Island {i + 1}<small>{openJunctionRing(hole).length} corners</small></span><button aria-label={`Remove island ${i + 1}`} onClick={() => onChange({ ...draft, surfaceMode: 'rebuild', footprint: { ...draft.footprint!, holes: draft.footprint!.holes.filter((_, j) => j !== i) } })}><Trash2 size={15} /></button></div>)}

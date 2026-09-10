@@ -22,6 +22,7 @@ export interface RoadJunctionDraft {
   allowedLaneMovements?: string[];
   mergedFrom?: { junctionIds: string[]; internalRoadIds: string[] };
   retainedIslands?: Array<{ polygon: [number, number][]; holes: [number, number][][]; sourceType: string }>;
+  retainedCycleways?: Array<{ polygon: [number, number][]; holes: [number, number][][] }>;
 }
 
 export interface RoadJunctionPlan {
@@ -63,6 +64,7 @@ export function readRoadJunction(areas: RoadArea[], id: string): RoadJunctionDra
     ...(Array.isArray(area?.attributes.junctionAllowedLaneMovements) ? { allowedLaneMovements: area.attributes.junctionAllowedLaneMovements.map(String) } : {}),
     ...(area?.attributes.junctionMergedFrom ? { mergedFrom: area.attributes.junctionMergedFrom as unknown as RoadJunctionDraft['mergedFrom'] } : {}),
     ...(Array.isArray(area?.attributes.junctionRetainedIslands) ? { retainedIslands: area.attributes.junctionRetainedIslands as unknown as RoadJunctionDraft['retainedIslands'] } : {}),
+    ...(Array.isArray(area?.attributes.junctionRetainedCycleways) ? { retainedCycleways: area.attributes.junctionRetainedCycleways as unknown as RoadJunctionDraft['retainedCycleways'] } : {}),
     ...(area?.attributes.junctionFootprint ? { footprint: area.attributes.junctionFootprint as unknown as JunctionFootprint } : {}) };
 }
 
@@ -181,22 +183,57 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
       const blocked = movements.filter((movement) => !draft.disabledMovements.includes(roadMovementKey(movement)) && draft.footprint!.holes.some((ring) => junctionPolygonArea(intersection([movement.polygon.map(project)], [ring.map(project)])) > .01));
       if (blocked.length) warnings.push(`${blocked.length} permitted lane connections cross an island. Review Turns and restrict these movements. Connection curves are guides, not vehicle swept-path checks.`);
     }
+    const isCycleway = (area: RoadArea) => /bik|cycl/i.test(String(area.attributes.sourceType ?? area.attributes.transportationUsage ?? area.function));
+    const cycleApproaches: Polygon[] = approaches.filter(isCycleway).map(area => [area.polygon.map(project), ...(area.holes ?? []).map(ring => ring.map(project))]);
+    const sharedCycleEnds = cycleApproaches.flatMap((polygon, i) => cycleApproaches.slice(i + 1).flatMap(other => intersection(polygon, other)));
+    let cycleEndOwnership = sharedCycleEnds.length ? union(sharedCycleEnds[0], ...sharedCycleEnds.slice(1)) : [];
+    // Keep actual approach cycleways to their full-width ends. A difference
+    // between nested kerb outlines fades to a wedge when the next arm has no
+    // cycleway. Only through/slight turns create a physical continuation;
+    // turning permissions remain visible as guides, not invented cycle paving.
+    const cycleParts: Polygon[] = [
+      ...cycleApproaches,
+      ...(draft.retainedCycleways ?? []).map(area => [area.polygon.map(project), ...area.holes.map(ring => ring.map(project))]),
+      ...movements.filter(m => m.mode === 'bicycle' && ['through', 'slight_left', 'slight_right'].includes(m.turn)).map(m => [m.polygon.map(project)]),
+    ];
+    let cycleNetwork = cycleParts.length ? union(cycleParts[0], ...cycleParts.slice(1)) : [];
+    const cycleOpenings: Polygon[] = [...sourceOpenings, ...(footprint?.holes ?? []).map(ring => [ring.map(project)])];
+    if (cycleOpenings.length && cycleNetwork.length) cycleNetwork = difference(cycleNetwork, ...cycleOpenings);
+    if (cycleOpenings.length && cycleEndOwnership.length) cycleEndOwnership = difference(cycleEndOwnership, ...cycleOpenings);
     let occupied: MultiPolygon = [];
     const generated: RoadArea[] = [];
-    // Physical kerbs are independent of movement paths. Build nested kerb
-    // outlines, then subtract the inner modes to make disjoint semantic areas.
-    // Turning ribbons can self-cross and must never define the pavement.
+    // Motor and walking kerbs remain independent of turn permissions. Cycling
+    // is reserved first so neither a larger carriageway nor its sidewalk can
+    // swallow an existing bicycle lane.
     const groups = ['motor', 'cycle', 'walk'] as const;
     const kinds: RoadBandKind[] = ['car_lane', 'parking'];
     for (const group of groups) {
       if (group === 'cycle') kinds.push('bike_lane');
       if (group === 'walk') kinds.push('sidewalk');
-      if (!hasKind(group === 'motor' ? ['car_lane', 'parking'] : group === 'cycle' ? ['bike_lane'] : ['sidewalk'])) continue;
+      if (!(group === 'cycle' && cycleNetwork.length) && !hasKind(group === 'motor' ? ['car_lane', 'parking'] : group === 'cycle' ? ['bike_lane'] : ['sidewalk'])) continue;
       const outline = !generated.length ? footprint : automaticOutline(kinds);
+      if (group === 'cycle' && primaryKinds[0] === 'car_lane') {
+        let visible = cycleNetwork.length ? difference(cycleNetwork, ...cycleApproaches) : [];
+        if (cycleEndOwnership.length) visible = visible.length ? union(visible, cycleEndOwnership) : cycleEndOwnership;
+        for (const polygon of visible) {
+          const n = generated.length;
+          generated.push({ id: `${draft.id}-surface-${n}`, roadId: draft.id, sectionId: 'junction', bandId: `junction-cycle-${n}`, surfaceIndex: n,
+            surfaceType: 'TrafficArea', function: 'intersection', polygon: polygon[0].map(unproject), holes: polygon.slice(1).map(ring => ring.map(unproject)),
+            vertical: approaches[0]?.vertical, geometryMode: 'generated', attributes: {
+              connectedCityRoadIds: draft.roadIds, cityRoadEndpoints: draft.endpoints, junctionSurfaceMode: 'generated',
+              transportationUsage: 'intersection', sourceType: 'Biking', allowedModes: ['bicycle'], surfaceMaterial: 'asphalt',
+            } });
+        }
+        if (visible.length) occupied = occupied.length ? union(occupied, visible) : visible;
+        continue;
+      }
       if (!outline) return empty('The approach kerbs do not form a simple outline. Trace the visible boundary or adjust the road ends before generating this junction.');
       let joined: MultiPolygon = [[outline.polygon.map(project), ...outline.holes.map((ring) => ring.map(project))]];
       if (sourceOpenings.length) joined = difference(joined, ...sourceOpenings);
       if (footprint?.holes.length && group !== 'motor') joined = difference(joined, ...footprint.holes.map((ring): Polygon => [ring.map(project)]));
+      if (group !== 'cycle' && cycleNetwork.length) joined = difference(joined, cycleNetwork);
+      if (group === 'cycle' && cycleApproaches.length) joined = difference(joined, ...cycleApproaches);
+      if (group === 'cycle' && cycleEndOwnership.length) joined = joined.length ? union(joined, cycleEndOwnership) : cycleEndOwnership;
       const visible = occupied.length ? difference(joined, occupied) : joined;
       occupied = occupied.length ? union(occupied, joined) : joined;
       for (const polygon of visible) {
@@ -234,7 +271,9 @@ export function buildRoadJunctionPlan(draft: RoadJunctionDraft, areas: RoadArea[
     const trimFootprint = islandPolygons.length || otherPolygons.length ? union(occupied, ...islandPolygons, ...otherPolygons) : occupied;
     const trimmed = approaches.flatMap((area) => {
       const polygon: Polygon = [area.polygon.map(project), ...(area.holes ?? []).map((ring) => ring.map(project))];
-      return difference(polygon, trimFootprint).map((part, i) => ({ ...area, id: `${area.id}-trim-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map((ring) => ring.map(unproject)) }));
+      const cycleTrim = [...otherPolygons, ...cycleEndOwnership, ...islandPolygons];
+      const parts = isCycleway(area) ? (cycleTrim.length ? difference(polygon, ...cycleTrim) : [polygon]) : difference(polygon, trimFootprint);
+      return parts.map((part, i) => ({ ...area, id: `${area.id}-trim-${i}`, polygon: part[0].map(unproject), holes: part.slice(1).map((ring) => ring.map(unproject)) }));
     });
     if (draft.roadIds.some((id) => !trimmed.some((area) => area.roadId === id))) return empty('The junction would consume an entire short approach. Extend that road before rebuilding.');
     const removedRoadIds = draft.mergedFrom ? [...draft.mergedFrom.junctionIds, ...draft.mergedFrom.internalRoadIds].filter(id => id !== draft.id && areas.some(a => a.roadId === id)) : [];
@@ -274,6 +313,9 @@ export function saveRoadJunction(doc: CityJsonDocument, draft: RoadJunctionDraft
     for (const section of layout?.sections ?? []) for (const [end,connection] of Object.entries(section.connections ?? {})) if (removed.has(connection.targetId)) delete section.connections![end];
   }
   object.attributes = { ...object.attributes, name: draft.name, class: 'intersection', _transportationKind: 'intersection', _connectedCityRoadIds: draft.roadIds,
+    ...(draft.surfaceMode === 'rebuild' && plan.areas.find(a => a.roadId === draft.id)?.vertical ? {
+      _verticalProfile: JSON.parse(JSON.stringify(plan.areas.find(a => a.roadId === draft.id)!.vertical)),
+    } : {}),
     _cityRoadEndpoints: draft.endpoints, _disabledMovements: draft.disabledMovements,
     _junctionCurveFactor: draft.curveFactor, _junctionSurfaceMode: draft.surfaceMode === 'rebuild' ? 'generated' : object.attributes?._junctionSurfaceMode ?? 'source',
     _junctionFootprint: draft.footprint ? JSON.parse(JSON.stringify(draft.footprint)) : null,
@@ -282,6 +324,7 @@ export function saveRoadJunction(doc: CityJsonDocument, draft: RoadJunctionDraft
     ...(draft.allowedLaneMovements ? { _allowedOsm2streetsRoadMovements: null } : {}),
     ...(draft.mergedFrom ? { _junctionMergedFrom: JSON.parse(JSON.stringify(draft.mergedFrom)) } : {}),
     ...(draft.retainedIslands ? { _junctionRetainedIslands: JSON.parse(JSON.stringify(draft.retainedIslands)) } : {}),
+    ...(draft.retainedCycleways ? { _junctionRetainedCycleways: JSON.parse(JSON.stringify(draft.retainedCycleways)) } : {}),
     _updatedAt: new Date().toISOString(),
   };
   return plan.replacedRoadIds;

@@ -11,12 +11,49 @@ import { checkIntegrity } from '../../src/lib/integrity';
 import { buildRoadVisuals } from '../../src/lib/road-visuals';
 import { isLaneTransition } from '../../src/lib/junction-presentation';
 import { junctionPolygonArea, localJunctionProjection } from '../../src/lib/junction-footprint';
-import { intersection } from '../../src/lib/polygon-boolean';
+import { intersection, difference, union } from '../../src/lib/polygon-boolean';
 
 const prefix = 'hh-road-r00-c00-osm2streets-';
 const source = () => JSON.parse(readFileSync('public/examples/hamburg-roedingsmarkt-source.json','utf8')) as CityJsonDocument;
 
 describe('real Hamburg junction consolidation', () => {
+  it('keeps every approach cycleway at full width, including the one that ends at the junction, through save/reopen', () => {
+    const doc=source(), areas=extractTransportationAreas(doc), id=`${prefix}intersection-210`;
+    const group=suggestJunctionCluster(areas,id)!;
+    const draft=consolidateJunctionCluster(areas,readRoadJunction(areas,id),group);
+    const plan=buildRoadJunctionPlan(draft,areas);
+    expect(plan.error).toBeUndefined();
+    const cycling=areas.filter(a=>draft.roadIds.includes(a.roadId)&&a.attributes.sourceType==='Biking');
+    expect(cycling.length).toBeGreaterThan(3);
+    expect(cycling.some(a=>a.roadId===`${prefix}road-1680`)).toBe(true);
+    const {project}=localJunctionProjection(cycling[0].polygon[0]);
+    const checkCoverage=(next:typeof areas,tolerance:number)=>{
+      const polygons=next.filter(a=>a.attributes.sourceType==='Biking').map(a=>[a.polygon.map(project),...(a.holes??[]).map(r=>r.map(project))]);
+      const covered=union(polygons[0],...polygons.slice(1));
+      for(const lane of cycling) expect(junctionPolygonArea(difference([lane.polygon.map(project)],covered))).toBeLessThan(tolerance);
+    };
+    // Boolean operations snap to a millimetre grid; allow only that edge loss.
+    checkCoverage(plan.areas,.02);
+    saveRoadJunction(doc,draft,plan);compactVertices(doc);
+    const saved=extractTransportationAreas(doc);
+    checkCoverage(saved,.06);
+    expect(readRoadJunction(saved,id).retainedCycleways).toEqual(draft.retainedCycleways);
+    expect(validateRoadOverlaps(plan.areas,areas,'EPSG:25832',plan.removedRoadIds)).toEqual([]);
+  });
+  it('offers a larger connected search without relaxing crossing-level guards', () => {
+    const areas=extractTransportationAreas(source()),id=`${prefix}intersection-210`;
+    const nearby=suggestJunctionCluster(areas,id)!,larger=suggestJunctionCluster(areas,id,'larger')!;
+    expect(larger.junctionIds.length).toBeGreaterThanOrEqual(nearby.junctionIds.length);
+    expect(nearby.junctionIds.every(id=>larger.junctionIds.includes(id))).toBe(true);
+    const doc=source(),draft=consolidateJunctionCluster(areas,readRoadJunction(areas,id),larger),plan=buildRoadJunctionPlan(draft,areas);
+    expect(plan.error).toBeUndefined();
+    expect(validateRoadOverlaps(plan.areas,areas,'EPSG:25832',plan.removedRoadIds)).toEqual([]);
+    saveRoadJunction(doc,draft,plan);compactVertices(doc);
+    expect(checkIntegrity(doc).ok).toBe(true);
+    expect(readRoadJunction(extractTransportationAreas(doc),id).roadIds).toEqual(larger.roadIds);
+    const changed=areas.map(a=>larger.internalRoadIds.includes(a.roadId)?{...a,vertical:{placement:'underground' as const,osmLayer:-1,source:'osm_tags' as const}}:a);
+    expect(suggestJunctionCluster(changed,id,'larger')).toBeNull();
+  });
   it('previews without mutations, then saves one junction and all approach trims atomically', () => {
     const doc = source(), before = JSON.stringify(doc), areas = extractTransportationAreas(doc), id = `${prefix}intersection-210`;
     const group = suggestJunctionCluster(areas,id)!;
