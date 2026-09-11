@@ -2,6 +2,8 @@
 
 Updated 9 September 2026
 
+Historical implementation record. Current controls and behavior are documented in [Road connections, intersections and width policy](road-ux-research.md) and [the latest intersection verification](intersections-and-crossings-2026-09-10.md). In particular, opening a junction now preserves its shape without activating handles; generation is manual and reviewable conflicts can be saved with warnings.
+
 ## September correction
 
 - Opening an intersection activates boundary handles immediately. Selection also opens the workspace reliably; malformed imported fragments have an explicit generate/trace path.

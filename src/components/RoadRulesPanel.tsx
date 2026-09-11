@@ -12,7 +12,7 @@ export default function RoadRulesPanel({ draft, section, issues, onChange }: {
   const extents = roadSectionExtents(section);
   const patch = (next: Partial<RoadSectionDraft>) => onChange({ ...draft, ruleProfile: structuredClone(profile), sections: draft.sections.map((item) => item.id === section.id ? { ...item, ...next } : item) }, 'Change road extent');
   return <div className="road-rules-panel">
-    <div><b>{profile.name}</b><small>Policy {profile.version} · project checks, with source notes</small></div>
+    <div><b>{profile.name}</b><small>Profile {profile.version} · width checks with sources and scope</small></div>
     <p>Dashed amber lines show left/right limits measured from the directed centreline. Leave a limit blank where the available space is unknown.</p>
     <div className="road-rules-extents">
       {(['left', 'right'] as const).map((side) => <label key={side}>

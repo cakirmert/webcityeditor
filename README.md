@@ -53,7 +53,7 @@ In **Lanes**, choose a type under **Add another band**, then click the blue **+ 
 | **Lanes** | Select a band in the proportional street preview. Change width, type, surface, direction and order; add driving, cycling, sidewalk, parking or planting space. |
 | **Shape** | Move centreline anchors, add bends with the white `+` handles, choose **Smooth** or **Straight**, adjust elevation or split a section. |
 | **Connections** | Inspect Start/End joins, open their existing intersections, or construct one together with an unsaved road draft. |
-| **Rules** | Review minimum/maximum widths, set left/right extent limits, fit widths into available space, and import or export a city policy. |
+| **Rules** | Review width thresholds and their sources, set left/right extent limits, fit widths into available space, and import or export a city rule profile. |
 
 ![Road design with a live street preview and the lane controls in the same inspector](assets/readme/road-design-current.jpg)
 
@@ -157,7 +157,13 @@ npm run backend:setup
 npm run backend:up
 ```
 
-It uses a persistent SQLite volume and retains the last 20 revisions. Local browser saves and CityJSON export continue to work without it. See the [backend setup and API guide](backend/README.md) for the access key, local connection, later HTTPS hosting, backups and replacing the storage implementation.
+The starter stores complete CityJSON snapshots in a persistent SQLite volume and retains the last 20 revisions. It does not serve the map or provide object-level spatial queries. The [storage architecture and database comparison](docs/streaming-and-storage.md#database-options) explains the recommended PostgreSQL/PostGIS direction, cjdb and 3DCityDB. Local browser saves and CityJSON export work without a server. See the [backend setup and API guide](backend/README.md) for connection, hosting and backups.
+
+## How the data reaches the map
+
+Road preparation reads **OSM XML/PBF → osm2streets lane and junction polygons → CityJSON → gzip CityJSONSeq tiles**. XML is the OSM input format, not an intermediate CityGML file. The browser loads a viewport subset of the prepared catalog, preserving applied edits while unloading clean off-screen tiles. Detailed building display uses official **3D Tiles**; a picked building becomes CityJSON when needed for editing.
+
+The [conversion guide](docs/osm-to-cityjson.md) includes a tested command using the committed Hamburg extract, intermediate files and validation steps. [Streaming and storage](docs/streaming-and-storage.md) explains feature records, tile dependencies, memory handling and save behavior. [Width rules and sources](docs/road-ux-research.md#governing-references) distinguish Hamburg's adopted ReStra requirements from editor fallback thresholds.
 
 ## Run locally
 
@@ -181,12 +187,15 @@ npm run build
 
 | Document | Contents |
 | --- | --- |
+| [OSM-to-CityJSON conversion guide](docs/osm-to-cityjson.md) | Tested commands, XML/PBF inputs, native exporter, intermediate files, options, validation and static packaging. |
+| [Streaming and storage](docs/streaming-and-storage.md) | CityJSONSeq records, viewport loading, 3D Tiles, project revisions and SQLite/cjdb/3DCityDB trade-offs. |
+| [Road connections, intersections and width policy](docs/road-ux-research.md) | Current workflow, manual generation scopes, geometry construction, Hamburg regulations and exact width-source locations. |
+| [Transportation data and rule provenance](docs/transportation-provenance.md) | Mapped versus inferred data, pinned upstream code, CityJSON mappings, coordinates, metadata and limits of rule coverage. |
+| [Current intersection behavior and verification](docs/intersections-and-crossings-2026-09-10.md) | Crossing order, full-width cycle ends, selected-only generation, readable warnings and save behavior. |
 | [Eight-intersection review and audit](docs/intersection-validation-2026-09.md) | Labeled satellite/source/candidate comparisons, reproducible tools, the 608-junction audit and explicit blocked cases. |
 | [Consolidation, lane transitions and crossing levels](docs/intersection-consolidation-2026-09-10.md) | Rödingsmarkt follow-up, two left-turn lanes, source provenance, save/reload validation and the new railway context. |
 | [Intersection reference study](docs/intersection-reference-study.md) | Selected real junction, original/edited data, satellite comparison, width estimates and remaining uncertainty. |
-| [UX and width-policy research](docs/road-ux-research.md) | PTV Vissim, SUMO NetEdit and Godot patterns; geometry alternatives; Hamburg ReStra sources and project assumptions. |
-| [Transportation provenance](docs/transportation-provenance.md) | OSM → osm2streets → CityJSON, upstream rule audit and CityJSON Transportation semantics. |
-| [Handoff and verification](docs/road-editor-handoff.md) | Delivered behavior, regression checks and implementation limits. |
+| [Earlier implementation handoff](docs/road-editor-handoff.md) | Dated delivery record and regression checks; use the current references above for present behavior. |
 | [Backend setup and API](backend/README.md) | Docker, persistent workspaces, revision conflicts, backups and the replaceable storage contract. |
 | [PROJECT.md](PROJECT.md) | Architecture, datasets, converter commands and contributor notes. |
 

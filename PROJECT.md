@@ -1,12 +1,12 @@
 # City Editor project reference
 
-This file is the single technical handoff for City Editor. It consolidates the former prototype status, road-geometry notes, Hamburg pipeline guides, osm2streets plans, and next-session task list.
+This reference describes City Editor's architecture, datasets and development workflows. Detailed guides cover [OSM conversion](docs/osm-to-cityjson.md), [transportation provenance](docs/transportation-provenance.md), [intersection and width rules](docs/road-ux-research.md), and [streaming and storage](docs/streaming-and-storage.md).
 
-## What the project guarantees
+## Runtime overview
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
 - The default demo starts with usage-coloured citywide ALKIS LoD0 footprints, fades in native LoD1 from zoom 13.25, and switches directly to photo-textured native LoD3 at zoom 18. There is no ordinary LoD2 display tier. A persistent building-usage legend explains the flat-footprint palette; official 3D tiers retain semantic deep-red roofs and cream walls. Tapping a streamed batch feature creates a passive local CityJSON edit proxy; the streamed object is hidden only after a local mutation is saved.
-- The complete 550,691-feature osm2streets catalog—344,265 roads plus 206,426 linked intersections—is packaged as 930 static 1 km gzip CityJSONSeq tiles and streamed from GitHub Pages by viewport. Its 122.6 MB gzip payload replaces 1.67 GB of raw CityJSONSeq and includes exact cross-tile seam dependencies. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
+- The complete 550,691-feature osm2streets catalog—344,265 roads plus 206,426 linked intersections—is packaged as 930 static 1 km gzip CityJSONSeq tiles and streamed from GitHub Pages by viewport. The committed catalog reports 129.29 MB of gzip tiles and 1.72 GB of uncompressed content, with required cross-tile seam dependencies. It works without a local backend, Overpass, Rust, or startup OSM XML processing.
 - CityJSON is the editable source of truth for roads, locally loaded buildings, and buildings handed off from the remote stream.
 - Imported osm2streets polygons remain byte-for-byte unchanged during attribute-only road edits.
 - Close building views replace the official LoD1 stream with Hamburg's official LoD3 stream. Editable local CityJSON remains the source of truth for selected/changed objects.
@@ -57,6 +57,8 @@ The old `prototype/` and `spike/` layouts are obsolete. Source and tooling must 
 `src/lib/project-storage.ts` defines the replaceable HTTP client and versioned contract. `useSharedProjects` links one loaded CityJSON document to one server project, debounces applied changes, serializes writes, retains retry mutation IDs and stops on revision conflicts. Drafts remain local until applied. Opening a project resets document editing state; creating one disconnects viewport catalog streaming so panning cannot evict the working area. Late catalog responses are discarded after that switch.
 
 `backend/server.mjs` provides named workspaces, project snapshots, optimistic revisions and bounded history using Node 24's built-in SQLite driver. It has no application npm dependencies. Docker runs it as a non-root user with a persistent volume. GitHub Pages serves only the frontend; users configure a later HTTPS API through Projects without rebuilding the site. A single team key covers all workspaces in an instance. Individual accounts, permissions and automatic multi-user merging are future backend work.
+
+SQLite currently stores complete CityJSON revisions as JSON text. It does not supply spatial queries or the reference map stream. The [database comparison](docs/streaming-and-storage.md#database-options) recommends PostgreSQL/PostGIS for a future shared city-object service and identifies cjdb/3DCityDB integration checks. Replacing the snapshot store can retain the existing HTTP contract; independent object edits require additional API and transaction design.
 
 Run `npm run backend:setup`, then `npm run backend:up` on a machine with Docker. `npm run backend:down` stops it while retaining saved data. `npm run test:backend` verifies the API and persistence; the regular Vitest suite covers the client, autosave and document isolation. See [backend/README.md](backend/README.md) for hosting, recovery, backup and API details.
 
@@ -217,7 +219,7 @@ Equivalent npm commands are `npm run data:hamburg-roads:prepare` and `npm run de
 npm run data:hamburg-roads:pages
 ```
 
-The packager assigns each feature by extent centroid to a 1 km cell, preserves the millimetre grid, and writes relative gzip tile URLs. The current result is 930 files, 550,691 features (344,265 roads and 206,426 intersections), 1,666,587,937 bytes uncompressed, and 122,423,214 compressed tile bytes (about 116.75 MiB), plus the catalog. GitHub Pages is read-only, so edited road tiles are retained through **Save local** or **Export CityJSON**, not `Save seq`.
+The packager assigns each feature by extent centroid to a 1 km cell, preserves the millimetre grid, and writes relative gzip tile URLs. The committed catalog checked on 11 September 2026 contains 930 files, 550,691 features (344,265 roads and 206,426 intersections), 1,724,524,636 bytes uncompressed, and 129,287,582 compressed tile bytes (about 123.30 MiB), plus the catalog. GitHub Pages is read-only, so edited road tiles are retained through **Save local**, **Export CityJSON** or a connected shared project, not `Save seq`. See [the pipeline guide](docs/osm-to-cityjson.md) for a tested small extract and [streaming internals](docs/streaming-and-storage.md#viewport-loading-and-unloading) for loading limits and dependencies.
 
 Runtime memory stays bounded while moving through the city. Every viewport keeps
 its visible road cells, all exact seam-dependency cells, and at most two
@@ -286,7 +288,7 @@ npm run dev:hamburg-roads -- --dry-run
 
 Focused regression coverage exists for smooth road preview/export parity, touch handle editing, endpoint snapping, reciprocal CityJSON connections, exact-polygon attribute saves, highest-LoD mesh selection, catalog preparation, and the Hamburg committed fixtures.
 
-## Intersection and road-policy implementation (2026-09-07)
+## Intersection and width-rule implementation
 
 The lane-order continuations are now integrated with an intersection movement editor and an
 explicit surface-construction workflow. Physical kerbs use ordered approach mouths and curved
@@ -301,17 +303,22 @@ The bundled `public/examples/hamburg-mattentwiete.json` design study can be open
 and a 28-point kerb trace rather than claiming surveyed accuracy. See the
 [reference study](docs/intersection-reference-study.md).
 
-`src/lib/road-rules.ts` provides a versioned Hamburg concept-design policy with current ReStra
-sources and separately identified project assumptions. New widths and asymmetric left/right
-limits are checked before save; fitting preserves individual band minimums. Profiles, offsets and
-limits persist in `_roadLayout`. Road fitting ignores trees on pavement/green/separator surfaces
-and blocks traffic surfaces covering mapped trunks.
+`src/lib/road-rules.ts` provides a versioned Hamburg design-rule profile with clause/page references
+for supported ReStra dimensions and explicit fallback labels for unverified defaults. The
+[width reference](docs/road-ux-research.md#governing-references) distinguishes adopted standards,
+traffic law and software checks. Widths and asymmetric left/right limits are checked before save;
+fitting preserves individual band minimums. Profiles, offsets and limits persist in `_roadLayout`.
+Tree trunks already in pedestrian/planting surfaces can remain; newly occupied traffic space is
+reported. Reviewable design conflicts can be saved with warnings in `_roadFitReview`; structural
+errors and invalid/non-positive widths remain blocking.
 
 Research and acceptance details:
 
 - [Transportation provenance and upstream rule audit](docs/transportation-provenance.md)
+- [OSM XML/PBF conversion commands and output files](docs/osm-to-cityjson.md)
+- [CityJSONSeq streaming and database architecture](docs/streaming-and-storage.md)
 - [UX comparison, geometry choices and Hamburg width research](docs/road-ux-research.md)
-- [Delivered behavior, verification and limitations](docs/road-editor-handoff.md)
+- [Current intersection behavior and verification](docs/intersections-and-crossings-2026-09-10.md)
 
 ## Remaining roadmap
 

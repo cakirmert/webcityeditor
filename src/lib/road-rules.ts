@@ -12,7 +12,7 @@ export interface RoadWidthRule {
   note: string;
 }
 
-/** A versioned project policy, stored with the layout for reproducible exports. */
+/** Versioned design thresholds and source notes, stored with the road layout. */
 export interface RoadRuleProfile {
   id: string;
   name: string;
@@ -20,26 +20,25 @@ export interface RoadRuleProfile {
   widths: Record<RoadBandKind, RoadWidthRule>;
 }
 
-const RESTRA = 'https://www.hamburg.de/politik-und-verwaltung/behoerden/bvm/die-themen-der-behoerde/grundlagen-strassenwesen/restra-193078';
 const CURRENT_RESTRA = 'https://dokumente.hamburg.de/resource/blob/193072/34178351da128e832be75bb3c3fcc405/restra-data.pdf';
 
 export const HAMBURG_ROAD_RULES: RoadRuleProfile = {
   id: 'hamburg-concept',
   name: 'Hamburg · concept design',
-  version: '2026-09-09',
+  version: '2026-09-11',
   widths: {
     car_lane: { minimumM: 2.75, recommendedM: 3.25, maximumM: 5, twoWayMinimumM: 5.5, twoWayRecommendedM: 6.5, twoWayMaximumM: 10,
-      source: 'Project design policy', note: 'Per motor lane; a band carrying both directions needs two lanes of space. Review bus, freight and speed requirements.' },
+      source: 'Editor fallback; no verified standard clause', note: 'Generic motor-lane thresholds, not a universal regulatory minimum. The two-way values reserve two lanes of space. Select applicable design-vehicle, speed, bus and freight requirements before detailed design.' },
     bike_lane: { minimumM: 2, recommendedM: 2.5, maximumM: 5, twoWayMinimumM: 3, twoWayRecommendedM: 3.5, twoWayMaximumM: 8,
-      source: CURRENT_RESTRA, note: 'ReStra 23.03.2026, pp. 94–96: one-way clear cycling space 2.00/2.50 m; add markings or protection separately (marked lane total 2.25/2.75 m). Two-way defaults assume provision on one side only: 3.00/3.50 m; provision on both sides can use 2.50/3.00 m.' },
+      source: `${CURRENT_RESTRA}#page=107`, note: 'ReStra 23.03.2026, ERA 2.2.1, printed pp. 94–96: one-way clear cycling space 2.00/2.50 m; add markings or protection separately (marked lane total 2.25/2.75 m). Two-way defaults assume provision on one side only: 3.00/3.50 m; provision on both sides uses 2.50/3.00 m.' },
     sidewalk: { minimumM: 1.8, recommendedM: 2.65, maximumM: 30,
-      source: RESTRA, note: '1.80 m clear pedestrian space; 2.65 m is the total side-space reference at 50 km/h, including safety space. Tree pits and furniture do not count as clear walking width.' },
+      source: `${CURRENT_RESTRA}#page=98`, note: 'ReStra 23.03.2026, RASt 4.7 and EFA 3.2.1, printed pp. 12 and 85: 1.80 m clear pedestrian space; 2.65 m total side-space reference at 50 km/h, including safety space. The band-width check cannot measure clear passage around tree pits or furniture.' },
     parking: { minimumM: 2, recommendedM: 2.1, maximumM: 3.5,
-      source: RESTRA, note: 'Parallel parking: 2.10 m standard materials; 2.00 m with other surfaces. 2.30 m recommended beside heavily used main roads. Add a separate door buffer; accessible spaces need separate dimensions.' },
+      source: `${CURRENT_RESTRA}#page=91`, note: 'ReStra 23.03.2026, EAR 3.4.3, printed p. 78: parallel parking 2.10 m with standard materials, 2.00 m with other materials; 2.30 m recommended beside heavily used main roads. Door buffers and accessible spaces need separate dimensions.' },
     median: { minimumM: 0.1, recommendedM: 0.5, maximumM: 20,
-      source: 'Project design policy', note: 'Kerb or separator only; this is not a pedestrian refuge minimum.' },
+      source: 'Editor fallback; no verified standard clause', note: 'Generic kerb or separator only; this does not define a pedestrian refuge or a complete protective buffer.' },
     green: { minimumM: 0.5, recommendedM: 1.5, maximumM: 50,
-      source: 'Project design policy', note: 'Landscape strip only; tree rooting volume requires its own design.' },
+      source: 'Editor fallback; no verified standard clause', note: 'Landscape strip only; tree rooting volume requires its own design.' },
   },
 };
 

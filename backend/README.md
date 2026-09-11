@@ -1,6 +1,8 @@
 # Shared project storage
 
-An optional Docker service for City Editor. It stores CityJSON projects in named workspaces, saves revisions and rejects stale writes. The GitHub Pages editor works without this service; choose **Projects** (or **More → Shared projects** on a phone) when a server is available.
+An optional Docker service for City Editor. It stores CityJSON projects in named workspaces, saves revisions and rejects stale writes. The GitHub Pages editor works without this service; choose **Projects** when a server is available.
+
+This starter stores whole-document snapshots in SQLite. It does not provide the map's tile stream or an object-level spatial database. [Streaming and storage](../docs/streaming-and-storage.md) explains that separation and compares the future PostgreSQL/PostGIS, cjdb and 3DCityDB options. No database migration is implemented by that recommendation.
 
 ## Start with Docker
 
