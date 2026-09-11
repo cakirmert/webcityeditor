@@ -1,4 +1,4 @@
-import type { RoadBand, RoadBandKind, RoadDraft, RoadSectionDraft } from './transportation';
+import type { RoadBand, RoadBandKind, RoadDraft, RoadSectionDraft } from './road-types.js';
 
 export interface RoadWidthRule {
   minimumM: number;

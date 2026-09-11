@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { CoreState } from './useCoreState';
 import type { UndoRedoState } from './useUndoRedo';
 import type { CityJsonDocument, NewBuildingForm } from '../types';
@@ -71,6 +71,23 @@ export function useBuildingEditor(
     fileName: string;
   } | null>(null);
   const [ifcParsing, setIfcParsing] = useState(false);
+  const ifcContextRef = useRef({ document: cityjson, pending: ifcPending, pushUndo });
+  ifcContextRef.current = { document: cityjson, pending: ifcPending, pushUndo };
+  const ifcRequestVersion = useRef(0);
+  const ifcChooserRef = useRef<HTMLInputElement | null>(null);
+  const ifcPlacementRef = useRef<object | null>(null);
+  useEffect(() => {
+    setIfcPending(null);
+    setIfcParsing(false);
+    return () => {
+      // An old chooser, parser or lazy converter must not finish against a
+      // replacement document, including when the editor has been unmounted.
+      ifcRequestVersion.current++;
+      ifcChooserRef.current?.remove();
+      ifcChooserRef.current = null;
+      ifcPlacementRef.current = null;
+    };
+  }, [cityjson]);
   const [pendingAsset, setPendingAssetState] = useState<BuildingAssetDefinition | null>(null);
   const [pendingAssetDocument, setPendingAssetDocument] =
     useState<CityJsonDocument | null>(null);
@@ -540,23 +557,31 @@ export function useBuildingEditor(
 
   const handleImportIfc = useCallback(() => {
     if (!cityjson) return;
+    const requestVersion = ++ifcRequestVersion.current;
+    const isCurrent = () => ifcRequestVersion.current === requestVersion && ifcContextRef.current.document === cityjson;
+    ifcChooserRef.current?.remove();
+    setIfcParsing(false);
     const input = document.createElement('input');
+    ifcChooserRef.current = input;
     input.type = 'file';
     input.accept = '.ifc';
     input.style.display = 'none';
     input.onchange = async () => {
       const file = input.files?.[0];
       input.remove();
-      if (!file) return;
+      if (ifcChooserRef.current === input) ifcChooserRef.current = null;
+      if (!file || !isCurrent()) return;
       setIfcParsing(true);
       try {
         const { parseIfc } = await import('../lib/ifc-import');
+        if (!isCurrent()) return;
         const parsed = await parseIfc(file);
+        if (!isCurrent()) return;
         setIfcPending({ parsed, fileName: file.name });
       } catch (e) {
-        alert(`IFC parse failed: ${e instanceof Error ? e.message : String(e)}`);
+        if (isCurrent()) alert(`IFC parse failed: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
-        setIfcParsing(false);
+        if (isCurrent()) setIfcParsing(false);
       }
     };
     document.body.appendChild(input);
@@ -565,10 +590,16 @@ export function useBuildingEditor(
 
   const handleIfcPlacement = useCallback(
     async (lngLat: [number, number]) => {
-      if (!cityjson || !ifcPending) return;
+      if (!cityjson || !ifcPending || ifcPlacementRef.current) return;
+      const placement = {};
+      const requestVersion = ifcRequestVersion.current;
+      ifcPlacementRef.current = placement;
+      const isCurrent = () => ifcRequestVersion.current === requestVersion &&
+        ifcContextRef.current.document === cityjson && ifcContextRef.current.pending === ifcPending;
       try {
-        pushUndo(`Import IFC: ${ifcPending.fileName}`);
         const { convertIfcToCityJsonBuilding } = await import('../lib/ifc-to-cityjson');
+        if (!isCurrent()) return;
+        ifcContextRef.current.pushUndo(`Import IFC: ${ifcPending.fileName}`);
         const { value: result } = runStructurallyGuardedMutation(
           cityjson,
           `Importing IFC ${ifcPending.fileName}`,
@@ -598,18 +629,24 @@ export function useBuildingEditor(
         setReloadToken((t) => t + 1);
         markGeometryChanged();
       } catch (e) {
-        alert(
+        if (isCurrent()) alert(
           `Could not create building from IFC: ${e instanceof Error ? e.message : String(e)}`
         );
       } finally {
-        setIfcPending(null);
+        if (ifcPlacementRef.current === placement) ifcPlacementRef.current = null;
+        if (isCurrent()) setIfcPending(null);
       }
     },
     [cityjson, ifcPending, pushUndo, setDirtyIds, setSelection, setReloadToken, markGeometryChanged]
   );
 
   const handleCancelIfcPlacement = useCallback(() => {
+    ifcRequestVersion.current++;
+    ifcChooserRef.current?.remove();
+    ifcChooserRef.current = null;
+    ifcPlacementRef.current = null;
     setIfcPending(null);
+    setIfcParsing(false);
   }, []);
 
   useEffect(() => {
@@ -743,12 +780,12 @@ export function useBuildingEditor(
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        setIfcPending(null);
+        handleCancelIfcPlacement();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ifcPending]);
+  }, [ifcPending, handleCancelIfcPlacement]);
 
   const handleDragMove = useCallback(
     (dx: number, dy: number) => {

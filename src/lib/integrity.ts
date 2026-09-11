@@ -1,4 +1,4 @@
-import type { CityJsonDocument, CityObject } from '../types';
+import type { CityJsonDocument, CityObject } from '../types-cityjson.js';
 
 export type IntegritySeverity = 'error' | 'warning' | 'info';
 

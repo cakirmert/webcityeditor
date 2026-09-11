@@ -40,8 +40,21 @@ jobs:
       - name: Test shared storage
         run: npm run test:backend
 
+      - name: Build installable editor
+        run: npm run build:package
+
+      - name: Verify package in a clean consumer
+        run: npm run test:package
+
       - name: Build for GitHub Pages
         run: npm run build:pages
+
+      - name: Include installable package
+        run: |
+          mkdir -p dist/packages
+          cp artifacts/webcityeditor-*.tgz dist/packages/
+          cd dist/packages
+          sha256sum webcityeditor-*.tgz > SHA256SUMS
 
       - name: Publish dist to gh-pages
         env:

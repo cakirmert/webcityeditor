@@ -1,0 +1,3 @@
+# Retained upstream license/notice texts keep their original whitespace.
+packaging/*notices.md -whitespace
+packaging/*notices.html -whitespace

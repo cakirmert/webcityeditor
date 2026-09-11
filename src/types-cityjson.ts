@@ -1,0 +1,35 @@
+// Minimal CityJSON 2.0 types used by the editor. Not spec-exhaustive.
+
+export interface CityJsonTransform {
+  scale: [number, number, number];
+  translate: [number, number, number];
+}
+
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type AttributeValue = JsonValue | undefined;
+
+export interface CityObject {
+  type: string;
+  attributes?: Record<string, AttributeValue>;
+  geometry?: unknown[];
+  children?: string[];
+  parents?: string[];
+  /** Optional CityJSONFeature extent carried by datasets such as 3DBAG. */
+  geographicalExtent?: number[];
+}
+
+export interface CityJsonDocument {
+  type: 'CityJSON';
+  version: string;
+  metadata?: {
+    referenceSystem?: string;
+    geographicalExtent?: number[];
+    [k: string]: unknown;
+  };
+  transform?: CityJsonTransform;
+  CityObjects: Record<string, CityObject>;
+  vertices: [number, number, number][];
+  appearance?: unknown;
+  extensions?: unknown;
+}

@@ -31,6 +31,8 @@ interface Props {
   canClose?: boolean;
   onClose?: () => void;
   banner?: { kind: 'info' | 'err'; message: string };
+  /** Packaged editor deployments do not contain the hosted Hamburg datasets. */
+  includeHostedSamples?: boolean;
 }
 
 type Status = { kind: 'idle' } | { kind: 'info' | 'ok' | 'err'; msg: string };
@@ -93,14 +95,40 @@ export default function FileLoader({
   canClose = false,
   onClose,
   banner,
+  includeHostedSamples = true,
 }: Props) {
-  const [url, setUrl] = useState(() => publicAssetUrl(DEFAULT_HAMBURG_SAMPLE));
-  const [catalogUrl, setCatalogUrl] = useState(DEFAULT_HAMBURG_CATALOG_URL);
+  const [url, setUrl] = useState(() => includeHostedSamples ? publicAssetUrl(DEFAULT_HAMBURG_SAMPLE) : '');
+  const [catalogUrl, setCatalogUrl] = useState(includeHostedSamples ? DEFAULT_HAMBURG_CATALOG_URL : '');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [dragActive, setDragActive] = useState(false);
   const [recent, setRecent] = useState<{ name: string; savedAt: number }[]>([]);
   const [hostedSamples, setHostedSamples] = useState<QuickSample[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeLoadRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeLoadRef.current?.abort();
+      activeLoadRef.current = null;
+    };
+  }, []);
+
+  // A closed loader, host document replacement, or newer source selection
+  // invalidates older reads. File/IndexedDB reads cannot be aborted, and a
+  // fetch implementation may finish despite cancellation, so check ownership
+  // again before emitting a document or updating the status.
+  const beginLoad = useCallback(() => {
+    activeLoadRef.current?.abort();
+    const controller = new AbortController();
+    activeLoadRef.current = controller;
+    return {
+      signal: controller.signal,
+      isCurrent: () => mountedRef.current && activeLoadRef.current === controller && !controller.signal.aborted,
+    };
+  }, []);
 
   useEffect(() => {
     listDocuments()
@@ -109,7 +137,7 @@ export default function FileLoader({
   }, []);
 
   useEffect(() => {
-    if (import.meta.env.MODE === 'test') return;
+    if (!includeHostedSamples || import.meta.env.MODE === 'test') return;
     let cancelled = false;
 
     async function loadHostedSamples() {
@@ -145,11 +173,11 @@ export default function FileLoader({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [includeHostedSamples]);
 
   const quickSamples = useMemo(
-    () => [...hostedSamples, QUICK_SAMPLES[0], ...QUICK_SAMPLES.slice(1)],
-    [hostedSamples]
+    () => includeHostedSamples ? [...hostedSamples, ...QUICK_SAMPLES] : QUICK_SAMPLES.filter(sample => !sample.guideOnly),
+    [hostedSamples, includeHostedSamples]
   );
   const primaryHostedSample = hostedSamples[0] ?? null;
 
@@ -192,45 +220,55 @@ export default function FileLoader({
 
   const handleFile = useCallback(
     async (file: File) => {
+      const load = beginLoad();
       setStatus({ kind: 'info', msg: `Reading ${file.name}…` });
       try {
         const text = await file.text();
+        if (!load.isCurrent()) return;
         parseAndEmit(text, file.name);
       } catch (e) {
+        if (!load.isCurrent()) return;
         setStatus({
           kind: 'err',
           msg: `Read error: ${e instanceof Error ? e.message : String(e)}`,
         });
       }
     },
-    [parseAndEmit]
+    [beginLoad, parseAndEmit]
   );
 
   const handleUrl = useCallback(async () => {
     if (!url.trim()) return;
+    const load = beginLoad();
     setStatus({ kind: 'info', msg: `Fetching ${url}…` });
     try {
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: load.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
       const text = await resp.text();
+      if (!load.isCurrent()) return;
       const name = url.split('/').pop() ?? 'remote.city.json';
       parseAndEmit(text, name);
     } catch (e) {
+      if (!load.isCurrent()) return;
       setStatus({
         kind: 'err',
         msg: `Fetch failed: ${e instanceof Error ? e.message : String(e)}. CORS may be blocking — try downloading manually.`,
       });
     }
-  }, [url, parseAndEmit]);
+  }, [url, beginLoad, parseAndEmit]);
 
   const handleCatalogUrl = useCallback(async () => {
     if (!catalogUrl.trim() || !onCatalogLoaded) return;
+    const load = beginLoad();
     setStatus({ kind: 'info', msg: `Connecting to CityJSONSeq catalog ${catalogUrl}…` });
     try {
       const loaded = await fetchCityJsonSeqViewport(
         catalogUrl,
-        DEFAULT_HAMBURG_VIEWPORT_BBOX
+        DEFAULT_HAMBURG_VIEWPORT_BBOX,
+        new Set(),
+        (input, init) => fetch(input, { ...init, signal: load.signal })
       );
+      if (!load.isCurrent()) return;
       if (!loaded.doc || loaded.tileIds.length === 0) {
         throw new Error('The Hamburg catalog returned no CityJSONSeq tiles for the initial view');
       }
@@ -243,12 +281,13 @@ export default function FileLoader({
           `${loaded.features.toLocaleString()} editable features. Move the map to stream more buildings.`,
       });
     } catch (e) {
+      if (!load.isCurrent()) return;
       setStatus({
         kind: 'err',
         msg: `Catalog connection failed: ${e instanceof Error ? e.message : String(e)}`,
       });
     }
-  }, [catalogUrl, onCatalogLoaded, onClose]);
+  }, [catalogUrl, beginLoad, onCatalogLoaded, onClose]);
 
   const handleQuickSample = useCallback(
     (sample: QuickSample) => {
@@ -261,16 +300,19 @@ export default function FileLoader({
         return;
       }
 
+      const load = beginLoad();
       setUrl(sample.url);
       void (async () => {
         setStatus({ kind: 'info', msg: `Fetching ${sample.label}...` });
         try {
-          const resp = await fetch(sample.url);
+          const resp = await fetch(sample.url, { signal: load.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const text = await resp.text();
+          if (!load.isCurrent()) return;
           const name = sample.url.split('/').pop() ?? sample.label;
           parseAndEmit(text, name);
         } catch (e) {
+          if (!load.isCurrent()) return;
           setStatus({
             kind: 'err',
             msg: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -278,10 +320,11 @@ export default function FileLoader({
         }
       })();
     },
-    [parseAndEmit]
+    [beginLoad, parseAndEmit]
   );
 
   const handleSample = useCallback(() => {
+    beginLoad();
     const sample: CityJsonDocument = {
       type: 'CityJSON',
       version: '2.0',
@@ -334,24 +377,27 @@ export default function FileLoader({
       ],
     };
     parseAndEmit(JSON.stringify(sample), 'sample-cube.city.json');
-  }, [parseAndEmit]);
+  }, [beginLoad, parseAndEmit]);
 
   const handleLoadLocal = useCallback(
     async (name: string) => {
+      const load = beginLoad();
       setStatus({ kind: 'info', msg: `Loading local save "${name}"…` });
       try {
         const stored = await loadDocument(name);
+        if (!load.isCurrent()) return;
         if (!stored) throw new Error('Not found');
         onLoaded(stored.doc, stored.name, null);
         onClose?.();
       } catch (e) {
+        if (!load.isCurrent()) return;
         setStatus({
           kind: 'err',
           msg: `Local load failed: ${e instanceof Error ? e.message : String(e)}`,
         });
       }
     },
-    [onLoaded, onClose]
+    [beginLoad, onLoaded, onClose]
   );
 
   const handleDeleteLocal = useCallback(async (name: string) => {
@@ -514,32 +560,7 @@ export default function FileLoader({
           {quickSamples.map((s) => (
             <button
               key={s.url}
-              onClick={() => {
-                if (s.guideOnly) {
-                  setStatus({
-                    kind: 'info',
-                    msg: `${s.description} - download portal opens in a new tab.`,
-                  });
-                  window.open(s.url, '_blank', 'noopener,noreferrer');
-                  return;
-                }
-                setUrl(s.url);
-                void (async () => {
-                  setStatus({ kind: 'info', msg: `Fetching ${s.label}…` });
-                  try {
-                    const resp = await fetch(s.url);
-                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                    const text = await resp.text();
-                    const name = s.url.split('/').pop() ?? s.label;
-                    parseAndEmit(text, name);
-                  } catch (e) {
-                    setStatus({
-                      kind: 'err',
-                      msg: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`,
-                    });
-                  }
-                })();
-              }}
+              onClick={() => handleQuickSample(s)}
               className="flex w-full flex-col items-start gap-0.5 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-2 text-left text-[11px] hover:border-[var(--accent)]"
             >
               <div className="flex items-center gap-2 font-semibold text-[var(--text)]">

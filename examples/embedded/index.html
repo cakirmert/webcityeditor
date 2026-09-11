@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>WebCityEditor embedding example</title>
+<style>
+  body { margin: 0; font: 15px system-ui, sans-serif; background: #edf2f5; color: #153247; }
+  header { display: flex; align-items: center; gap: 18px; padding: 12px 20px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; } button { font: inherit; padding: 7px 12px; cursor: pointer; }
+  #editor { height: calc(100vh - 125px); min-height: 600px; min-width: 768px; }
+  #status { padding: 10px 20px; margin: 0; max-height: 60px; overflow: auto; white-space: pre-wrap; }
+</style></head>
+<body>
+<header><h1>Host application</h1><button id="snapshot">Read snapshot</button><button id="replace">Replace document</button><button id="dispose">Destroy editor</button></header>
+<pre id="status" role="status">Loading editor…</pre>
+<div id="editor"></div>
+<script type="module" src="/main.ts"></script>
+</body></html>

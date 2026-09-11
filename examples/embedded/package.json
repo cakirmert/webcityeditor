@@ -1,0 +1,8 @@
+{
+  "name": "webcityeditor-embedding-example",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite --host 127.0.0.1", "build": "tsc --noEmit && vite build" },
+  "dependencies": { "webcityeditor": "file:../../artifacts/webcityeditor-0.1.0.tgz" },
+  "devDependencies": { "vite": "8.1.0", "typescript": "6.0.3" }
+}

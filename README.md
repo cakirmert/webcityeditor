@@ -2,7 +2,7 @@
 
 Design streets, edit intersections and buildings, and keep the result in **CityJSON**. City Editor combines Hamburg's city data, satellite imagery, direct map handles and a single responsive inspector.
 
-**[Open the live demo](https://cakirmert.github.io/webcityeditor/)** · [Run locally](#run-locally) · [Research and technical notes](#research-and-technical-notes)
+**[Open the live demo](https://cakirmert.github.io/webcityeditor/)** · [Embed in your app](#embed-in-your-application) · [Run locally](#run-locally) · [Documentation](docs/README.md)
 
 ![All intersection approaches, numbered and coloured together, with the railway shown separately](assets/readme/intersection-overview-current.jpg)
 
@@ -136,7 +136,7 @@ Hamburg tile requests now use the serving `www.daten-hamburg.de` hostname direct
 | **Check 3D** | Runs primitive geometry validation through the configured local val3dity service. |
 | **Export CityJSON** | Downloads the loaded buildings, roads, junctions, attributes and edits together. |
 
-Road and intersection save operations are guarded against structural damage. Resolve blocking geometry/fit errors before export. A **Structure** pass and a **Check 3D** pass answer different questions; neither certifies traffic engineering or municipal design compliance.
+Road and intersection saves are guarded against structural damage. Accepted design warnings can be exported; invalid structure or a rejected 3D primitive check still blocks export. The [road warning reference](docs/road-warnings.md) explains every warning category, save acceptance and stored reviews. A **Structure** pass and a **Check 3D** pass answer different questions; neither certifies traffic engineering or municipal design compliance.
 
 ## Shared projects and the optional backend
 
@@ -165,9 +165,31 @@ Road preparation reads **OSM XML/PBF → osm2streets lane and junction polygons 
 
 The [conversion guide](docs/osm-to-cityjson.md) includes a tested command using the committed Hamburg extract, intermediate files and validation steps. [Streaming and storage](docs/streaming-and-storage.md) explains feature records, tile dependencies, memory handling and save behavior. [Width rules and sources](docs/road-ux-research.md#governing-references) distinguish Hamburg's adopted ReStra requirements from editor fallback thresholds.
 
+## Embed in your application
+
+Install the tested `webcityeditor` tarball and copy its browser assets:
+
+```sh
+npm install https://cakirmert.github.io/webcityeditor/packages/webcityeditor-0.1.0.tgz
+npx webcityeditor-copy-assets public/webcityeditor
+```
+
+```ts
+import { createEditor } from 'webcityeditor';
+
+const editor = createEditor(document.querySelector<HTMLElement>('#editor')!, {
+  editorUrl: '/webcityeditor/index.html',
+  document: cityJsonDocument,
+});
+await editor.ready;
+const snapshot = await editor.getDocument();
+```
+
+Give the host element an explicit height. The SDK isolates the full editor in a frame and starts with your document. `webcityeditor/core` provides parsing, structural checks and width rules without the UI. See the [package guide](docs/package-guide.md) for events, lifecycle, a React example, asset hosting, limitations and local builds. Registry publication is pending, so the install command currently uses the Pages tarball URL.
+
 ## Run locally
 
-Use Node.js 20.19+ or 22.12+ and a browser with WebGL2:
+Use Node.js 24 and a browser with WebGL2:
 
 ```powershell
 npm ci
@@ -187,6 +209,12 @@ npm run build
 
 | Document | Contents |
 | --- | --- |
+| [UI/UX handover](docs/handover-ui-ux.md) | Navigation, selection, road/intersection workflows, draft lifetimes and saving. |
+| [Technical handover](docs/handover-technical.md) | State ownership, geometry transactions, rendering, streaming, persistence and verification. |
+| [Road warnings](docs/road-warnings.md) | Width and overlap checks, generation failures, source exceptions, acceptance and export. |
+| [Upstream software and attribution](docs/upstream-dependencies.md) | What comes from Delft/CityJSON, A/B Street and other upstreams; exact revisions and licenses. |
+| [Embedding and package guide](docs/package-guide.md) | Installable npm tarball, frame SDK, headless API, assets and module boundaries. |
+| [Godot road generator assessment](docs/godot-integration.md) | Feasible scene/mesh integration, lane and coordinate mapping, current limitations and prototype criteria. |
 | [OSM-to-CityJSON conversion guide](docs/osm-to-cityjson.md) | Tested commands, XML/PBF inputs, native exporter, intermediate files, options, validation and static packaging. |
 | [Streaming and storage](docs/streaming-and-storage.md) | CityJSONSeq records, viewport loading, 3D Tiles, project revisions and SQLite/cjdb/3DCityDB trade-offs. |
 | [Road connections, intersections and width policy](docs/road-ux-research.md) | Current workflow, manual generation scopes, geometry construction, Hamburg regulations and exact width-source locations. |
@@ -200,3 +228,5 @@ npm run build
 | [PROJECT.md](PROJECT.md) | Architecture, datasets, converter commands and contributor notes. |
 
 The map retains attribution for OpenStreetMap, Hamburg's building/tree/planning data, Esri World Imagery and BKG TopPlusOpen. Current road, intersection and Hamburg LoD3 screenshots were captured from the running editor on 9 September 2026. Shared-project screenshots show the earlier local Docker test server.
+
+The editor's own code is licensed under [Apache-2.0](LICENSE). Bundled software and sample data retain their respective licenses; see [upstream attribution](docs/upstream-dependencies.md) and the package's retained notices.

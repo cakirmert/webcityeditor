@@ -1,4 +1,4 @@
-import type { AttributeValue, CityJsonDocument, CityObject } from '../types';
+import type { AttributeValue, CityJsonDocument, CityObject } from '../types-cityjson.js';
 
 export type ValidationResult =
   | { ok: true; doc: CityJsonDocument }

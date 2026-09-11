@@ -4,6 +4,9 @@ import FileLoader from './components/FileLoader';
 import SharedProjectsDialog from './components/SharedProjectsDialog';
 import { useSharedProjects } from './hooks/useSharedProjects';
 import { useProjectRoadReset } from './hooks/useProjectRoadReset';
+import { useEditorBridge } from './hooks/useEditorBridge';
+import type { EmbedConfig } from './package/frame-bridge';
+import { EditorError } from './package/protocol';
 import MapView from './components/MapView';
 import BuildingDetailPreview from './components/BuildingDetailPreview';
 import AttributePanel from './components/AttributePanel';
@@ -73,7 +76,7 @@ const HAMBURG_LOD3_SHOWCASE_URL =
 const HAMBURG_CITYWIDE_DEMO_NAME = 'hamburg-citywide-stream.city.json';
 const HAMBURG_STARTUP_SEED_ATTRIBUTE = '_webcityeditorHamburgSeed';
 
-export default function App() {
+export default function App({ embed }: { embed?: EmbedConfig } = {}) {
   const coreState = useCoreState();
   const undoRedo = useUndoRedo(coreState);
   const catalog = useCatalog(coreState, undoRedo);
@@ -377,6 +380,39 @@ export default function App() {
   );
 
   const hasMapDraft = roadEditor.roadDraftDirty || roadEditor.junctionDirty || roadEditor.parkedDrafts.length > 0 || !!buildingEditor.pendingTransform || !!buildingEditor.footprintEdit || coreState.drawMode !== 'none';
+  useEditorBridge(embed, {
+    document: coreState.cityjson,
+    reloadToken: coreState.reloadToken,
+    dirtyIds: coreState.dirtyIds,
+    state: {
+      fileName: coreState.fileName,
+      objectCount: embed ? Object.keys(coreState.cityjson?.CityObjects ?? {}).length : 0,
+      dirtyObjectIds: embed ? [...coreState.dirtyIds] : [],
+      hasDraft: hasMapDraft || !!buildingEditor.pendingFootprint || !!buildingEditor.ifcPending || !!buildingEditor.pendingAsset,
+      selection: roadEditor.showRoadEditor && roadEditor.junctionDraft
+        ? { kind: 'intersection', id: roadEditor.junctionDraft.id }
+        : roadEditor.showRoadEditor && roadEditor.selectedRoadArea
+          ? { kind: 'road', id: roadEditor.selectedRoadArea.roadId }
+          : coreState.selection ? { kind: 'building', id: coreState.selection.objectId } : null,
+    },
+    loadDocument: (doc, fileName) => {
+      if (buildingEditor.ifcParsing) throw new EditorError('busy', 'Wait for the IFC import to finish before replacing the document.');
+      handleLoadedForApp(doc, fileName, null);
+      roadEditor.handleCloseRoadWorkspace();
+      buildingEditor.setPendingTransform(null);
+      buildingEditor.setFootprintEdit(null);
+      buildingEditor.setPendingFootprint(null);
+      buildingEditor.setPendingForm(null);
+      buildingEditor.setSplitPreviewHeights(null);
+      buildingEditor.setSplitPreviewFloorPlans(null);
+      buildingEditor.handleCancelIfcPlacement();
+      buildingEditor.handleCancelAssetPlacement();
+      buildingEditor.setMultiSelection(new Set());
+      buildingEditor.setClipboardIds(null);
+      setShowBuildingStart(false);
+      setProjectsOpen(false);
+    },
+  });
   const sharedProjects = useSharedProjects(coreState, (doc, name) => {
     documentLoadVersion.current++;
     setAutoHamburgStatus(null);
@@ -400,7 +436,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (autoHamburgLoadStartedRef.current || coreState.cityjson) return;
+    if (embed || autoHamburgLoadStartedRef.current || coreState.cityjson) return;
     autoHamburgLoadStartedRef.current = true;
     const loadVersion = documentLoadVersion.current;
     setAutoHamburgStatus({
@@ -522,6 +558,7 @@ export default function App() {
       }
     })();
   }, [
+    embed,
     catalog,
     coreState,
     handleCatalogLoadedForApp,
@@ -1287,6 +1324,7 @@ export default function App() {
           </button>}
           {showFileLoader && (
             <FileLoader
+              includeHostedSamples={!embed}
               onLoaded={handleLoadedForApp}
               onCatalogLoaded={handleCatalogLoadedForApp}
               canClose={!!coreState.cityjson}

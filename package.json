@@ -41,7 +41,10 @@
     "test:backend": "node --test backend/server.test.mjs",
     "backend:up": "docker compose --env-file backend/.env -f backend/compose.yml up -d --build",
     "backend:down": "docker compose --env-file backend/.env -f backend/compose.yml down",
-    "backend:setup": "node backend/setup.mjs"
+    "backend:setup": "node backend/setup.mjs",
+    "build:package": "tsc -b && node scripts/build-package.mjs",
+    "pack:editor": "npm run build:package && npm pack ./package-dist --pack-destination artifacts",
+    "test:package": "node scripts/test-package.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.4",
@@ -92,5 +95,6 @@
     "typescript": "^6.0.3",
     "vite": "^8.1.0",
     "vitest": "^4.1.9"
-  }
+  },
+  "license": "Apache-2.0"
 }

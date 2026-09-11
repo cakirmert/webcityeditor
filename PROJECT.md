@@ -2,6 +2,8 @@
 
 This reference describes City Editor's architecture, datasets and development workflows. Detailed guides cover [OSM conversion](docs/osm-to-cityjson.md), [transportation provenance](docs/transportation-provenance.md), [intersection and width rules](docs/road-ux-research.md), and [streaming and storage](docs/streaming-and-storage.md).
 
+For onboarding, start with the [technical handover](docs/handover-technical.md) and [UI/UX handover](docs/handover-ui-ux.md). The [warning reference](docs/road-warnings.md) explains validation and acceptance, the [upstream inventory](docs/upstream-dependencies.md) records Delft/A/B Street contributions, and the [package guide](docs/package-guide.md) describes the browser SDK and headless API.
+
 ## Runtime overview
 
 - The application runs from the repository root with `npm ci` and `npm run dev`.
@@ -20,7 +22,7 @@ flowchart LR
   H --> C["Picked feature to local CityJSON"]
   R["Pages gzip CityJSONSeq roads"] --> B
   A["Local CityJSON / CityJSONSeq / IFC"] --> B
-  O["Optional OSM refresh"] --> S["osm2streets WASM"]
+  O["Explicit project-wide OSM reset"] --> S["osm2streets WASM"]
   S --> P["Exact lane and junction polygons"]
   P --> B
   B --> V["Map and highest-LoD preview"]
@@ -35,10 +37,13 @@ flowchart LR
 ```text
 webcityeditor/
 ├── src/                   React editor, hooks, map layers, and geometry logic
+├── src/package/           Browser embedding SDK and headless public exports
+├── packaging/             Asset-copy CLI and retained dependency/data notices
+├── examples/embedded/     Standalone host application using the npm package
 ├── tests/                 Component, hook, CLI, and geometry tests
 ├── backend/               Optional Node 24 / SQLite project service and Docker setup
 ├── scripts/               Hamburg, CityJSON, osm2streets, and OpenDRIVE tools
-├── public/data/           Small committed browser-safe Hamburg demo
+├── public/data/           Hosted Hamburg catalogs and compact building assets
 ├── test-fixtures/         Small deterministic regression inputs
 ├── assets/readme/         Screenshots used by README.md
 ├── vendor/osm2streets/    Git submodule containing the maintained fork
@@ -119,12 +124,12 @@ junctions then follow connected road geometry edits. See [the implementation han
 
 ## UX and performance decisions
 
-- **Roads** starts as a compact chooser. Selecting a road or junction opens it directly when no draft is active; existing-draft switching retains its explicit edit/discard path.
-- One compact inspector contains **Lanes**, **Shape**, **Connections** and **Rules**; intersections use **Shape**, **Turns** and **Roads**. Touch layouts use a collapsible bottom sheet; camera framing leaves the active edit visible around it.
+- **Roads** starts as a compact chooser. Selecting another road or junction parks a dirty draft with its undo history; **Kept drafts** resumes it. Drafts remain in the current session until applied or discarded.
+- One compact right inspector contains **Lanes**, **Shape**, **Connections** and **Rules**; intersections use **Shape**, **Turns** and **Roads**. It targets tablets and desktop windows, with internal scrolling and camera space beside the tools.
 - Road curvature is changed by dragging or adding visible map anchors. The UI exposes only the meaningful **Smooth** and **Straight** choice, not an abstract curve-strength percentage.
 - A comparison bar above the map provides Map/Satellite, road opacity and hold-to-compare controls. The generic **Map layers** control starts collapsed and closes when another map tool opens.
 - Road-network connection highlights exist only while the Roads workspace is open. Closing it or selecting unrelated map content clears every saved-road, OSM, lane, and junction highlight. Connections use a bright cyan/ice stroke over a dark navy halo so they remain distinct over dark, grey, blue, and red road surfaces as well as pale basemap areas.
-- Phone layouts retain only Data, Roads, New Building, and More in the primary toolbar. Planning, list, export, validation, and secondary tools use the touch-sized More menu.
+- Narrower tablet windows group secondary controls under **More**. Phones are outside the supported editing layout; allow at least 768 CSS pixels, preferably 1024 or more.
 - Planning can be enabled at overview zoom. A single official FNP OGC API request supplies 2,842 interactive polygons across Hamburg and is cached in session; bounded XPlan detail queries run only when the viewport is within the safe 4.5 km range and refresh after the camera leaves the padded query coverage. The scrollable legend stays at the lower left and Map layers stays at the upper left.
 - Drawing uses capture-phase Pointer Events and pointer capture. Do not add `event.buttons === 0` as a drag-ending condition; trackpads and overlay sequences can report it mid-drag.
 - Edit focus computes a padded bounding box around the active road or building, then filters buildings, roads, zones, OSM centre-lines, osm2streets polygons, and street objects outside it.
